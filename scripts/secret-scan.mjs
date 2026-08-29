@@ -7,7 +7,7 @@ const patterns = [
   {
     name: "API key",
     expression:
-      /\b(?:sk|pk)-[A-Za-z0-9_-]{20,}\b|\b(?:ghp|github_pat|xox[baprs])-[A-Za-z0-9_-]{16,}\b/g,
+      /\b(?:sk|pk)-[A-Za-z0-9_-]{20,}\b|\b(?:ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{16,}\b/g,
   },
   {
     name: "credential assignment",

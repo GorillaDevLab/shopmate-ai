@@ -18,6 +18,11 @@ test("Secret 扫描拒绝疑似 API Token 并隐藏原文", () => {
   assert.doesNotMatch(findings[0], /1234567890/);
 });
 
+test("Secret 扫描识别 GitHub Token 格式", () => {
+  const token = ["ghp_", "12345678901234567890"].join("");
+  assert.deepEqual(scanText(`说明文本 ${token}`), ["API key"]);
+});
+
 test("扫描追踪文件时返回失败规则但不泄露 Secret", () => {
   const directory = mkdtempSync(join(tmpdir(), "shopmate-secret-test-"));
   const file = join(directory, "fixture.txt");
@@ -26,8 +31,8 @@ test("扫描追踪文件时返回失败规则但不泄露 Secret", () => {
 
   try {
     const findings = scanTrackedFiles([file]);
-    assert.deepEqual(findings, [`${file}: credential assignment`]);
-    assert.doesNotMatch(findings[0], /1234567890/);
+    assert.deepEqual(findings, [`${file}: API key`, `${file}: credential assignment`]);
+    assert.doesNotMatch(findings.join(" "), /1234567890/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
