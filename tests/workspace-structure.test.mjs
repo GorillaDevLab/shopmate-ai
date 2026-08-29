@@ -38,3 +38,11 @@ test("应用 TypeScript 配置继承共享严格基线", () => {
   assert.equal(apiConfig.extends, "../../tsconfig.base.json");
   assert.equal(webConfig.extends, "../../tsconfig.base.json");
 });
+
+test("根目录提供分层测试与覆盖率命令", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+
+  for (const script of ["test:unit", "test:integration", "coverage"]) {
+    assert.equal(typeof packageJson.scripts[script], "string", `缺少命令：${script}`);
+  }
+});
