@@ -7,6 +7,7 @@
 ```text
 shopmate-ai/
 ├─ apps/web/              # 中文 Next.js Web 应用
+├─ apps/api/              # NestJS 版本化 API
 ├─ packages/              # 跨应用复用的模块与配置
 ├─ docs/                  # 正式项目文档
 ├─ .github/               # GitHub 配置与后续 CI 工作流
@@ -48,3 +49,13 @@ pnpm --filter @shopmate/web dev
 ```
 
 启动后访问 <http://localhost:3000>。Web 应用使用 Next.js App Router、TypeScript 与 Tailwind CSS，当前提供中文根布局、移动端基础界面和全局错误页。
+
+## API 应用
+
+从仓库根目录启动 NestJS API：
+
+```bash
+pnpm --filter @shopmate/api dev
+```
+
+API 默认监听 3001 端口。启动后可通过 <http://localhost:3001/api/v1/health> 检查服务状态；也可以通过 `PORT` 环境变量指定其他有效端口。
