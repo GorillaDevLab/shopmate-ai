@@ -1,0 +1,217 @@
+import { inventoryAlerts, metrics, products, type DashboardState } from "./dashboard-data";
+
+export type { DashboardState } from "./dashboard-data";
+
+export function Dashboard({ state = "ready" }: { state?: DashboardState }) {
+  return (
+    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 sm:py-7">
+      <div className="mx-auto w-full max-w-6xl">
+        <DashboardHeader />
+        <section id="main-content" className="mt-10 sm:mt-14">
+          <DashboardIntro />
+          {state === "ready" ? <ReadyDashboard /> : <StatePanel state={state} />}
+        </section>
+        <footer className="mt-12 border-t border-app-line pt-5 text-sm text-app-muted">
+          中文界面 · 移动端优先 · 隐私友好
+        </footer>
+      </div>
+    </main>
+  );
+}
+
+function DashboardHeader() {
+  return (
+    <header className="flex items-center justify-between gap-4">
+      <a
+        className="inline-flex min-h-11 items-center gap-3 rounded-full focus-ring"
+        href="#main-content"
+      >
+        <span className="grid size-10 place-items-center rounded-2xl bg-brand text-lg font-black text-white shadow-brand">
+          S
+        </span>
+        <span className="text-base font-bold tracking-tight">ShopMate AI</span>
+      </a>
+      <div className="hidden items-center gap-3 text-right sm:flex">
+        <div>
+          <p className="text-sm font-semibold">周一，早上好</p>
+          <p className="text-xs text-app-subtle">数据更新于刚刚</p>
+        </div>
+        <span className="grid size-10 place-items-center rounded-full bg-app-text text-sm font-bold text-white">
+          店
+        </span>
+      </div>
+    </header>
+  );
+}
+
+function DashboardIntro() {
+  return (
+    <div className="mb-7 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p className="mb-2 text-sm font-bold tracking-[0.16em] text-brand uppercase">经营总览</p>
+        <h1 className="text-3xl font-black tracking-[-0.04em] sm:text-5xl">今天的经营，一眼看清</h1>
+      </div>
+      <span className="w-fit rounded-full border border-app-line bg-app-surface px-3 py-1.5 text-xs font-semibold text-app-muted">
+        Mock 数据预览
+      </span>
+    </div>
+  );
+}
+
+function ReadyDashboard() {
+  return (
+    <>
+      <MetricGrid />
+      <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+        <SalesTrend />
+        <InventoryPanel />
+      </div>
+      <ProductsPanel />
+    </>
+  );
+}
+
+function MetricGrid() {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {metrics.map((metric, index) => (
+        <article
+          key={metric.label}
+          className="rounded-3xl border border-app-line bg-app-surface p-5 shadow-[0_16px_40px_rgb(41_48_76/0.05)]"
+        >
+          <div className="flex items-center justify-between text-sm text-app-muted">
+            <span>{metric.label}</span>
+            <span className="size-2 rounded-full bg-brand/70" />
+          </div>
+          <p className="mt-4 text-3xl font-black tracking-[-0.04em]">{metric.value}</p>
+          <p
+            className={`mt-2 text-xs font-bold ${index === 3 ? "text-amber-600" : index === 2 ? "text-app-muted" : "text-emerald-600"}`}
+          >
+            {metric.change}
+          </p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SalesTrend() {
+  const heights = [45, 62, 52, 78, 68, 88, 96];
+  return (
+    <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
+      <PanelHeading eyebrow="本周表现" title="销售趋势" detail="近 7 天" />
+      <div
+        className="mt-6 flex h-44 items-end gap-2 sm:gap-4"
+        role="img"
+        aria-label="近七日销售趋势图"
+      >
+        {heights.map((height, index) => (
+          <div key={index} className="flex flex-1 flex-col items-center gap-2">
+            <div
+              className={`w-full rounded-t-xl ${index === 6 ? "bg-brand" : "bg-[#dcd9fb]"}`}
+              style={{ height: `${height}%` }}
+            />
+            <span className="text-[11px] text-app-subtle">
+              {["一", "二", "三", "四", "五", "六", "今"][index]}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function InventoryPanel() {
+  return (
+    <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
+      <PanelHeading eyebrow="需要关注" title="库存提醒" detail="8 项" />
+      <div className="mt-5 space-y-4">
+        {inventoryAlerts.map((name) => (
+          <div key={name} className="flex items-center gap-3">
+            <span className="grid size-9 place-items-center rounded-xl bg-amber-100 text-sm text-amber-700">
+              !
+            </span>
+            <div>
+              <p className="text-sm font-bold">{name}</p>
+              <p className="mt-0.5 text-xs text-app-muted">剩余 12 件</p>
+            </div>
+            <span className="ml-auto text-xs font-bold text-amber-600">补货</span>
+          </div>
+        ))}
+      </div>
+      <button className="mt-5 min-h-11 w-full rounded-2xl border border-app-line text-sm font-bold text-app-muted transition hover:border-brand hover:text-brand">
+        查看全部提醒
+      </button>
+    </section>
+  );
+}
+
+function ProductsPanel() {
+  return (
+    <section className="mt-5 rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
+      <PanelHeading eyebrow="今日榜单" title="热销商品" detail="按销售额排序" />
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        {products.map((product, index) => (
+          <article key={product.name} className="flex items-center gap-3 rounded-2xl bg-app-bg p-3">
+            <div className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#dce9f4] text-lg font-black text-app-text/60">
+              {index + 1}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold">{product.name}</p>
+              <p className="mt-1 text-xs text-app-muted">今日售出 {product.sold} 件</p>
+            </div>
+            <span className="ml-auto text-sm font-black">{product.sales}</span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PanelHeading({
+  eyebrow,
+  title,
+  detail,
+}: {
+  eyebrow: string;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-xs font-bold tracking-[0.14em] text-app-subtle uppercase">{eyebrow}</p>
+        <h2 className="mt-2 text-xl font-black">{title}</h2>
+      </div>
+      <span className="rounded-full bg-[#eef0ff] px-3 py-1 text-xs font-bold text-brand">
+        {detail}
+      </span>
+    </div>
+  );
+}
+
+function StatePanel({ state }: { state: Exclude<DashboardState, "ready"> }) {
+  const copy = {
+    loading: ["正在整理你的经营数据…", "很快就能看到今天的经营概览。"],
+    empty: ["还没有经营数据", "导入第一批商品后，这里会自动生成经营概览。"],
+    error: ["数据暂时加载失败", "请检查 API 服务后再试一次。"],
+  }[state];
+  return (
+    <div
+      className="rounded-3xl border border-dashed border-app-line bg-app-surface px-6 py-20 text-center"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-[#eef0ff] text-xl text-brand">
+        ✦
+      </div>
+      <h2 className="mt-5 text-xl font-black">{copy[0]}</h2>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-app-muted">{copy[1]}</p>
+      {state === "error" && (
+        <button className="mt-6 min-h-11 rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong">
+          重新加载
+        </button>
+      )}
+    </div>
+  );
+}
