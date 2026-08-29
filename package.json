@@ -11,6 +11,7 @@
     "build": "pnpm -r --if-present run build",
     "test": "node --test tests/workspace-structure.test.mjs && pnpm -r --if-present run test",
     "lint": "pnpm -r --if-present run lint",
-    "typecheck": "pnpm -r --if-present run typecheck"
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "smoke": "node scripts/smoke-test.mjs"
   }
 }

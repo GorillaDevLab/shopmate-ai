@@ -48,6 +48,7 @@ pnpm build      # 构建提供 build 命令的工作区
 pnpm test       # 验证根工程并运行工作区测试
 pnpm lint       # 检查提供 lint 命令的工作区
 pnpm typecheck  # 检查提供 typecheck 命令的工作区
+pnpm smoke      # 检查本地 Web 与 API 是否已启动
 ```
 
 ## Web 应用
@@ -69,3 +70,22 @@ pnpm --filter @shopmate/api dev
 ```
 
 API 默认监听 3001 端口。启动后可通过 <http://localhost:3001/api/v1/health> 检查服务状态；也可以通过 `PORT` 环境变量指定其他有效端口。
+
+## 本地启动与冒烟测试
+
+首次启动按以下步骤执行：
+
+```powershell
+corepack enable
+pnpm install
+Copy-Item .env.example .env
+pnpm dev
+```
+
+`pnpm dev` 会并行启动 Web（3000）和 API（3001）。保持该终端运行，再打开另一个终端执行：
+
+```powershell
+pnpm smoke
+```
+
+冒烟测试会分别报告 Web 和 API 的可用性；若服务未启动、端口错误或返回非 2xx，会显示具体地址和状态。API 健康检查地址为 <http://localhost:3001/api/v1/health>。
