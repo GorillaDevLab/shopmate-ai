@@ -32,3 +32,13 @@ test("根 package.json 提供统一命令", () => {
     );
   }
 });
+
+test("应用 TypeScript 配置继承共享严格基线", () => {
+  const baseConfig = JSON.parse(readFileSync("tsconfig.base.json", "utf8"));
+  const apiConfig = JSON.parse(readFileSync("apps/api/tsconfig.json", "utf8"));
+  const webConfig = JSON.parse(readFileSync("apps/web/tsconfig.json", "utf8"));
+
+  assert.equal(baseConfig.compilerOptions.strict, true);
+  assert.equal(apiConfig.extends, "../../tsconfig.base.json");
+  assert.equal(webConfig.extends, "../../tsconfig.base.json");
+});
