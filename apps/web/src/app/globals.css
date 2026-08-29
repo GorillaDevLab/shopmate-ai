@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+:root {
+  --app-bg: #f6f7fb;
+  --app-surface: #ffffff;
+  --app-text: #171a26;
+  --app-muted: #5d6476;
+  --app-subtle: #858c9d;
+  --app-line: #e2e5ed;
+  --brand: #6956e8;
+  --brand-strong: #5542d6;
+}
+
+@theme inline {
+  --color-app-bg: var(--app-bg);
+  --color-app-surface: var(--app-surface);
+  --color-app-text: var(--app-text);
+  --color-app-muted: var(--app-muted);
+  --color-app-subtle: var(--app-subtle);
+  --color-app-line: var(--app-line);
+  --color-brand: var(--brand);
+  --color-brand-strong: var(--brand-strong);
+  --shadow-brand: 0 12px 30px rgb(105 86 232 / 0.24);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-width: 320px;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100dvh;
+  margin: 0;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.focus-ring:focus-visible,
+button:focus-visible {
+  outline: 3px solid rgb(105 86 232 / 0.32);
+  outline-offset: 3px;
+}
+
+.glow {
+  position: absolute;
+  z-index: -1;
+  border-radius: 999px;
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+.glow-primary {
+  top: -8rem;
+  right: -9rem;
+  width: 24rem;
+  height: 24rem;
+  background: radial-gradient(circle, rgb(137 116 255 / 0.2), transparent 68%);
+}
+
+.glow-secondary {
+  bottom: 8%;
+  left: -10rem;
+  width: 22rem;
+  height: 22rem;
+  background: radial-gradient(circle, rgb(91 196 190 / 0.16), transparent 70%);
+}
+
+::selection {
+  background: rgb(105 86 232 / 0.2);
+}

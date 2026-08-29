@@ -6,7 +6,7 @@
 
 ```text
 shopmate-ai/
-├─ apps/                  # 可独立运行和部署的应用
+├─ apps/web/              # 中文 Next.js Web 应用
 ├─ packages/              # 跨应用复用的模块与配置
 ├─ docs/                  # 正式项目文档
 ├─ .github/               # GitHub 配置与后续 CI 工作流
@@ -15,7 +15,7 @@ shopmate-ai/
 └─ pnpm-workspace.yaml    # pnpm 工作区配置
 ```
 
-后续任务将在 `apps/` 中初始化 Web 和 API，在 `packages/` 中逐步加入共享类型、配置、数据库、AI 与分析模块。
+后续任务将在 `apps/` 中继续加入 API，在 `packages/` 中逐步加入共享类型、配置、数据库、AI 与分析模块。
 
 ## 环境要求
 
@@ -39,4 +39,12 @@ pnpm lint       # 检查提供 lint 命令的工作区
 pnpm typecheck  # 检查提供 typecheck 命令的工作区
 ```
 
-当前 A1 只建立 Monorepo 根骨架，尚未初始化具体应用。
+## Web 应用
+
+从仓库根目录启动中文 Web 应用：
+
+```bash
+pnpm --filter @shopmate/web dev
+```
+
+启动后访问 <http://localhost:3000>。Web 应用使用 Next.js App Router、TypeScript 与 Tailwind CSS，当前提供中文根布局、移动端基础界面和全局错误页。
