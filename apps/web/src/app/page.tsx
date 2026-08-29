@@ -6,7 +6,10 @@ export default function Home() {
 
       <div className="relative mx-auto flex min-h-[calc(100dvh-3rem)] w-full max-w-6xl flex-col">
         <header className="flex items-center justify-between">
-          <a className="inline-flex min-h-11 items-center gap-3 rounded-full focus-ring" href="#main-content">
+          <a
+            className="inline-flex min-h-11 items-center gap-3 rounded-full focus-ring"
+            href="#main-content"
+          >
             <span className="grid size-10 place-items-center rounded-2xl bg-brand text-lg font-black text-white shadow-brand">
               S
             </span>
@@ -19,7 +22,9 @@ export default function Home() {
 
         <section id="main-content" className="flex flex-1 items-center py-14 sm:py-20">
           <div className="max-w-3xl">
-            <p className="mb-5 text-sm font-bold tracking-[0.18em] text-brand uppercase">你的 AI 购物搭档</p>
+            <p className="mb-5 text-sm font-bold tracking-[0.18em] text-brand uppercase">
+              你的 AI 购物搭档
+            </p>
             <h1
               aria-label="让每一次购物决策更简单"
               className="text-balance text-4xl font-black leading-[1.08] tracking-[-0.045em] sm:text-6xl lg:text-7xl"

@@ -25,11 +25,7 @@ test("根 package.json 提供统一命令", () => {
   assert.equal(packageJson.packageManager, "pnpm@11.24.0");
 
   for (const script of requiredScripts) {
-    assert.equal(
-      typeof packageJson.scripts[script],
-      "string",
-      `缺少命令：${script}`,
-    );
+    assert.equal(typeof packageJson.scripts[script], "string", `缺少命令：${script}`);
   }
 });
 

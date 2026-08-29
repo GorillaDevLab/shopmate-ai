@@ -11,13 +11,9 @@ describe("中文应用基础", () => {
   it("展示 ShopMate AI 的中文价值主张", () => {
     render(<Home />);
 
-    expect(
-      screen.getByRole("heading", { name: "让每一次购物决策更简单" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "让每一次购物决策更简单" })).toBeInTheDocument();
     expect(screen.getByText("ShopMate AI")).toBeInTheDocument();
-    expect(
-      screen.getByText("中文界面 · 移动端优先 · 隐私友好"),
-    ).toHaveClass("text-app-muted");
+    expect(screen.getByText("中文界面 · 移动端优先 · 隐私友好")).toHaveClass("text-app-muted");
   });
 
   it("声明中文页面语言与元数据", () => {

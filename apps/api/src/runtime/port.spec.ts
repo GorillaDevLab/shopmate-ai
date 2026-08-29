@@ -21,8 +21,6 @@ describe("resolvePort", () => {
     expect(portModule).not.toBeNull();
     if (!portModule) return;
 
-    expect(() => portModule.resolvePort(value)).toThrow(
-      "PORT 必须是 1 到 65535 之间的整数",
-    );
+    expect(() => portModule.resolvePort(value)).toThrow("PORT 必须是 1 到 65535 之间的整数");
   });
 });

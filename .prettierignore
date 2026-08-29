@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+.planning/
+docs/superpowers/
+findings.md
+progress.md
+task_plan.md
+pnpm-lock.yaml
+pnpm-workspace.yaml

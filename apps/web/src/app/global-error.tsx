@@ -10,7 +10,10 @@ export function ErrorContent({ retry }: GlobalErrorProps) {
   return (
     <main className="grid min-h-dvh place-items-center bg-app-bg px-5 py-10 text-app-text">
       <section className="w-full max-w-md rounded-[2rem] border border-app-line bg-app-surface p-7 text-center shadow-xl shadow-slate-900/5 sm:p-10">
-        <span aria-hidden="true" className="mx-auto grid size-14 place-items-center rounded-2xl bg-red-50 text-2xl">
+        <span
+          aria-hidden="true"
+          className="mx-auto grid size-14 place-items-center rounded-2xl bg-red-50 text-2xl"
+        >
           !
         </span>
         <h1 className="mt-6 text-2xl font-black tracking-tight">页面暂时出了点问题</h1>
