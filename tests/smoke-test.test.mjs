@@ -12,7 +12,9 @@ test("冒烟检查报告非 2xx 服务响应", async () => {
   const address = server.address();
   assert.equal(typeof address, "object");
   const failure = await checkEndpoint({ name: "API", url: `http://127.0.0.1:${address.port}` });
-  await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  await new Promise((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
   assert.match(failure, /API 未就绪.*HTTP 503/);
 });
 

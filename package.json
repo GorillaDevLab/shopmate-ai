@@ -12,6 +12,17 @@
     "test": "node --test tests/workspace-structure.test.mjs && pnpm -r --if-present run test",
     "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "smoke": "node scripts/smoke-test.mjs"
+    "smoke": "node scripts/smoke-test.mjs",
+    "format": "prettier --write eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src/config/deepseek-env.ts scripts/smoke-test.mjs tests/smoke-test.test.mjs",
+    "format:check": "prettier --check eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src/config/deepseek-env.ts scripts/smoke-test.mjs tests/smoke-test.test.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@typescript-eslint/eslint-plugin": "8.47.0",
+    "@typescript-eslint/parser": "8.47.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.6.2",
+    "typescript-eslint": "8.47.0"
   }
 }

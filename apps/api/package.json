@@ -9,7 +9,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "test": "vitest run",
-    "lint": "oxlint src test",
+    "lint": "eslint src test --max-warnings=0",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
