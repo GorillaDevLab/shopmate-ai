@@ -2,12 +2,17 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const ignoredFiles = new Set([".env.example"]);
-const binaryExtensions = /\.(?:png|jpg|jpeg|gif|ico|woff2?|ttf|pdf)$/i;
+const binaryExtensions = /\.(?:png|jpg|jpeg|gif|ico|webp|woff2?|ttf|otf|pdf|zip|gz|mp4|mp3)$/i;
 const patterns = [
-  { name: "API key", expression: /\b(?:sk|pk)-[A-Za-z0-9_-]{20,}\b/g },
+  {
+    name: "API key",
+    expression:
+      /\b(?:sk|pk)-[A-Za-z0-9_-]{20,}\b|\b(?:ghp|github_pat|xox[baprs])-[A-Za-z0-9_-]{16,}\b/g,
+  },
   {
     name: "credential assignment",
-    expression: /\b(?:api[_-]?key|token|secret)\s*[:=]\s*["'][A-Za-z0-9_\-/+=]{16,}["']/gi,
+    expression:
+      /\b(?:api[_-]?key|token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_\-/+=]{16,}["']?/gi,
   },
 ];
 
@@ -20,13 +25,13 @@ export function scanText(text) {
   return findings;
 }
 
-export function scanTrackedFiles() {
-  const files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
-    .split("\0")
-    .filter(Boolean);
+export function scanTrackedFiles(inputFiles) {
+  const files =
+    inputFiles ??
+    execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
   const findings = [];
   for (const file of files) {
-    if (ignoredFiles.has(file) || binaryExtensions.test(file)) continue;
+    if (ignoredFiles.has(file.split(/[\\/]/).pop()) || binaryExtensions.test(file)) continue;
     const matches = scanText(readFileSync(file, "utf8"));
     matches.forEach((rule) => findings.push(`${file}: ${rule}`));
   }
