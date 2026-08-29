@@ -1,11 +1,12 @@
 "use client";
 
 type GlobalErrorProps = Readonly<{
-  error: Error & { digest?: string };
-  unstable_retry: () => void;
+  error: unknown;
+  reset: () => void;
+  retry: () => void;
 }>;
 
-export function ErrorContent({ unstable_retry }: GlobalErrorProps) {
+export function ErrorContent({ retry }: GlobalErrorProps) {
   return (
     <main className="grid min-h-dvh place-items-center bg-app-bg px-5 py-10 text-app-text">
       <section className="w-full max-w-md rounded-[2rem] border border-app-line bg-app-surface p-7 text-center shadow-xl shadow-slate-900/5 sm:p-10">
@@ -18,7 +19,7 @@ export function ErrorContent({ unstable_retry }: GlobalErrorProps) {
         </p>
         <button
           className="mt-7 min-h-11 w-full rounded-2xl bg-brand px-5 py-3 text-sm font-bold text-white shadow-brand transition hover:bg-brand-strong active:translate-y-px"
-          onClick={unstable_retry}
+          onClick={retry}
           type="button"
         >
           重新尝试

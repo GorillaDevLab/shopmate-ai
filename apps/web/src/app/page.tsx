@@ -33,7 +33,7 @@ export default function Home() {
           </div>
         </section>
 
-        <footer className="border-t border-app-line pt-5 text-sm text-app-subtle">
+        <footer className="border-t border-app-line pt-5 text-sm text-app-muted">
           中文界面 · 移动端优先 · 隐私友好
         </footer>
       </div>

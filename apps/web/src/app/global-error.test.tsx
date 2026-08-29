@@ -18,7 +18,8 @@ describe("全局错误页", () => {
     render(
       <GlobalError
         error={new Error("内部错误详情")}
-        unstable_retry={() => {
+        reset={() => undefined}
+        retry={() => {
           retryCount += 1;
         }}
       />,
