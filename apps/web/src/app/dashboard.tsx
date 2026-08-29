@@ -100,7 +100,11 @@ function SalesTrend() {
   return (
     <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
       <PanelHeading eyebrow="本周表现" title="销售趋势" detail="近 7 天" />
-      <div className="mt-6 flex h-44 items-end gap-2 sm:gap-4" aria-label="近七日销售趋势图">
+      <div
+        className="mt-6 flex h-44 items-end gap-2 sm:gap-4"
+        role="img"
+        aria-label="近七日销售趋势图"
+      >
         {heights.map((height, index) => (
           <div key={index} className="flex flex-1 flex-col items-center gap-2">
             <div
@@ -193,7 +197,11 @@ function StatePanel({ state }: { state: Exclude<DashboardState, "ready"> }) {
     error: ["数据暂时加载失败", "请检查 API 服务后再试一次。"],
   }[state];
   return (
-    <div className="rounded-3xl border border-dashed border-app-line bg-app-surface px-6 py-20 text-center">
+    <div
+      className="rounded-3xl border border-dashed border-app-line bg-app-surface px-6 py-20 text-center"
+      role="status"
+      aria-live="polite"
+    >
       <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-[#eef0ff] text-xl text-brand">
         ✦
       </div>
