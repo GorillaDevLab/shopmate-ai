@@ -1,3 +1,6 @@
 packages:
   - "apps/*"
   - "packages/*"
+allowBuilds:
+  # ESLint 的 TypeScript 导入解析器需要安装其平台原生绑定。
+  unrs-resolver: true
