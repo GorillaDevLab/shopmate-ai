@@ -13,8 +13,8 @@
     "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r --if-present run typecheck",
     "smoke": "node scripts/smoke-test.mjs",
-    "format": "prettier --write eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src/config/deepseek-env.ts scripts/smoke-test.mjs tests/smoke-test.test.mjs",
-    "format:check": "prettier --check eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src/config/deepseek-env.ts scripts/smoke-test.mjs tests/smoke-test.test.mjs"
+    "format": "prettier --write eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts scripts tests",
+    "format:check": "prettier --check eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts scripts tests"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

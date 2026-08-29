@@ -1,11 +1,6 @@
 import "reflect-metadata";
 
-import {
-  Body,
-  Controller,
-  type INestApplication,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, type INestApplication, Post } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { IsString } from "class-validator";
 import request from "supertest";

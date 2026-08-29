@@ -25,9 +25,7 @@ describe("全局错误页", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("heading", { name: "页面暂时出了点问题" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "页面暂时出了点问题" })).toBeInTheDocument();
     expect(screen.queryByText("内部错误详情")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "重新尝试" }));
