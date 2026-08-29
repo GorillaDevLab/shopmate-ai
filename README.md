@@ -18,6 +18,16 @@ shopmate-ai/
 
 后续任务将在 `apps/` 中继续加入 API，在 `packages/` 中逐步加入共享类型、配置、数据库、AI 与分析模块。
 
+## 环境变量
+
+复制根目录的 `.env.example` 作为本地配置模板。DeepSeek 密钥只在实际调用 AI 时需要，未配置时 Demo 仍可启动；真实 `.env` 文件不会提交到仓库。
+
+```powershell
+Copy-Item .env.example .env
+```
+
+可配置 `DEEPSEEK_API_KEY` 和可选的 `DEEPSEEK_BASE_URL`。API 会校验服务地址格式，并在调用 AI 前对缺少的密钥给出明确错误。
+
 ## 环境要求
 
 - Node.js 22 或更高版本
