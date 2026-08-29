@@ -9,13 +9,14 @@
   "scripts": {
     "dev": "pnpm -r --parallel --if-present run dev",
     "build": "pnpm -r --if-present run build",
-    "test": "node --test tests/workspace-structure.test.mjs && pnpm -r --if-present run test",
+    "test": "node --test tests/workspace-structure.test.mjs tests/smoke-test.test.mjs tests/ci-workflow.test.mjs tests/secret-scan.test.mjs && pnpm -r --if-present run test",
     "test:unit": "pnpm -r --if-present run test:unit",
     "test:integration": "pnpm -r --if-present run test:integration",
     "coverage": "pnpm -r --if-present run coverage",
     "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r --if-present run typecheck",
     "smoke": "node scripts/smoke-test.mjs",
+    "secret:scan": "node scripts/secret-scan.mjs",
     "format": "prettier --write eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts scripts tests",
     "format:check": "prettier --check eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts scripts tests"
   },
