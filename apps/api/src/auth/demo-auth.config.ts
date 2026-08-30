@@ -29,17 +29,25 @@ export function readDemoAuthConfig(env: NodeJS.ProcessEnv): DemoAuthConfig | nul
   return {
     email: values.DEMO_AUTH_EMAIL.trim().toLowerCase(),
     password: values.DEMO_AUTH_PASSWORD,
-    userId: values.DEMO_AUTH_USER_ID,
-    merchantId: values.DEMO_AUTH_MERCHANT_ID,
+    userId: values.DEMO_AUTH_USER_ID.trim(),
+    merchantId: values.DEMO_AUTH_MERCHANT_ID.trim(),
     sessionSecret: values.DEMO_SESSION_SECRET,
     ttlSeconds,
     secureCookie: env.NODE_ENV === "production",
   };
 }
 
+export function readOptionalDemoAuthConfig(env: NodeJS.ProcessEnv): DemoAuthConfig | null {
+  try {
+    return readDemoAuthConfig(env);
+  } catch {
+    return null;
+  }
+}
+
 function requireValue(env: NodeJS.ProcessEnv, key: (typeof requiredKeys)[number]): string {
-  const value = env[key]?.trim();
-  if (!value) throw new Error(`缺少必需环境变量：${key}`);
+  const value = env[key];
+  if (!value?.trim()) throw new Error(`缺少必需环境变量：${key}`);
   return value;
 }
 
