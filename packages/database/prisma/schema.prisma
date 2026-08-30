@@ -17,16 +17,24 @@ enum ProductStatus {
   INACTIVE
 }
 
+enum OrderStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
 model Merchant {
   id     String         @id @default(cuid())
   name   String
   slug   String         @unique
   status MerchantStatus @default(ACTIVE)
 
-  products  Product[]
-  skus      Sku[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  products Product[]
+  skus     Sku[]
+  orders   Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
 }
@@ -45,8 +53,9 @@ model Product {
 
   status ProductStatus @default(ACTIVE)
 
-  merchant  Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  skus      Sku[]
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  skus     Sku[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -64,8 +73,9 @@ model Sku {
   cost           Decimal @db.Decimal(12, 2)
   alertThreshold Int     @default(0)
 
-  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  merchant   Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -73,4 +83,42 @@ model Sku {
   @@unique([merchantId, code])
   @@index([merchantId])
   @@index([productId])
+}
+
+model Order {
+  id         String @id @default(cuid())
+  merchantId String
+
+  orderNo     String
+  orderedAt   DateTime
+  status      OrderStatus @default(PENDING)
+  totalAmount Decimal     @db.Decimal(12, 2)
+
+  merchant Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([merchantId, orderNo])
+  @@index([merchantId, orderedAt])
+  @@index([status])
+}
+
+model OrderItem {
+  id      String @id @default(cuid())
+  orderId String
+  skuId   String
+
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(12, 2)
+  lineAmount Decimal @db.Decimal(12, 2)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sku   Sku   @relation(fields: [skuId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([skuId])
 }
