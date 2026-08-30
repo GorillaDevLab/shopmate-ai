@@ -26,3 +26,6 @@ yarn-error.log*
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Prisma generated client
+packages/database/generated/
