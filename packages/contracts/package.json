@@ -1,0 +1,33 @@
+{
+  "name": "@shopmate/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./mock": {
+      "types": "./dist/product/product.mock.d.ts",
+      "import": "./dist/product/product.mock.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "test": "pnpm run build && vitest run",
+    "test:unit": "pnpm run build && vitest run src --passWithNoTests",
+    "typecheck": "tsc --project tsconfig.build.json",
+    "lint": "eslint src --max-warnings=0"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.13",
+    "typescript": "6.0.2",
+    "vitest": "4.1.11"
+  }
+}
