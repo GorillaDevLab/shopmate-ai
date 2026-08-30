@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MerchantStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Merchant {
+  id     String         @id @default(cuid())
+  name   String
+  slug   String         @unique
+  status MerchantStatus @default(ACTIVE)
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model Product {
+  id         String @id @default(cuid())
+  merchantId String
+
+  name          String
+  description   String?
+  features      Json?
+  sellingPoints Json?
+
+  price    Decimal @db.Decimal(12, 2)
+  currency String  @default("CNY")
+
+  status ProductStatus @default(ACTIVE)
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([merchantId])
+  @@index([merchantId, status])
+}

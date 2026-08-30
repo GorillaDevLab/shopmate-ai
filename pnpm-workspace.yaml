@@ -1,6 +1,11 @@
 packages:
   - "apps/*"
   - "packages/*"
+
 allowBuilds:
+  # Prisma CLI 和数据库引擎需要运行安装构建脚本。
+  "@prisma/engines": true
+  prisma: true
+
   # ESLint 的 TypeScript 导入解析器需要安装其平台原生绑定。
   unrs-resolver: true
