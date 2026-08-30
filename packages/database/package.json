@@ -7,15 +7,16 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-  "generate": "prisma generate",
-  "seed": "prisma generate && tsx src/seed.ts",
-  "test": "prisma validate && node --import tsx --test test/*.test.mjs",
-  "typecheck": "prisma generate && tsc --noEmit",
-  "lint": "eslint src test prisma.config.ts --max-warnings=0",
-  "prisma:format": "prisma format",
-  "prisma:validate": "prisma validate",
-  "prisma:generate": "prisma generate",
-  "prisma:migrate:deploy": "prisma migrate deploy"
+    "generate": "prisma generate",
+    "seed": "prisma generate && tsx src/seed.ts",
+    "seed:orders": "prisma generate && tsx src/seed.ts && tsx src/order-seed.ts",
+    "test": "prisma validate && node --import tsx --test test/*.test.mjs",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "lint": "eslint src test prisma.config.ts --max-warnings=0",
+    "prisma:format": "prisma format",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
