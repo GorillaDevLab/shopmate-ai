@@ -29,3 +29,5 @@ Thumbs.db
 
 # Prisma generated client
 packages/database/generated/
+packages/database/prisma.config.js
+packages/database/prisma.config.d.ts

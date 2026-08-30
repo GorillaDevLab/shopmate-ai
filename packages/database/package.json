@@ -3,15 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
   },
   "scripts": {
+    "build": "prisma generate && tsc --project tsconfig.build.json",
     "generate": "prisma generate",
     "seed": "prisma generate && tsx src/seed.ts",
     "seed:orders": "prisma generate && tsx src/seed.ts && tsx src/order-seed.ts",
-    "test": "prisma validate && node --import tsx --test test/*.test.mjs",
-    "typecheck": "prisma generate && tsc --noEmit",
+    "test": "pnpm run build && prisma validate && node --import tsx --test test/*.test.mjs",
+    "typecheck": "prisma generate && tsc --project tsconfig.build.json",
     "lint": "eslint src test prisma.config.ts --max-warnings=0",
     "prisma:format": "prisma format",
     "prisma:validate": "prisma validate",
