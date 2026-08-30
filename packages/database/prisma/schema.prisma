@@ -23,10 +23,10 @@ model Merchant {
   slug   String         @unique
   status MerchantStatus @default(ACTIVE)
 
-  products Product[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  products  Product[]
+  skus      Sku[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([status])
 }
@@ -45,11 +45,32 @@ model Product {
 
   status ProductStatus @default(ACTIVE)
 
-  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-
+  merchant  Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  skus      Sku[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([merchantId])
   @@index([merchantId, status])
+}
+
+model Sku {
+  id         String @id @default(cuid())
+  merchantId String
+  productId  String
+
+  code           String
+  inventory      Int     @default(0)
+  cost           Decimal @db.Decimal(12, 2)
+  alertThreshold Int     @default(0)
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([merchantId, code])
+  @@index([merchantId])
+  @@index([productId])
 }

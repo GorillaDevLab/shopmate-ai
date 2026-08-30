@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "prisma validate",
+    "test": "prisma validate && node --test test/*.test.mjs",
     "prisma:format": "prisma format",
     "prisma:validate": "prisma validate"
   },
