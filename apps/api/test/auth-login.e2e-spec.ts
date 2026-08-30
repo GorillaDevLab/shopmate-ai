@@ -75,6 +75,11 @@ describe("Demo 登录配置不完整", () => {
 
   beforeAll(async () => {
     vi.stubEnv("DEMO_AUTH_EMAIL", "owner@shopmate.co.nz");
+    vi.stubEnv("DEMO_AUTH_PASSWORD", "");
+    vi.stubEnv("DEMO_AUTH_USER_ID", "");
+    vi.stubEnv("DEMO_AUTH_MERCHANT_ID", "");
+    vi.stubEnv("DEMO_SESSION_SECRET", "");
+    vi.stubEnv("DEMO_SESSION_TTL_SECONDS", "");
     const [{ AppModule }, { configureApp }] = await Promise.all([
       import("../src/app.module.js"),
       import("../src/app.config.js"),
