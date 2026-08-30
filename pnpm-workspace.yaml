@@ -7,5 +7,8 @@ allowBuilds:
   "@prisma/engines": true
   prisma: true
 
+  # tsx 使用 esbuild 执行 TypeScript Seed。
+  esbuild: true
+
   # ESLint 的 TypeScript 导入解析器需要安装其平台原生绑定。
   unrs-resolver: true
