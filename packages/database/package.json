@@ -3,15 +3,29 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
+    "generate": "prisma generate",
     "test": "prisma validate && node --test test/*.test.mjs",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "lint": "eslint src test prisma.config.ts --max-warnings=0",
     "prisma:format": "prisma format",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
-    "@prisma/client": "7.10.0"
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "7.10.0",
+    "dotenv": "^17.0.0",
+    "pg": "^8.0.0"
   },
   "devDependencies": {
-    "prisma": "7.10.0"
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.0.0",
+    "prisma": "7.10.0",
+    "typescript": "^6.0.0"
   }
 }
