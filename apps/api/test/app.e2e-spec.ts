@@ -6,6 +6,8 @@ import { IsString } from "class-validator";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { Public } from "../src/auth/access/public.decorator.js";
+
 class ValidationProbeDto {
   @IsString()
   name!: string;
@@ -14,6 +16,7 @@ class ValidationProbeDto {
 @Controller({ path: "validation-probe", version: "1" })
 class ValidationProbeController {
   @Post()
+  @Public()
   validate(@Body() body: ValidationProbeDto): ValidationProbeDto {
     return body;
   }
