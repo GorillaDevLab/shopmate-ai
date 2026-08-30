@@ -2,8 +2,8 @@ import { Body, Controller, HttpCode, Post, Res } from "@nestjs/common";
 
 import { LoginInputDto } from "./contracts/index.js";
 import { DemoAuthService } from "./demo-auth.service.js";
-
-const SESSION_COOKIE_NAME = "shopmate_demo_session";
+import { Public } from "./access/public.decorator.js";
+import { DEMO_SESSION_COOKIE_NAME } from "./session/demo-session-cookie.js";
 
 interface CookieResponse {
   cookie(
@@ -25,9 +25,10 @@ export class DemoAuthController {
 
   @Post("login")
   @HttpCode(200)
+  @Public()
   login(@Body() input: LoginInputDto, @Res({ passthrough: true }) response: CookieResponse) {
     const result = this.authService.login(input);
-    response.cookie(SESSION_COOKIE_NAME, result.token, {
+    response.cookie(DEMO_SESSION_COOKIE_NAME, result.token, {
       httpOnly: true,
       sameSite: "lax",
       secure: result.secureCookie,
