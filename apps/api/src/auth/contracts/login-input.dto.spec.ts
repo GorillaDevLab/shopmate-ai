@@ -1,8 +1,9 @@
 import "reflect-metadata";
 
-import { BadRequestException, ValidationPipe, type ArgumentMetadata } from "@nestjs/common";
+import { BadRequestException, type ArgumentMetadata } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
 
+import { createGlobalValidationPipe } from "../../app.config.js";
 import { LoginInputDto } from "./login-input.dto.js";
 
 const metadata: ArgumentMetadata = {
@@ -10,12 +11,7 @@ const metadata: ArgumentMetadata = {
   metatype: LoginInputDto,
 };
 
-const pipe = new ValidationPipe({
-  transform: true,
-  whitelist: true,
-  forbidNonWhitelisted: true,
-  stopAtFirstError: true,
-});
+const pipe = createGlobalValidationPipe();
 
 async function validateLoginInput(input: Record<string, unknown>): Promise<LoginInputDto> {
   return pipe.transform(input, metadata);
@@ -43,12 +39,17 @@ describe("LoginInputDto", () => {
   });
 
   it("拒绝客户端覆盖 merchantId", async () => {
-    await expect(
-      validateLoginInput({
-        email: "owner@shopmate.co.nz",
-        password: "demo-pass-2026",
-        merchantId: "attacker-merchant",
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    const error = await validateLoginInput({
+      email: "owner@shopmate.co.nz",
+      password: "demo-pass-2026",
+      merchantId: "attacker-merchant",
+    }).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).getResponse()).toEqual({
+      statusCode: 400,
+      error: "请求参数无效",
+      message: "请求参数校验失败",
+    });
   });
 });
