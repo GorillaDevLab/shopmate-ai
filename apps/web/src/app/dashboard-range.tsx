@@ -114,7 +114,7 @@ function RangeForm({ initial, latestDate, onCancel, onApply }: FormProps) {
       asOfDate: dates.endDate,
     });
     if (!parsed.success || dates.endDate > latestDate) {
-      setError("请选择有效日期：开始不晚于结束，最多 31 天，且不能晚于今天。");
+      setError("请选择有效日期：开始不晚于结束，且不能晚于今天。");
       return;
     }
     onApply(dates);
@@ -154,7 +154,7 @@ function RangeFormHeading() {
         自选统计时段
       </h2>
       <p className="mt-2 text-sm text-app-muted">
-        最多 31 天，与前一个等长时段比较。库存为当前快照。
+        支持任意历史时段，与前一个等长时段比较。库存为当前快照。
       </p>
     </>
   );

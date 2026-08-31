@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
+
 import { dashboardResponsePreview } from "./dashboard-data";
 
 const api = vi.hoisted(() => ({ fetchDashboard: vi.fn() }));
@@ -75,6 +77,22 @@ describe("DashboardClient", () => {
     await waitFor(() => expect(screen.queryByText("¥0.01")).not.toBeInTheDocument());
   });
 
+  it("切换时保留上一段数据，避免字体和卡片跳变", async () => {
+    const pending = deferred<typeof dashboardResponsePreview>();
+    api.fetchDashboard
+      .mockResolvedValueOnce(dashboardResponsePreview)
+      .mockReturnValueOnce(pending.promise);
+    render(<DashboardClient asOfDate="2026-08-31" />);
+    await screen.findByText("数据来自 Analytics API");
+    fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
+    expect(screen.getAllByText("¥12,680.00").length).toBeGreaterThan(0);
+    expect(document.getElementById("main-content")).toHaveAttribute("aria-busy", "true");
+    pending.resolve({
+      ...dashboardResponsePreview,
+      period: { startDate: "2026-08-02", endDate: "2026-08-31", days: 30 },
+    });
+  });
+
   it("30 天请求失败后重试仍使用同一范围，可切回 7 天", async () => {
     api.fetchDashboard
       .mockResolvedValueOnce(dashboardResponsePreview)
@@ -119,6 +137,16 @@ describe("DashboardClient", () => {
       within(await screen.findByRole("article", { name: "近 7 天销售额" })).getByText("¥12,680.00"),
     ).toBeInTheDocument();
     expect(api.fetchDashboard).toHaveBeenCalledTimes(2);
+  });
+
+  it("会话失效时提供重新登录入口", async () => {
+    const error = Object.assign(new Error("登录已失效，请重新登录"), { status: 401 });
+    api.fetchDashboard.mockRejectedValueOnce(error);
+    render(<DashboardClient asOfDate="2026-08-31" />);
+
+    const loginLink = await screen.findByRole("link", { name: "重新登录" });
+    expect(loginLink).toHaveAttribute("href", "/login");
+    expect(screen.getByText("请先登录后再查看商家经营数据。")).toBeInTheDocument();
   });
 
   it("较旧请求晚返回时不会覆盖较新的结果", async () => {

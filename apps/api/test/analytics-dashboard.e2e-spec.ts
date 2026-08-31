@@ -54,6 +54,19 @@ describe("经营看板 Analytics API", () => {
       .expect(401);
   });
 
+  it("退出登录会清除会话 Cookie", async () => {
+    const response = await request(app.getHttpServer())
+      .post("/api/v1/auth/logout")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(response.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([expect.stringContaining("shopmate_demo_session=")]),
+    );
+    await request(app.getHttpServer())
+      .get("/api/v1/analytics/dashboard?asOfDate=2026-08-31")
+      .expect(401);
+  });
+
   it("带区间的请求同样鉴权并把区间传入所有统计服务", async () => {
     const path = "/api/v1/analytics/dashboard?asOfDate=2026-08-31&startDate=2026-08-02";
     await request(app.getHttpServer()).get(path).expect(401);
@@ -76,7 +89,7 @@ describe("经营看板 Analytics API", () => {
     await request(app.getHttpServer())
       .get("/api/v1/analytics/dashboard?asOfDate=2026-08-31&startDate=2026-07-01")
       .set("Cookie", cookie)
-      .expect(400);
+      .expect(200);
   });
 
   it("只使用登录会话中的 Merchant 返回统一看板快照", async () => {

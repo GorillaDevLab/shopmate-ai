@@ -68,8 +68,8 @@ export function calculateInventoryRisk(
   input: InventoryRiskInput,
   windowDays: number = ANALYTICS_RULES.salesWindowDays,
 ): InventoryRiskResult {
-  if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 31) {
-    throw new RangeError("inventory sales window must be 1–31 days");
+  if (!Number.isInteger(windowDays) || windowDays < 1) {
+    throw new RangeError("inventory sales window must be a positive integer");
   }
   assertNonNegativeInteger(input.inventory, "inventory");
   assertNonNegativeInteger(input.alertThreshold, "alertThreshold");

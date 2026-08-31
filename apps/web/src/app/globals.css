@@ -217,6 +217,11 @@ button:focus-visible {
   box-shadow: 0 0 0 4px var(--brand-ring);
 }
 
+.dashboard-refreshing {
+  opacity: 0.72;
+  transition: opacity 180ms ease-out;
+}
+
 .range-segments {
   position: relative;
   display: inline-grid;

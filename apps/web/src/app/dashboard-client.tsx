@@ -11,7 +11,7 @@ type ClientState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly data: AnalyticsDashboardResponse }
   | { readonly status: "empty"; readonly data: AnalyticsDashboardResponse }
-  | { readonly status: "error" };
+  | { readonly status: "error"; readonly authRequired: boolean };
 type ClientResult = { key: string; state: ClientState };
 
 export function DashboardClient({ asOfDate = shanghaiToday() }: { asOfDate?: string }) {
@@ -21,10 +21,12 @@ export function DashboardClient({ asOfDate = shanghaiToday() }: { asOfDate?: str
 
 function DashboardRangeClient({ asOfDate }: { asOfDate: string }) {
   const [range, setRange] = useState<DashboardRange>({ kind: "7", endDate: asOfDate });
-  const { state, retry } = useDashboard(range.endDate, range.startDate);
+  const { state, retry, isRefreshing } = useDashboard(range.endDate, range.startDate);
   return (
     <Dashboard
       state={state.status}
+      authRequired={state.status === "error" ? state.authRequired : false}
+      isRefreshing={isRefreshing}
       data={"data" in state ? state.data : undefined}
       onRetry={retry}
       periodLabel={rangeLabel(range)}
@@ -39,7 +41,12 @@ function useDashboard(asOfDate: string, startDate?: string) {
     key: requestKey,
     state: { status: "loading" },
   });
-  const state: ClientState = result.key === requestKey ? result.state : { status: "loading" };
+  const state: ClientState =
+    result.key === requestKey
+      ? result.state
+      : "data" in result.state
+        ? { status: "ready", data: result.state.data }
+        : { status: "loading" };
   const controllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const { applyData, applyError } = useRequestCallbacks(requestKey, requestIdRef, setResult);
@@ -67,7 +74,7 @@ function useDashboard(asOfDate: string, startDate?: string) {
     startRequest(asOfDate, controllerRef, requestIdRef, applyData, applyError, startDate);
   };
 
-  return { state, retry };
+  return { state, retry, isRefreshing: result.key !== requestKey };
 }
 
 function useRequestCallbacks(
@@ -88,11 +95,20 @@ function useRequestCallbacks(
   const applyError = useCallback(
     (error: unknown, requestId: number) => {
       if (isAbortError(error) || requestId !== requestIdRef.current) return;
-      setResult({ key: requestKey, state: { status: "error" } });
+      setResult({
+        key: requestKey,
+        state: { status: "error", authRequired: isUnauthorizedError(error) },
+      });
     },
     [requestKey, requestIdRef, setResult],
   );
   return { applyData, applyError };
+}
+
+function isUnauthorizedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const status = (error as Error & { status?: unknown }).status;
+  return status === 401;
 }
 
 function startRequest(
