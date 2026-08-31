@@ -86,10 +86,10 @@ export class DeepSeekLLMProvider implements LLMProvider {
       return;
     }
 
-    let apiKey: string;
+    let credential: string;
 
     try {
-      apiKey = requireDeepSeekApiKey(this.config);
+      credential = requireDeepSeekApiKey(this.config);
     } catch {
       throw new LLMProviderError({
         code: "CONFIGURATION",
@@ -99,7 +99,7 @@ export class DeepSeekLLMProvider implements LLMProvider {
     }
 
     const sdk = new OpenAI({
-      apiKey,
+      apiKey: credential,
       baseURL: this.config.baseUrl,
       timeout: this.config.timeoutMs,
 
