@@ -27,6 +27,10 @@ export interface DemoLoginResult {
 export class DemoAuthService {
   constructor(@Inject(DEMO_AUTH_CONFIG) private readonly config: DemoAuthConfig | null) {}
 
+  usesSecureCookie(): boolean {
+    return this.config?.secureCookie ?? false;
+  }
+
   login(input: LoginInputDto): DemoLoginResult {
     const config = this.requireConfig();
     if (!safeEqual(input.email, config.email) || !safeEqual(input.password, config.password)) {

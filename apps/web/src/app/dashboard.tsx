@@ -6,6 +6,7 @@ import { LowInventoryPanel } from "./low-inventory-panel";
 import { MetricGrid } from "./metric-card";
 import { SalesTrend } from "./sales-trend";
 import { ThemeSettings } from "./theme-settings";
+import { LogoutButton } from "./logout-button";
 
 export type DashboardState = "ready" | "loading" | "empty" | "error";
 
@@ -75,7 +76,10 @@ function DashboardHeader({ ready }: { ready: boolean }) {
             {ready ? "数据来自 Analytics API" : "正在连接经营分析服务"}
           </p>
         </div>
-        <ThemeSettings />
+        <div className="flex items-center gap-2">
+          <LogoutButton />
+          <ThemeSettings />
+        </div>
       </div>
     </header>
   );

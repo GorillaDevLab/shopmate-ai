@@ -17,6 +17,7 @@ interface CookieResponse {
       path: string;
     },
   ): void;
+  clearCookie(name: string, options: { httpOnly: boolean; sameSite: "lax"; secure: boolean; path: string }): void;
 }
 
 @Controller({ path: "auth", version: "1" })
@@ -36,5 +37,18 @@ export class DemoAuthController {
       path: "/",
     });
     return { message: "登录成功", expiresAt: result.expiresAt };
+  }
+
+  @Post("logout")
+  @HttpCode(200)
+  @Public()
+  logout(@Res({ passthrough: true }) response: CookieResponse) {
+    response.clearCookie(DEMO_SESSION_COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: this.authService.usesSecureCookie(),
+      path: "/",
+    });
+    return { message: "已退出登录" };
   }
 }

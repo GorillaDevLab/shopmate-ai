@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
+
 import { dashboardResponsePreview } from "./dashboard-data";
 
 const api = vi.hoisted(() => ({ fetchDashboard: vi.fn() }));
