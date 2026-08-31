@@ -9,8 +9,8 @@ import {
 } from "./metric-rules.js";
 import type { SalesOrderRecord } from "./sales-query.repository.js";
 import { SalesQueryService } from "./sales-query.service.js";
+import { analyticsWindow } from "./analytics-window.js";
 
-const RECENT_WINDOW_DAYS = 7;
 const SHANGHAI_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u;
 
@@ -58,16 +58,21 @@ export interface DashboardSummaryResult {
 export class DashboardService {
   constructor(private readonly salesQueryService: SalesQueryService) {}
 
-  async summarize(context: AuthContext, asOfDate: string): Promise<DashboardSummaryResult> {
+  async summarize(
+    context: AuthContext,
+    asOfDate: string,
+    startDate?: string,
+  ): Promise<DashboardSummaryResult> {
     const parsedAsOfDate = parseDateOnly(asOfDate);
+    const window = analyticsWindow(asOfDate, startDate);
 
     const monthStart = formatDateOnly(Date.UTC(parsedAsOfDate.year, parsedAsOfDate.month - 1, 1));
 
-    const currentStart = subtractCalendarDays(asOfDate, RECENT_WINDOW_DAYS - 1);
+    const currentStart = window.startDate;
 
     const previousEnd = subtractCalendarDays(currentStart, 1);
 
-    const previousStart = subtractCalendarDays(previousEnd, RECENT_WINDOW_DAYS - 1);
+    const previousStart = subtractCalendarDays(previousEnd, window.days - 1);
 
     const queryStart = previousStart < monthStart ? previousStart : monthStart;
 
@@ -118,12 +123,12 @@ export class DashboardService {
         currentWindow: {
           startDate: currentStart,
           endDate: asOfDate,
-          days: RECENT_WINDOW_DAYS,
+          days: window.days,
         },
         previousWindow: {
           startDate: previousStart,
           endDate: previousEnd,
-          days: RECENT_WINDOW_DAYS,
+          days: window.days,
         },
         metrics: currentMetrics,
         previousMetrics,

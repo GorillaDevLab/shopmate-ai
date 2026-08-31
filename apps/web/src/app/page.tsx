@@ -1,7 +1,7 @@
-import { Dashboard } from "./dashboard";
+import { DashboardClient } from "./dashboard-client";
 
 export { Dashboard } from "./dashboard";
 
 export default function Home() {
-  return <Dashboard />;
+  return <DashboardClient />;
 }

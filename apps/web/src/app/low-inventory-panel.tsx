@@ -7,9 +7,11 @@ const days = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
 export function LowInventoryPanel({
   items,
   state = "ready",
+  periodLabel = "近 7 天",
 }: {
   items: readonly DashboardInventoryAlert[];
   state?: ProductPanelState;
+  periodLabel?: string;
 }) {
   return (
     <ProductPanelFrame
@@ -18,40 +20,37 @@ export function LowInventoryPanel({
       state={state}
       count={items.length}
     >
-      <ul role="list" className="mt-5 space-y-3">
+      <p className="mt-1 text-xs text-app-muted">当前库存 · 按{periodLabel}销量估算</p>
+      <ul role="list" className="mt-2">
         {items.map((item) => (
-          <InventoryItem key={item.sku} item={item} />
+          <InventoryItem key={item.sku} item={item} periodLabel={periodLabel} />
         ))}
       </ul>
     </ProductPanelFrame>
   );
 }
 
-function InventoryItem({ item }: { item: DashboardInventoryAlert }) {
+function InventoryItem({
+  item,
+  periodLabel,
+}: {
+  item: DashboardInventoryAlert;
+  periodLabel: string;
+}) {
   return (
-    <li className="min-w-0 rounded-2xl border border-app-line p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 break-words [overflow-wrap:anywhere]">
-          <h3 className="text-sm font-bold">{item.name}</h3>
-          <p className="mt-1 text-xs text-app-muted">SKU：{item.sku}</p>
-        </div>
-        <span
-          aria-hidden="true"
-          className="grid size-7 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-800"
-        >
-          !
-        </span>
+    <li className="inventory-row">
+      <div className="min-w-0 break-words [overflow-wrap:anywhere] xl:flex xl:flex-wrap xl:items-baseline xl:gap-x-3">
+        <h3 className="text-sm font-bold">{item.name}</h3>
+        <p className="mt-1 text-xs text-app-muted xl:mt-0">SKU：{item.sku}</p>
       </div>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 break-all text-xs tabular-nums">
-        <p>剩余 {count.format(item.inventory)} 件</p>
-        <p className="text-app-muted">
-          近 7 天销量：
+      <div className="inventory-stock break-all text-xs tabular-nums">
+        <p className="font-semibold">剩余 {count.format(item.inventory)} 件</p>
+        <p className="mt-1 text-app-muted">
+          {periodLabel}销量：
           {item.recentSold === null ? "暂无数据" : `${count.format(item.recentSold)} 件`}
         </p>
       </div>
-      <p className="mt-2 break-all text-xs font-bold text-amber-800">
-        {forecastText(item.forecast)}
-      </p>
+      <p className="break-all text-xs font-medium text-warning">{forecastText(item.forecast)}</p>
     </li>
   );
 }

@@ -1,4 +1,4 @@
-import { DashboardPreviewSchema } from "@shopmate/contracts";
+import { AnalyticsDashboardResponseSchema, DashboardPreviewSchema } from "@shopmate/contracts";
 
 export type DashboardState = "ready" | "loading" | "empty" | "error";
 
@@ -12,9 +12,30 @@ export const dashboardPreview = DashboardPreviewSchema.parse({
   ],
 
   products: [
-    { rank: 1, name: "轻量通勤双肩包", sku: "BAG-BLACK", sold: 86, salesMinor: 369800 },
-    { rank: 2, name: "云朵柔光台灯", sku: "LAMP-WHITE", sold: 68, salesMinor: 281600 },
-    { rank: 3, name: "可折叠旅行水杯", sku: "CUP-BLUE", sold: 51, salesMinor: 193400 },
+    {
+      rank: 1,
+      productId: "product-bag",
+      name: "轻量通勤双肩包",
+      skuCodes: ["BAG-BLACK"],
+      sold: 86,
+      salesMinor: 369800,
+    },
+    {
+      rank: 2,
+      productId: "product-lamp",
+      name: "云朵柔光台灯",
+      skuCodes: ["LAMP-WHITE"],
+      sold: 68,
+      salesMinor: 281600,
+    },
+    {
+      rank: 3,
+      productId: "product-cup",
+      name: "可折叠旅行水杯",
+      skuCodes: ["CUP-BLUE"],
+      sold: 51,
+      salesMinor: 193400,
+    },
   ],
 
   inventoryAlerts: [
@@ -52,3 +73,21 @@ export const dashboardPreview = DashboardPreviewSchema.parse({
 });
 
 export const { metrics, products, inventoryAlerts, trend } = dashboardPreview;
+
+// 仅供组件测试与 Story 预览；实际页面通过 Analytics API 获取同一契约的数据。
+export const dashboardResponsePreview = AnalyticsDashboardResponseSchema.parse({
+  asOfDate: "2026-08-31",
+  period: { startDate: "2026-08-25", endDate: "2026-08-31", days: 7 },
+  metrics,
+  products,
+  inventoryAlerts,
+  trend: [
+    { date: "2026-08-25", revenueMinor: 520_000 },
+    { date: "2026-08-26", revenueMinor: 680_000 },
+    { date: "2026-08-27", revenueMinor: 610_000 },
+    { date: "2026-08-28", revenueMinor: 890_000 },
+    { date: "2026-08-29", revenueMinor: 760_000 },
+    { date: "2026-08-30", revenueMinor: 1_040_000 },
+    { date: "2026-08-31", revenueMinor: 1_268_000 },
+  ],
+});

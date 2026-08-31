@@ -1,21 +1,51 @@
-import { inventoryAlerts, metrics, products, trend, type DashboardState } from "./dashboard-data";
-import { MetricGrid } from "./metric-card";
+import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
+import type { ReactNode } from "react";
+
 import { HotProductsPanel } from "./hot-products-panel";
 import { LowInventoryPanel } from "./low-inventory-panel";
+import { MetricGrid } from "./metric-card";
+import { SalesTrend } from "./sales-trend";
+import { ThemeSettings } from "./theme-settings";
 
-export type { DashboardState } from "./dashboard-data";
+export type DashboardState = "ready" | "loading" | "empty" | "error";
 
-export function Dashboard({ state = "ready" }: { state?: DashboardState }) {
+interface DashboardProps {
+  readonly state?: DashboardState;
+  readonly data?: AnalyticsDashboardResponse;
+  readonly onRetry?: () => void;
+  readonly controls?: ReactNode;
+  readonly periodLabel?: string;
+}
+
+export function Dashboard({
+  state = "loading",
+  data,
+  onRetry,
+  controls,
+  periodLabel = "近 7 天",
+}: DashboardProps) {
+  const visibleState = state === "ready" && !data ? "empty" : state;
   return (
-    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 sm:py-7">
-      <div className="mx-auto w-full max-w-6xl">
-        <DashboardHeader />
-        <section id="main-content" className="mt-10 sm:mt-14">
-          <DashboardIntro />
-          <MetricGrid metrics={metrics} state={state} />
-          {state === "ready" ? <ReadyDashboard /> : <StatePanel state={state} />}
+    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
+      <div className="mx-auto w-full max-w-[1440px]">
+        <DashboardHeader ready={visibleState === "ready"} />
+        <section id="main-content" className="mt-8 lg:mt-4">
+          <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
+          <MetricGrid
+            metrics={data?.metrics ?? []}
+            state={visibleState}
+            periodLabel={periodLabel}
+          />
+          {visibleState === "ready" && data ? (
+            <ReadyDashboard data={data} periodLabel={periodLabel} />
+          ) : (
+            <StatePanel
+              state={visibleState === "ready" ? "empty" : visibleState}
+              onRetry={onRetry}
+            />
+          )}
         </section>
-        <footer className="mt-12 border-t border-app-line pt-5 text-sm text-app-muted">
+        <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted lg:mt-4">
           中文界面 · 移动端优先 · 隐私友好
         </footer>
       </div>
@@ -23,128 +53,110 @@ export function Dashboard({ state = "ready" }: { state?: DashboardState }) {
   );
 }
 
-function DashboardHeader() {
+function DashboardHeader({ ready }: { ready: boolean }) {
   return (
-    <header className="flex items-center justify-between gap-4">
+    <header className="flex items-center justify-between gap-3 border-b border-app-line pb-3">
       <a
         className="inline-flex min-h-11 items-center gap-3 rounded-full focus-ring"
         href="#main-content"
       >
-        <span className="grid size-10 place-items-center rounded-2xl bg-brand text-lg font-black text-white shadow-brand">
+        <span className="grid size-9 place-items-center rounded-xl bg-brand text-lg font-bold text-white">
           S
         </span>
         <span className="text-base font-bold tracking-tight">ShopMate AI</span>
       </a>
-      <div className="hidden items-center gap-3 text-right sm:flex">
-        <div>
+      <div className="flex items-center gap-4 text-right">
+        <div className="hidden sm:block">
           <p className="text-sm font-semibold">商家经营看板</p>
-          <p className="text-xs text-app-muted">当前为模拟数据，尚未连接分析服务</p>
+          <p className="text-xs text-app-muted">
+            {ready ? "数据来自 Analytics API" : "正在连接经营分析服务"}
+          </p>
         </div>
-        <span className="grid size-10 place-items-center rounded-full bg-app-text text-sm font-bold text-white">
-          店
-        </span>
+        <ThemeSettings />
       </div>
     </header>
   );
 }
 
-function DashboardIntro() {
+function DashboardIntro({
+  data,
+  controls,
+  periodLabel,
+}: {
+  data?: AnalyticsDashboardResponse;
+  controls?: ReactNode;
+  periodLabel: string;
+}) {
   return (
-    <div className="mb-7 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between lg:mb-4">
       <div>
-        <p className="mb-2 text-sm font-bold tracking-[0.16em] text-brand uppercase">经营总览</p>
-        <h1 className="text-3xl font-black tracking-[-0.04em] sm:text-5xl">今天的经营，一眼看清</h1>
+        <p className="mb-1 text-xs font-semibold tracking-[0.12em] text-app-muted">经营总览</p>
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
+          {periodLabel}经营，一眼看清
+        </h1>
       </div>
-      <span className="w-fit rounded-full border border-app-line bg-app-surface px-3 py-1.5 text-xs font-semibold text-app-muted">
-        演示数据预览
-      </span>
+      {controls ?? (
+        <span className="w-fit rounded-full border border-app-line bg-app-surface px-3 py-1.5 text-xs font-semibold text-app-muted">
+          {data ? `统计截至 ${formatChineseDate(data.asOfDate)}` : "正在获取最新数据"}
+        </span>
+      )}
     </div>
   );
 }
 
-function ReadyDashboard() {
+function ReadyDashboard({
+  data,
+  periodLabel,
+}: {
+  data: AnalyticsDashboardResponse;
+  periodLabel: string;
+}) {
   return (
     <>
-      <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
-        <SalesTrend />
-        <LowInventoryPanel items={inventoryAlerts} />
+      <div className="mt-4 grid items-stretch gap-4 lg:grid-cols-[1.15fr_1fr]">
+        <SalesTrend points={data.trend} periodLabel={periodLabel} />
+        <LowInventoryPanel items={data.inventoryAlerts} periodLabel={periodLabel} />
       </div>
-      <div className="mt-5">
-        <HotProductsPanel items={products} />
+      <div className="mt-4">
+        <HotProductsPanel items={data.products} />
       </div>
     </>
   );
 }
 
-function SalesTrend() {
-  return (
-    <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
-      <PanelHeading eyebrow="本周表现" title="销售趋势" detail="近 7 天" />
-      <div
-        className="mt-6 flex h-44 items-end gap-2 sm:gap-4"
-        role="img"
-        aria-label="近七日销售趋势图（演示数据）"
-      >
-        {trend.map((point, index) => (
-          <div key={point.label} className="flex h-full min-w-0 flex-1 flex-col items-center gap-2">
-            <div className="flex min-h-0 w-full flex-1 items-end">
-              <div
-                className={`w-full rounded-t-xl ${index === 6 ? "bg-brand" : "bg-[#dcd9fb]"}`}
-                style={{ height: `${point.heightPercent}%` }}
-              />
-            </div>
-            <span className="text-[11px] text-app-subtle">{point.label}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function PanelHeading({
-  eyebrow,
-  title,
-  detail,
+function StatePanel({
+  state,
+  onRetry,
 }: {
-  eyebrow: string;
-  title: string;
-  detail: string;
+  state: Exclude<DashboardState, "ready">;
+  onRetry?: () => void;
 }) {
-  return (
-    <div className="flex items-start justify-between">
-      <div>
-        <p className="text-xs font-bold tracking-[0.14em] text-app-subtle uppercase">{eyebrow}</p>
-        <h2 className="mt-2 text-xl font-black">{title}</h2>
-      </div>
-      <span className="rounded-full bg-[#eef0ff] px-3 py-1 text-xs font-bold text-brand">
-        {detail}
-      </span>
-    </div>
-  );
-}
-
-function StatePanel({ state }: { state: Exclude<DashboardState, "ready"> }) {
   const copy = {
-    loading: ["正在整理你的经营数据…", "很快就能看到今天的经营概览。"],
+    loading: ["正在整理你的经营数据…", "很快就能看到最新经营概览。"],
     empty: ["还没有经营数据", "导入第一批商品后，这里会自动生成经营概览。"],
     error: ["数据暂时加载失败", "请检查 API 服务后再试一次。"],
   }[state];
   return (
-    <div
-      className="mt-5 rounded-3xl border border-dashed border-app-line bg-app-surface px-6 py-20 text-center"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-[#eef0ff] text-xl text-brand">
+    <div className="dashboard-panel mt-5 px-6 py-20 text-center" role="status" aria-live="polite">
+      <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-brand-soft text-xl text-brand">
         ✦
       </div>
       <h2 className="mt-5 text-xl font-black">{copy[0]}</h2>
       <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-app-muted">{copy[1]}</p>
       {state === "error" && (
-        <button className="mt-6 min-h-11 rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-6 min-h-11 rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong"
+        >
           重新加载
         </button>
       )}
     </div>
   );
+}
+
+function formatChineseDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  return `${year}年${Number(month)}月${Number(day)}日`;
 }

@@ -37,6 +37,14 @@ export type {
   DashboardInventoryAlert,
   DashboardStockForecast,
 } from "./dashboard/dashboard-products.schema.js";
+export {
+  AnalyticsDashboardQuerySchema,
+  AnalyticsDashboardResponseSchema,
+} from "./analytics/dashboard-api.schema.js";
+export type {
+  AnalyticsDashboardQuery,
+  AnalyticsDashboardResponse,
+} from "./analytics/dashboard-api.schema.js";
 
 export {
   DEFAULT_LLM_LOCALE,

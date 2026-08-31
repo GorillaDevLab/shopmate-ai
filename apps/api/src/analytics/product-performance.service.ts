@@ -10,8 +10,7 @@ import {
   type TrendResult,
 } from "./metric-rules.js";
 import { SalesQueryService } from "./sales-query.service.js";
-
-const PERFORMANCE_WINDOW_DAYS = 7;
+import { analyticsWindow } from "./analytics-window.js";
 const SHANGHAI_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/u;
 
@@ -20,6 +19,7 @@ export type LowPerformanceReason = "NO_SALES" | "DECLINED_AT_LEAST_30_PERCENT";
 export interface ProductPerformanceRecord {
   readonly productId: string;
   readonly productName: string;
+  readonly skuCodes: readonly string[];
 
   readonly unitsSold: number;
   readonly revenueCents: number;
@@ -74,14 +74,19 @@ export class ProductPerformanceService {
     private readonly salesQueryService: Pick<SalesQueryService, "listEffectiveOrders">,
   ) {}
 
-  async analyze(context: AuthContext, asOfDate: string): Promise<ProductPerformanceResult> {
+  async analyze(
+    context: AuthContext,
+    asOfDate: string,
+    startDate?: string,
+  ): Promise<ProductPerformanceResult> {
+    const window = analyticsWindow(asOfDate, startDate);
     assertValidDate(asOfDate);
 
-    const currentStart = subtractCalendarDays(asOfDate, PERFORMANCE_WINDOW_DAYS - 1);
+    const currentStart = window.startDate;
 
     const previousEnd = subtractCalendarDays(currentStart, 1);
 
-    const previousStart = subtractCalendarDays(previousEnd, PERFORMANCE_WINDOW_DAYS - 1);
+    const previousStart = subtractCalendarDays(previousEnd, window.days - 1);
 
     const [skus, orders] = await Promise.all([
       this.repository.listMerchantSkus(context),
@@ -93,6 +98,7 @@ export class ProductPerformanceService {
 
     const skuToProduct = new Map<string, string>();
     const productNames = new Map<string, string>();
+    const skuCodesByProduct = new Map<string, string[]>();
 
     for (const sku of skus) {
       skuToProduct.set(sku.id, sku.productId);
@@ -100,6 +106,10 @@ export class ProductPerformanceService {
       if (!productNames.has(sku.productId)) {
         productNames.set(sku.productId, sku.productName);
       }
+
+      const codes = skuCodesByProduct.get(sku.productId) ?? [];
+      codes.push(sku.code);
+      skuCodesByProduct.set(sku.productId, codes);
     }
 
     const currentAggregates = new Map<string, ProductAggregate>();
@@ -210,6 +220,7 @@ export class ProductPerformanceService {
       return {
         productId: product.productId,
         productName: productNames.get(product.productId) ?? product.productId,
+        skuCodes: [...(skuCodesByProduct.get(product.productId) ?? [])].sort(),
 
         unitsSold: product.unitsSold,
         revenueCents: product.revenueCents,
@@ -237,13 +248,13 @@ export class ProductPerformanceService {
       currentWindow: {
         startDate: currentStart,
         endDate: asOfDate,
-        days: PERFORMANCE_WINDOW_DAYS,
+        days: window.days,
       },
 
       previousWindow: {
         startDate: previousStart,
         endDate: previousEnd,
-        days: PERFORMANCE_WINDOW_DAYS,
+        days: window.days,
       },
 
       products,

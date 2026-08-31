@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { DashboardPreviewSchema } from "../index.js";
 
-const product = { rank: 2, name: "台灯", sku: "LAMP-WHITE", sold: 3, salesMinor: 30000 };
+const product = {
+  rank: 2,
+  productId: "product-lamp",
+  name: "台灯",
+  skuCodes: ["LAMP-WHITE"],
+  sold: 3,
+  salesMinor: 30000,
+};
 const alert = {
   name: "台灯",
   sku: "LAMP-WHITE",
@@ -44,7 +51,7 @@ describe("热销与库存展示边界", () => {
     { ...product, sold: -1 },
     { ...product, sold: 1.5 },
     { ...product, salesMinor: Infinity },
-    { ...product, sku: " " },
+    { ...product, skuCodes: [] },
     { ...product, salesMinor: Number.MAX_SAFE_INTEGER + 1 },
     { ...product, secret: "placeholder" },
   ])("拒绝非法热销条目 %#", (item) => {
@@ -69,11 +76,20 @@ describe("热销与库存展示边界", () => {
       false,
     );
   });
-  it.each(["products", "inventoryAlerts"] as const)("拒绝 %s 的重复 SKU", (field) => {
+  it("拒绝热销商品重复 productId", () => {
     expect(
       DashboardPreviewSchema.safeParse({
         ...preview,
-        [field]: [...preview[field], ...preview[field]],
+        products: [...preview.products, ...preview.products],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("拒绝库存条目重复 SKU", () => {
+    expect(
+      DashboardPreviewSchema.safeParse({
+        ...preview,
+        inventoryAlerts: [...preview.inventoryAlerts, ...preview.inventoryAlerts],
       }).success,
     ).toBe(false);
   });

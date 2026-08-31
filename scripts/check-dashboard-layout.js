@@ -1,37 +1,46 @@
-// Playwright CLI run-code 文件：在已打开的本地 Dashboard 上执行。
-// CLI 以函数表达式读取文件，不接受末尾分号。
+// Run with Playwright CLI on a local Dashboard with an authenticated Demo session and seeded data.
+// CLI reads this file as a function expression, without a trailing semicolon.
 // prettier-ignore
 async (page) => {
+  page.setDefaultTimeout(10000);
   const results = [];
+  const checkBounds = async (width) => {
+    const bounds = await page.locator("main").evaluate(main => {
+      const root = main.ownerDocument.documentElement;
+      const overflow = [...main.querySelectorAll("*")].filter(element => {
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && (box.left < -1 || box.right > root.clientWidth + 1);
+      }).length;
+      return { width: root.clientWidth, height: root.scrollHeight, overflow };
+    });
+    if (bounds.width !== width || bounds.overflow > 0) throw new Error("Dashboard overflow: " + JSON.stringify(bounds));
+    if (width === 1440 && bounds.height > 900) throw new Error("Seeded desktop dashboard exceeds one screen");
+    return bounds;
+  };
   for (const width of [375, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.getByRole("heading", { name: "今天的经营，一眼看清" }).waitFor();
-    for (const name of ["今日销售额", "今日订单", "今日销量", "客单价"]) {
-      await page.getByRole("article", { name, exact: true }).waitFor({ state: "visible" });
+    await page.reload();
+    await page.getByRole("region", { name: "销售趋势", exact: true }).waitFor();
+    for (const days of [30, 7]) {
+      const responsePromise = page.waitForResponse(response => response.url().includes("/api/v1/analytics/dashboard?"));
+      await page.getByRole("button", { name: `近 ${days} 天`, exact: true }).click();
+      const response = await responsePromise;
+      if (!response.ok()) throw new Error("Dashboard API returned " + response.status());
+      const data = await response.json();
+      if (data.period.days !== days || data.trend.length !== days) throw new Error("Wrong API period");
+      await page.getByRole("region", { name: "销售趋势", exact: true }).waitFor();
+      const card = page.getByRole("article", { name: `近 ${days} 天销售额`, exact: true });
+      const money = "¥" + (data.metrics.find(metric => metric.key === "sales").value / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (!(await card.innerText()).includes(money)) throw new Error("Metric does not match API");
+      results.push({ days, ...await checkBounds(width) });
     }
-    await page.getByText("¥12,680.00", { exact: true }).waitFor();
-    await page.getByText("↓ 下降 5.2%", { exact: true }).waitFor();
-    const layout = await page.locator("main").evaluate((main) => {
-      const viewport = main.ownerDocument.documentElement.clientWidth;
-      const overflow = [...main.querySelectorAll("*")].filter((element) => {
-        const box = element.getBoundingClientRect();
-        return box.width > 0 && (box.left < -1 || box.right > viewport + 1);
-      }).length;
-      const bars = [...main.querySelectorAll('[role="img"] [style]')].map(
-        (element) => element.getBoundingClientRect().height,
-      );
-      return { viewport, overflow, bars };
-    });
-    if (layout.viewport !== width || layout.overflow > 0) {
-      throw new Error(`${width}px 布局溢出：${JSON.stringify(layout)}`);
-    }
-    if (layout.bars.length !== 7 || layout.bars.some((height) => height <= 0)) {
-      throw new Error(`${width}px 趋势柱不可见：${JSON.stringify(layout.bars)}`);
-    }
-    await page.getByText("已售罄", { exact: true }).waitFor();
-    await page.getByText("暂无销量，无法估算", { exact: true }).waitFor();
-    await page.getByRole("region", { name: "热销商品", exact: true }).getByText("SKU：BAG-BLACK").waitFor();
-    results.push({ width, overflow: layout.overflow, visibleBars: layout.bars.length });
+    await page.getByRole("button", { name: "自选时段", exact: true }).click();
+    await page.getByRole("dialog").waitFor();
+    await page.getByLabel("开始日期").fill("2026-08-10");
+    await page.getByLabel("结束日期").fill("2026-08-15");
+    await page.getByRole("button", { name: "应用时段" }).click();
+    await page.getByRole("region", { name: "销售趋势", exact: true }).waitFor();
+    results.push({ custom: true, ...await checkBounds(width) });
   }
   return results;
 }
