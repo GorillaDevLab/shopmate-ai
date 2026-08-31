@@ -8,6 +8,14 @@ import RootLayout, { metadata } from "./layout";
 import Home, { Dashboard } from "./page";
 
 describe("中文应用基础", () => {
+  it("展示四项经营指标而非库存占位指标", () => {
+    render(<Home />);
+    for (const name of ["今日销售额", "今日订单", "今日销量", "客单价"]) {
+      expect(screen.getByRole("article", { name })).toBeInTheDocument();
+    }
+    expect(screen.getByText("¥44.34")).toBeInTheDocument();
+    expect(screen.queryByText("库存健康度")).not.toBeInTheDocument();
+  });
   it("展示经营 Dashboard 的核心区域", () => {
     render(<Home />);
 
@@ -51,13 +59,14 @@ describe("中文应用基础", () => {
 describe("Dashboard 三态", () => {
   it.each(["loading", "empty", "error"] as const)("%s 时不残留演示指标", (state) => {
     render(<Dashboard state={state} />);
-    expect(screen.queryByText("¥12,680")).not.toBeInTheDocument();
+    expect(screen.queryByText("¥12,680.00")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "热销商品" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
   it("加载时显示骨架提示", () => {
     render(<Dashboard state="loading" />);
     expect(screen.getByText("正在整理你的经营数据…")).toBeInTheDocument();
+    expect(screen.getAllByText("正在加载指标")).toHaveLength(4);
   });
 
   it("空数据时给出下一步提示", () => {

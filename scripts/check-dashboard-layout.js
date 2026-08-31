@@ -6,6 +6,11 @@ async (page) => {
   for (const width of [375, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.getByRole("heading", { name: "今天的经营，一眼看清" }).waitFor();
+    for (const name of ["今日销售额", "今日订单", "今日销量", "客单价"]) {
+      await page.getByRole("article", { name, exact: true }).waitFor({ state: "visible" });
+    }
+    await page.getByText("¥12,680.00", { exact: true }).waitFor();
+    await page.getByText("↓ 下降 5.2%", { exact: true }).waitFor();
     const layout = await page.locator("main").evaluate((main) => {
       const viewport = main.ownerDocument.documentElement.clientWidth;
       const overflow = [...main.querySelectorAll("*")].filter((element) => {
