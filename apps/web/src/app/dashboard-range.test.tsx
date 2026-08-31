@@ -23,9 +23,9 @@ describe("自选时段", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "自选时段" }));
-    fireEvent.change(screen.getByLabelText("开始日期"), { target: { value: "2026-07-01" } });
+    fireEvent.change(screen.getByLabelText("开始日期"), { target: { value: "2026-09-01" } });
     fireEvent.click(screen.getByRole("button", { name: "应用时段" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("最多 31 天");
+    expect(screen.getByRole("alert")).toHaveTextContent("开始不晚于结束");
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("开始日期"), { target: { value: "2026-08-10" } });
     fireEvent.change(screen.getByLabelText("结束日期"), { target: { value: "2026-08-15" } });

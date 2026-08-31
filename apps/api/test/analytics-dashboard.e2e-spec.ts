@@ -76,7 +76,7 @@ describe("经营看板 Analytics API", () => {
     await request(app.getHttpServer())
       .get("/api/v1/analytics/dashboard?asOfDate=2026-08-31&startDate=2026-07-01")
       .set("Cookie", cookie)
-      .expect(400);
+      .expect(200);
   });
 
   it("只使用登录会话中的 Merchant 返回统一看板快照", async () => {

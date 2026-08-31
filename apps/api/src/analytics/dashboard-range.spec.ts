@@ -82,11 +82,17 @@ describe("看板整页统计范围", () => {
     expect(result.inventoryAlerts[0]?.forecast).toEqual({ status: "estimated", days: 1 });
     expect((await createService().get(context, { asOfDate: "2026-08-31" })).period.days).toBe(7);
   });
-  it("非法、反向及过长时段被拒绝", async () => {
-    for (const startDate of ["2026-02-30", "2026-09-01", "2026-07-01"]) {
+  it("非法和反向时段被拒绝，长历史时段可用", async () => {
+    for (const startDate of ["2026-02-30", "2026-09-01"]) {
       await expect(
         createService().get(context, { asOfDate: "2026-08-31", startDate }),
       ).rejects.toMatchObject({ status: 400 });
     }
+    const result = await createService().get(context, {
+      asOfDate: "2026-08-31",
+      startDate: "2026-07-01",
+    });
+    expect(result.period.days).toBe(62);
+    expect(result.trend).toHaveLength(62);
   });
 });

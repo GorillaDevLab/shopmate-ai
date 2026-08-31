@@ -24,7 +24,7 @@ describe("登录表单", () => {
     vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 200 }));
     render(<LoginForm />);
     fireEvent.change(screen.getByLabelText("邮箱"), { target: { value: "owner@example.com" } });
-    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "Password123!" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "test-password-123" } });
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
 
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/"));
