@@ -4,7 +4,16 @@ import * as contracts from "../index.js";
 const preview = {
   source: "demo",
   metrics: [{ key: "orders", value: 12, changeRatio: 0.02 }],
-  products: [{ rank: 1, name: "台灯", sku: "LAMP", sold: 3, salesMinor: 30000 }],
+  products: [
+    {
+      rank: 1,
+      productId: "product-lamp",
+      name: "台灯",
+      skuCodes: ["LAMP"],
+      sold: 3,
+      salesMinor: 30000,
+    },
+  ],
   inventoryAlerts: [
     {
       name: "台灯",

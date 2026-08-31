@@ -20,6 +20,7 @@ export type LowPerformanceReason = "NO_SALES" | "DECLINED_AT_LEAST_30_PERCENT";
 export interface ProductPerformanceRecord {
   readonly productId: string;
   readonly productName: string;
+  readonly skuCodes: readonly string[];
 
   readonly unitsSold: number;
   readonly revenueCents: number;
@@ -93,6 +94,7 @@ export class ProductPerformanceService {
 
     const skuToProduct = new Map<string, string>();
     const productNames = new Map<string, string>();
+    const skuCodesByProduct = new Map<string, string[]>();
 
     for (const sku of skus) {
       skuToProduct.set(sku.id, sku.productId);
@@ -100,6 +102,10 @@ export class ProductPerformanceService {
       if (!productNames.has(sku.productId)) {
         productNames.set(sku.productId, sku.productName);
       }
+
+      const codes = skuCodesByProduct.get(sku.productId) ?? [];
+      codes.push(sku.code);
+      skuCodesByProduct.set(sku.productId, codes);
     }
 
     const currentAggregates = new Map<string, ProductAggregate>();
@@ -210,6 +216,7 @@ export class ProductPerformanceService {
       return {
         productId: product.productId,
         productName: productNames.get(product.productId) ?? product.productId,
+        skuCodes: [...(skuCodesByProduct.get(product.productId) ?? [])].sort(),
 
         unitsSold: product.unitsSold,
         revenueCents: product.revenueCents,

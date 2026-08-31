@@ -212,6 +212,13 @@ describe("ProductPerformanceService", () => {
     expect(revenueOrder).toEqual(["product-c", "product-a", "product-b", "product-e", "product-d"]);
   });
 
+  it("返回商品的真实 SKU 编码供前端展示", async () => {
+    const result = await service.analyze(context, "2026-08-30");
+    expect(result.products.find((product) => product.productId === "product-a")?.skuCodes).toEqual([
+      "SKU-A",
+    ]);
+  });
+
   it("正确识别上涨下降和新品样本", async () => {
     const result = await service.analyze(context, "2026-08-30");
 

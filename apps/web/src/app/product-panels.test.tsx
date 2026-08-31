@@ -6,8 +6,9 @@ import { LowInventoryPanel } from "./low-inventory-panel";
 
 const product: DashboardHotProduct = {
   rank: 7,
+  productId: "product-lamp",
   name: "台灯",
-  sku: "LAMP-WHITE",
+  skuCodes: ["LAMP-WHITE"],
   sold: 1286,
   salesMinor: 30001,
 };
@@ -23,7 +24,16 @@ describe("热销列表", () => {
   it("显示上游排名和顺序，不按数值重新排名", () => {
     render(
       <HotProductsPanel
-        items={[product, { ...product, rank: 2, sku: "LAMP-BLACK", sold: 2000 }]}
+        items={[
+          product,
+          {
+            ...product,
+            rank: 2,
+            productId: "product-lamp-black",
+            skuCodes: ["LAMP-BLACK"],
+            sold: 2000,
+          },
+        ]}
       />,
     );
     const rows = screen.getAllByRole("listitem");

@@ -78,9 +78,9 @@ export function calculateInventoryRisk(input: InventoryRiskInput): InventoryRisk
   } else if (input.soldUnits7d === 0) {
     daysToStockout = null;
   } else {
-    daysToStockout = roundTo(
-      (input.inventory * ANALYTICS_RULES.salesWindowDays) / input.soldUnits7d,
-      1,
+    daysToStockout = Math.max(
+      0.1,
+      roundTo((input.inventory * ANALYTICS_RULES.salesWindowDays) / input.soldUnits7d, 1),
     );
   }
 

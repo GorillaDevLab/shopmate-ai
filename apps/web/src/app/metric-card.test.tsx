@@ -19,10 +19,10 @@ describe("指标网格", () => {
       />,
     );
     expect(screen.getAllByRole("article").map((card) => card.getAttribute("aria-label"))).toEqual([
-      "今日销售额",
-      "今日订单",
-      "今日销量",
-      "客单价",
+      "近 7 天销售额",
+      "近 7 天订单",
+      "近 7 天销量",
+      "近 7 天客单价",
     ]);
     expect(screen.getAllByText("暂无数据")).toHaveLength(2);
     expect(screen.getByText("¥44.34")).toBeInTheDocument();
@@ -31,14 +31,14 @@ describe("指标网格", () => {
 
 describe("经营指标卡片", () => {
   it.each([
-    ["sales", 1268000, "今日销售额", "¥12,680.00"],
-    ["sales", 1, "今日销售额", "¥0.01"],
-    ["sales", 0, "今日销售额", "¥0.00"],
-    ["sales", Number.MAX_SAFE_INTEGER, "今日销售额", "¥90,071,992,547,409.91"],
-    ["orders", 1286, "今日订单", "1,286 单"],
-    ["orders", 0, "今日订单", "0 单"],
-    ["units", 420, "今日销量", "420 件"],
-    ["averageOrderValue", 4434, "客单价", "¥44.34"],
+    ["sales", 1268000, "近 7 天销售额", "¥12,680.00"],
+    ["sales", 1, "近 7 天销售额", "¥0.01"],
+    ["sales", 0, "近 7 天销售额", "¥0.00"],
+    ["sales", Number.MAX_SAFE_INTEGER, "近 7 天销售额", "¥90,071,992,547,409.91"],
+    ["orders", 1286, "近 7 天订单", "1,286 单"],
+    ["orders", 0, "近 7 天订单", "0 单"],
+    ["units", 420, "近 7 天销量", "420 件"],
+    ["averageOrderValue", 4434, "近 7 天客单价", "¥44.34"],
   ] as const)("格式化 %s = %s", (key, value, label, output) => {
     render(<MetricCard metric={{ ...metric, key, value }} />);
     expect(screen.getByRole("article", { name: label })).toBeInTheDocument();

@@ -3,10 +3,10 @@ import { formatMetricChange, formatMetricValue } from "./metric-format";
 
 export type MetricCardState = "ready" | "loading" | "empty" | "error";
 const labels = {
-  sales: "今日销售额",
-  orders: "今日订单",
-  units: "今日销量",
-  averageOrderValue: "客单价",
+  sales: "近 7 天销售额",
+  orders: "近 7 天订单",
+  units: "近 7 天销量",
+  averageOrderValue: "近 7 天客单价",
 } satisfies Record<DashboardMetric["key"], string>;
 const keys = ["sales", "orders", "units", "averageOrderValue"] as const;
 

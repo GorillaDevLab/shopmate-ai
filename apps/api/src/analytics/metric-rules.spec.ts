@@ -58,6 +58,17 @@ describe("Analytics 指标规则", () => {
       expect(result.level).toBe("CRITICAL");
     });
 
+    it("正库存的预计售罄天数不会被舍入为零", () => {
+      const result = calculateInventoryRisk({
+        inventory: 1,
+        alertThreshold: 3,
+        soldUnits7d: 1_000,
+      });
+
+      expect(result.daysToStockout).toBe(0.1);
+      expect(result.level).toBe("CRITICAL");
+    });
+
     it("低于预警库存时属于预警风险", () => {
       const result = calculateInventoryRisk({
         inventory: 8,

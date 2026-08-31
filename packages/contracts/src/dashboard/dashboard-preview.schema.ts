@@ -31,6 +31,8 @@ export type DashboardMetric = z.infer<typeof DashboardMetricSchema>;
 
 const uniqueSkus = (items: { sku: string }[]) =>
   new Set(items.map((item) => item.sku)).size === items.length;
+const uniqueProducts = (items: { productId: string }[]) =>
+  new Set(items.map((item) => item.productId)).size === items.length;
 
 // F1/F2/F3 的展示模型，不作为 E 模块分析指标或 API 响应的定义。
 export const DashboardPreviewSchema = z.strictObject({
@@ -44,7 +46,7 @@ export const DashboardPreviewSchema = z.strictObject({
   products: z
     .array(DashboardHotProductSchema)
     .max(10)
-    .refine(uniqueSkus, { error: "热销 SKU 不能重复" }),
+    .refine(uniqueProducts, { error: "热销商品不能重复" }),
   inventoryAlerts: z
     .array(DashboardInventoryAlertSchema)
     .max(10)

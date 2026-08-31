@@ -14,8 +14,13 @@ const count = z
 export const DashboardHotProductSchema = z.strictObject(
   {
     rank: count.min(1, { error: "排名必须大于 0" }),
+    productId: text,
     name: text,
-    sku: text,
+    skuCodes: z
+      .array(text)
+      .min(1, { error: "商品至少需要一个 SKU" })
+      .max(20)
+      .refine((codes) => new Set(codes).size === codes.length, { error: "SKU 不能重复" }),
     sold: count.nullable(),
     salesMinor: count.nullable(),
   },
