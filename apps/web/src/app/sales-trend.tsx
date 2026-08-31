@@ -21,10 +21,7 @@ export function SalesTrend({
   const chartPoints = createChartPoints(points, maximum);
   const selected = chartPoints.find((point) => point.date === selectedDate) ?? chartPoints.at(-1);
   return (
-    <section
-      aria-label="销售趋势"
-      className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 lg:p-4"
-    >
+    <section aria-label="销售趋势" className="dashboard-panel flex flex-col justify-between">
       <TrendHeading count={points.length} selected={selected} periodLabel={periodLabel} />
       <div className="mt-4 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2">
         <ValueAxis maximum={maximum} />
@@ -68,7 +65,7 @@ function TrendHeading({
   return (
     <div className="flex min-w-0 items-start justify-between gap-4">
       <div className="shrink-0">
-        <h2 className="text-xl font-black">销售趋势</h2>
+        <h2 className="text-base font-semibold">销售趋势</h2>
         <p className="mt-1 text-xs text-app-muted">
           {periodLabel ?? `近 ${count} 天`} · 每日销售额
         </p>
@@ -216,7 +213,7 @@ function PointButton({
         aria-hidden="true"
         className={
           selected
-            ? "size-2.5 rounded-full border-2 border-white bg-brand shadow-[0_0_0_4px_rgb(105_86_232/0.14)]"
+            ? "trend-point-selected size-2.5 rounded-full border-2 border-white bg-brand"
             : "size-1.5 rounded-full bg-brand"
         }
       />
@@ -266,7 +263,7 @@ function DenseSelection({
         <span
           key={point.date}
           aria-hidden="true"
-          className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand ${point.date === selected?.date ? "size-2.5 border-2 border-white shadow-[0_0_0_4px_rgb(105_86_232/0.14)]" : "size-1"}`}
+          className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand ${point.date === selected?.date ? "trend-point-selected size-2.5 border-2 border-white" : "size-1"}`}
           style={{ left: `${point.x}%`, top: `${point.y}%` }}
         />
       ))}

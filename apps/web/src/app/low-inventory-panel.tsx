@@ -21,7 +21,7 @@ export function LowInventoryPanel({
       count={items.length}
     >
       <p className="mt-1 text-xs text-app-muted">当前库存 · 按{periodLabel}销量估算</p>
-      <ul role="list" className="mt-3 grid gap-3 lg:grid-cols-2 lg:gap-2">
+      <ul role="list" className="mt-2">
         {items.map((item) => (
           <InventoryItem key={item.sku} item={item} periodLabel={periodLabel} />
         ))}
@@ -38,29 +38,19 @@ function InventoryItem({
   periodLabel: string;
 }) {
   return (
-    <li className="min-w-0 rounded-2xl border border-app-line p-3 lg:p-2.5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 break-words [overflow-wrap:anywhere]">
-          <h3 className="text-sm font-bold">{item.name}</h3>
-          <p className="mt-1 text-xs text-app-muted">SKU：{item.sku}</p>
-        </div>
-        <span
-          aria-hidden="true"
-          className="grid size-7 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-800"
-        >
-          !
-        </span>
+    <li className="inventory-row">
+      <div className="min-w-0 break-words [overflow-wrap:anywhere] xl:flex xl:flex-wrap xl:items-baseline xl:gap-x-3">
+        <h3 className="text-sm font-bold">{item.name}</h3>
+        <p className="mt-1 text-xs text-app-muted xl:mt-0">SKU：{item.sku}</p>
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 break-all text-xs tabular-nums lg:mt-1">
-        <p>剩余 {count.format(item.inventory)} 件</p>
-        <p className="text-app-muted">
+      <div className="inventory-stock break-all text-xs tabular-nums">
+        <p className="font-semibold">剩余 {count.format(item.inventory)} 件</p>
+        <p className="mt-1 text-app-muted">
           {periodLabel}销量：
           {item.recentSold === null ? "暂无数据" : `${count.format(item.recentSold)} 件`}
         </p>
       </div>
-      <p className="mt-2 break-all text-xs font-bold text-amber-800 lg:mt-1">
-        {forecastText(item.forecast)}
-      </p>
+      <p className="break-all text-xs font-medium text-warning">{forecastText(item.forecast)}</p>
     </li>
   );
 }

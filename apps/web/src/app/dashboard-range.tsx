@@ -53,18 +53,15 @@ function RangeButtons({
     });
   };
   return (
-    <div
-      role="group"
-      aria-label="经营统计时段"
-      className="inline-flex max-w-full gap-1 rounded-2xl border border-app-line bg-app-surface p-1"
-    >
+    <div role="group" aria-label="经营统计时段" className="range-segments" data-range={value.kind}>
+      <span aria-hidden="true" className="range-indicator" />
       {(["7", "30", "custom"] as const).map((kind) => (
         <button
           key={kind}
           type="button"
           aria-pressed={value.kind === kind}
           onClick={() => choose(kind)}
-          className={`min-h-11 rounded-xl px-3 text-sm font-semibold transition-colors focus-ring sm:px-4 ${value.kind === kind ? "bg-brand text-white" : "text-app-muted hover:bg-app-bg"}`}
+          className={`min-h-11 rounded-lg px-3 text-sm font-semibold focus-ring sm:px-4 ${value.kind === kind ? "text-white" : "text-app-muted hover:text-app-text"}`}
         >
           {kind === "custom" ? "自选时段" : `近 ${kind} 天`}
         </button>

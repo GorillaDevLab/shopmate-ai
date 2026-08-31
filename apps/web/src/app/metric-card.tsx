@@ -48,16 +48,15 @@ export function MetricCard({
     <article
       aria-label={`${periodLabel}${labels[metric.key]}`}
       aria-busy={state === "loading"}
-      className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 shadow-[0_16px_40px_rgb(41_48_76/0.05)] lg:p-4"
+      className="dashboard-panel"
     >
       <div className="flex items-center justify-between gap-2 text-sm text-app-muted">
         <h2>
           {periodLabel}
           {labels[metric.key]}
         </h2>
-        <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-brand/70" />
       </div>
-      <div className="mt-4 min-h-24 lg:mt-2 lg:min-h-20" aria-live="polite">
+      <div className="mt-3 min-h-20 lg:mt-2 lg:min-h-16" aria-live="polite">
         <MetricContent metric={metric} state={state} />
       </div>
     </article>
@@ -72,7 +71,7 @@ function MetricContent({ metric, state }: { metric: DashboardMetric; state: Metr
   }
   return (
     <>
-      <p className="break-all text-3xl font-black tracking-[-0.04em] tabular-nums">
+      <p className="break-all text-3xl font-semibold tracking-tight tabular-nums">
         {formatMetricValue(metric)}
       </p>
       <MetricChange ratio={metric.changeRatio} />
@@ -82,13 +81,9 @@ function MetricContent({ metric, state }: { metric: DashboardMetric; state: Metr
 
 function MetricChange({ ratio }: { ratio: number | null }) {
   const color =
-    ratio === null || ratio === 0
-      ? "text-app-muted"
-      : ratio > 0
-        ? "text-emerald-700"
-        : "text-rose-700";
+    ratio === null || ratio === 0 ? "text-app-muted" : ratio > 0 ? "text-positive" : "text-danger";
   return (
-    <div className="mt-2 space-y-1 text-xs">
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
       <p className={`break-all font-bold tabular-nums ${color}`}>{formatMetricChange(ratio)}</p>
       <p className="text-app-muted">较上一周期</p>
     </div>
