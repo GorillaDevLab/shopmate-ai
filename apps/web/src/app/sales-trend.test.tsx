@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { SalesTrend } from "./sales-trend";
@@ -15,9 +15,12 @@ describe("销售趋势图", () => {
     );
 
     expect(screen.getByRole("img", { name: "近 2 天销售趋势图" })).toBeInTheDocument();
-    expect(screen.getByText("8月30日")).toBeInTheDocument();
-    expect(screen.getByText("¥1,100.00")).toBeInTheDocument();
     expect(screen.getByText("¥1,268.00")).toBeInTheDocument();
+    const previousDay = screen.getByRole("button", { name: "8月30日，销售额 ¥1,100.00" });
+    fireEvent.mouseEnter(previousDay);
+    expect(screen.getByRole("status")).toHaveTextContent("8月30日");
+    expect(screen.getByRole("status")).toHaveTextContent("¥1,100.00");
+    expect(previousDay).toHaveAttribute("aria-pressed", "true");
   });
 
   it("全零数据仍生成有限坐标，不出现 NaN 或 Infinity", () => {
@@ -31,5 +34,31 @@ describe("销售趋势图", () => {
     render(<SalesTrend points={[{ date: "2026-08-31", revenueMinor: Number.MAX_SAFE_INTEGER }]} />);
 
     expect(screen.getByText("¥90,071,992,547,409.91")).toHaveClass("break-all");
+  });
+
+  it("支持键盘聚焦和点击选择，不改动 API 金额", () => {
+    render(
+      <SalesTrend
+        points={[
+          { date: "2026-08-30", revenueMinor: 12345 },
+          { date: "2026-08-31", revenueMinor: 0 },
+        ]}
+      />,
+    );
+    const previousDay = screen.getByRole("button", { name: "8月30日，销售额 ¥123.45" });
+    fireEvent.focus(previousDay);
+    expect(screen.getByRole("status")).toHaveTextContent("¥123.45");
+    fireEvent.click(screen.getByRole("button", { name: "8月31日，销售额 ¥0.00" }));
+    expect(screen.getByRole("status")).toHaveTextContent("¥0.00");
+  });
+
+  it("新响应移除已选日期后展示最新日期", () => {
+    const { rerender } = render(
+      <SalesTrend points={[{ date: "2026-08-30", revenueMinor: 12345 }]} />,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    rerender(<SalesTrend points={[{ date: "2026-08-31", revenueMinor: 67890 }]} />);
+    expect(screen.getByRole("status")).toHaveTextContent("8月31日");
+    expect(screen.getByRole("status")).toHaveTextContent("¥678.90");
   });
 });
