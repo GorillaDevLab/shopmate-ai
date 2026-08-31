@@ -1,4 +1,5 @@
 import { inventoryAlerts, metrics, products, trend, type DashboardState } from "./dashboard-data";
+import { MetricGrid } from "./metric-card";
 
 export type { DashboardState } from "./dashboard-data";
 
@@ -9,6 +10,7 @@ export function Dashboard({ state = "ready" }: { state?: DashboardState }) {
         <DashboardHeader />
         <section id="main-content" className="mt-10 sm:mt-14">
           <DashboardIntro />
+          <MetricGrid metrics={metrics} state={state} />
           {state === "ready" ? <ReadyDashboard /> : <StatePanel state={state} />}
         </section>
         <footer className="mt-12 border-t border-app-line pt-5 text-sm text-app-muted">
@@ -61,37 +63,12 @@ function DashboardIntro() {
 function ReadyDashboard() {
   return (
     <>
-      <MetricGrid />
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
         <SalesTrend />
         <InventoryPanel />
       </div>
       <ProductsPanel />
     </>
-  );
-}
-
-function MetricGrid() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {metrics.map((metric, index) => (
-        <article
-          key={metric.label}
-          className="rounded-3xl border border-app-line bg-app-surface p-5 shadow-[0_16px_40px_rgb(41_48_76/0.05)]"
-        >
-          <div className="flex items-center justify-between text-sm text-app-muted">
-            <span>{metric.label}</span>
-            <span className="size-2 rounded-full bg-brand/70" />
-          </div>
-          <p className="mt-4 text-3xl font-black tracking-[-0.04em]">{metric.value}</p>
-          <p
-            className={`mt-2 text-xs font-bold ${index === 3 ? "text-amber-600" : index === 2 ? "text-app-muted" : "text-emerald-600"}`}
-          >
-            {metric.change}
-          </p>
-        </article>
-      ))}
-    </div>
   );
 }
 
@@ -205,7 +182,7 @@ function StatePanel({ state }: { state: Exclude<DashboardState, "ready"> }) {
   }[state];
   return (
     <div
-      className="rounded-3xl border border-dashed border-app-line bg-app-surface px-6 py-20 text-center"
+      className="mt-5 rounded-3xl border border-dashed border-app-line bg-app-surface px-6 py-20 text-center"
       role="status"
       aria-live="polite"
     >

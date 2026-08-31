@@ -5,10 +5,10 @@ export type DashboardState = "ready" | "loading" | "empty" | "error";
 export const dashboardPreview = DashboardPreviewSchema.parse({
   source: "demo",
   metrics: [
-    { label: "今日销售额", value: "¥12,680", change: "+18.6%" },
-    { label: "今日订单", value: "286", change: "+12.4%" },
-    { label: "库存健康度", value: "92%", change: "良好" },
-    { label: "待处理提醒", value: "08", change: "需要关注" },
+    { key: "sales", value: 1268000, changeRatio: 0.186 },
+    { key: "orders", value: 286, changeRatio: 0.124 },
+    { key: "units", value: 420, changeRatio: -0.052 },
+    { key: "averageOrderValue", value: 4434, changeRatio: 0.055 },
   ],
 
   products: [
