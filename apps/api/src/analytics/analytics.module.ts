@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { DashboardService } from "./dashboard.service.js";
 import { LOW_STOCK_REPOSITORY, PrismaLowStockRepository } from "./low-stock.repository.js";
 import { LowStockService } from "./low-stock.service.js";
+import { ProductPerformanceService } from "./product-performance.service.js";
 import { PrismaSalesQueryRepository, SALES_QUERY_REPOSITORY } from "./sales-query.repository.js";
 import { SalesQueryService } from "./sales-query.service.js";
 
@@ -23,7 +24,9 @@ import { SalesQueryService } from "./sales-query.service.js";
     },
 
     DashboardService,
+    ProductPerformanceService,
   ],
-  exports: [SalesQueryService, LowStockService, DashboardService],
+
+  exports: [SalesQueryService, LowStockService, DashboardService, ProductPerformanceService],
 })
 export class AnalyticsModule {}
