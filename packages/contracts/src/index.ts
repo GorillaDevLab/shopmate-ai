@@ -1,3 +1,5 @@
+export { DashboardPreviewSchema } from "./dashboard/dashboard-preview.schema.js";
+export type { DashboardPreview } from "./dashboard/dashboard-preview.schema.js";
 export {
   MoneySchema,
   PaginationSchema,
