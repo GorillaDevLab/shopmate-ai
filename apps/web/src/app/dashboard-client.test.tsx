@@ -12,7 +12,58 @@ vi.mock("./dashboard-api", () => ({
 import { DashboardClient } from "./dashboard-client";
 
 describe("DashboardClient", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => vi.resetAllMocks());
+
+  it("全页切换 30 天，取消七天请求，旧请求晚返回不能覆盖", async () => {
+    const first = deferred<typeof dashboardResponsePreview>();
+    const second = deferred<typeof dashboardResponsePreview>();
+    api.fetchDashboard.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    render(<DashboardClient asOfDate="2026-08-31" />);
+    fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
+    expect(api.fetchDashboard.mock.calls[0]?.[1].aborted).toBe(true);
+    expect(api.fetchDashboard).toHaveBeenLastCalledWith(
+      "2026-08-31",
+      expect.any(AbortSignal),
+      "2026-08-02",
+    );
+    second.resolve({
+      ...dashboardResponsePreview,
+      period: { startDate: "2026-08-02", endDate: "2026-08-31", days: 30 },
+    });
+    expect(
+      within(await screen.findByRole("article", { name: "近 30 天销售额" })).getByText(
+        "¥12,680.00",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/近 30 天销量：/).length).toBeGreaterThan(0);
+    first.resolve({
+      ...dashboardResponsePreview,
+      metrics: dashboardResponsePreview.metrics.map((metric) => ({ ...metric, value: 1 })),
+    });
+    await waitFor(() => expect(screen.queryByText("¥0.01")).not.toBeInTheDocument());
+  });
+
+  it("30 天请求失败后重试仍使用同一范围，可切回 7 天", async () => {
+    api.fetchDashboard
+      .mockResolvedValueOnce(dashboardResponsePreview)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(dashboardResponsePreview);
+    render(<DashboardClient asOfDate="2026-08-31" />);
+    await screen.findByText("数据来自 Analytics API");
+    fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新加载" }));
+    expect(api.fetchDashboard).toHaveBeenLastCalledWith(
+      "2026-08-31",
+      expect.any(AbortSignal),
+      "2026-08-02",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "近 7 天" }));
+    expect(api.fetchDashboard).toHaveBeenLastCalledWith(
+      "2026-08-31",
+      expect.any(AbortSignal),
+      undefined,
+    );
+  });
 
   it("加载真实 API 响应并展示相同指标", async () => {
     api.fetchDashboard.mockResolvedValue(dashboardResponsePreview);

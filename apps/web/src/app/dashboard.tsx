@@ -1,4 +1,5 @@
 import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
+import type { ReactNode } from "react";
 
 import { HotProductsPanel } from "./hot-products-panel";
 import { LowInventoryPanel } from "./low-inventory-panel";
@@ -11,19 +12,31 @@ interface DashboardProps {
   readonly state?: DashboardState;
   readonly data?: AnalyticsDashboardResponse;
   readonly onRetry?: () => void;
+  readonly controls?: ReactNode;
+  readonly periodLabel?: string;
 }
 
-export function Dashboard({ state = "loading", data, onRetry }: DashboardProps) {
+export function Dashboard({
+  state = "loading",
+  data,
+  onRetry,
+  controls,
+  periodLabel = "近 7 天",
+}: DashboardProps) {
   const visibleState = state === "ready" && !data ? "empty" : state;
   return (
     <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
       <div className="mx-auto w-full max-w-[1440px]">
         <DashboardHeader ready={visibleState === "ready"} />
         <section id="main-content" className="mt-8 lg:mt-4">
-          <DashboardIntro data={data} />
-          <MetricGrid metrics={data?.metrics ?? []} state={visibleState} />
+          <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
+          <MetricGrid
+            metrics={data?.metrics ?? []}
+            state={visibleState}
+            periodLabel={periodLabel}
+          />
           {visibleState === "ready" && data ? (
-            <ReadyDashboard data={data} />
+            <ReadyDashboard data={data} periodLabel={periodLabel} />
           ) : (
             <StatePanel
               state={visibleState === "ready" ? "empty" : visibleState}
@@ -66,28 +79,44 @@ function DashboardHeader({ ready }: { ready: boolean }) {
   );
 }
 
-function DashboardIntro({ data }: { data?: AnalyticsDashboardResponse }) {
+function DashboardIntro({
+  data,
+  controls,
+  periodLabel,
+}: {
+  data?: AnalyticsDashboardResponse;
+  controls?: ReactNode;
+  periodLabel: string;
+}) {
   return (
     <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between lg:mb-4">
       <div>
         <p className="mb-2 text-sm font-bold tracking-[0.16em] text-brand uppercase">经营总览</p>
         <h1 className="text-3xl font-black tracking-[-0.04em] sm:text-4xl">
-          近 7 天经营，一眼看清
+          {periodLabel}经营，一眼看清
         </h1>
       </div>
-      <span className="w-fit rounded-full border border-app-line bg-app-surface px-3 py-1.5 text-xs font-semibold text-app-muted">
-        {data ? `统计截至 ${formatChineseDate(data.asOfDate)}` : "正在获取最新数据"}
-      </span>
+      {controls ?? (
+        <span className="w-fit rounded-full border border-app-line bg-app-surface px-3 py-1.5 text-xs font-semibold text-app-muted">
+          {data ? `统计截至 ${formatChineseDate(data.asOfDate)}` : "正在获取最新数据"}
+        </span>
+      )}
     </div>
   );
 }
 
-function ReadyDashboard({ data }: { data: AnalyticsDashboardResponse }) {
+function ReadyDashboard({
+  data,
+  periodLabel,
+}: {
+  data: AnalyticsDashboardResponse;
+  periodLabel: string;
+}) {
   return (
     <>
       <div className="mt-4 grid items-start gap-4 lg:grid-cols-[1.1fr_1fr]">
-        <SalesTrend points={data.trend} />
-        <LowInventoryPanel items={data.inventoryAlerts} />
+        <SalesTrend points={data.trend} periodLabel={periodLabel} />
+        <LowInventoryPanel items={data.inventoryAlerts} periodLabel={periodLabel} />
       </div>
       <div className="mt-4">
         <HotProductsPanel items={data.products} />

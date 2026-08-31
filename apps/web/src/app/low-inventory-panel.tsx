@@ -7,9 +7,11 @@ const days = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
 export function LowInventoryPanel({
   items,
   state = "ready",
+  periodLabel = "近 7 天",
 }: {
   items: readonly DashboardInventoryAlert[];
   state?: ProductPanelState;
+  periodLabel?: string;
 }) {
   return (
     <ProductPanelFrame
@@ -18,18 +20,25 @@ export function LowInventoryPanel({
       state={state}
       count={items.length}
     >
-      <ul role="list" className="mt-4 grid gap-3 lg:grid-cols-2 lg:gap-2">
+      <p className="mt-1 text-xs text-app-muted">当前库存 · 按{periodLabel}销量估算</p>
+      <ul role="list" className="mt-3 grid gap-3 lg:grid-cols-2 lg:gap-2">
         {items.map((item) => (
-          <InventoryItem key={item.sku} item={item} />
+          <InventoryItem key={item.sku} item={item} periodLabel={periodLabel} />
         ))}
       </ul>
     </ProductPanelFrame>
   );
 }
 
-function InventoryItem({ item }: { item: DashboardInventoryAlert }) {
+function InventoryItem({
+  item,
+  periodLabel,
+}: {
+  item: DashboardInventoryAlert;
+  periodLabel: string;
+}) {
   return (
-    <li className="min-w-0 rounded-2xl border border-app-line p-3">
+    <li className="min-w-0 rounded-2xl border border-app-line p-3 lg:p-2.5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 break-words [overflow-wrap:anywhere]">
           <h3 className="text-sm font-bold">{item.name}</h3>
@@ -42,14 +51,14 @@ function InventoryItem({ item }: { item: DashboardInventoryAlert }) {
           !
         </span>
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 break-all text-xs tabular-nums">
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 break-all text-xs tabular-nums lg:mt-1">
         <p>剩余 {count.format(item.inventory)} 件</p>
         <p className="text-app-muted">
-          近 7 天销量：
+          {periodLabel}销量：
           {item.recentSold === null ? "暂无数据" : `${count.format(item.recentSold)} 件`}
         </p>
       </div>
-      <p className="mt-2 break-all text-xs font-bold text-amber-800">
+      <p className="mt-2 break-all text-xs font-bold text-amber-800 lg:mt-1">
         {forecastText(item.forecast)}
       </p>
     </li>

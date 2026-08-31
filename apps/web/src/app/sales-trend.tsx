@@ -8,7 +8,13 @@ type TrendPoint = AnalyticsDashboardResponse["trend"][number];
 type ChartPoint = TrendPoint & { x: number; y: number };
 const axisMoney = new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 });
 
-export function SalesTrend({ points }: { points: readonly TrendPoint[] }) {
+export function SalesTrend({
+  points,
+  periodLabel,
+}: {
+  points: readonly TrendPoint[];
+  periodLabel?: string;
+}) {
   const gradientId = useId();
   const [selectedDate, setSelectedDate] = useState<string>();
   const maximum = chartMaximum(points);
@@ -19,34 +25,53 @@ export function SalesTrend({ points }: { points: readonly TrendPoint[] }) {
       aria-label="销售趋势"
       className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 lg:p-4"
     >
-      <TrendHeading count={points.length} selected={selected} />
+      <TrendHeading count={points.length} selected={selected} periodLabel={periodLabel} />
       <div className="mt-4 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2">
         <ValueAxis maximum={maximum} />
-        <div className="relative h-40">
-          <TrendDrawing points={chartPoints} selected={selected} gradientId={gradientId} />
-          {chartPoints.map((point) => (
-            <PointButton
-              key={point.date}
-              point={point}
-              selected={point.date === selected?.date}
-              onSelect={setSelectedDate}
-            />
-          ))}
+        <div className="relative h-40 rounded-lg focus-within:ring-2 focus-within:ring-brand/50">
+          <TrendDrawing
+            points={chartPoints}
+            selected={selected}
+            gradientId={gradientId}
+            periodLabel={periodLabel}
+          />
+          {chartPoints.length > 7 ? (
+            <DenseSelection points={chartPoints} selected={selected} onSelect={setSelectedDate} />
+          ) : (
+            chartPoints.map((point) => (
+              <PointButton
+                key={point.date}
+                point={point}
+                selected={point.date === selected?.date}
+                onSelect={setSelectedDate}
+              />
+            ))
+          )}
         </div>
         <div />
         <DateAxis points={chartPoints} />
       </div>
-      <ChartLegend />
+      <ChartLegend dense={points.length > 7} />
     </section>
   );
 }
 
-function TrendHeading({ count, selected }: { count: number; selected?: TrendPoint }) {
+function TrendHeading({
+  count,
+  selected,
+  periodLabel,
+}: {
+  count: number;
+  selected?: TrendPoint;
+  periodLabel?: string;
+}) {
   return (
     <div className="flex min-w-0 items-start justify-between gap-4">
       <div className="shrink-0">
         <h2 className="text-xl font-black">销售趋势</h2>
-        <p className="mt-1 text-xs text-app-muted">近 {count} 天 · 每日销售额</p>
+        <p className="mt-1 text-xs text-app-muted">
+          {periodLabel ?? `近 ${count} 天`} · 每日销售额
+        </p>
       </div>
       <div role="status" aria-live="polite" aria-atomic="true" className="min-w-0 text-right">
         <p className="text-xs text-app-muted">
@@ -83,9 +108,10 @@ type DrawingProps = {
   points: ChartPoint[];
   selected?: ChartPoint;
   gradientId: string;
+  periodLabel?: string;
 };
 
-function TrendDrawing({ points, selected, gradientId }: DrawingProps) {
+function TrendDrawing({ points, selected, gradientId, periodLabel }: DrawingProps) {
   const line = points.map(({ x, y }) => `${x * 10},${y * 1.6}`).join(" ");
   const first = points[0];
   const last = points.at(-1);
@@ -96,7 +122,7 @@ function TrendDrawing({ points, selected, gradientId }: DrawingProps) {
       viewBox="0 0 1000 160"
       preserveAspectRatio="none"
       role="img"
-      aria-label={`近 ${points.length} 天销售趋势图`}
+      aria-label={`${periodLabel ?? `近 ${points.length} 天`}销售趋势图`}
     >
       <ChartBackground gradientId={gradientId} />
       <polygon points={area} fill={`url(#${gradientId})`} />
@@ -114,14 +140,14 @@ function TrendDrawing({ points, selected, gradientId }: DrawingProps) {
   );
 }
 
-function ChartLegend() {
+function ChartLegend({ dense }: { dense: boolean }) {
   return (
     <p className="mt-3 flex items-center justify-between gap-2 text-xs text-app-muted">
       <span className="inline-flex items-center gap-2">
         <span aria-hidden="true" className="h-0.5 w-4 rounded bg-brand" />
         销售额 · 人民币
       </span>
-      <span>选择数据点查看金额</span>
+      <span>{dense ? "拖动图表或按方向键查看" : "选择数据点查看金额"}</span>
     </p>
   );
 }
@@ -199,12 +225,15 @@ function PointButton({
 }
 
 function DateAxis({ points }: { points: ChartPoint[] }) {
+  const ticks = new Set(
+    Array.from({ length: Math.min(points.length, 5) }, (_, index) =>
+      Math.round((index * (points.length - 1)) / Math.max(1, Math.min(points.length, 5) - 1)),
+    ),
+  );
   return (
     <div aria-hidden="true" className="relative mt-2 h-4 text-[11px] tabular-nums text-app-muted">
       {points
-        .filter(
-          (_, index) => index % Math.ceil(points.length / 7) === 0 || index === points.length - 1,
-        )
+        .filter((_, index) => points.length <= 7 || ticks.has(index))
         .map((point) => (
           <span
             key={point.date}
@@ -215,6 +244,51 @@ function DateAxis({ points }: { points: ChartPoint[] }) {
           </span>
         ))}
     </div>
+  );
+}
+
+function DenseSelection({
+  points,
+  selected,
+  onSelect,
+}: {
+  points: ChartPoint[];
+  selected?: ChartPoint;
+  onSelect: (date: string) => void;
+}) {
+  const index = Math.max(
+    0,
+    points.findIndex((point) => point.date === selected?.date),
+  );
+  return (
+    <>
+      {points.map((point) => (
+        <span
+          key={point.date}
+          aria-hidden="true"
+          className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand ${point.date === selected?.date ? "size-2.5 border-2 border-white shadow-[0_0_0_4px_rgb(105_86_232/0.14)]" : "size-1"}`}
+          style={{ left: `${point.x}%`, top: `${point.y}%` }}
+        />
+      ))}
+      <input
+        type="range"
+        min={0}
+        max={points.length - 1}
+        step={1}
+        value={index}
+        aria-label="选择趋势日期"
+        aria-valuetext={
+          selected
+            ? `${formatDate(selected.date)}，销售额 ${formatMoneyMinor(selected.revenueMinor)}`
+            : "暂无数据"
+        }
+        className="absolute inset-y-0 left-[4%] m-0 h-full w-[92%] cursor-crosshair opacity-0"
+        onChange={(event) => {
+          const point = points[Number(event.target.value)];
+          if (point) onSelect(point.date);
+        }}
+      />
+    </>
   );
 }
 

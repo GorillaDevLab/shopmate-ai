@@ -20,7 +20,20 @@ const count = z
   .int({ error: "数量必须是安全整数" })
   .min(0, { error: "数量不能为负数" });
 
-export const AnalyticsDashboardQuerySchema = z.strictObject({ asOfDate: dateOnly });
+const queryDate = dateOnly.refine((value) => value >= "1000-01-01", "日期年份不能小于 1000");
+export const AnalyticsDashboardQuerySchema = z
+  .strictObject({
+    asOfDate: queryDate,
+    startDate: queryDate.optional(),
+  })
+  .refine(
+    ({ asOfDate, startDate }) => {
+      if (startDate === undefined) return true;
+      const days = (Date.parse(asOfDate) - Date.parse(startDate)) / 86_400_000 + 1;
+      return days >= 1 && days <= 31;
+    },
+    { error: "开始日期不能晚于结束日期，且最多选择 31 天", path: ["startDate"] },
+  );
 
 const analyticsDashboardResponse = z.strictObject({
   asOfDate: dateOnly,
@@ -49,7 +62,7 @@ export const AnalyticsDashboardResponseSchema = analyticsDashboardResponse.super
       addIssue(context, ["period", "endDate"], "统计截止日期必须与周期结束日期一致");
     }
 
-    if (response.period.days > 31) {
+    if (response.period.days > 31 || !dateOnly.safeParse(response.period.startDate).success) {
       return;
     }
 

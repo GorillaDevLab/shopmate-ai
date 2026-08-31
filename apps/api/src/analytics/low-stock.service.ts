@@ -4,8 +4,7 @@ import type { AuthContext } from "../auth/contracts/index.js";
 import { calculateInventoryRisk, type InventoryRiskLevel } from "./metric-rules.js";
 import { LOW_STOCK_REPOSITORY, type LowStockRepository } from "./low-stock.repository.js";
 import { SalesQueryService } from "./sales-query.service.js";
-
-const SALES_WINDOW_DAYS = 7;
+import { analyticsWindow } from "./analytics-window.js";
 
 export interface LowStockRiskRecord {
   readonly skuId: string;
@@ -14,6 +13,7 @@ export interface LowStockRiskRecord {
   readonly code: string;
   readonly inventory: number;
   readonly alertThreshold: number;
+  /** Legacy property name; covers window.days, which defaults to seven. */
   readonly soldUnits7d: number;
   readonly averageDailyUnits: number;
   readonly daysToStockout: number | null;
@@ -38,8 +38,13 @@ export class LowStockService {
     private readonly salesQueryService: Pick<SalesQueryService, "listEffectiveOrders">,
   ) {}
 
-  async analyze(context: AuthContext, asOfDate: string): Promise<LowStockAnalysisResult> {
-    const startDate = subtractCalendarDays(asOfDate, SALES_WINDOW_DAYS - 1);
+  async analyze(
+    context: AuthContext,
+    asOfDate: string,
+    fromDate?: string,
+  ): Promise<LowStockAnalysisResult> {
+    const window = analyticsWindow(asOfDate, fromDate);
+    const startDate = window.startDate;
 
     const [skus, orders] = await Promise.all([
       this.repository.listMerchantSkus(context),
@@ -61,11 +66,14 @@ export class LowStockService {
       .map((sku) => {
         const soldUnits7d = soldUnitsBySku.get(sku.id) ?? 0;
 
-        const risk = calculateInventoryRisk({
-          inventory: sku.inventory,
-          alertThreshold: sku.alertThreshold,
-          soldUnits7d,
-        });
+        const risk = calculateInventoryRisk(
+          {
+            inventory: sku.inventory,
+            alertThreshold: sku.alertThreshold,
+            soldUnits7d,
+          },
+          window.days,
+        );
 
         return {
           skuId: sku.id,
@@ -87,7 +95,7 @@ export class LowStockService {
       window: {
         startDate,
         endDate: asOfDate,
-        days: SALES_WINDOW_DAYS,
+        days: window.days,
       },
       risks,
     };
@@ -121,20 +129,4 @@ function compareRisk(left: LowStockRiskRecord, right: LowStockRiskRecord): numbe
   }
 
   return left.code.localeCompare(right.code);
-}
-
-function subtractCalendarDays(date: string, days: number): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) {
-    throw new RangeError("date must use YYYY-MM-DD format");
-  }
-
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-
-  if (Number.isNaN(parsed.getTime())) {
-    throw new RangeError("date is invalid");
-  }
-
-  parsed.setUTCDate(parsed.getUTCDate() - days);
-
-  return parsed.toISOString().slice(0, 10);
 }

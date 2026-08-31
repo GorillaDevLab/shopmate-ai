@@ -4,6 +4,19 @@ import { describe, expect, it } from "vitest";
 import { SalesTrend } from "./sales-trend";
 
 describe("销售趋势图", () => {
+  it("30 天使用可键盘操作的日期滑块，避免密集按钮互相遮挡", () => {
+    const points = Array.from({ length: 30 }, (_, i) => ({
+      date: `2026-08-${String(i + 2).padStart(2, "0")}`,
+      revenueMinor: i * 100,
+    }));
+    render(<SalesTrend points={points} periodLabel="所选时段" />);
+    const slider = screen.getByRole("slider", { name: "选择趋势日期" });
+    fireEvent.change(slider, { target: { value: "9" } });
+    expect(screen.getByRole("status")).toHaveTextContent("8月11日");
+    expect(screen.getByRole("status")).toHaveTextContent("¥9.00");
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.getByRole("img", { name: "所选时段销售趋势图" })).toBeInTheDocument();
+  });
   it("展示 API 原始日期与人民币金额", () => {
     render(
       <SalesTrend

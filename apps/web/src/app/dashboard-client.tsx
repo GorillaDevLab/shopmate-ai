@@ -1,58 +1,98 @@
 "use client";
 
 import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Dashboard } from "./dashboard";
 import { fetchDashboard, isAbortError } from "./dashboard-api";
+import { DashboardRangeControls, rangeLabel, type DashboardRange } from "./dashboard-range";
 
 type ClientState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly data: AnalyticsDashboardResponse }
   | { readonly status: "empty"; readonly data: AnalyticsDashboardResponse }
   | { readonly status: "error" };
+type ClientResult = { key: string; state: ClientState };
 
 export function DashboardClient({ asOfDate = shanghaiToday() }: { asOfDate?: string }) {
-  const { state, retry } = useDashboard(asOfDate);
+  // Remount on a new business date so a previous date's selection cannot leak into the next view.
+  return <DashboardRangeClient key={asOfDate} asOfDate={asOfDate} />;
+}
+
+function DashboardRangeClient({ asOfDate }: { asOfDate: string }) {
+  const [range, setRange] = useState<DashboardRange>({ kind: "7", endDate: asOfDate });
+  const { state, retry } = useDashboard(range.endDate, range.startDate);
   return (
     <Dashboard
       state={state.status}
       data={"data" in state ? state.data : undefined}
       onRetry={retry}
+      periodLabel={rangeLabel(range)}
+      controls={<DashboardRangeControls value={range} latestDate={asOfDate} onChange={setRange} />}
     />
   );
 }
 
-function useDashboard(asOfDate: string) {
-  const [state, setState] = useState<ClientState>({ status: "loading" });
+function useDashboard(asOfDate: string, startDate?: string) {
+  const requestKey = `${asOfDate}/${startDate ?? "7"}`;
+  const [result, setResult] = useState<ClientResult>({
+    key: requestKey,
+    state: { status: "loading" },
+  });
+  const state: ClientState = result.key === requestKey ? result.state : { status: "loading" };
   const controllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
-
-  const applyData = (data: AnalyticsDashboardResponse, requestId: number) => {
-    if (requestId !== requestIdRef.current) return;
-    setState(isEmptyDashboard(data) ? { status: "empty", data } : { status: "ready", data });
-  };
-
-  const applyError = (error: unknown, requestId: number) => {
-    if (isAbortError(error) || requestId !== requestIdRef.current) return;
-    setState({ status: "error" });
-  };
+  const { applyData, applyError } = useRequestCallbacks(requestKey, requestIdRef, setResult);
 
   useEffect(() => {
     const activeControllerRef = controllerRef;
-    const controller = startRequest(asOfDate, controllerRef, requestIdRef, applyData, applyError);
+    const activeRequestIdRef = requestIdRef;
+    const controller = startRequest(
+      asOfDate,
+      controllerRef,
+      requestIdRef,
+      applyData,
+      applyError,
+      startDate,
+    );
     return () => {
       activeControllerRef.current?.abort();
       controller.abort();
+      activeRequestIdRef.current++;
     };
-  }, [asOfDate]);
+  }, [asOfDate, startDate, applyData, applyError]);
 
   const retry = () => {
-    setState({ status: "loading" });
-    startRequest(asOfDate, controllerRef, requestIdRef, applyData, applyError);
+    setResult({ key: requestKey, state: { status: "loading" } });
+    startRequest(asOfDate, controllerRef, requestIdRef, applyData, applyError, startDate);
   };
 
   return { state, retry };
+}
+
+function useRequestCallbacks(
+  requestKey: string,
+  requestIdRef: { current: number },
+  setResult: (result: ClientResult) => void,
+) {
+  const applyData = useCallback(
+    (data: AnalyticsDashboardResponse, requestId: number) => {
+      if (requestId !== requestIdRef.current) return;
+      setResult({
+        key: requestKey,
+        state: isEmptyDashboard(data) ? { status: "empty", data } : { status: "ready", data },
+      });
+    },
+    [requestKey, requestIdRef, setResult],
+  );
+  const applyError = useCallback(
+    (error: unknown, requestId: number) => {
+      if (isAbortError(error) || requestId !== requestIdRef.current) return;
+      setResult({ key: requestKey, state: { status: "error" } });
+    },
+    [requestKey, requestIdRef, setResult],
+  );
+  return { applyData, applyError };
 }
 
 function startRequest(
@@ -61,12 +101,13 @@ function startRequest(
   requestIdRef: { current: number },
   onData: (data: AnalyticsDashboardResponse, requestId: number) => void,
   onError: (error: unknown, requestId: number) => void,
+  startDate?: string,
 ): AbortController {
   controllerRef.current?.abort();
   const controller = new AbortController();
   controllerRef.current = controller;
   const requestId = ++requestIdRef.current;
-  void fetchDashboard(asOfDate, controller.signal).then(
+  void fetchDashboard(asOfDate, controller.signal, startDate).then(
     (data) => onData(data, requestId),
     (error: unknown) => onError(error, requestId),
   );

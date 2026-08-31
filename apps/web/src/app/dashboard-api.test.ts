@@ -6,6 +6,18 @@ import { DashboardApiError, fetchDashboard } from "./dashboard-api";
 describe("Dashboard API 客户端", () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  it("把时段发送给 API，拒绝返回其他时段的数据", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(dashboardResponsePreview));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchDashboard("2026-08-31", undefined, "2026-08-02")).rejects.toMatchObject({
+      status: 502,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/analytics/dashboard?asOfDate=2026-08-31&startDate=2026-08-02",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("携带会话并用共享 Schema 校验响应", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(dashboardResponsePreview));
     vi.stubGlobal("fetch", fetchMock);

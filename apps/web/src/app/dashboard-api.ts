@@ -1,4 +1,5 @@
 import {
+  AnalyticsDashboardQuerySchema,
   AnalyticsDashboardResponseSchema,
   type AnalyticsDashboardResponse,
 } from "@shopmate/contracts";
@@ -16,10 +17,16 @@ export class DashboardApiError extends Error {
 export async function fetchDashboard(
   asOfDate: string,
   signal?: AbortSignal,
+  startDate?: string,
 ): Promise<AnalyticsDashboardResponse> {
+  if (!AnalyticsDashboardQuerySchema.safeParse({ asOfDate, startDate }).success) {
+    throw new DashboardApiError("统计日期范围无效", 400);
+  }
   let response: Response;
   try {
-    response = await fetch(`/api/v1/analytics/dashboard?asOfDate=${encodeURIComponent(asOfDate)}`, {
+    const query = new URLSearchParams({ asOfDate });
+    if (startDate !== undefined) query.set("startDate", startDate);
+    response = await fetch(`/api/v1/analytics/dashboard?${query}`, {
       credentials: "include",
       cache: "no-store",
       headers: { Accept: "application/json" },
@@ -36,6 +43,11 @@ export async function fetchDashboard(
   const parsed = AnalyticsDashboardResponseSchema.safeParse(payload);
   if (!parsed.success) {
     throw new DashboardApiError("经营数据响应格式异常，请稍后重试", 502);
+  }
+  const expectedStart =
+    startDate ?? new Date(Date.parse(asOfDate) - 6 * 86_400_000).toISOString().slice(0, 10);
+  if (parsed.data.period.startDate !== expectedStart || parsed.data.period.endDate !== asOfDate) {
+    throw new DashboardApiError("经营数据统计时段不匹配，请重试", 502);
   }
   return parsed.data;
 }

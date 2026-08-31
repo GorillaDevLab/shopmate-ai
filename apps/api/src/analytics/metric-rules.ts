@@ -64,12 +64,18 @@ export interface RankedProductPerformance extends ProductPerformanceInput {
 
 const MONEY_PATTERN = /^\d+(?:\.\d{1,2})?$/u;
 
-export function calculateInventoryRisk(input: InventoryRiskInput): InventoryRiskResult {
+export function calculateInventoryRisk(
+  input: InventoryRiskInput,
+  windowDays: number = ANALYTICS_RULES.salesWindowDays,
+): InventoryRiskResult {
+  if (!Number.isInteger(windowDays) || windowDays < 1 || windowDays > 31) {
+    throw new RangeError("inventory sales window must be 1–31 days");
+  }
   assertNonNegativeInteger(input.inventory, "inventory");
   assertNonNegativeInteger(input.alertThreshold, "alertThreshold");
   assertNonNegativeInteger(input.soldUnits7d, "soldUnits7d");
 
-  const averageDailyUnits = roundTo(input.soldUnits7d / ANALYTICS_RULES.salesWindowDays, 2);
+  const averageDailyUnits = roundTo(input.soldUnits7d / windowDays, 2);
 
   let daysToStockout: number | null;
 
@@ -78,10 +84,7 @@ export function calculateInventoryRisk(input: InventoryRiskInput): InventoryRisk
   } else if (input.soldUnits7d === 0) {
     daysToStockout = null;
   } else {
-    daysToStockout = Math.max(
-      0.1,
-      roundTo((input.inventory * ANALYTICS_RULES.salesWindowDays) / input.soldUnits7d, 1),
-    );
+    daysToStockout = Math.max(0.1, roundTo((input.inventory * windowDays) / input.soldUnits7d, 1));
   }
 
   let level: InventoryRiskLevel;

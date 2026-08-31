@@ -26,12 +26,15 @@ export class DashboardApiService {
   async get(context: AuthContext, rawQuery: unknown): Promise<AnalyticsDashboardResponse> {
     const query = AnalyticsDashboardQuerySchema.safeParse(rawQuery);
     if (!query.success) throwInvalidInput();
+    const range: [string, string?] = query.data.startDate
+      ? [query.data.asOfDate, query.data.startDate]
+      : [query.data.asOfDate];
 
     try {
       const [summary, inventory, products] = await Promise.all([
-        this.dashboardService.summarize(context, query.data.asOfDate),
-        this.lowStockService.analyze(context, query.data.asOfDate),
-        this.productPerformanceService.analyze(context, query.data.asOfDate),
+        this.dashboardService.summarize(context, ...range),
+        this.lowStockService.analyze(context, ...range),
+        this.productPerformanceService.analyze(context, ...range),
       ]);
 
       return AnalyticsDashboardResponseSchema.parse({
