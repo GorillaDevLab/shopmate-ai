@@ -79,7 +79,9 @@ describe("DashboardClient", () => {
 
   it("切换时保留上一段数据，避免字体和卡片跳变", async () => {
     const pending = deferred<typeof dashboardResponsePreview>();
-    api.fetchDashboard.mockResolvedValueOnce(dashboardResponsePreview).mockReturnValueOnce(pending.promise);
+    api.fetchDashboard
+      .mockResolvedValueOnce(dashboardResponsePreview)
+      .mockReturnValueOnce(pending.promise);
     render(<DashboardClient asOfDate="2026-08-31" />);
     await screen.findByText("数据来自 Analytics API");
     fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));

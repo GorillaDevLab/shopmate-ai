@@ -28,7 +28,11 @@ export function LogoutButton() {
 
   return (
     <div className="flex items-center gap-2">
-      {error && <span className="text-xs text-danger" role="alert">退出失败，请重试</span>}
+      {error && (
+        <span className="text-xs text-danger" role="alert">
+          退出失败，请重试
+        </span>
+      )}
       <button
         type="button"
         className="min-h-11 rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold text-app-text transition hover:bg-brand-soft disabled:cursor-not-allowed disabled:opacity-60"

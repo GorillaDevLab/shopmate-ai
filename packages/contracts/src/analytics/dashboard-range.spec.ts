@@ -10,14 +10,11 @@ describe("看板自选时段", () => {
       ).toBe(true);
     },
   );
-  it.each(["2026-09-01", "2026-02-30", "", "0001-01-01"])(
-    "拒绝非法范围 %s",
-    (startDate) => {
-      expect(
-        AnalyticsDashboardQuerySchema.safeParse({ asOfDate: "2026-08-31", startDate }).success,
-      ).toBe(false);
-    },
-  );
+  it.each(["2026-09-01", "2026-02-30", "", "0001-01-01"])("拒绝非法范围 %s", (startDate) => {
+    expect(
+      AnalyticsDashboardQuerySchema.safeParse({ asOfDate: "2026-08-31", startDate }).success,
+    ).toBe(false);
+  });
   it("保留默认七天并拒绝 scope 注入", () => {
     expect(AnalyticsDashboardQuerySchema.parse({ asOfDate: "2026-08-31" })).toEqual({
       asOfDate: "2026-08-31",

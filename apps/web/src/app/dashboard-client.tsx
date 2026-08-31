@@ -41,11 +41,12 @@ function useDashboard(asOfDate: string, startDate?: string) {
     key: requestKey,
     state: { status: "loading" },
   });
-  const state: ClientState = result.key === requestKey
-    ? result.state
-    : "data" in result.state
-      ? { status: "ready", data: result.state.data }
-      : { status: "loading" };
+  const state: ClientState =
+    result.key === requestKey
+      ? result.state
+      : "data" in result.state
+        ? { status: "ready", data: result.state.data }
+        : { status: "loading" };
   const controllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
   const { applyData, applyError } = useRequestCallbacks(requestKey, requestIdRef, setResult);

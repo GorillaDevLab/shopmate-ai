@@ -28,8 +28,9 @@ describe("Dashboard 响应式与无障碍验收", () => {
       "dialog",
     );
     expect(screen.getByRole("article", { name: "近 7 天销售额" })).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "经营指标" })).getAllByRole("article"))
-      .toHaveLength(4);
+    expect(
+      within(screen.getByRole("region", { name: "经营指标" })).getAllByRole("article"),
+    ).toHaveLength(4);
   });
 
   it.each(["loading", "empty", "error"] as const)(
@@ -38,7 +39,9 @@ describe("Dashboard 响应式与无障碍验收", () => {
       render(<Dashboard state={state} />);
       const status = screen.getByRole("status");
       expect(status).toHaveAttribute("aria-live", "polite");
-      expect(status).toHaveTextContent(state === "loading" ? "正在整理" : state === "empty" ? "还没有" : "失败");
+      expect(status).toHaveTextContent(
+        state === "loading" ? "正在整理" : state === "empty" ? "还没有" : "失败",
+      );
       expect(screen.queryByRole("region", { name: "销售趋势" })).not.toBeInTheDocument();
     },
   );

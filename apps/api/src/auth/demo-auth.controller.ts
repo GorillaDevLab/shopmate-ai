@@ -17,7 +17,10 @@ interface CookieResponse {
       path: string;
     },
   ): void;
-  clearCookie(name: string, options: { httpOnly: boolean; sameSite: "lax"; secure: boolean; path: string }): void;
+  clearCookie(
+    name: string,
+    options: { httpOnly: boolean; sameSite: "lax"; secure: boolean; path: string },
+  ): void;
 }
 
 @Controller({ path: "auth", version: "1" })

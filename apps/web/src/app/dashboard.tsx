@@ -34,7 +34,11 @@ export function Dashboard({
     <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
       <div className="mx-auto w-full max-w-[1440px]">
         <DashboardHeader ready={visibleState === "ready"} />
-        <section id="main-content" className={`mt-8 lg:mt-4 ${isRefreshing ? "dashboard-refreshing" : ""}`} aria-busy={isRefreshing}>
+        <section
+          id="main-content"
+          className={`mt-8 lg:mt-4 ${isRefreshing ? "dashboard-refreshing" : ""}`}
+          aria-busy={isRefreshing}
+        >
           <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
           <MetricGrid
             metrics={data?.metrics ?? []}
@@ -160,11 +164,18 @@ function StatePanel({
       {state === "error" && (
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           {isAuthError && (
-            <a className="inline-flex min-h-11 items-center rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong" href="/login">
+            <a
+              className="inline-flex min-h-11 items-center rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong"
+              href="/login"
+            >
               重新登录
             </a>
           )}
-          <button type="button" onClick={onRetry} className="min-h-11 rounded-2xl border border-app-line bg-app-surface px-5 text-sm font-bold text-app-text transition hover:bg-brand-soft">
+          <button
+            type="button"
+            onClick={onRetry}
+            className="min-h-11 rounded-2xl border border-app-line bg-app-surface px-5 text-sm font-bold text-app-text transition hover:bg-brand-soft"
+          >
             重新加载
           </button>
         </div>

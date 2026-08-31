@@ -29,7 +29,11 @@ export function LoginForm() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
       if (!response.ok) {
-        setRequestError(response.status === 401 ? "邮箱或密码不正确，请重试。" : "登录服务暂时不可用，请稍后再试。");
+        setRequestError(
+          response.status === 401
+            ? "邮箱或密码不正确，请重试。"
+            : "登录服务暂时不可用，请稍后再试。",
+        );
         return;
       }
       router.replace("/");
@@ -44,7 +48,9 @@ export function LoginForm() {
   return (
     <form className="mt-6 space-y-4" onSubmit={handleSubmit} noValidate>
       <div>
-        <label className="text-sm font-semibold" htmlFor="login-email">邮箱</label>
+        <label className="text-sm font-semibold" htmlFor="login-email">
+          邮箱
+        </label>
         <input
           className="mt-2 min-h-11 w-full rounded-xl border border-app-line bg-app-bg px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
           id="login-email"
@@ -56,10 +62,16 @@ export function LoginForm() {
           aria-invalid={Boolean(errors.email)}
           aria-describedby={errors.email ? "login-email-error" : undefined}
         />
-        {errors.email && <p className="mt-1 text-xs text-danger" id="login-email-error">{errors.email}</p>}
+        {errors.email && (
+          <p className="mt-1 text-xs text-danger" id="login-email-error">
+            {errors.email}
+          </p>
+        )}
       </div>
       <div>
-        <label className="text-sm font-semibold" htmlFor="login-password">密码</label>
+        <label className="text-sm font-semibold" htmlFor="login-password">
+          密码
+        </label>
         <input
           className="mt-2 min-h-11 w-full rounded-xl border border-app-line bg-app-bg px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
           id="login-password"
@@ -71,9 +83,17 @@ export function LoginForm() {
           aria-invalid={Boolean(errors.password)}
           aria-describedby={errors.password ? "login-password-error" : undefined}
         />
-        {errors.password && <p className="mt-1 text-xs text-danger" id="login-password-error">{errors.password}</p>}
+        {errors.password && (
+          <p className="mt-1 text-xs text-danger" id="login-password-error">
+            {errors.password}
+          </p>
+        )}
       </div>
-      {requestError && <p className="rounded-xl bg-brand-soft px-3 py-2 text-sm text-danger" role="alert">{requestError}</p>}
+      {requestError && (
+        <p className="rounded-xl bg-brand-soft px-3 py-2 text-sm text-danger" role="alert">
+          {requestError}
+        </p>
+      )}
       <button
         className="min-h-11 w-full rounded-xl bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-60"
         type="submit"
