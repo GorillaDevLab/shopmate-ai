@@ -18,7 +18,7 @@ export function LowInventoryPanel({
       state={state}
       count={items.length}
     >
-      <ul role="list" className="mt-5 space-y-3">
+      <ul role="list" className="mt-4 grid gap-3 lg:grid-cols-2 lg:gap-2">
         {items.map((item) => (
           <InventoryItem key={item.sku} item={item} />
         ))}
@@ -42,7 +42,7 @@ function InventoryItem({ item }: { item: DashboardInventoryAlert }) {
           !
         </span>
       </div>
-      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 break-all text-xs tabular-nums">
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 break-all text-xs tabular-nums">
         <p>剩余 {count.format(item.inventory)} 件</p>
         <p className="text-app-muted">
           近 7 天销量：

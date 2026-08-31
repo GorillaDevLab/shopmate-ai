@@ -13,7 +13,7 @@ export function HotProductsPanel({
 }) {
   return (
     <ProductPanelFrame title="热销商品" emptyText="暂无热销商品" state={state} count={items.length}>
-      <ol role="list" className="mt-5 grid gap-3 lg:grid-cols-3">
+      <ol role="list" className="mt-4 grid gap-3 lg:grid-cols-3">
         {items.map((item) => (
           <HotProductItem key={item.productId} item={item} />
         ))}
@@ -24,7 +24,7 @@ export function HotProductsPanel({
 
 function HotProductItem({ item }: { item: DashboardHotProduct }) {
   return (
-    <li value={item.rank} className="min-w-0 rounded-2xl bg-app-bg p-4">
+    <li value={item.rank} className="min-w-0 rounded-2xl bg-app-bg p-4 lg:p-3">
       <div className="flex items-start gap-3">
         <span className="shrink-0 rounded-xl bg-[#dce9f4] px-2 py-2 text-xs font-bold">
           第 {item.rank} 名
@@ -34,7 +34,7 @@ function HotProductItem({ item }: { item: DashboardHotProduct }) {
           <p className="mt-1 text-xs text-app-muted">SKU：{item.skuCodes.join("、")}</p>
         </div>
       </div>
-      <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
+      <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
         <div>
           <dt className="text-app-muted">本期销量</dt>
           <dd className="mt-1 break-all font-bold tabular-nums">

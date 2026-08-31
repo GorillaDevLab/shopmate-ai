@@ -43,13 +43,13 @@ export function MetricCard({
     <article
       aria-label={labels[metric.key]}
       aria-busy={state === "loading"}
-      className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 shadow-[0_16px_40px_rgb(41_48_76/0.05)]"
+      className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 shadow-[0_16px_40px_rgb(41_48_76/0.05)] lg:p-4"
     >
       <div className="flex items-center justify-between gap-2 text-sm text-app-muted">
         <h2>{labels[metric.key]}</h2>
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-brand/70" />
       </div>
-      <div className="mt-4 min-h-24" aria-live="polite">
+      <div className="mt-4 min-h-24 lg:mt-2 lg:min-h-20" aria-live="polite">
         <MetricContent metric={metric} state={state} />
       </div>
     </article>

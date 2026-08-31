@@ -9,10 +9,10 @@ export function SalesTrend({ points }: { points: readonly TrendPoint[] }) {
   const accessibleName = `近 ${points.length} 天销售趋势图`;
 
   return (
-    <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
+    <section className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 lg:p-4">
       <PanelHeading detail={`近 ${points.length} 天`} />
       <svg
-        className="mt-5 h-44 w-full overflow-visible"
+        className="mt-5 h-44 w-full overflow-visible lg:mt-3 lg:h-32"
         viewBox="0 0 640 180"
         role="img"
         aria-label={accessibleName}
@@ -41,7 +41,10 @@ export function SalesTrend({ points }: { points: readonly TrendPoint[] }) {
           />
         ))}
       </svg>
-      <ul className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4" aria-label="趋势明细">
+      <ul
+        className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4 lg:mt-3 xl:grid-cols-7"
+        aria-label="趋势明细"
+      >
         {points.map((point) => (
           <li key={point.date} className="min-w-0 rounded-xl bg-app-bg px-3 py-2">
             <span className="text-app-muted">{formatDate(point.date)}</span>

@@ -16,10 +16,10 @@ interface DashboardProps {
 export function Dashboard({ state = "loading", data, onRetry }: DashboardProps) {
   const visibleState = state === "ready" && !data ? "empty" : state;
   return (
-    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 sm:py-7">
-      <div className="mx-auto w-full max-w-6xl">
+    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
+      <div className="mx-auto w-full max-w-[1440px]">
         <DashboardHeader ready={visibleState === "ready"} />
-        <section id="main-content" className="mt-10 sm:mt-14">
+        <section id="main-content" className="mt-8 lg:mt-4">
           <DashboardIntro data={data} />
           <MetricGrid metrics={data?.metrics ?? []} state={visibleState} />
           {visibleState === "ready" && data ? (
@@ -31,7 +31,7 @@ export function Dashboard({ state = "loading", data, onRetry }: DashboardProps) 
             />
           )}
         </section>
-        <footer className="mt-12 border-t border-app-line pt-5 text-sm text-app-muted">
+        <footer className="mt-8 border-t border-app-line pt-4 text-sm text-app-muted lg:mt-4 lg:pt-3">
           中文界面 · 移动端优先 · 隐私友好
         </footer>
       </div>
@@ -68,10 +68,10 @@ function DashboardHeader({ ready }: { ready: boolean }) {
 
 function DashboardIntro({ data }: { data?: AnalyticsDashboardResponse }) {
   return (
-    <div className="mb-7 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between lg:mb-4">
       <div>
         <p className="mb-2 text-sm font-bold tracking-[0.16em] text-brand uppercase">经营总览</p>
-        <h1 className="text-3xl font-black tracking-[-0.04em] sm:text-5xl">
+        <h1 className="text-3xl font-black tracking-[-0.04em] sm:text-4xl">
           近 7 天经营，一眼看清
         </h1>
       </div>
@@ -85,11 +85,11 @@ function DashboardIntro({ data }: { data?: AnalyticsDashboardResponse }) {
 function ReadyDashboard({ data }: { data: AnalyticsDashboardResponse }) {
   return (
     <>
-      <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[1.1fr_1fr]">
         <SalesTrend points={data.trend} />
         <LowInventoryPanel items={data.inventoryAlerts} />
       </div>
-      <div className="mt-5">
+      <div className="mt-4">
         <HotProductsPanel items={data.products} />
       </div>
     </>

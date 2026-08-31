@@ -15,7 +15,7 @@ export function ProductPanelFrame({ title, emptyText, state, count, children }: 
     <section
       aria-label={title}
       aria-busy={state === "loading"}
-      className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6"
+      className="min-w-0 rounded-3xl border border-app-line bg-app-surface p-5 lg:p-4"
     >
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-xl font-black">{title}</h2>
