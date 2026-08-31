@@ -2,7 +2,9 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 
 import RootLayout, { metadata } from "./layout";
 import { Dashboard } from "./page";
