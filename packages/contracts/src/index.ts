@@ -47,6 +47,23 @@ export type {
 } from "./analytics/dashboard-api.schema.js";
 
 export {
+  DASHBOARD_COMPONENT_REGISTRY,
+  DashboardLayoutCardSchema,
+  DashboardLayoutComponentSchema,
+  DashboardLayoutSchema,
+  DashboardLayoutSizeSchema,
+  DashboardLayoutVersionSchema,
+  DEFAULT_DASHBOARD_LAYOUT,
+} from "./dashboard/dashboard-layout.schema.js";
+export type {
+  DashboardLayout,
+  DashboardLayoutCard,
+  DashboardLayoutComponent,
+  DashboardLayoutSize,
+  DashboardLayoutVersion,
+} from "./dashboard/dashboard-layout.schema.js";
+
+export {
   DEFAULT_LLM_LOCALE,
   DEFAULT_LLM_SYSTEM_POLICY_ZH_CN,
   LLMProviderError,
