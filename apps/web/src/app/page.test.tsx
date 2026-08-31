@@ -26,16 +26,35 @@ describe("中文应用基础", () => {
     );
 
     expect(markup).toContain('lang="zh-CN"');
-    expect(metadata.title).toBe("ShopMate AI｜智能购物助手");
-    expect(metadata.description).toBe("用 AI 整理商品信息，做出更轻松的购物决策。");
+    expect(metadata.title).toBe("ShopMate AI｜智能经营助手");
+    expect(metadata.description).toBe("面向电商商家的中文经营看板，集中查看销售、商品与库存信息。");
   });
 
   it("提供浏览器应用图标", () => {
     expect(existsSync(resolve(process.cwd(), "src/app/icon.svg"))).toBe(true);
   });
+
+  it("明确展示演示数据，不伪装成实时同步", () => {
+    render(<Home />);
+    expect(screen.getByText("演示数据预览")).toBeInTheDocument();
+    expect(screen.queryByText("数据更新于刚刚")).not.toBeInTheDocument();
+    expect(screen.queryByText("周一，早上好")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看全部提醒（演示）" })).toBeDisabled();
+  });
+
+  it("展示预览趋势并标注模拟数据来源", () => {
+    render(<Home />);
+    expect(screen.getByRole("img", { name: "近七日销售趋势图（演示数据）" })).toBeInTheDocument();
+  });
 });
 
 describe("Dashboard 三态", () => {
+  it.each(["loading", "empty", "error"] as const)("%s 时不残留演示指标", (state) => {
+    render(<Dashboard state={state} />);
+    expect(screen.queryByText("¥12,680")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "热销商品" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
   it("加载时显示骨架提示", () => {
     render(<Dashboard state="loading" />);
     expect(screen.getByText("正在整理你的经营数据…")).toBeInTheDocument();

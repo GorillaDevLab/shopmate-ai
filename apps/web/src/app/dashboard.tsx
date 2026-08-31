@@ -1,4 +1,4 @@
-import { inventoryAlerts, metrics, products, type DashboardState } from "./dashboard-data";
+import { inventoryAlerts, metrics, products, trend, type DashboardState } from "./dashboard-data";
 
 export type { DashboardState } from "./dashboard-data";
 
@@ -33,8 +33,8 @@ function DashboardHeader() {
       </a>
       <div className="hidden items-center gap-3 text-right sm:flex">
         <div>
-          <p className="text-sm font-semibold">周一，早上好</p>
-          <p className="text-xs text-app-subtle">数据更新于刚刚</p>
+          <p className="text-sm font-semibold">商家经营看板</p>
+          <p className="text-xs text-app-muted">当前为模拟数据，尚未连接分析服务</p>
         </div>
         <span className="grid size-10 place-items-center rounded-full bg-app-text text-sm font-bold text-white">
           店
@@ -52,7 +52,7 @@ function DashboardIntro() {
         <h1 className="text-3xl font-black tracking-[-0.04em] sm:text-5xl">今天的经营，一眼看清</h1>
       </div>
       <span className="w-fit rounded-full border border-app-line bg-app-surface px-3 py-1.5 text-xs font-semibold text-app-muted">
-        Mock 数据预览
+        演示数据预览
       </span>
     </div>
   );
@@ -96,24 +96,23 @@ function MetricGrid() {
 }
 
 function SalesTrend() {
-  const heights = [45, 62, 52, 78, 68, 88, 96];
   return (
     <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
       <PanelHeading eyebrow="本周表现" title="销售趋势" detail="近 7 天" />
       <div
         className="mt-6 flex h-44 items-end gap-2 sm:gap-4"
         role="img"
-        aria-label="近七日销售趋势图"
+        aria-label="近七日销售趋势图（演示数据）"
       >
-        {heights.map((height, index) => (
-          <div key={index} className="flex flex-1 flex-col items-center gap-2">
-            <div
-              className={`w-full rounded-t-xl ${index === 6 ? "bg-brand" : "bg-[#dcd9fb]"}`}
-              style={{ height: `${height}%` }}
-            />
-            <span className="text-[11px] text-app-subtle">
-              {["一", "二", "三", "四", "五", "六", "今"][index]}
-            </span>
+        {trend.map((point, index) => (
+          <div key={point.label} className="flex h-full min-w-0 flex-1 flex-col items-center gap-2">
+            <div className="flex min-h-0 w-full flex-1 items-end">
+              <div
+                className={`w-full rounded-t-xl ${index === 6 ? "bg-brand" : "bg-[#dcd9fb]"}`}
+                style={{ height: `${point.heightPercent}%` }}
+              />
+            </div>
+            <span className="text-[11px] text-app-subtle">{point.label}</span>
           </div>
         ))}
       </div>
@@ -124,23 +123,31 @@ function SalesTrend() {
 function InventoryPanel() {
   return (
     <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
-      <PanelHeading eyebrow="需要关注" title="库存提醒" detail="8 项" />
+      <PanelHeading
+        eyebrow="需要关注"
+        title="库存提醒"
+        detail={`${inventoryAlerts.length} 项示例`}
+      />
       <div className="mt-5 space-y-4">
-        {inventoryAlerts.map((name) => (
+        {inventoryAlerts.map(({ name, inventory }) => (
           <div key={name} className="flex items-center gap-3">
             <span className="grid size-9 place-items-center rounded-xl bg-amber-100 text-sm text-amber-700">
               !
             </span>
             <div>
               <p className="text-sm font-bold">{name}</p>
-              <p className="mt-0.5 text-xs text-app-muted">剩余 12 件</p>
+              <p className="mt-0.5 text-xs text-app-muted">剩余 {inventory} 件</p>
             </div>
-            <span className="ml-auto text-xs font-bold text-amber-600">补货</span>
+            <span className="ml-auto shrink-0 text-xs font-bold text-amber-600">库存示例</span>
           </div>
         ))}
       </div>
-      <button className="mt-5 min-h-11 w-full rounded-2xl border border-app-line text-sm font-bold text-app-muted transition hover:border-brand hover:text-brand">
-        查看全部提醒
+      <button
+        type="button"
+        disabled
+        className="mt-5 min-h-11 w-full cursor-not-allowed rounded-2xl border border-app-line text-sm font-bold text-app-muted"
+      >
+        查看全部提醒（演示）
       </button>
     </section>
   );
