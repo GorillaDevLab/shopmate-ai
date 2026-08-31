@@ -1,5 +1,7 @@
 import { inventoryAlerts, metrics, products, trend, type DashboardState } from "./dashboard-data";
 import { MetricGrid } from "./metric-card";
+import { HotProductsPanel } from "./hot-products-panel";
+import { LowInventoryPanel } from "./low-inventory-panel";
 
 export type { DashboardState } from "./dashboard-data";
 
@@ -65,9 +67,11 @@ function ReadyDashboard() {
     <>
       <div className="mt-5 grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
         <SalesTrend />
-        <InventoryPanel />
+        <LowInventoryPanel items={inventoryAlerts} />
       </div>
-      <ProductsPanel />
+      <div className="mt-5">
+        <HotProductsPanel items={products} />
+      </div>
     </>
   );
 }
@@ -91,61 +95,6 @@ function SalesTrend() {
             </div>
             <span className="text-[11px] text-app-subtle">{point.label}</span>
           </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function InventoryPanel() {
-  return (
-    <section className="rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
-      <PanelHeading
-        eyebrow="需要关注"
-        title="库存提醒"
-        detail={`${inventoryAlerts.length} 项示例`}
-      />
-      <div className="mt-5 space-y-4">
-        {inventoryAlerts.map(({ name, inventory }) => (
-          <div key={name} className="flex items-center gap-3">
-            <span className="grid size-9 place-items-center rounded-xl bg-amber-100 text-sm text-amber-700">
-              !
-            </span>
-            <div>
-              <p className="text-sm font-bold">{name}</p>
-              <p className="mt-0.5 text-xs text-app-muted">剩余 {inventory} 件</p>
-            </div>
-            <span className="ml-auto shrink-0 text-xs font-bold text-amber-600">库存示例</span>
-          </div>
-        ))}
-      </div>
-      <button
-        type="button"
-        disabled
-        className="mt-5 min-h-11 w-full cursor-not-allowed rounded-2xl border border-app-line text-sm font-bold text-app-muted"
-      >
-        查看全部提醒（演示）
-      </button>
-    </section>
-  );
-}
-
-function ProductsPanel() {
-  return (
-    <section className="mt-5 rounded-3xl border border-app-line bg-app-surface p-5 sm:p-6">
-      <PanelHeading eyebrow="今日榜单" title="热销商品" detail="按销售额排序" />
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        {products.map((product, index) => (
-          <article key={product.name} className="flex items-center gap-3 rounded-2xl bg-app-bg p-3">
-            <div className="grid size-12 shrink-0 place-items-center rounded-xl bg-[#dce9f4] text-lg font-black text-app-text/60">
-              {index + 1}
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-bold">{product.name}</p>
-              <p className="mt-1 text-xs text-app-muted">今日售出 {product.sold} 件</p>
-            </div>
-            <span className="ml-auto text-sm font-black">{product.sales}</span>
-          </article>
         ))}
       </div>
     </section>

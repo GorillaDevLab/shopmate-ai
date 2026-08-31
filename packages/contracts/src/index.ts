@@ -27,3 +27,13 @@ export type {
   ProductStatusFilter,
   ProductSummary,
 } from "./product/product.schema.js";
+export {
+  DashboardHotProductSchema,
+  DashboardInventoryAlertSchema,
+  DashboardStockForecastSchema,
+} from "./dashboard/dashboard-products.schema.js";
+export type {
+  DashboardHotProduct,
+  DashboardInventoryAlert,
+  DashboardStockForecast,
+} from "./dashboard/dashboard-products.schema.js";

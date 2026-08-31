@@ -12,15 +12,33 @@ export const dashboardPreview = DashboardPreviewSchema.parse({
   ],
 
   products: [
-    { name: "轻量通勤双肩包", sold: 86, sales: "¥3,698" },
-    { name: "云朵柔光台灯", sold: 68, sales: "¥2,816" },
-    { name: "可折叠旅行水杯", sold: 51, sales: "¥1,934" },
+    { rank: 1, name: "轻量通勤双肩包", sku: "BAG-BLACK", sold: 86, salesMinor: 369800 },
+    { rank: 2, name: "云朵柔光台灯", sku: "LAMP-WHITE", sold: 68, salesMinor: 281600 },
+    { rank: 3, name: "可折叠旅行水杯", sku: "CUP-BLUE", sold: 51, salesMinor: 193400 },
   ],
 
   inventoryAlerts: [
-    { name: "云朵柔光台灯", inventory: 12 },
-    { name: "便携榨汁杯", inventory: 12 },
-    { name: "轻量通勤双肩包", inventory: 12 },
+    {
+      name: "云朵柔光台灯",
+      sku: "LAMP-WHITE",
+      inventory: 12,
+      recentSold: 28,
+      forecast: { status: "estimated", days: 3 },
+    },
+    {
+      name: "便携榨汁杯",
+      sku: "JUICER-GREEN",
+      inventory: 0,
+      recentSold: 5,
+      forecast: { status: "out_of_stock" },
+    },
+    {
+      name: "轻量通勤双肩包",
+      sku: "BAG-GRAY",
+      inventory: 12,
+      recentSold: 0,
+      forecast: { status: "no_sales" },
+    },
   ],
   trend: [
     { label: "一", heightPercent: 45 },

@@ -4,8 +4,16 @@ import * as contracts from "../index.js";
 const preview = {
   source: "demo",
   metrics: [{ key: "orders", value: 12, changeRatio: 0.02 }],
-  products: [{ name: "台灯", sold: 3, sales: "¥300" }],
-  inventoryAlerts: [{ name: "台灯", inventory: 0 }],
+  products: [{ rank: 1, name: "台灯", sku: "LAMP", sold: 3, salesMinor: 30000 }],
+  inventoryAlerts: [
+    {
+      name: "台灯",
+      sku: "LAMP",
+      inventory: 0,
+      recentSold: 3,
+      forecast: { status: "out_of_stock" },
+    },
+  ],
   trend: [{ label: "一", heightPercent: 45 }],
 };
 
@@ -17,8 +25,8 @@ describe("看板预览共享契约（非 Analytics API 契约）", () => {
 
   it.each([
     { ...preview, source: "live" },
-    { ...preview, products: [{ name: "台灯", sold: -1, sales: "¥300" }] },
-    { ...preview, inventoryAlerts: [{ name: "台灯", inventory: 1.5 }] },
+    { ...preview, products: [{ ...preview.products[0], sold: -1 }] },
+    { ...preview, inventoryAlerts: [{ ...preview.inventoryAlerts[0], inventory: 1.5 }] },
     { ...preview, trend: [{ label: "一", heightPercent: 101 }] },
     { ...preview, metrics: [{ key: "unknown", value: 12, changeRatio: 0.02 }] },
     { ...preview, internalSecret: "占位符" },

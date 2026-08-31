@@ -47,7 +47,9 @@ describe("中文应用基础", () => {
     expect(screen.getByText("演示数据预览")).toBeInTheDocument();
     expect(screen.queryByText("数据更新于刚刚")).not.toBeInTheDocument();
     expect(screen.queryByText("周一，早上好")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看全部提醒（演示）" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /查看全部提醒/ })).not.toBeInTheDocument();
+    expect(screen.getByText("已售罄")).toBeInTheDocument();
+    expect(screen.getByText("暂无销量，无法估算")).toBeInTheDocument();
   });
 
   it("展示预览趋势并标注模拟数据来源", () => {
