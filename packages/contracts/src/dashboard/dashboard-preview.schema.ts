@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  DashboardHotProductSchema,
+  DashboardInventoryAlertSchema,
+} from "./dashboard-products.schema.js";
 
 const text = z
   .string({ error: "展示文案必须是字符串" })
@@ -25,7 +29,10 @@ export const DashboardMetricSchema = z.strictObject(
 );
 export type DashboardMetric = z.infer<typeof DashboardMetricSchema>;
 
-// F1/F2 的展示模型，不作为 E 模块分析指标或 API 响应的定义。
+const uniqueSkus = (items: { sku: string }[]) =>
+  new Set(items.map((item) => item.sku)).size === items.length;
+
+// F1/F2/F3 的展示模型，不作为 E 模块分析指标或 API 响应的定义。
 export const DashboardPreviewSchema = z.strictObject({
   source: z.literal("demo", { error: "预览数据来源必须为 demo" }),
   metrics: z
@@ -34,8 +41,14 @@ export const DashboardPreviewSchema = z.strictObject({
     .refine((metrics) => new Set(metrics.map((metric) => metric.key)).size === metrics.length, {
       error: "经营指标不能重复",
     }),
-  products: z.array(z.strictObject({ name: text, sold: count, sales: text })).max(10),
-  inventoryAlerts: z.array(z.strictObject({ name: text, inventory: count })).max(10),
+  products: z
+    .array(DashboardHotProductSchema)
+    .max(10)
+    .refine(uniqueSkus, { error: "热销 SKU 不能重复" }),
+  inventoryAlerts: z
+    .array(DashboardInventoryAlertSchema)
+    .max(10)
+    .refine(uniqueSkus, { error: "库存 SKU 不能重复" }),
   trend: z
     .array(
       z.strictObject({

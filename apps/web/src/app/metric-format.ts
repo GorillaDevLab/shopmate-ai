@@ -18,6 +18,11 @@ export function formatMetricValue({ key, value }: DashboardMetric): string {
   if (value === null) return "暂无数据";
   if (key === "orders") return `${integer.format(value)} 单`;
   if (key === "units") return `${integer.format(value)} 件`;
+  return formatMoneyMinor(value);
+}
+
+export function formatMoneyMinor(value: number | null): string {
+  if (value === null) return "暂无数据";
   // 避免安全整数上界的“分”转为浮点元时丢失分位精度。
   const minor = BigInt(value);
   const scale = BigInt(100);

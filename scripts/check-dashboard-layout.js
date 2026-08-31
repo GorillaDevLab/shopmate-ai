@@ -28,9 +28,9 @@ async (page) => {
     if (layout.bars.length !== 7 || layout.bars.some((height) => height <= 0)) {
       throw new Error(`${width}px 趋势柱不可见：${JSON.stringify(layout.bars)}`);
     }
-    if (!(await page.getByRole("button", { name: "查看全部提醒（演示）" }).isDisabled())) {
-      throw new Error("未实现的演示操作应明确禁用");
-    }
+    await page.getByText("已售罄", { exact: true }).waitFor();
+    await page.getByText("暂无销量，无法估算", { exact: true }).waitFor();
+    await page.getByRole("region", { name: "热销商品", exact: true }).getByText("SKU：BAG-BLACK").waitFor();
     results.push({ width, overflow: layout.overflow, visibleBars: layout.bars.length });
   }
   return results;

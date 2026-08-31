@@ -24,6 +24,17 @@ Web 的 `dashboard-data.ts` 导入时通过该 Schema 校验所有预览区域�
 - `value: null` 显示“暂无数据”，真实 `0` 正常显示；`changeRatio: null` 显示“暂无可比数据”。
 - `state` 支持 `ready`、`loading`、`empty`、`error`。加载显示 Skeleton 并尊重减少动画设置；空和错误状态不保留旧数值。缺失的指标显示空卡片。
 
+## 热销与低库存组件（F3）
+
+`HotProductsPanel`、`LowInventoryPanel` 分别接收 `items` 与 `state`，可独立进入加载、空和错误状态。当前首页使用演示数据；真实请求状态由 F4 接入。
+
+- 热销条目含商品名、SKU、上游排名、销量及整数分销售额；保留上游顺序，不自行排序或重算指标。缺失数值显示“暂无数据”，零值正常显示。
+- 库存条目含商品名、SKU、剩余库存、近 7 天销量及预测。只格式化传入天数，不做库存除销量计算。
+- `forecast.status` 为 `estimated` 时必须提供正数 `days`，显示约一位小数；小于 0.1 天显示“预计不足 0.1 天售罄”。
+- `out_of_stock` 显示“已售罄”；`no_sales` 显示“暂无销量，无法估算”；`insufficient_data` 显示“数据不足，无法估算”。这些状态不携带 `days`。
+- Schema 拒绝负数、非有限数、重复 SKU 及明显矛盾的库存状态；不替代 E 模块的风险筛选或计算规则。
+- 两个列表各有 Skeleton、空态和错误提示，非正常状态不展示旧条目。移除了未实现的“查看全部提醒”占位按钮，本次不新增商品跳转或补货操作。
+
 ## 单元测试
 
 ```sh
@@ -52,7 +63,7 @@ npx --yes --package @playwright/cli playwright-cli -s=f1-check run-code --filena
 npx --yes --package @playwright/cli playwright-cli -s=f1-check close
 ```
 
-脚本检查 375px 和 1440px 下内容边界、四项指标、七根趋势柱实际高度及演示按钮禁用状态。
+脚本检查 375px 和 1440px 下内容边界、四项指标、七根趋势柱实际高度、SKU 与库存特殊状态。
 检查内容的真实几何边界，不依靠 `overflow-x: hidden` 掩盖溢出。
 浏览器产生的 `.playwright-cli/` 快照和日志仅留本地，不加入提交。
 
