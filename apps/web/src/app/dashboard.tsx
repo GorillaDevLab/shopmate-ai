@@ -13,6 +13,7 @@ interface DashboardProps {
   readonly state?: DashboardState;
   readonly data?: AnalyticsDashboardResponse;
   readonly onRetry?: () => void;
+  readonly authRequired?: boolean;
   readonly controls?: ReactNode;
   readonly periodLabel?: string;
 }
@@ -21,6 +22,7 @@ export function Dashboard({
   state = "loading",
   data,
   onRetry,
+  authRequired = false,
   controls,
   periodLabel = "近 7 天",
 }: DashboardProps) {
@@ -42,6 +44,7 @@ export function Dashboard({
             <StatePanel
               state={visibleState === "ready" ? "empty" : visibleState}
               onRetry={onRetry}
+              authRequired={authRequired}
             />
           )}
         </section>
@@ -127,30 +130,38 @@ function ReadyDashboard({
 function StatePanel({
   state,
   onRetry,
+  authRequired,
 }: {
   state: Exclude<DashboardState, "ready">;
   onRetry?: () => void;
+  authRequired: boolean;
 }) {
   const copy = {
     loading: ["正在整理你的经营数据…", "很快就能看到最新经营概览。"],
     empty: ["还没有经营数据", "导入第一批商品后，这里会自动生成经营概览。"],
     error: ["数据暂时加载失败", "请检查 API 服务后再试一次。"],
   }[state];
+  const isAuthError = state === "error" && authRequired;
   return (
     <div className="dashboard-panel mt-5 px-6 py-20 text-center" role="status" aria-live="polite">
       <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-brand-soft text-xl text-brand">
         ✦
       </div>
       <h2 className="mt-5 text-xl font-black">{copy[0]}</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-app-muted">{copy[1]}</p>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-app-muted">
+        {isAuthError ? "请先登录后再查看商家经营数据。" : copy[1]}
+      </p>
       {state === "error" && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-6 min-h-11 rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong"
-        >
-          重新加载
-        </button>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          {isAuthError && (
+            <a className="inline-flex min-h-11 items-center rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong" href="/login">
+              重新登录
+            </a>
+          )}
+          <button type="button" onClick={onRetry} className="min-h-11 rounded-2xl border border-app-line bg-app-surface px-5 text-sm font-bold text-app-text transition hover:bg-brand-soft">
+            重新加载
+          </button>
+        </div>
       )}
     </div>
   );

@@ -121,6 +121,16 @@ describe("DashboardClient", () => {
     expect(api.fetchDashboard).toHaveBeenCalledTimes(2);
   });
 
+  it("会话失效时提供重新登录入口", async () => {
+    const error = Object.assign(new Error("登录已失效，请重新登录"), { status: 401 });
+    api.fetchDashboard.mockRejectedValueOnce(error);
+    render(<DashboardClient asOfDate="2026-08-31" />);
+
+    const loginLink = await screen.findByRole("link", { name: "重新登录" });
+    expect(loginLink).toHaveAttribute("href", "/login");
+    expect(screen.getByText("请先登录后再查看商家经营数据。")).toBeInTheDocument();
+  });
+
   it("较旧请求晚返回时不会覆盖较新的结果", async () => {
     const first = deferred<typeof dashboardResponsePreview>();
     const second = deferred<typeof dashboardResponsePreview>();

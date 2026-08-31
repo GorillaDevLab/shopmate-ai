@@ -11,7 +11,7 @@ type ClientState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly data: AnalyticsDashboardResponse }
   | { readonly status: "empty"; readonly data: AnalyticsDashboardResponse }
-  | { readonly status: "error" };
+  | { readonly status: "error"; readonly authRequired: boolean };
 type ClientResult = { key: string; state: ClientState };
 
 export function DashboardClient({ asOfDate = shanghaiToday() }: { asOfDate?: string }) {
@@ -25,6 +25,7 @@ function DashboardRangeClient({ asOfDate }: { asOfDate: string }) {
   return (
     <Dashboard
       state={state.status}
+      authRequired={state.status === "error" ? state.authRequired : false}
       data={"data" in state ? state.data : undefined}
       onRetry={retry}
       periodLabel={rangeLabel(range)}
@@ -88,11 +89,20 @@ function useRequestCallbacks(
   const applyError = useCallback(
     (error: unknown, requestId: number) => {
       if (isAbortError(error) || requestId !== requestIdRef.current) return;
-      setResult({ key: requestKey, state: { status: "error" } });
+      setResult({
+        key: requestKey,
+        state: { status: "error", authRequired: isUnauthorizedError(error) },
+      });
     },
     [requestKey, requestIdRef, setResult],
   );
   return { applyData, applyError };
+}
+
+function isUnauthorizedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const status = (error as Error & { status?: unknown }).status;
+  return status === 401;
 }
 
 function startRequest(
