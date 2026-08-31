@@ -77,6 +77,20 @@ describe("DashboardClient", () => {
     await waitFor(() => expect(screen.queryByText("¥0.01")).not.toBeInTheDocument());
   });
 
+  it("切换时保留上一段数据，避免字体和卡片跳变", async () => {
+    const pending = deferred<typeof dashboardResponsePreview>();
+    api.fetchDashboard.mockResolvedValueOnce(dashboardResponsePreview).mockReturnValueOnce(pending.promise);
+    render(<DashboardClient asOfDate="2026-08-31" />);
+    await screen.findByText("数据来自 Analytics API");
+    fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
+    expect(screen.getAllByText("¥12,680.00").length).toBeGreaterThan(0);
+    expect(document.getElementById("main-content")).toHaveAttribute("aria-busy", "true");
+    pending.resolve({
+      ...dashboardResponsePreview,
+      period: { startDate: "2026-08-02", endDate: "2026-08-31", days: 30 },
+    });
+  });
+
   it("30 天请求失败后重试仍使用同一范围，可切回 7 天", async () => {
     api.fetchDashboard
       .mockResolvedValueOnce(dashboardResponsePreview)

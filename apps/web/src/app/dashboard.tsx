@@ -15,6 +15,7 @@ interface DashboardProps {
   readonly data?: AnalyticsDashboardResponse;
   readonly onRetry?: () => void;
   readonly authRequired?: boolean;
+  readonly isRefreshing?: boolean;
   readonly controls?: ReactNode;
   readonly periodLabel?: string;
 }
@@ -24,6 +25,7 @@ export function Dashboard({
   data,
   onRetry,
   authRequired = false,
+  isRefreshing = false,
   controls,
   periodLabel = "近 7 天",
 }: DashboardProps) {
@@ -32,7 +34,7 @@ export function Dashboard({
     <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
       <div className="mx-auto w-full max-w-[1440px]">
         <DashboardHeader ready={visibleState === "ready"} />
-        <section id="main-content" className="mt-8 lg:mt-4">
+        <section id="main-content" className={`mt-8 lg:mt-4 ${isRefreshing ? "dashboard-refreshing" : ""}`} aria-busy={isRefreshing}>
           <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
           <MetricGrid
             metrics={data?.metrics ?? []}
