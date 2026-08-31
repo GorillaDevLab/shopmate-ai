@@ -37,3 +37,30 @@ export type {
   DashboardInventoryAlert,
   DashboardStockForecast,
 } from "./dashboard/dashboard-products.schema.js";
+
+export {
+  DEFAULT_LLM_LOCALE,
+  DEFAULT_LLM_SYSTEM_POLICY_ZH_CN,
+  LLMProviderError,
+} from "./ai/llm-provider.js";
+
+export type {
+  JsonObject,
+  JsonPrimitive,
+  JsonValue,
+  LLMAssistantMessage,
+  LLMFinishReason,
+  LLMGenerationRequest,
+  LLMGenerationResult,
+  LLMMessage,
+  LLMProvider,
+  LLMProviderErrorCode,
+  LLMProviderErrorOptions,
+  LLMRole,
+  LLMSystemMessage,
+  LLMTokenUsage,
+  LLMToolCall,
+  LLMToolDefinition,
+  LLMToolMessage,
+  LLMUserMessage,
+} from "./ai/llm-provider.js";
