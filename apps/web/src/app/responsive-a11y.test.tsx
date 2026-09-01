@@ -11,7 +11,7 @@ describe("Dashboard 响应式与无障碍验收", () => {
     render(<Dashboard state="ready" data={dashboardResponsePreview} />);
 
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "经营指标" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "经营看板卡片" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "销售趋势" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "库存提醒" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "热销商品" })).toBeInTheDocument();
@@ -29,7 +29,7 @@ describe("Dashboard 响应式与无障碍验收", () => {
     );
     expect(screen.getByRole("article", { name: "近 7 天销售额" })).toBeInTheDocument();
     expect(
-      within(screen.getByRole("region", { name: "经营指标" })).getAllByRole("article"),
+      within(screen.getByRole("region", { name: "经营看板卡片" })).getAllByRole("article"),
     ).toHaveLength(4);
   });
 

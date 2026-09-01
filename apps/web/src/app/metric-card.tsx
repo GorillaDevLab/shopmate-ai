@@ -44,9 +44,10 @@ export function MetricCard({
   state?: MetricCardState;
   periodLabel?: string;
 }) {
+  const accessibleLabel = `${periodLabel}${labels[metric.key]}${state === "loading" ? "，正在加载" : ""}`;
   return (
     <article
-      aria-label={`${periodLabel}${labels[metric.key]}`}
+      aria-label={accessibleLabel}
       aria-busy={state === "loading"}
       className="dashboard-panel"
     >
