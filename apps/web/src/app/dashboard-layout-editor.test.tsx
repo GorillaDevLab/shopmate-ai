@@ -48,7 +48,9 @@ describe("DashboardLayoutEditor", () => {
     expect(screen.queryByText("草稿未保存")).not.toBeInTheDocument();
 
     fireEvent.dragStart(dragHandle("销售额"));
-    fireEvent.dragOver(card("metric-units"));
+    fireEvent.dragEnter(card("metric-units"));
+
+    expect(cardOrder().slice(0, 3)).toEqual(["metric-orders", "metric-units", "metric-sales"]);
     fireEvent.drop(card("metric-units"));
 
     expect(cardOrder().slice(0, 3)).toEqual(["metric-orders", "metric-units", "metric-sales"]);
@@ -77,19 +79,52 @@ describe("DashboardLayoutEditor", () => {
     );
   });
 
-  it("修改尺寸只更新本页草稿，不请求保存 API", () => {
+  it("拖动缩放手柄时连续预览，并在松手后吸附到受支持尺寸", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     render(<DashboardLayoutEditor data={dashboardResponsePreview} periodLabel="近 7 天" />);
     fireEvent.click(screen.getByRole("button", { name: "编辑看板" }));
+    vi.spyOn(
+      screen.getByRole("region", { name: "经营看板卡片" }),
+      "getBoundingClientRect",
+    ).mockReturnValue(rect({ width: 1_200 }));
+    const resizeHandle = screen.getByRole("slider", { name: "调整销售额卡片宽度" });
 
-    fireEvent.change(screen.getByRole("combobox", { name: "销售额卡片宽度" }), {
-      target: { value: "full" },
-    });
+    fireEvent(resizeHandle, pointerEvent("pointerdown", { clientX: 400, pointerId: 7 }));
+    fireEvent(resizeHandle, pointerEvent("pointermove", { clientX: 700, pointerId: 7 }));
 
-    expect(card("metric-sales")).toHaveAttribute("data-size", "full");
+    expect(card("metric-sales")).toHaveAttribute("data-size", "1/3");
+    expect(card("metric-sales")).toHaveAttribute("data-preview-span", "7");
+    expect(resizeHandle).toHaveAttribute("aria-valuenow", "7");
+
+    fireEvent(resizeHandle, pointerEvent("pointerup", { clientX: 700, pointerId: 7 }));
+
+    expect(card("metric-sales")).toHaveAttribute("data-size", "2/3");
+    expect(card("metric-sales")).not.toHaveAttribute("data-preview-span");
+    expect(resizeHandle).toHaveAttribute("aria-valuetext", "三分之二");
     expect(screen.getByText("草稿未保存")).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("缩放手柄支持键盘离散调整，且 Escape 可取消指针草稿", () => {
+    render(<DashboardLayoutEditor data={dashboardResponsePreview} periodLabel="近 7 天" />);
+    fireEvent.click(screen.getByRole("button", { name: "编辑看板" }));
+    vi.spyOn(
+      screen.getByRole("region", { name: "经营看板卡片" }),
+      "getBoundingClientRect",
+    ).mockReturnValue(rect({ width: 1_200 }));
+    const resizeHandle = screen.getByRole("slider", { name: "调整销售额卡片宽度" });
+
+    fireEvent.keyDown(resizeHandle, { key: "ArrowRight" });
+    expect(card("metric-sales")).toHaveAttribute("data-size", "1/2");
+
+    fireEvent(resizeHandle, pointerEvent("pointerdown", { clientX: 600, pointerId: 8 }));
+    fireEvent(resizeHandle, pointerEvent("pointermove", { clientX: 1_000, pointerId: 8 }));
+    expect(card("metric-sales")).toHaveAttribute("data-preview-span", "10");
+    fireEvent.keyDown(resizeHandle, { key: "Escape" });
+
+    expect(card("metric-sales")).toHaveAttribute("data-size", "1/2");
+    expect(card("metric-sales")).not.toHaveAttribute("data-preview-span");
   });
 
   it("移动端保持单列且所有编辑控件都有可读名称", () => {
@@ -98,6 +133,7 @@ describe("DashboardLayoutEditor", () => {
 
     expect(screen.getByRole("region", { name: "经营看板卡片" })).toHaveClass(
       "grid-cols-1",
+      "grid-flow-dense",
       "items-start",
     );
     expect(card("sales-trend")).toHaveClass("min-w-0");
@@ -105,10 +141,34 @@ describe("DashboardLayoutEditor", () => {
       expect(button).toHaveAccessibleName();
     }
     expect(
-      within(card("metric-sales")).getByRole("combobox", { name: "销售额卡片宽度" }),
-    ).toBeInTheDocument();
+      within(card("metric-sales")).getByRole("slider", { name: "调整销售额卡片宽度" }),
+    ).toHaveAttribute("aria-valuemin", "4");
   });
 });
+
+function rect(overrides: Partial<DOMRect> = {}): DOMRect {
+  return {
+    bottom: 0,
+    height: 0,
+    left: 0,
+    right: 0,
+    top: 0,
+    width: 0,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+    ...overrides,
+  };
+}
+
+function pointerEvent(
+  type: "pointerdown" | "pointermove" | "pointerup",
+  init: { clientX: number; pointerId: number },
+): MouseEvent {
+  const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: init.clientX });
+  Object.defineProperty(event, "pointerId", { value: init.pointerId });
+  return event;
+}
 
 function card(id: string): HTMLElement {
   const element = document.querySelector(`[data-dashboard-card-id="${id}"]`);
