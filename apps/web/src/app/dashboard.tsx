@@ -1,6 +1,9 @@
-import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
-import type { ReactNode } from "react";
+"use client";
 
+import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
+import { useState, type ReactNode } from "react";
+
+import { DashboardAiAssistant } from "./dashboard-ai-assistant";
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
 import { MetricGrid } from "./metric-card";
 import { ThemeSettings } from "./theme-settings";
@@ -28,10 +31,15 @@ export function Dashboard({
   periodLabel = "近 7 天",
 }: DashboardProps) {
   const visibleState = state === "ready" && !data ? "empty" : state;
+  const [assistantOpen, setAssistantOpen] = useState(false);
   return (
     <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
       <div className="mx-auto w-full max-w-[1440px]">
-        <DashboardHeader ready={visibleState === "ready"} />
+        <DashboardHeader
+          ready={visibleState === "ready"}
+          assistantOpen={assistantOpen}
+          onOpenAssistant={() => setAssistantOpen(true)}
+        />
         <section
           id="main-content"
           className={`mt-8 lg:mt-4 ${isRefreshing ? "dashboard-refreshing" : ""}`}
@@ -39,7 +47,13 @@ export function Dashboard({
         >
           <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
           {visibleState === "ready" && data ? (
-            <DashboardLayoutEditor data={data} periodLabel={periodLabel} />
+            <DashboardLayoutEditor
+              data={data}
+              periodLabel={periodLabel}
+              onEditingChange={(editing) => {
+                if (editing) setAssistantOpen(false);
+              }}
+            />
           ) : (
             <>
               <MetricGrid
@@ -59,11 +73,22 @@ export function Dashboard({
           中文界面 · 移动端优先 · 隐私友好
         </footer>
       </div>
+      {!authRequired && (
+        <DashboardAiAssistant open={assistantOpen} onOpenChange={setAssistantOpen} />
+      )}
     </main>
   );
 }
 
-function DashboardHeader({ ready }: { ready: boolean }) {
+function DashboardHeader({
+  ready,
+  assistantOpen,
+  onOpenAssistant,
+}: {
+  ready: boolean;
+  assistantOpen: boolean;
+  onOpenAssistant: () => void;
+}) {
   return (
     <header className="flex items-center justify-between gap-3 border-b border-app-line pb-3">
       <a
@@ -83,12 +108,15 @@ function DashboardHeader({ ready }: { ready: boolean }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <a
+          <button
+            type="button"
             className="hidden min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:bg-brand-soft sm:inline-flex"
-            href="/chat"
+            aria-haspopup="dialog"
+            aria-expanded={assistantOpen}
+            onClick={onOpenAssistant}
           >
             AI 助手
-          </a>
+          </button>
           <LogoutButton />
           <ThemeSettings />
         </div>

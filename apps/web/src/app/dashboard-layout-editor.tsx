@@ -60,6 +60,7 @@ const metricLabels = {
 type EditorProps = {
   data: AnalyticsDashboardResponse;
   periodLabel: string;
+  onEditingChange?: (isEditing: boolean) => void;
 };
 
 type ResizeSession = {
@@ -72,7 +73,7 @@ type ResizeSession = {
 
 type ResizePreview = Pick<ResizeSession, "cardId" | "span">;
 
-export function DashboardLayoutEditor({ data, periodLabel }: EditorProps) {
+export function DashboardLayoutEditor({ data, periodLabel, onEditingChange }: EditorProps) {
   const [cards, setCards] = useState<DashboardLayoutCard[]>(() => [
     ...DEFAULT_DASHBOARD_LAYOUT.cards,
   ]);
@@ -95,8 +96,9 @@ export function DashboardLayoutEditor({ data, periodLabel }: EditorProps) {
       setResizePreview(undefined);
     }
     setIsEditing(next);
+    onEditingChange?.(next);
     setAnnouncement(next ? "已进入看板编辑模式" : "已退出看板编辑模式");
-  }, []);
+  }, [onEditingChange]);
   useDashboardEditorShortcut(toggleEditing);
 
   useEffect(() => {

@@ -1,11 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent } from "react";
 import Link from "next/link";
 
-import { sendChatMessage } from "../chat-api";
-
-type ChatMessage = { readonly role: "user" | "assistant"; readonly content: string };
+import { useChatSession } from "../chat-session";
 
 const examples = [
   { label: "查库存", prompt: "请查询当前库存" },
@@ -14,31 +12,7 @@ const examples = [
 ] as const;
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [lastFailed, setLastFailed] = useState<string | null>(null);
-
-  async function submit(content = input) {
-    const prompt = content.trim();
-    if (!prompt || isSending) return;
-    setInput("");
-    setError(null);
-    setLastFailed(null);
-    setMessages((current) => [...current, { role: "user", content: prompt }]);
-    setIsSending(true);
-    try {
-      const reply = await sendChatMessage(prompt);
-      setMessages((current) => [...current, reply]);
-    } catch (reason) {
-      if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setError(reason instanceof Error ? reason.message : "AI 服务暂时不可用，请稍后重试");
-      setLastFailed(prompt);
-    } finally {
-      setIsSending(false);
-    }
-  }
+  const { messages, input, setInput, isSending, error, submit, retry } = useChatSession();
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -113,15 +87,13 @@ export default function ChatPage() {
             {error && (
               <div className="flex items-center gap-3" role="alert">
                 <p className="text-sm text-danger">{error}</p>
-                {lastFailed && (
-                  <button
-                    type="button"
-                    className="min-h-10 rounded-xl border border-app-line px-3 text-sm font-semibold hover:bg-brand-soft"
-                    onClick={() => void submit(lastFailed)}
-                  >
-                    重试
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="min-h-10 rounded-xl border border-app-line px-3 text-sm font-semibold hover:bg-brand-soft"
+                  onClick={() => void retry()}
+                >
+                  重试
+                </button>
               </div>
             )}
           </div>
