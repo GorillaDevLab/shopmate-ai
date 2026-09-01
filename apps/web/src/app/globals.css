@@ -261,9 +261,17 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .dashboard-layout-card.is-dragging,
   .layout-edit-button,
-  .dashboard-card-controls button {
+  .dashboard-card-controls button,
+  .ai-assistant-pill,
+  .ai-assistant-dialog,
+  .ai-assistant-send {
     transition-duration: 0ms;
     transform: none;
+  }
+  .ai-assistant-pill,
+  .ai-assistant-pill:hover,
+  .ai-assistant-pill.is-hidden {
+    transform: translateX(-50%);
   }
 }
 

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
@@ -31,6 +31,16 @@ describe("Dashboard 响应式与无障碍验收", () => {
     expect(
       within(screen.getByRole("region", { name: "经营看板卡片" })).getAllByRole("article"),
     ).toHaveLength(4);
+  });
+
+  it("在当前看板打开 AI 助手，进入布局编辑时自动关闭", () => {
+    render(<Dashboard state="ready" data={dashboardResponsePreview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "AI 助手" }));
+    expect(screen.getByRole("dialog", { name: "AI 经营助手" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /编辑看板/ }));
+    expect(screen.queryByRole("dialog", { name: "AI 经营助手" })).not.toBeInTheDocument();
   });
 
   it.each(["loading", "empty", "error"] as const)(
