@@ -11,7 +11,10 @@ export class ChatApiError extends Error {
   }
 }
 
-export async function sendChatMessage(content: string, signal?: AbortSignal): Promise<AiChatResponse["message"]> {
+export async function sendChatMessage(
+  content: string,
+  signal?: AbortSignal,
+): Promise<AiChatResponse["message"]> {
   const message = content.trim();
   if (!message) throw new ChatApiError("请输入想了解的经营问题", 400);
 

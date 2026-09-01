@@ -22,7 +22,7 @@ describe("中文聊天页", () => {
     expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("请查询当前库存");
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
 
-    expect(await screen.findByText("当前库存还有 5 件。"),).toBeInTheDocument();
+    expect(await screen.findByText("当前库存还有 5 件。")).toBeInTheDocument();
     expect(api.sendChatMessage).toHaveBeenCalledWith("请查询当前库存");
   });
 
