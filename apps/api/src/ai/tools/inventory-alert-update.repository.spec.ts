@@ -148,4 +148,40 @@ describe("PrismaInventoryAlertUpdateRepository", () => {
 
     expect(transactionMocks.sku.updateMany).not.toHaveBeenCalled();
   });
+  it("读取后写入前发生并发变化时不会覆盖新值", async () => {
+    transactionMocks.sku.findFirst
+      .mockResolvedValueOnce({
+        id: "sku-001",
+        alertThreshold: 10,
+        updatedAt: new Date("2026-09-01T08:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        id: "sku-001",
+        alertThreshold: 15,
+        updatedAt: new Date("2026-09-01T08:30:00.000Z"),
+      });
+
+    transactionMocks.sku.updateMany.mockResolvedValue({
+      count: 0,
+    });
+
+    const repository = new PrismaInventoryAlertUpdateRepository();
+
+    const result = await repository.confirmAlertThreshold({
+      merchantId: "merchant-001",
+      skuId: "sku-001",
+      expectedAlertThreshold: 10,
+      expectedSkuUpdatedAt: "2026-09-01T08:00:00.000Z",
+      targetAlertThreshold: 20,
+    });
+
+    expect(transactionMocks.sku.updateMany).toHaveBeenCalledTimes(1);
+
+    expect(result).toEqual({
+      kind: "CONFLICT",
+      skuId: "sku-001",
+      actualAlertThreshold: 15,
+      actualSkuUpdatedAt: "2026-09-01T08:30:00.000Z",
+    });
+  });
 });

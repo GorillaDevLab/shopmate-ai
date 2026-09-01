@@ -106,7 +106,7 @@ describe("InventoryAlertUpdateService", () => {
         permissions: [AuthPermission.InventoryWrite],
       }),
     ).rejects.toMatchObject({
-      code: "ACTOR_MISMATCH",
+      code: "CONFIRMATION_NOT_FOUND",
     });
 
     expect(repository.confirmAlertThreshold).not.toHaveBeenCalled();
