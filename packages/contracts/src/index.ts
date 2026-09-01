@@ -89,3 +89,30 @@ export type {
   LLMToolMessage,
   LLMUserMessage,
 } from "./ai/llm-provider.js";
+
+export {
+  INVENTORY_ALERT_CONFIRMATION_PROTOCOL,
+  INVENTORY_ALERT_CONFIRMATION_TTL_MS,
+  InventoryAlertUpdateBindingSchema,
+  InventoryAlertUpdateCancelCommandSchema,
+  InventoryAlertUpdateConfirmCommandSchema,
+  InventoryAlertUpdateConfirmedSchema,
+  InventoryAlertUpdateCancelledSchema,
+  InventoryAlertUpdateConflictSchema,
+  InventoryAlertUpdateExpiredSchema,
+  InventoryAlertUpdateOutcomeSchema,
+  InventoryAlertUpdatePreviewSchema,
+  hasInventoryAlertUpdateConflict,
+  isInventoryAlertConfirmationExpired,
+  matchesInventoryAlertConfirmationActor,
+} from "./inventory/inventory-alert-update.schema.js";
+
+export type {
+  InventoryAlertActor,
+  InventoryAlertSkuSnapshot,
+  InventoryAlertUpdateBinding,
+  InventoryAlertUpdateCancelCommand,
+  InventoryAlertUpdateConfirmCommand,
+  InventoryAlertUpdateOutcome,
+  InventoryAlertUpdatePreview,
+} from "./inventory/inventory-alert-update.schema.js";
