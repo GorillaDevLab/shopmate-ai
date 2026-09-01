@@ -102,6 +102,9 @@ export {
   GetSalesSummaryTool,
   GetSalesTrendTool,
 } from "./ai/read-tools.schema.js";
+
+export { AiChatRequestSchema, AiChatResponseSchema } from "./ai/chat-api.schema.js";
+export type { AiChatRequest, AiChatResponse } from "./ai/chat-api.schema.js";
 export type {
   AiReadToolContract,
   AiReadToolEmpty,
