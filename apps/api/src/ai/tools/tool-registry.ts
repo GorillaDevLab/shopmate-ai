@@ -41,6 +41,7 @@ export type ToolRegistryErrorCode =
   | "NOT_REGISTERED"
   | "INVALID_INPUT"
   | "INVALID_OUTPUT"
+  | "HANDLER_FAILED"
   | "FORBIDDEN";
 
 export interface ToolRegistryErrorOptions {
@@ -62,6 +63,18 @@ export class ToolRegistryError extends Error {
     this.name = "ToolRegistryError";
     this.code = options.code;
     this.toolName = options.toolName;
+  }
+
+  toJSON(): Readonly<{
+    code: ToolRegistryErrorCode;
+    toolName: string;
+    message: string;
+  }> {
+    return Object.freeze({
+      code: this.code,
+      toolName: this.toolName,
+      message: this.message,
+    });
   }
 }
 
@@ -173,7 +186,17 @@ export class ToolRegistry {
       });
     }
 
-    const rawOutput = await tool.handler(parsedInput, context);
+    let rawOutput: unknown;
+
+    try {
+      rawOutput = await tool.handler(parsedInput, context);
+    } catch {
+      throw new ToolRegistryError({
+        code: "HANDLER_FAILED",
+        toolName,
+        message: `工具 "${toolName}" 执行失败。`,
+      });
+    }
 
     try {
       return tool.output.parse(rawOutput);
