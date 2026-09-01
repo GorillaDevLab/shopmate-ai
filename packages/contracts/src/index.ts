@@ -91,6 +91,26 @@ export type {
 } from "./ai/llm-provider.js";
 
 export {
+  AI_READ_TOOL_CONTRACTS,
+  AI_READ_TOOL_NAMES,
+  AiReadToolEmptySchema,
+  AiReadToolErrorSchema,
+  GetBestSellersTool,
+  GetInventoryRisksTool,
+  GetProductDetailsTool,
+  GetProductPerformanceTool,
+  GetSalesSummaryTool,
+  GetSalesTrendTool,
+} from "./ai/read-tools.schema.js";
+export type {
+  AiReadToolContract,
+  AiReadToolEmpty,
+  AiReadToolError,
+  AiReadToolName,
+  AiReadToolSchema,
+} from "./ai/read-tools.schema.js";
+
+export {
   INVENTORY_ALERT_CONFIRMATION_PROTOCOL,
   INVENTORY_ALERT_CONFIRMATION_TTL_MS,
   InventoryAlertUpdateBindingSchema,
