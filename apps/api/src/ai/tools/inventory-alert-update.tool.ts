@@ -45,7 +45,6 @@ export type InventoryAlertUpdateToolOutput =
 export type InventoryAlertUpdateErrorCode =
   | "SKU_NOT_FOUND"
   | "CONFIRMATION_NOT_FOUND"
-  | "ACTOR_MISMATCH"
   | "PERMISSION_DENIED";
 
 export class InventoryAlertUpdateError extends Error {
@@ -329,7 +328,7 @@ export class InventoryAlertUpdateService {
         merchantId: context.merchantId,
       })
     ) {
-      throw new InventoryAlertUpdateError("ACTOR_MISMATCH", "当前身份不能使用该确认令牌。");
+      throw new InventoryAlertUpdateError("CONFIRMATION_NOT_FOUND", "确认令牌不存在或已经失效。");
     }
   }
 
