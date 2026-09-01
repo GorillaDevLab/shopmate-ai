@@ -83,6 +83,12 @@ function DashboardHeader({ ready }: { ready: boolean }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <a
+            className="hidden min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:bg-brand-soft sm:inline-flex"
+            href="/chat"
+          >
+            AI 助手
+          </a>
           <LogoutButton />
           <ThemeSettings />
         </div>
