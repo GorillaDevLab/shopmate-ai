@@ -62,6 +62,14 @@ export type {
   DashboardLayoutSize,
   DashboardLayoutVersion,
 } from "./dashboard/dashboard-layout.schema.js";
+export {
+  DashboardLayoutReadResponseSchema,
+  DashboardLayoutSaveRequestSchema,
+} from "./dashboard/dashboard-layout-api.schema.js";
+export type {
+  DashboardLayoutReadResponse,
+  DashboardLayoutSaveRequest,
+} from "./dashboard/dashboard-layout-api.schema.js";
 
 export {
   DEFAULT_LLM_LOCALE,
