@@ -139,3 +139,22 @@ export type {
   InventoryAlertUpdateOutcome,
   InventoryAlertUpdatePreview,
 } from "./inventory/inventory-alert-update.schema.js";
+
+export {
+  DouyinProductCopySchema,
+  GeneralProductCopySchema,
+  ProductCopyContentSchema,
+  ProductCopyOutputSchema,
+  ProductCopyRequestSchema,
+  ProductCopyTypeSchema,
+  ProductDescriptionCopySchema,
+  ProductTitleCopySchema,
+  XiaohongshuProductCopySchema,
+} from "./ai/product-copy.schema.js";
+
+export type {
+  ProductCopyContent,
+  ProductCopyOutput,
+  ProductCopyRequest,
+  ProductCopyType,
+} from "./ai/product-copy.schema.js";
