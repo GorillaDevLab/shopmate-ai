@@ -1,0 +1,388 @@
+import {
+  GetSalesSummaryTool,
+  type LLMGenerationRequest,
+  type LLMGenerationResult,
+  type LLMProvider,
+} from "@shopmate/contracts";
+import { describe, expect, it, vi } from "vitest";
+
+import { AuthPermission } from "../../auth/contracts/auth-context.js";
+import { ToolRegistry, type ToolInvocationContext } from "../tools/tool-registry.js";
+import { BusinessAgent, BusinessAgentError } from "./business-agent.js";
+
+const context: ToolInvocationContext = {
+  userId: "user-1",
+  merchantId: "merchant-1",
+  permissions: [AuthPermission.OrdersRead],
+};
+
+const period = {
+  startDate: "2026-08-25",
+  endDate: "2026-08-31",
+};
+
+const salesResult = {
+  status: "ok" as const,
+  data: {
+    source: "DashboardService" as const,
+    period: { ...period, timezone: "Asia/Shanghai" as const },
+    revenueMinor: 174_200,
+    currency: "CNY" as const,
+    orderCount: 5,
+    unitsSold: 27,
+    averageOrderValueMinor: 34_840,
+  },
+};
+
+type SalesSummaryOutput = ReturnType<typeof GetSalesSummaryTool.output.parse>;
+
+describe("BusinessAgent", () => {
+  it("把允许的工具交给 Provider，并把已验证结果注入中文回答", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales-1", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，共 5 单。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const registry = salesRegistry(handler);
+    const agent = new BusinessAgent(provider, registry);
+
+    const result = await agent.run({
+      question: "2026年8月25日到31日销售情况怎么样？",
+      context,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "销售额为 1,742 元，共 5 单。",
+      usedTools: ["get_sales_summary"],
+      rounds: 2,
+    });
+    expect(handler).toHaveBeenCalledOnce();
+
+    const firstRequest = provider.requests[0];
+    const secondRequest = provider.requests[1];
+    expect(firstRequest?.tools).toEqual(registry.listDefinitions());
+    expect(firstRequest?.messages[0]).toMatchObject({ role: "system" });
+    expect(firstRequest?.messages[1]).toEqual({
+      role: "user",
+      content: "2026年8月25日到31日销售情况怎么样？",
+    });
+    expect(secondRequest?.messages.at(-1)).toEqual({
+      role: "tool",
+      toolCallId: "call-sales-1",
+      name: "get_sales_summary",
+      content: JSON.stringify(salesResult),
+    });
+  });
+
+  it("无须经营工具的中文回答可直接完成", async () => {
+    const provider = scriptedProvider([finalResult("请告诉我你想分析的商品或时段。")]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    await expect(agent.run({ question: "你好", context })).resolves.toEqual({
+      status: "completed",
+      answer: "请告诉我你想分析的商品或时段。",
+      usedTools: [],
+      rounds: 1,
+    });
+  });
+
+  it("未注册工具不会被执行，并可由 Provider 给出安全解释", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-unknown", "run_sql", { query: "SELECT 1" }),
+      finalResult("该查询不在允许的工具范围内，无法执行。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler));
+
+    const result = await agent.run({ question: "执行任意查询", context });
+
+    expect(result.status).toBe("completed");
+    expect(result.usedTools).toEqual([]);
+    expect(handler).not.toHaveBeenCalled();
+    expect(provider.requests[1]?.messages.at(-1)).toMatchObject({
+      role: "tool",
+      name: "run_sql",
+    });
+    expect(provider.requests[1]?.messages.at(-1)?.content).toContain("NOT_REGISTERED");
+    expect(provider.requests[1]?.messages.at(-1)?.content).not.toContain("SELECT 1");
+  });
+
+  it("拒绝重复的相同工具调用，避免无限循环", async () => {
+    const repeated = toolCallResult("call-sales", "get_sales_summary", period);
+    const provider = scriptedProvider([repeated, repeated]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler));
+
+    const result = await agent.run({ question: "查询销售额", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).toContain("无法继续安全查询");
+    expect(result.rounds).toBe(2);
+    expect(handler).toHaveBeenCalledOnce();
+    expect(provider.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("达到工具轮次上限后停止，不会继续调用 Provider", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-1", "get_sales_summary", {
+        startDate: "2026-08-25",
+        endDate: "2026-08-25",
+      }),
+      toolCallResult("call-2", "get_sales_summary", {
+        startDate: "2026-08-26",
+        endDate: "2026-08-26",
+      }),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler), { maxToolRounds: 1 });
+
+    const result = await agent.run({ question: "逐日查询销售额", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.rounds).toBe(2);
+    expect(provider.generate).toHaveBeenCalledTimes(2);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it("最后一个允许的工具轮次之后仍可生成最终解释", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-1", "get_sales_summary", period),
+      finalResult("已根据工具结果完成销售分析。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(), { maxToolRounds: 1 });
+
+    const result = await agent.run({ question: "查询销售额", context });
+
+    expect(result.status).toBe("completed");
+    expect(result.rounds).toBe(2);
+  });
+
+  it("Provider 异常时返回中文安全结果且不泄漏异常信息", async () => {
+    const provider: LLMProvider = {
+      name: "failing",
+      generate: vi.fn(() => Promise.reject(new Error("secret upstream detail"))),
+    };
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({ question: "查询销售额", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).toContain("暂时无法完成");
+    expect(result.answer).not.toContain("secret");
+  });
+
+  it("拒绝空问题和超长问题", async () => {
+    const agent = new BusinessAgent(scriptedProvider([]), salesRegistry());
+
+    await expect(agent.run({ question: "   ", context })).rejects.toMatchObject({
+      code: "INVALID_QUESTION",
+    } satisfies Partial<BusinessAgentError>);
+    await expect(agent.run({ question: "问".repeat(2001), context })).rejects.toMatchObject({
+      code: "INVALID_QUESTION",
+    } satisfies Partial<BusinessAgentError>);
+    await expect(agent.run({ question: 123 as unknown as string, context })).rejects.toMatchObject({
+      code: "INVALID_QUESTION",
+    } satisfies Partial<BusinessAgentError>);
+  });
+
+  it("拒绝无中文内容的最终回答", async () => {
+    const agent = new BusinessAgent(
+      scriptedProvider([finalResult("Revenue unavailable")]),
+      salesRegistry(),
+    );
+
+    const result = await agent.run({ question: "查询销售额", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).toContain("中文");
+  });
+
+  it("没有成功工具结果时拒绝包含经营数字的回答", async () => {
+    const agent = new BusinessAgent(
+      scriptedProvider([finalResult("销售额是 999 元。")]),
+      salesRegistry(),
+    );
+
+    const result = await agent.run({ question: "销售额怎么样？", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).not.toContain("999");
+  });
+
+  it("工具只返回 empty 时仍拒绝模型编造经营数字", async () => {
+    const emptyResult: SalesSummaryOutput = {
+      status: "empty",
+      reason: "NO_DATA",
+      message: "当前时段没有销售数据。",
+    };
+    const provider = scriptedProvider([
+      toolCallResult("call-empty", "get_sales_summary", period),
+      finalResult("该时段仍有 999 单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(vi.fn(() => emptyResult)));
+
+    const result = await agent.run({ question: "该时段销售情况？", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).not.toContain("999");
+  });
+
+  it("成功工具结果存在时仍拒绝混入来源不明的经营数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，但订单数为 999 单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({ question: "查询销售额和订单", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).not.toContain("999");
+  });
+
+  it("拒绝用中文数字绕过经营数字来源校验", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("订单数为九百单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({ question: "查询订单数", context });
+
+    expect(result.status).toBe("limited");
+  });
+
+  it("单轮工具调用超过上限时一个也不执行", async () => {
+    const provider = scriptedProvider([
+      multiToolCallResult([
+        { id: "call-1", name: "get_sales_summary", arguments: period },
+        { id: "call-2", name: "get_sales_summary", arguments: period },
+      ]),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler), { maxCallsPerRound: 1 });
+
+    const result = await agent.run({ question: "查询两个时段", context });
+
+    expect(result.status).toBe("limited");
+    expect(handler).not.toHaveBeenCalled();
+    expect(provider.generate).toHaveBeenCalledOnce();
+  });
+
+  it("累计工具调用超过上限时停止后续执行", async () => {
+    const provider = scriptedProvider([
+      multiToolCallResult([
+        {
+          id: "call-1",
+          name: "get_sales_summary",
+          arguments: { startDate: "2026-08-25", endDate: "2026-08-25" },
+        },
+        {
+          id: "call-2",
+          name: "get_sales_summary",
+          arguments: { startDate: "2026-08-26", endDate: "2026-08-26" },
+        },
+      ]),
+      toolCallResult("call-3", "get_sales_summary", {
+        startDate: "2026-08-27",
+        endDate: "2026-08-27",
+      }),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler), {
+      maxCallsPerRound: 2,
+      maxTotalCalls: 2,
+    });
+
+    const result = await agent.run({ question: "查询三个时段", context });
+
+    expect(result.status).toBe("limited");
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(provider.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("拒绝越界的循环配置", () => {
+    const provider = scriptedProvider([]);
+    const registry = salesRegistry();
+
+    expect(() => new BusinessAgent(provider, registry, { maxToolRounds: 0 })).toThrowError(
+      expect.objectContaining({ code: "INVALID_OPTIONS" }),
+    );
+    expect(() => new BusinessAgent(provider, registry, { maxCallsPerRound: 5 })).toThrowError(
+      expect.objectContaining({ code: "INVALID_OPTIONS" }),
+    );
+    expect(() => new BusinessAgent(provider, registry, { maxTotalCalls: 9 })).toThrowError(
+      expect.objectContaining({ code: "INVALID_OPTIONS" }),
+    );
+  });
+
+  it("内容过滤响应不会被当作成功回答", async () => {
+    const filtered = {
+      ...finalResult("这是被过滤的中文内容。"),
+      finishReason: "content_filter" as const,
+    };
+    const agent = new BusinessAgent(scriptedProvider([filtered]), salesRegistry());
+
+    const result = await agent.run({ question: "查询销售额", context });
+
+    expect(result.status).toBe("limited");
+  });
+});
+
+function salesRegistry(handler: () => SalesSummaryOutput = vi.fn(() => salesResult)): ToolRegistry {
+  const registry = new ToolRegistry({ allowedToolNames: [GetSalesSummaryTool.name] });
+  registry.register({
+    ...GetSalesSummaryTool,
+    requiredPermissions: [AuthPermission.OrdersRead],
+    handler,
+  });
+  return registry;
+}
+
+function toolCallResult(
+  id: string,
+  name: string,
+  argumentsValue: Record<string, string>,
+): LLMGenerationResult {
+  return {
+    message: {
+      role: "assistant",
+      content: null,
+      toolCalls: [{ id, name, arguments: argumentsValue }],
+    },
+    finishReason: "tool_calls",
+  };
+}
+
+function multiToolCallResult(
+  toolCalls: NonNullable<LLMGenerationResult["message"]["toolCalls"]>,
+): LLMGenerationResult {
+  return {
+    message: { role: "assistant", content: null, toolCalls },
+    finishReason: "tool_calls",
+  };
+}
+
+function finalResult(content: string): LLMGenerationResult {
+  return {
+    message: { role: "assistant", content },
+    finishReason: "stop",
+  };
+}
+
+function scriptedProvider(results: readonly LLMGenerationResult[]) {
+  const queue = [...results];
+  const requests: LLMGenerationRequest[] = [];
+  const generate = vi.fn(async (request: LLMGenerationRequest) => {
+    requests.push(request);
+    const result = queue.shift();
+    if (!result) {
+      throw new Error("Scripted Provider 没有更多响应");
+    }
+    return result;
+  });
+  return { name: "scripted", generate, requests } satisfies LLMProvider & {
+    requests: LLMGenerationRequest[];
+  };
+}

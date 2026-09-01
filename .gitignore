@@ -27,6 +27,9 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Local AI workflow artifacts
+docs/superpowers/
+
 # Prisma generated client
 packages/database/generated/
 packages/database/prisma.config.js
