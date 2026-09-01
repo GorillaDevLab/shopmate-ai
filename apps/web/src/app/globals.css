@@ -626,7 +626,7 @@ button:focus-visible {
 .ai-assistant-composer textarea {
   min-height: 54px;
   max-height: 150px;
-  resize: vertical;
+  resize: none;
   border: 0;
   background: transparent;
   padding: 6px 5px;

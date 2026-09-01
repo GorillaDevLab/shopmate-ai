@@ -124,7 +124,11 @@ function AssistantComposer({
     <div className="ai-assistant-compose-area">
       <div className="ai-assistant-suggestions" aria-label="经营问题建议">
         {suggestions.map((suggestion) => (
-          <button key={suggestion.label} type="button" onClick={() => chat.setInput(suggestion.prompt)}>
+          <button
+            key={suggestion.label}
+            type="button"
+            onClick={() => chat.setInput(suggestion.prompt)}
+          >
             {suggestion.label}
           </button>
         ))}
