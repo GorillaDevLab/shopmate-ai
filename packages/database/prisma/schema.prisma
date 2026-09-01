@@ -29,9 +29,10 @@ model Merchant {
   slug   String         @unique
   status MerchantStatus @default(ACTIVE)
 
-  products Product[]
-  skus     Sku[]
-  orders   Order[]
+  products         Product[]
+  skus             Sku[]
+  orders           Order[]
+  dashboardLayouts UserDashboardLayout[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -121,4 +122,22 @@ model OrderItem {
 
   @@index([orderId])
   @@index([skuId])
+}
+
+model UserDashboardLayout {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+
+  schemaVersion Int  @default(1)
+  revision      Int  @default(1)
+  layout        Json
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, merchantId])
+  @@index([merchantId])
 }
