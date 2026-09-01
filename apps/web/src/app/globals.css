@@ -89,6 +89,184 @@ button:focus-visible {
   box-shadow: var(--panel-shadow);
 }
 
+.dashboard-layout-card {
+  position: relative;
+  width: 100%;
+  transform-origin: center;
+}
+.dashboard-layout-card > .dashboard-panel {
+  height: 100%;
+}
+.dashboard-layout-card.is-editing {
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--brand) 38%, var(--app-line));
+  border-radius: 20px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--brand-soft) 68%, var(--app-surface));
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--brand-ring) 28%, transparent);
+}
+.dashboard-layout-card.is-dragging {
+  z-index: 3;
+  opacity: 0.58;
+  transform: scale(0.985);
+}
+.dashboard-layout-card.is-resizing {
+  z-index: 4;
+  border-color: color-mix(in srgb, var(--brand) 70%, var(--app-line));
+  box-shadow: 0 18px 48px color-mix(in srgb, var(--brand-ring) 48%, transparent);
+}
+.dashboard-layout-card.is-resizing > .dashboard-panel {
+  pointer-events: none;
+  user-select: none;
+}
+.layout-edit-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  background: var(--app-surface);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+.layout-edit-button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--brand) 36%, var(--app-line));
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+}
+.layout-edit-button:active {
+  transform: scale(0.97);
+}
+.layout-edit-button kbd {
+  border: 1px solid var(--app-line);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--app-muted);
+  font: inherit;
+  font-size: 11px;
+}
+.dashboard-card-controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 8px;
+}
+.dashboard-card-controls button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--app-muted);
+  cursor: pointer;
+  transition:
+    transform 140ms cubic-bezier(0.23, 1, 0.32, 1),
+    background-color 160ms ease,
+    color 160ms ease;
+}
+.dashboard-card-controls button:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.dashboard-card-controls button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.dashboard-drag-handle {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--app-muted);
+  cursor: grab;
+  touch-action: none;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+.dashboard-drag-handle:active {
+  cursor: grabbing;
+}
+.dashboard-size-readout {
+  min-width: 72px;
+  margin-left: auto;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-surface) 82%, transparent);
+  padding: 6px 10px;
+  color: var(--app-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+.dashboard-resize-handle {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  z-index: 5;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: end;
+  border-radius: 0 0 19px;
+  padding: 0 8px 8px 0;
+  color: var(--brand);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.dashboard-resize-handle > span {
+  width: 13px;
+  height: 13px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  border-radius: 0 0 4px;
+  opacity: 0.72;
+}
+.dashboard-resize-handle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+@media (min-width: 768px) {
+  .dashboard-layout-card.has-size-preview {
+    grid-column: span var(--dashboard-card-span) / span var(--dashboard-card-span);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .layout-edit-button:hover {
+    border-color: color-mix(in srgb, var(--brand) 35%, var(--app-line));
+    background: var(--brand-soft);
+  }
+  .dashboard-card-controls button:hover:not(:disabled),
+  .dashboard-drag-handle:hover {
+    background: var(--app-surface);
+    color: var(--brand);
+  }
+  .dashboard-resize-handle:hover > span {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-layout-card.is-dragging,
+  .layout-edit-button,
+  .dashboard-card-controls button {
+    transition-duration: 0ms;
+    transform: none;
+  }
+}
+
 .appearance-trigger {
   display: inline-flex;
   align-items: center;

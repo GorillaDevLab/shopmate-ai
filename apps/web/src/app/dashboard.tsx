@@ -1,10 +1,8 @@
 import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
 import type { ReactNode } from "react";
 
-import { HotProductsPanel } from "./hot-products-panel";
-import { LowInventoryPanel } from "./low-inventory-panel";
+import { DashboardLayoutEditor } from "./dashboard-layout-editor";
 import { MetricGrid } from "./metric-card";
-import { SalesTrend } from "./sales-trend";
 import { ThemeSettings } from "./theme-settings";
 import { LogoutButton } from "./logout-button";
 
@@ -40,19 +38,21 @@ export function Dashboard({
           aria-busy={isRefreshing}
         >
           <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
-          <MetricGrid
-            metrics={data?.metrics ?? []}
-            state={visibleState}
-            periodLabel={periodLabel}
-          />
           {visibleState === "ready" && data ? (
-            <ReadyDashboard data={data} periodLabel={periodLabel} />
+            <DashboardLayoutEditor data={data} periodLabel={periodLabel} />
           ) : (
-            <StatePanel
-              state={visibleState === "ready" ? "empty" : visibleState}
-              onRetry={onRetry}
-              authRequired={authRequired}
-            />
+            <>
+              <MetricGrid
+                metrics={data?.metrics ?? []}
+                state={visibleState}
+                periodLabel={periodLabel}
+              />
+              <StatePanel
+                state={visibleState === "ready" ? "empty" : visibleState}
+                onRetry={onRetry}
+                authRequired={authRequired}
+              />
+            </>
           )}
         </section>
         <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted lg:mt-4">
@@ -120,26 +120,6 @@ function DashboardIntro({
         </span>
       )}
     </div>
-  );
-}
-
-function ReadyDashboard({
-  data,
-  periodLabel,
-}: {
-  data: AnalyticsDashboardResponse;
-  periodLabel: string;
-}) {
-  return (
-    <>
-      <div className="mt-4 grid items-stretch gap-4 lg:grid-cols-[1.15fr_1fr]">
-        <SalesTrend points={data.trend} periodLabel={periodLabel} />
-        <LowInventoryPanel items={data.inventoryAlerts} periodLabel={periodLabel} />
-      </div>
-      <div className="mt-4">
-        <HotProductsPanel items={data.products} />
-      </div>
-    </>
   );
 }
 
