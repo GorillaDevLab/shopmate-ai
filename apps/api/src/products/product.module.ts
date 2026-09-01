@@ -11,5 +11,6 @@ import { ProductService } from "./product.service.js";
     PrismaProductRepository,
     { provide: PRODUCT_REPOSITORY, useExisting: PrismaProductRepository },
   ],
+  exports: [ProductService],
 })
 export class ProductModule {}
