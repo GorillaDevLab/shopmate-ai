@@ -47,10 +47,24 @@ export class MockLLMProvider implements LLMProvider {
   async generate(request: LLMGenerationRequest): Promise<LLMGenerationResult> {
     this.throwConfiguredError();
 
+    const toolContent = getLatestVerifiedToolContent(request);
+
+    if (toolContent) {
+      return toolExplanationResult(toolContent);
+    }
+
     const userText = getLatestUserText(request);
 
     if (matchesInventoryIntent(userText)) {
       return inventoryToolResult();
+    }
+
+    if (matchesBestSellersIntent(userText)) {
+      return bestSellersToolResult();
+    }
+
+    if (matchesSalesTrendIntent(userText)) {
+      return salesTrendToolResult();
     }
 
     if (matchesSalesIntent(userText)) {
@@ -79,6 +93,38 @@ export class MockLLMProvider implements LLMProvider {
       retryable: fixture.retryable,
     });
   }
+}
+
+function getLatestVerifiedToolContent(request: LLMGenerationRequest): string | null {
+  for (let index = request.messages.length - 1; index >= 0; index -= 1) {
+    const message = request.messages[index];
+
+    if (message?.role === "tool") {
+      return normalizeToolContent(message.content);
+    }
+  }
+
+  return null;
+}
+
+function normalizeToolContent(content: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!isToolResult(parsed)) {
+      return null;
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function isToolResult(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const status = (value as Readonly<Record<string, unknown>>).status;
+  return status === "ok" || status === "empty" || status === "error";
 }
 
 function getLatestUserText(request: LLMGenerationRequest): string {
@@ -124,6 +170,14 @@ function matchesSalesIntent(value: string): boolean {
   ]);
 }
 
+function matchesBestSellersIntent(value: string): boolean {
+  return includesAny(value, ["热销", "畅销", "卖得最好", "销量排行", "销售排行", "best seller"]);
+}
+
+function matchesSalesTrendIntent(value: string): boolean {
+  return includesAny(value, ["销售趋势", "销售走势", "营收趋势", "每日趋势", "trend"]);
+}
+
 function matchesCopywritingIntent(value: string): boolean {
   return includesAny(value, [
     "文案",
@@ -150,7 +204,7 @@ function inventoryToolResult(): LLMGenerationResult {
         {
           id: "mock-call-inventory-001",
           name: "get_inventory_risks",
-          arguments: {},
+          arguments: defaultPeriod(),
         },
       ],
     },
@@ -169,7 +223,7 @@ function salesToolResult(): LLMGenerationResult {
         {
           id: "mock-call-sales-001",
           name: "get_sales_summary",
-          arguments: {},
+          arguments: defaultPeriod(),
         },
       ],
     },
@@ -177,6 +231,52 @@ function salesToolResult(): LLMGenerationResult {
     usage: fixedUsage(),
     requestId: "mock-request-sales",
   };
+}
+
+function bestSellersToolResult(): LLMGenerationResult {
+  return toolCallGeneration({
+    id: "mock-call-best-sellers-001",
+    name: "get_best_sellers",
+    arguments: { ...defaultPeriod(), limit: 20 },
+  });
+}
+
+function salesTrendToolResult(): LLMGenerationResult {
+  return toolCallGeneration({
+    id: "mock-call-sales-trend-001",
+    name: "get_sales_trend",
+    arguments: { ...defaultPeriod(), granularity: "day" },
+  });
+}
+
+function toolCallGeneration(
+  toolCall: NonNullable<LLMGenerationResult["message"]["toolCalls"]>[number],
+): LLMGenerationResult {
+  return {
+    message: { role: "assistant", content: null, toolCalls: [toolCall] },
+    finishReason: "tool_calls",
+    usage: fixedUsage(),
+    requestId: `mock-request-${toolCall.name}`,
+  };
+}
+
+function toolExplanationResult(content: string): LLMGenerationResult {
+  return {
+    message: {
+      role: "assistant",
+      content: `已根据经过验证的工具结果完成查询：${content}`,
+    },
+    finishReason: "stop",
+    usage: fixedUsage(),
+    requestId: "mock-request-tool-explanation",
+  };
+}
+
+function defaultPeriod() {
+  return {
+    startDate: "2026-08-25",
+    endDate: "2026-08-31",
+  } as const;
 }
 
 function copywritingResult(): LLMGenerationResult {

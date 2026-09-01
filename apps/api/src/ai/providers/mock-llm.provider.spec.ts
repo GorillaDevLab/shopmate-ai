@@ -24,7 +24,10 @@ describe("MockLLMProvider", () => {
           {
             id: "mock-call-inventory-001",
             name: "get_inventory_risks",
-            arguments: {},
+            arguments: {
+              startDate: "2026-08-25",
+              endDate: "2026-08-31",
+            },
           },
         ],
       },
@@ -47,7 +50,10 @@ describe("MockLLMProvider", () => {
       {
         id: "mock-call-inventory-001",
         name: "get_inventory_risks",
-        arguments: {},
+        arguments: {
+          startDate: "2026-08-25",
+          endDate: "2026-08-31",
+        },
       },
     ]);
 
@@ -63,11 +69,50 @@ describe("MockLLMProvider", () => {
       {
         id: "mock-call-sales-001",
         name: "get_sales_summary",
-        arguments: {},
+        arguments: {
+          startDate: "2026-08-25",
+          endDate: "2026-08-31",
+        },
       },
     ]);
 
     expect(result.finishReason).toBe("tool_calls");
+  });
+
+  it("热销排行意图优先选择热销商品工具", async () => {
+    const provider = new MockLLMProvider();
+
+    const result = await provider.generate(userRequest("最近哪些商品最热销？给我销量排行"));
+
+    expect(result.message.toolCalls).toEqual([
+      {
+        id: "mock-call-best-sellers-001",
+        name: "get_best_sellers",
+        arguments: {
+          startDate: "2026-08-25",
+          endDate: "2026-08-31",
+          limit: 20,
+        },
+      },
+    ]);
+  });
+
+  it("销售趋势意图优先选择销售趋势工具", async () => {
+    const provider = new MockLLMProvider();
+
+    const result = await provider.generate(userRequest("最近销售额的每日趋势怎么样？"));
+
+    expect(result.message.toolCalls).toEqual([
+      {
+        id: "mock-call-sales-trend-001",
+        name: "get_sales_trend",
+        arguments: {
+          startDate: "2026-08-25",
+          endDate: "2026-08-31",
+          granularity: "day",
+        },
+      },
+    ]);
   });
 
   it("文案意图返回固定中文回答", async () => {
@@ -80,6 +125,48 @@ describe("MockLLMProvider", () => {
     expect(result.message.content).toBe(
       "这款商品主打实用、易用与高性价比，适合日常使用。建议结合真实商品参数、目标人群和已验证卖点进一步完善文案。",
     );
+  });
+
+  it("收到已验证工具结果后停止调用并返回中文解释", async () => {
+    const provider = new MockLLMProvider();
+    const toolContent = JSON.stringify({
+      status: "ok",
+      data: {
+        revenueMinor: 174200,
+        orderCount: 5,
+      },
+    });
+
+    const result = await provider.generate({
+      messages: [
+        { role: "user", content: "最近销售额和订单怎么样？" },
+        {
+          role: "assistant",
+          content: null,
+          toolCalls: [
+            {
+              id: "mock-call-sales-001",
+              name: "get_sales_summary",
+              arguments: {
+                startDate: "2026-08-25",
+                endDate: "2026-08-31",
+              },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          toolCallId: "mock-call-sales-001",
+          name: "get_sales_summary",
+          content: toolContent,
+        },
+      ],
+    });
+
+    expect(result.finishReason).toBe("stop");
+    expect(result.message.toolCalls).toBeUndefined();
+    expect(result.message.content).toContain("经过验证的工具结果");
+    expect(result.message.content).toContain(toolContent);
   });
 
   it("无法识别意图时明确说明数据不足而不是编造经营数据", async () => {
