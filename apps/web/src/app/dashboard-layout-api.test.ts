@@ -44,7 +44,10 @@ describe("dashboard layout API", () => {
   });
 
   it("拒绝被污染的响应", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ revision: 0 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ revision: 0 })),
+    );
     await expect(fetchDashboardLayout()).rejects.toMatchObject({ status: 502 });
   });
 
@@ -82,14 +85,20 @@ describe("dashboard layout API", () => {
   });
 
   it("区分登录失效与网络错误", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 401 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 401 })),
+    );
     await expect(fetchDashboardLayout()).rejects.toMatchObject({
       status: 401,
       retryable: false,
       message: "登录已失效，请重新登录",
     });
 
-    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("offline"))));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new TypeError("offline"))),
+    );
     await expect(fetchDashboardLayout()).rejects.toMatchObject({
       status: 0,
       retryable: true,

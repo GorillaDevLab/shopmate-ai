@@ -304,7 +304,12 @@ function useCardInteractions(
   const moveCard = (cardId: string, targetIndex: number, animate = false) => {
     const cards = state.draft.cards;
     const currentIndex = cards.findIndex((card) => card.id === cardId);
-    if (currentIndex < 0 || currentIndex === targetIndex || targetIndex < 0 || targetIndex >= cards.length)
+    if (
+      currentIndex < 0 ||
+      currentIndex === targetIndex ||
+      targetIndex < 0 ||
+      targetIndex >= cards.length
+    )
       return;
     changeCards(reorderCards(cards, currentIndex, targetIndex), animate);
     setAnnouncement(`${cardTitle(cards[currentIndex])}已移至第 ${targetIndex + 1} 位`);
@@ -312,9 +317,7 @@ function useCardInteractions(
   const resizeCard = (cardId: string, size: DashboardLayoutSize) => {
     const card = state.draft.cards.find((candidate) => candidate.id === cardId);
     if (!card || card.size === size) return;
-    changeCards(
-      state.draft.cards.map((item) => (item.id === cardId ? { ...item, size } : item)),
-    );
+    changeCards(state.draft.cards.map((item) => (item.id === cardId ? { ...item, size } : item)));
     setAnnouncement(`${cardTitle(card)}宽度已调整为${sizeLabel(size)}`);
   };
   const removeCard = (card: DashboardLayoutCard) => {
@@ -335,24 +338,10 @@ function useCardInteractions(
     startResize: (event: ReactPointerEvent<HTMLElement>, card: DashboardLayoutCard) =>
       startResize(event, card, resizeSessionRef, setResizePreview),
     updateResize: (event: ReactPointerEvent<HTMLElement>) =>
-      updateResize(
-        event,
-        gridRef,
-        resizeSessionRef,
-        pendingRectsRef,
-        setResizePreview,
-      ),
+      updateResize(event, gridRef, resizeSessionRef, pendingRectsRef, setResizePreview),
     finishResize: (event: ReactPointerEvent<HTMLElement>) =>
-      finishResize(
-        event,
-        gridRef,
-        resizeSessionRef,
-        pendingRectsRef,
-        setResizePreview,
-        resizeCard,
-      ),
-    cancelResize: () =>
-      cancelResize(resizeSessionRef, pendingRectsRef, setResizePreview),
+      finishResize(event, gridRef, resizeSessionRef, pendingRectsRef, setResizePreview, resizeCard),
+    cancelResize: () => cancelResize(resizeSessionRef, pendingRectsRef, setResizePreview),
     announce: setAnnouncement,
   };
 }
@@ -391,8 +380,12 @@ function EditToolbar(props: Parameters<typeof EditorHeader>[0]) {
   return (
     <div role="toolbar" aria-label="看板布局编辑工具" className="layout-editor-toolbar">
       <SaveStatus state={props.state} isDirty={props.isDirty} />
-      <button type="button" onClick={props.onAdd}>添加组件</button>
-      <button type="button" onClick={() => props.onModeChange("preview")}>预览</button>
+      <button type="button" onClick={props.onAdd}>
+        添加组件
+      </button>
+      <button type="button" onClick={() => props.onModeChange("preview")}>
+        预览
+      </button>
       <LayoutMoreMenu {...props} />
       <button
         data-layout-save-button
@@ -411,7 +404,9 @@ function PreviewToolbar(props: Parameters<typeof EditorHeader>[0]) {
   return (
     <div role="toolbar" aria-label="看板预览工具" className="layout-editor-toolbar">
       <span className="layout-preview-label">预览草稿</span>
-      <button type="button" onClick={() => props.onModeChange("edit")}>返回编辑</button>
+      <button type="button" onClick={() => props.onModeChange("edit")}>
+        返回编辑
+      </button>
       <button type="button" className="layout-save-button" onClick={props.onSave}>
         完成并保存
       </button>
@@ -482,7 +477,9 @@ function LayoutMessage({
   return (
     <div className="layout-error-banner" role="alert">
       <span>{state.message}</span>
-      <button type="button" onClick={onRetrySave}>重试保存</button>
+      <button type="button" onClick={onRetrySave}>
+        重试保存
+      </button>
       {state.saveStatus === "conflict" && (
         <button type="button" onClick={() => reloadAfterConfirmation(onReload)}>
           重新加载服务器版本
@@ -494,14 +491,20 @@ function LayoutMessage({
 
 function LayoutLoadState({ state, onRetry }: { state: LayoutEditorState; onRetry: () => void }) {
   if (state.loadStatus === "loading") {
-    return <div className="layout-loading" role="status">正在恢复你的看板布局…</div>;
+    return (
+      <div className="layout-loading" role="status">
+        正在恢复你的看板布局…
+      </div>
+    );
   }
   return (
     <div className="dashboard-panel layout-load-error" role="alert">
       <strong>布局暂时无法加载</strong>
       <p>{state.message}</p>
       <div>
-        <button type="button" onClick={onRetry}>重新加载布局</button>
+        <button type="button" onClick={onRetry}>
+          重新加载布局
+        </button>
         {state.message?.includes("登录") && <a href="/login">重新登录</a>}
       </div>
     </div>
@@ -524,9 +527,10 @@ function DashboardCard(props: DashboardCardProps) {
   const { card, isEditing, isDragging, isResizing, previewSpan, children } = props;
   const title = cardTitle(card);
   const currentSpan = previewSpan ?? spanForSize(card.size);
-  const style = previewSpan === undefined
-    ? undefined
-    : ({ "--dashboard-card-span": previewSpan } as CSSProperties);
+  const style =
+    previewSpan === undefined
+      ? undefined
+      : ({ "--dashboard-card-span": previewSpan } as CSSProperties);
   return (
     <div
       data-dashboard-card-id={card.id}
@@ -558,7 +562,9 @@ function CardControls(props: DashboardCardProps & { title: string; span: number 
         title={`拖动${props.title}`}
         draggable
         className="dashboard-drag-handle"
-        onDragStart={(event) => startDragging(event, props.card.id, props.interactions.setDraggedId)}
+        onDragStart={(event) =>
+          startDragging(event, props.card.id, props.interactions.setDraggedId)
+        }
         onDragEnd={() => props.interactions.setDraggedId(undefined)}
       >
         ⠿
@@ -579,7 +585,9 @@ function MoveButtons(props: DashboardCardProps & { title: string }) {
         type="button"
         aria-label={`${props.title}上移`}
         disabled={props.index === 0}
-        onClick={(event) => props.interactions.moveCard(props.card.id, props.index - 1, event.detail > 0)}
+        onClick={(event) =>
+          props.interactions.moveCard(props.card.id, props.index - 1, event.detail > 0)
+        }
       >
         ↑
       </button>
@@ -587,7 +595,9 @@ function MoveButtons(props: DashboardCardProps & { title: string }) {
         type="button"
         aria-label={`${props.title}下移`}
         disabled={props.index === props.count - 1}
-        onClick={(event) => props.interactions.moveCard(props.card.id, props.index + 1, event.detail > 0)}
+        onClick={(event) =>
+          props.interactions.moveCard(props.card.id, props.index + 1, event.detail > 0)
+        }
       >
         ↓
       </button>
@@ -596,7 +606,11 @@ function MoveButtons(props: DashboardCardProps & { title: string }) {
 }
 
 function CardMoreMenu(
-  props: DashboardCardProps & { title: string; open: boolean; onOpenChange: (open: boolean) => void },
+  props: DashboardCardProps & {
+    title: string;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  },
 ) {
   return (
     <div className="layout-menu-anchor ml-auto">
@@ -667,13 +681,23 @@ function CardResizeHandle(props: DashboardCardProps & { title: string; span: num
   );
 }
 
-function UndoToast({ state, dispatch }: { state: LayoutEditorState; dispatch: Dispatch<LayoutEditorAction> }) {
+function UndoToast({
+  state,
+  dispatch,
+}: {
+  state: LayoutEditorState;
+  dispatch: Dispatch<LayoutEditorAction>;
+}) {
   if (!state.removedCard) return null;
   const title = cardTitle(state.removedCard.card);
   return (
     <div className="layout-undo-toast" role="status">
       <span>已移除 {title}</span>
-      <button type="button" aria-label={`撤销删除${title}`} onClick={() => dispatch({ type: "removeUndone" })}>
+      <button
+        type="button"
+        aria-label={`撤销删除${title}`}
+        onClick={() => dispatch({ type: "removeUndone" })}
+      >
         撤销
       </button>
     </div>
@@ -820,7 +844,12 @@ function renderCard(
     return <SalesTrend points={data.trend} periodLabel={periodLabel} />;
   }
   if (card.component === "inventoryAlerts") {
-    return <LowInventoryPanel items={data.inventoryAlerts.slice(0, card.config.limit)} periodLabel={periodLabel} />;
+    return (
+      <LowInventoryPanel
+        items={data.inventoryAlerts.slice(0, card.config.limit)}
+        periodLabel={periodLabel}
+      />
+    );
   }
   return <HotProductsPanel items={data.products.slice(0, card.config.limit)} />;
 }

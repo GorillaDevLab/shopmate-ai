@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  DASHBOARD_COMPONENT_REGISTRY,
-  type DashboardLayoutComponent,
-} from "@shopmate/contracts";
+import { DASHBOARD_COMPONENT_REGISTRY, type DashboardLayoutComponent } from "@shopmate/contracts";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 type DashboardWidgetGalleryProps = {
@@ -101,7 +98,8 @@ function WidgetMark({ component }: { component: DashboardLayoutComponent }) {
     metric: "M5 15V9m5 6V5m5 10v-3",
     salesTrend: "m4 14 4-5 4 3 5-7",
     inventoryAlerts: "M5 7h10v9H5zM7 4h6v3",
-    hotProducts: "M10 3c3 3 4 5 2 7 2-1 4 1 3 4-1 3-3 4-5 4s-4-1-5-4c-1-3 1-6 3-8 0 2 1 3 2 4 1-2 1-4 0-7Z",
+    hotProducts:
+      "M10 3c3 3 4 5 2 7 2-1 4 1 3 4-1 3-3 4-5 4s-4-1-5-4c-1-3 1-6 3-8 0 2 1 3 2 4 1-2 1-4 0-7Z",
   };
   return (
     <span className="widget-gallery-mark" aria-hidden="true">
