@@ -5,6 +5,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
+vi.mock("./dashboard-layout-api", async () => {
+  const { DEFAULT_DASHBOARD_LAYOUT } = await import("@shopmate/contracts");
+  return {
+    fetchDashboardLayout: vi.fn(async () => ({
+      layout: DEFAULT_DASHBOARD_LAYOUT,
+      revision: 0,
+      updatedAt: null,
+    })),
+    saveDashboardLayout: vi.fn(),
+  };
+});
 
 import RootLayout, { metadata } from "./layout";
 import { Dashboard } from "./page";
@@ -13,16 +24,18 @@ import { dashboardResponsePreview } from "./dashboard-data";
 const readyDashboard = <Dashboard state="ready" data={dashboardResponsePreview} />;
 
 describe("中文应用基础", () => {
-  it("展示四项经营指标而非库存占位指标", () => {
+  it("展示四项经营指标而非库存占位指标", async () => {
     render(readyDashboard);
+    await screen.findByRole("region", { name: "经营看板卡片" });
     for (const name of ["近 7 天销售额", "近 7 天订单", "近 7 天销量", "近 7 天客单价"]) {
       expect(screen.getByRole("article", { name })).toBeInTheDocument();
     }
     expect(screen.getByText("¥44.34")).toBeInTheDocument();
     expect(screen.queryByText("库存健康度")).not.toBeInTheDocument();
   });
-  it("展示经营 Dashboard 的核心区域", () => {
+  it("展示经营 Dashboard 的核心区域", async () => {
     render(readyDashboard);
+    await screen.findByRole("region", { name: "经营看板卡片" });
 
     expect(screen.getByRole("heading", { name: "近 7 天经营，一眼看清" })).toBeInTheDocument();
     expect(screen.getByText("ShopMate AI")).toBeInTheDocument();
@@ -47,8 +60,9 @@ describe("中文应用基础", () => {
     expect(existsSync(resolve(process.cwd(), "src/app/icon.svg"))).toBe(true);
   });
 
-  it("明确展示 Analytics API 的统计日期", () => {
+  it("明确展示 Analytics API 的统计日期", async () => {
     render(readyDashboard);
+    await screen.findByRole("region", { name: "经营看板卡片" });
     expect(screen.getByText("数据来自 Analytics API")).toBeInTheDocument();
     expect(screen.getByText("统计截至 2026年8月31日")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /查看全部提醒/ })).not.toBeInTheDocument();
@@ -56,9 +70,9 @@ describe("中文应用基础", () => {
     expect(screen.getByText("暂无销量，无法估算")).toBeInTheDocument();
   });
 
-  it("展示真实日期与金额的响应式趋势图", () => {
+  it("展示真实日期与金额的响应式趋势图", async () => {
     render(readyDashboard);
-    expect(screen.getByRole("img", { name: "近 7 天销售趋势图" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "近 7 天销售趋势图" })).toBeInTheDocument();
   });
 });
 

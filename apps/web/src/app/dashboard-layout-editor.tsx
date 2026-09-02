@@ -1,29 +1,41 @@
 "use client";
 
-import {
-  DEFAULT_DASHBOARD_LAYOUT,
-  type AnalyticsDashboardResponse,
-  type DashboardLayoutCard,
-  type DashboardLayoutSize,
+import type {
+  AnalyticsDashboardResponse,
+  DashboardLayoutCard,
+  DashboardLayoutSize,
 } from "@shopmate/contracts";
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useReducer,
   useRef,
   useState,
   type CSSProperties,
+  type Dispatch,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  type RefObject,
+  type SetStateAction,
 } from "react";
 
-import { HotProductsPanel } from "./hot-products-panel";
-import { LowInventoryPanel } from "./low-inventory-panel";
-import { MetricCard } from "./metric-card";
-import { SalesTrend } from "./sales-trend";
+import {
+  DashboardLayoutApiError,
+  fetchDashboardLayout,
+  saveDashboardLayout,
+} from "./dashboard-layout-api";
+import {
+  createDashboardCard,
+  initialLayoutEditorState,
+  isLayoutDirty,
+  layoutEditorReducer,
+  type LayoutEditorAction,
+  type LayoutEditorMode,
+  type LayoutEditorState,
+} from "./dashboard-layout-state";
 import {
   adjacentSize,
   animateCardReflow,
@@ -35,12 +47,17 @@ import {
   spanForSize,
   type CardRectMap,
 } from "./dashboard-layout-resize";
+import { DashboardWidgetGallery } from "./dashboard-widget-gallery";
+import { HotProductsPanel } from "./hot-products-panel";
+import { LowInventoryPanel } from "./low-inventory-panel";
+import { MetricCard } from "./metric-card";
+import { SalesTrend } from "./sales-trend";
 
 const sizeOptions = [
-  { value: "1/3", label: "三分之一" },
-  { value: "1/2", label: "二分之一" },
-  { value: "2/3", label: "三分之二" },
-  { value: "full", label: "全宽" },
+  { value: "1/3", label: "小" },
+  { value: "1/2", label: "中" },
+  { value: "2/3", label: "大" },
+  { value: "full", label: "整行" },
 ] as const satisfies ReadonlyArray<{ value: DashboardLayoutSize; label: string }>;
 
 const sizeClasses: Record<DashboardLayoutSize, string> = {
@@ -73,49 +90,219 @@ type ResizeSession = {
 
 type ResizePreview = Pick<ResizeSession, "cardId" | "span">;
 
-export function DashboardLayoutEditor({ data, periodLabel, onEditingChange }: EditorProps) {
-  const [cards, setCards] = useState<DashboardLayoutCard[]>(() => [
-    ...DEFAULT_DASHBOARD_LAYOUT.cards,
-  ]);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
+export function DashboardLayoutEditor(props: EditorProps) {
+  const persistence = useLayoutPersistence(props.onEditingChange);
+  if (persistence.state.loadStatus !== "ready") {
+    return <LayoutLoadState state={persistence.state} onRetry={persistence.reload} />;
+  }
+  return <ReadyLayoutEditor {...props} persistence={persistence} />;
+}
+
+type Persistence = ReturnType<typeof useLayoutPersistence>;
+
+function ReadyLayoutEditor({
+  data,
+  periodLabel,
+  persistence,
+}: EditorProps & { persistence: Persistence }) {
+  const { state, dispatch } = persistence;
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+  const gridRef = useRef<HTMLElement>(null);
+  const interactions = useCardInteractions(state, dispatch, gridRef);
+  const isDirty = isLayoutDirty(state);
+  const isEditing = state.mode === "edit";
+
+  useEditorFocus(state.mode);
+  useDashboardEditorShortcut(() => toggleEditorMode(state.mode, dispatch));
+  useUndoExpiry(state, dispatch);
+  const announce = interactions.announce;
+  useEffect(() => {
+    announce(state.mode === "edit" ? "已进入看板编辑模式" : "已退出看板编辑模式");
+  }, [announce, state.mode]);
+
+  return (
+    <>
+      <EditorHeader
+        state={state}
+        isDirty={isDirty}
+        layoutMenuOpen={layoutMenuOpen}
+        onLayoutMenuChange={setLayoutMenuOpen}
+        onAdd={() => setGalleryOpen(true)}
+        onModeChange={(mode) => dispatch({ type: "modeChanged", mode })}
+        onSave={persistence.save}
+        onDiscard={() => discardChanges(state, dispatch)}
+        onRestore={() => restoreDefaults(dispatch)}
+      />
+      <LayoutMessage state={state} onRetrySave={persistence.save} onReload={persistence.reload} />
+      <DashboardGrid
+        data={data}
+        periodLabel={periodLabel}
+        state={state}
+        gridRef={gridRef}
+        interactions={interactions}
+      />
+      <DashboardWidgetGallery
+        open={galleryOpen}
+        cardCount={state.draft.cards.length}
+        onClose={() => setGalleryOpen(false)}
+        onAdd={(component) => {
+          dispatch({
+            type: "cardAdded",
+            card: createDashboardCard(component, state.draft.cards),
+          });
+          setGalleryOpen(false);
+          interactions.announce("组件已添加到看板末尾");
+        }}
+      />
+      <UndoToast state={state} dispatch={dispatch} />
+      <p className="sr-only" role="status" aria-label="布局编辑反馈" aria-live="polite">
+        {interactions.announcement}
+      </p>
+      {isEditing && <span className="sr-only">当前处于编辑模式</span>}
+    </>
+  );
+}
+
+function DashboardGrid({
+  data,
+  periodLabel,
+  state,
+  gridRef,
+  interactions,
+}: {
+  data: AnalyticsDashboardResponse;
+  periodLabel: string;
+  state: LayoutEditorState;
+  gridRef: MutableRefObject<HTMLElement | null>;
+  interactions: ReturnType<typeof useCardInteractions>;
+}) {
+  const isEditing = state.mode === "edit";
+  return (
+    <section
+      ref={gridRef}
+      id="dashboard-layout-grid"
+      aria-label="经营看板卡片"
+      className="dashboard-layout-grid grid grid-flow-dense grid-cols-1 items-start gap-4 md:grid-cols-12"
+    >
+      {state.draft.cards.map((card, index) => (
+        <DashboardCard
+          key={card.id}
+          card={card}
+          index={index}
+          count={state.draft.cards.length}
+          isEditing={isEditing}
+          isDragging={interactions.draggedId === card.id}
+          isResizing={interactions.resizePreview?.cardId === card.id}
+          previewSpan={
+            interactions.resizePreview?.cardId === card.id
+              ? interactions.resizePreview.span
+              : undefined
+          }
+          interactions={interactions}
+        >
+          {renderCard(card, data, periodLabel)}
+        </DashboardCard>
+      ))}
+    </section>
+  );
+}
+
+function useLayoutPersistence(onEditingChange?: (isEditing: boolean) => void) {
+  const [state, dispatch] = useReducer(layoutEditorReducer, initialLayoutEditorState);
+  const controllerRef = useRef<AbortController | undefined>(undefined);
+
+  const reload = useCallback(() => {
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    dispatch({ type: "loadStarted" });
+    void fetchDashboardLayout(controller.signal).then(
+      (response) => dispatch({ type: "loaded", response }),
+      (error: unknown) => handleLoadFailure(error, dispatch),
+    );
+  }, []);
+
+  useEffect(() => {
+    reload();
+    return () => controllerRef.current?.abort();
+  }, [reload]);
+  useEffect(() => onEditingChange?.(state.mode !== "view"), [onEditingChange, state.mode]);
+  useUnsavedChangesWarning(isLayoutDirty(state));
+
+  const save = useCallback(async () => {
+    if (state.saveStatus === "saving") return;
+    if (!isLayoutDirty(state)) {
+      dispatch({ type: "modeChanged", mode: "view" });
+      return;
+    }
+    dispatch({ type: "saveStarted" });
+    await persistDraft(state, dispatch);
+  }, [state]);
+
+  return { state, dispatch, reload, save };
+}
+
+async function persistDraft(state: LayoutEditorState, dispatch: Dispatch<LayoutEditorAction>) {
+  try {
+    const response = await saveDashboardLayout({
+      layout: state.draft,
+      expectedRevision: state.revision,
+    });
+    dispatch({ type: "saved", response });
+  } catch (error: unknown) {
+    const conflict = error instanceof DashboardLayoutApiError && error.status === 409;
+    dispatch({
+      type: "saveFailed",
+      kind: conflict ? "conflict" : "error",
+      message: error instanceof Error ? error.message : "保存失败，请重试",
+    });
+  }
+}
+
+function handleLoadFailure(error: unknown, dispatch: Dispatch<LayoutEditorAction>) {
+  if (error instanceof DOMException && error.name === "AbortError") return;
+  dispatch({
+    type: "loadFailed",
+    message: error instanceof Error ? error.message : "布局加载失败，请重试",
+  });
+}
+
+function useUnsavedChangesWarning(isDirty: boolean) {
+  useEffect(() => {
+    if (!isDirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isDirty]);
+}
+
+function useCardInteractions(
+  state: LayoutEditorState,
+  dispatch: Dispatch<LayoutEditorAction>,
+  gridRef: MutableRefObject<HTMLElement | null>,
+) {
   const [draggedId, setDraggedId] = useState<string>();
   const [resizePreview, setResizePreview] = useState<ResizePreview>();
   const [announcement, setAnnouncement] = useState("");
-  const gridRef = useRef<HTMLElement>(null);
-  const editToggleRef = useRef<HTMLButtonElement>(null);
-  const editModeRef = useRef(false);
   const resizeSessionRef = useRef<ResizeSession | undefined>(undefined);
   const pendingRectsRef = useRef<CardRectMap | undefined>(undefined);
-
-  const toggleEditing = useCallback(() => {
-    const next = !editModeRef.current;
-    editModeRef.current = next;
-    if (!next) {
-      resizeSessionRef.current = undefined;
-      setResizePreview(undefined);
-    }
-    setIsEditing(next);
-    onEditingChange?.(next);
-    setAnnouncement(next ? "已进入看板编辑模式" : "已退出看板编辑模式");
-  }, [onEditingChange]);
-  useDashboardEditorShortcut(toggleEditing);
-
-  useEffect(() => {
-    if (announcement.includes("看板编辑模式")) editToggleRef.current?.focus();
-  }, [announcement]);
 
   useLayoutEffect(() => {
     const before = pendingRectsRef.current;
     pendingRectsRef.current = undefined;
     if (before) animateCardReflow(gridRef.current, before);
-  }, [cards, resizePreview]);
+  }, [gridRef, state.draft.cards, resizePreview]);
 
-  const prepareReflow = (animate: boolean) => {
+  const changeCards = (cards: DashboardLayoutCard[], animate = false) => {
     pendingRectsRef.current = animate ? captureCardRects(gridRef.current) : undefined;
+    dispatch({ type: "cardsChanged", cards });
   };
-
   const moveCard = (cardId: string, targetIndex: number, animate = false) => {
+    const cards = state.draft.cards;
     const currentIndex = cards.findIndex((card) => card.id === cardId);
     if (
       currentIndex < 0 ||
@@ -124,159 +311,202 @@ export function DashboardLayoutEditor({ data, periodLabel, onEditingChange }: Ed
       targetIndex >= cards.length
     )
       return;
-    const title = cardTitle(cards[currentIndex]);
-    prepareReflow(animate);
-    setCards(reorderCards(cards, currentIndex, targetIndex));
-    setIsDirty(true);
-    setAnnouncement(`${title}已移至第 ${targetIndex + 1} 位`);
+    changeCards(reorderCards(cards, currentIndex, targetIndex), animate);
+    setAnnouncement(`${cardTitle(cards[currentIndex])}已移至第 ${targetIndex + 1} 位`);
   };
-
   const resizeCard = (cardId: string, size: DashboardLayoutSize) => {
-    const card = cards.find((candidate) => candidate.id === cardId);
+    const card = state.draft.cards.find((candidate) => candidate.id === cardId);
     if (!card || card.size === size) return;
-    setCards((current) => current.map((item) => (item.id === cardId ? { ...item, size } : item)));
-    setIsDirty(true);
+    changeCards(state.draft.cards.map((item) => (item.id === cardId ? { ...item, size } : item)));
     setAnnouncement(`${cardTitle(card)}宽度已调整为${sizeLabel(size)}`);
   };
-
-  const startResize = (event: ReactPointerEvent<HTMLElement>, card: DashboardLayoutCard) => {
-    if (event.button > 0 || resizeSessionRef.current) return;
-    const span = spanForSize(card.size);
-    resizeSessionRef.current = {
-      cardId: card.id,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startSpan: span,
-      span,
-    };
-    setResizePreview({ cardId: card.id, span });
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+  const removeCard = (card: DashboardLayoutCard) => {
+    pendingRectsRef.current = captureCardRects(gridRef.current);
+    dispatch({ type: "cardRemoved", cardId: card.id });
+    setAnnouncement(`${cardTitle(card)}已移除`);
   };
-
-  const updateResize = (event: ReactPointerEvent<HTMLElement>) => {
-    const session = resizeSessionRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
-    const width = gridRef.current?.getBoundingClientRect().width ?? 0;
-    const span = previewSpan(session.startSpan, session.startX, event.clientX, width);
-    if (span === session.span) return;
-    prepareReflow(true);
-    session.span = span;
-    setResizePreview({ cardId: session.cardId, span });
+  return {
+    draggedId,
+    setDraggedId,
+    resizePreview,
+    setResizePreview,
+    announcement,
+    changeCards,
+    moveCard,
+    resizeCard,
+    removeCard,
+    startResize: (event: ReactPointerEvent<HTMLElement>, card: DashboardLayoutCard) =>
+      startResize(event, card, resizeSessionRef, setResizePreview),
+    updateResize: (event: ReactPointerEvent<HTMLElement>) =>
+      updateResize(event, gridRef, resizeSessionRef, pendingRectsRef, setResizePreview),
+    finishResize: (event: ReactPointerEvent<HTMLElement>) =>
+      finishResize(event, gridRef, resizeSessionRef, pendingRectsRef, setResizePreview, resizeCard),
+    cancelResize: () => cancelResize(resizeSessionRef, pendingRectsRef, setResizePreview),
+    announce: setAnnouncement,
   };
+}
 
-  const finishResize = (event: ReactPointerEvent<HTMLElement>) => {
-    const session = resizeSessionRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
-    prepareReflow(true);
-    resizeSessionRef.current = undefined;
-    setResizePreview(undefined);
-    resizeCard(session.cardId, sizeForSpan(session.span));
-  };
-
-  const cancelResize = () => {
-    resizeSessionRef.current = undefined;
-    pendingRectsRef.current = undefined;
-    setResizePreview(undefined);
-  };
-
-  const resizeWithKeyboard = (
-    event: ReactKeyboardEvent<HTMLElement>,
-    card: DashboardLayoutCard,
-  ) => {
-    if (event.key === "Escape") {
-      cancelResize();
-      return;
-    }
-    const nextSize = keyboardResizeTarget(event.key, card.size);
-    if (!nextSize) return;
-    event.preventDefault();
-    resizeCard(card.id, nextSize);
-  };
-
+function EditorHeader(props: {
+  state: LayoutEditorState;
+  isDirty: boolean;
+  layoutMenuOpen: boolean;
+  onLayoutMenuChange: (open: boolean) => void;
+  onAdd: () => void;
+  onModeChange: (mode: LayoutEditorMode) => void;
+  onSave: () => void;
+  onDiscard: () => void;
+  onRestore: () => void;
+}) {
+  if (props.state.mode === "edit") return <EditToolbar {...props} />;
+  if (props.state.mode === "preview") return <PreviewToolbar {...props} />;
   return (
-    <>
-      <EditorHeader
-        toggleRef={editToggleRef}
-        isEditing={isEditing}
-        isDirty={isDirty}
-        onToggle={toggleEditing}
-      />
-      <section
-        ref={gridRef}
-        id="dashboard-layout-grid"
-        aria-label="经营看板卡片"
-        className="dashboard-layout-grid grid grid-flow-dense grid-cols-1 items-start gap-4 md:grid-cols-12"
+    <div className="layout-view-actions">
+      <SaveStatus state={props.state} isDirty={props.isDirty} />
+      <button
+        data-layout-edit-button
+        type="button"
+        className="layout-edit-button"
+        aria-pressed="false"
+        aria-controls="dashboard-layout-grid"
+        onClick={() => props.onModeChange("edit")}
       >
-        {cards.map((card, index) => (
-          <DashboardCard
-            key={card.id}
-            card={card}
-            index={index}
-            count={cards.length}
-            isEditing={isEditing}
-            isDragging={draggedId === card.id}
-            isResizing={resizePreview?.cardId === card.id}
-            previewSpan={resizePreview?.cardId === card.id ? resizePreview.span : undefined}
-            onMove={(offset, animate) => moveCard(card.id, index + offset, animate)}
-            onDragStart={(event) => startDragging(event, card.id, setDraggedId)}
-            onDragEnter={() => {
-              if (draggedId && draggedId !== card.id) moveCard(draggedId, index, true);
-            }}
-            onDrop={() => setDraggedId(undefined)}
-            onDragEnd={() => setDraggedId(undefined)}
-            onResizeStart={(event) => startResize(event, card)}
-            onResizeMove={updateResize}
-            onResizeEnd={finishResize}
-            onResizeCancel={cancelResize}
-            onResizeKeyDown={(event) => resizeWithKeyboard(event, card)}
-          >
-            {renderCard(card, data, periodLabel)}
-          </DashboardCard>
-        ))}
-      </section>
-      <p className="sr-only" role="status" aria-label="布局编辑反馈" aria-live="polite">
-        {announcement}
-      </p>
-    </>
+        编辑看板 <kbd aria-hidden="true">Ctrl/Cmd K</kbd>
+      </button>
+    </div>
   );
 }
 
-function EditorHeader({
-  toggleRef,
-  isEditing,
-  isDirty,
-  onToggle,
-}: {
-  toggleRef: RefObject<HTMLButtonElement | null>;
-  isEditing: boolean;
-  isDirty: boolean;
-  onToggle: () => void;
-}) {
+function EditToolbar(props: Parameters<typeof EditorHeader>[0]) {
   return (
-    <div
-      role={isEditing ? "toolbar" : undefined}
-      aria-label={isEditing ? "看板布局编辑工具" : undefined}
-      className="mb-3 flex min-h-11 flex-wrap items-center justify-end gap-2"
-    >
-      {isDirty && (
-        <span className="rounded-full bg-warning-soft px-3 py-1.5 text-xs font-semibold text-warning">
-          草稿未保存
-        </span>
-      )}
-      {isEditing && <span className="text-xs text-app-muted">拖动排序 · 拉动右下角调整尺寸</span>}
-      <button
-        ref={toggleRef}
-        type="button"
-        className="layout-edit-button"
-        aria-pressed={isEditing}
-        aria-expanded={isEditing}
-        aria-controls="dashboard-layout-grid"
-        onClick={onToggle}
-      >
-        {isEditing ? "退出编辑" : "编辑看板"}
-        {!isEditing && <kbd aria-hidden="true">Ctrl/Cmd K</kbd>}
+    <div role="toolbar" aria-label="看板布局编辑工具" className="layout-editor-toolbar">
+      <SaveStatus state={props.state} isDirty={props.isDirty} />
+      <button type="button" onClick={props.onAdd}>
+        添加组件
       </button>
+      <button type="button" onClick={() => props.onModeChange("preview")}>
+        预览
+      </button>
+      <LayoutMoreMenu {...props} />
+      <button
+        data-layout-save-button
+        type="button"
+        className="layout-save-button"
+        disabled={props.state.saveStatus === "saving"}
+        onClick={props.onSave}
+      >
+        {props.state.saveStatus === "saving" ? "正在保存…" : "完成并保存"}
+      </button>
+    </div>
+  );
+}
+
+function PreviewToolbar(props: Parameters<typeof EditorHeader>[0]) {
+  return (
+    <div role="toolbar" aria-label="看板预览工具" className="layout-editor-toolbar">
+      <span className="layout-preview-label">预览草稿</span>
+      <button type="button" onClick={() => props.onModeChange("edit")}>
+        返回编辑
+      </button>
+      <button type="button" className="layout-save-button" onClick={props.onSave}>
+        完成并保存
+      </button>
+    </div>
+  );
+}
+
+function LayoutMoreMenu(props: Parameters<typeof EditorHeader>[0]) {
+  return (
+    <div className="layout-menu-anchor">
+      <button
+        type="button"
+        aria-label="更多布局操作"
+        aria-haspopup="menu"
+        aria-expanded={props.layoutMenuOpen}
+        onClick={() => props.onLayoutMenuChange(!props.layoutMenuOpen)}
+      >
+        <span aria-hidden="true">•••</span>
+      </button>
+      {props.layoutMenuOpen && (
+        <div role="menu" aria-label="更多布局操作" className="layout-card-more-menu">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              props.onLayoutMenuChange(false);
+              props.onDiscard();
+            }}
+          >
+            放弃修改
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="is-danger"
+            onClick={() => {
+              props.onLayoutMenuChange(false);
+              props.onRestore();
+            }}
+          >
+            恢复默认
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SaveStatus({ state, isDirty }: { state: LayoutEditorState; isDirty: boolean }) {
+  const copy = state.saveStatus === "saved" ? "已保存" : isDirty ? "草稿未保存" : "布局已同步";
+  return (
+    <span className="layout-save-status" role="status" aria-label="布局保存状态">
+      {copy}
+    </span>
+  );
+}
+
+function LayoutMessage({
+  state,
+  onRetrySave,
+  onReload,
+}: {
+  state: LayoutEditorState;
+  onRetrySave: () => void;
+  onReload: () => void;
+}) {
+  if (state.saveStatus !== "error" && state.saveStatus !== "conflict") return null;
+  return (
+    <div className="layout-error-banner" role="alert">
+      <span>{state.message}</span>
+      <button type="button" onClick={onRetrySave}>
+        重试保存
+      </button>
+      {state.saveStatus === "conflict" && (
+        <button type="button" onClick={() => reloadAfterConfirmation(onReload)}>
+          重新加载服务器版本
+        </button>
+      )}
+    </div>
+  );
+}
+
+function LayoutLoadState({ state, onRetry }: { state: LayoutEditorState; onRetry: () => void }) {
+  if (state.loadStatus === "loading") {
+    return (
+      <div className="layout-loading" role="status">
+        正在恢复你的看板布局…
+      </div>
+    );
+  }
+  return (
+    <div className="dashboard-panel layout-load-error" role="alert">
+      <strong>布局暂时无法加载</strong>
+      <p>{state.message}</p>
+      <div>
+        <button type="button" onClick={onRetry}>
+          重新加载布局
+        </button>
+        {state.message?.includes("登录") && <a href="/login">重新登录</a>}
+      </div>
     </div>
   );
 }
@@ -289,24 +519,15 @@ type DashboardCardProps = {
   isDragging: boolean;
   isResizing: boolean;
   previewSpan?: number;
-  onMove: (offset: number, animate: boolean) => void;
-  onDragStart: (event: DragEvent<HTMLSpanElement>) => void;
-  onDragEnter: () => void;
-  onDrop: () => void;
-  onDragEnd: () => void;
-  onResizeStart: (event: ReactPointerEvent<HTMLElement>) => void;
-  onResizeMove: (event: ReactPointerEvent<HTMLElement>) => void;
-  onResizeEnd: (event: ReactPointerEvent<HTMLElement>) => void;
-  onResizeCancel: () => void;
-  onResizeKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void;
+  interactions: ReturnType<typeof useCardInteractions>;
   children: ReactNode;
 };
 
 function DashboardCard(props: DashboardCardProps) {
-  const { card, index, count, isEditing, isDragging, isResizing, previewSpan, children } = props;
+  const { card, isEditing, isDragging, isResizing, previewSpan, children } = props;
   const title = cardTitle(card);
   const currentSpan = previewSpan ?? spanForSize(card.size);
-  const previewStyle =
+  const style =
     previewSpan === undefined
       ? undefined
       : ({ "--dashboard-card-span": previewSpan } as CSSProperties);
@@ -315,59 +536,24 @@ function DashboardCard(props: DashboardCardProps) {
       data-dashboard-card-id={card.id}
       data-size={card.size}
       data-preview-span={previewSpan}
-      style={previewStyle}
+      style={style}
       className={`dashboard-layout-card min-w-0 ${sizeClasses[card.size]} ${isEditing ? "is-editing" : ""} ${isDragging ? "is-dragging" : ""} ${isResizing ? "is-resizing has-size-preview" : ""}`}
-      onDragOver={(event) => {
-        if (isEditing) event.preventDefault();
-      }}
-      onDragEnter={() => {
-        if (isEditing) props.onDragEnter();
-      }}
+      onDragOver={(event) => isEditing && event.preventDefault()}
+      onDragEnter={() => handleDragEnter(props)}
       onDrop={(event) => {
         event.preventDefault();
-        props.onDrop();
+        props.interactions.setDraggedId(undefined);
       }}
     >
-      {isEditing && (
-        <CardControls
-          title={title}
-          size={card.size}
-          span={currentSpan}
-          first={index === 0}
-          last={index === count - 1}
-          onMove={props.onMove}
-          onDragStart={props.onDragStart}
-          onDragEnd={props.onDragEnd}
-        />
-      )}
+      {isEditing && <CardControls {...props} title={title} span={currentSpan} />}
       {children}
-      {isEditing && (
-        <ResizeHandle
-          title={title}
-          span={currentSpan}
-          onPointerDown={props.onResizeStart}
-          onPointerMove={props.onResizeMove}
-          onPointerUp={props.onResizeEnd}
-          onPointerCancel={props.onResizeCancel}
-          onKeyDown={props.onResizeKeyDown}
-        />
-      )}
+      {isEditing && <CardResizeHandle {...props} title={title} span={currentSpan} />}
     </div>
   );
 }
 
-type CardControlsProps = {
-  title: string;
-  size: DashboardLayoutSize;
-  span: number;
-  first: boolean;
-  last: boolean;
-  onMove: (offset: number, animate: boolean) => void;
-  onDragStart: (event: DragEvent<HTMLSpanElement>) => void;
-  onDragEnd: () => void;
-};
-
-function CardControls(props: CardControlsProps) {
+function CardControls(props: DashboardCardProps & { title: string; span: number }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className="dashboard-card-controls" aria-label={`${props.title}布局设置`}>
       <span
@@ -376,63 +562,269 @@ function CardControls(props: CardControlsProps) {
         title={`拖动${props.title}`}
         draggable
         className="dashboard-drag-handle"
-        onDragStart={props.onDragStart}
-        onDragEnd={props.onDragEnd}
+        onDragStart={(event) =>
+          startDragging(event, props.card.id, props.interactions.setDraggedId)
+        }
+        onDragEnd={() => props.interactions.setDraggedId(undefined)}
       >
         ⠿
       </span>
+      <MoveButtons {...props} />
+      <span className="dashboard-size-readout" aria-hidden="true">
+        {sizeReadout(props.card.size, props.span)}
+      </span>
+      <CardMoreMenu {...props} open={menuOpen} onOpenChange={setMenuOpen} />
+    </div>
+  );
+}
+
+function MoveButtons(props: DashboardCardProps & { title: string }) {
+  return (
+    <>
       <button
         type="button"
         aria-label={`${props.title}上移`}
-        disabled={props.first}
-        onClick={(event) => props.onMove(-1, event.detail > 0)}
+        disabled={props.index === 0}
+        onClick={(event) =>
+          props.interactions.moveCard(props.card.id, props.index - 1, event.detail > 0)
+        }
       >
         ↑
       </button>
       <button
         type="button"
         aria-label={`${props.title}下移`}
-        disabled={props.last}
-        onClick={(event) => props.onMove(1, event.detail > 0)}
+        disabled={props.index === props.count - 1}
+        onClick={(event) =>
+          props.interactions.moveCard(props.card.id, props.index + 1, event.detail > 0)
+        }
       >
         ↓
       </button>
-      <span className="dashboard-size-readout" aria-hidden="true">
-        {sizeReadout(props.size, props.span)}
-      </span>
+    </>
+  );
+}
+
+function CardMoreMenu(
+  props: DashboardCardProps & {
+    title: string;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  },
+) {
+  return (
+    <div className="layout-menu-anchor ml-auto">
+      <button
+        type="button"
+        aria-label={`${props.title}更多操作`}
+        aria-haspopup="menu"
+        aria-expanded={props.open}
+        onClick={() => props.onOpenChange(!props.open)}
+      >
+        <span aria-hidden="true">•••</span>
+      </button>
+      {props.open && (
+        <div role="menu" aria-label={`${props.title}更多操作`} className="layout-card-more-menu">
+          <p>调整大小</p>
+          {sizeOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={props.card.size === option.value}
+              onClick={() => {
+                props.interactions.resizeCard(props.card.id, option.value);
+                props.onOpenChange(false);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            role="menuitem"
+            className="is-danger"
+            onClick={() => {
+              props.interactions.removeCard(props.card);
+              props.onOpenChange(false);
+            }}
+            data-remove-card-id={props.card.id}
+          >
+            删除
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function ResizeHandle({
-  title,
-  span,
-  ...events
-}: {
-  title: string;
-  span: number;
-  onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
-  onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
-  onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
-  onPointerCancel: () => void;
-  onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void;
-}) {
+function CardResizeHandle(props: DashboardCardProps & { title: string; span: number }) {
   return (
     <span
       role="slider"
       tabIndex={0}
-      aria-label={`调整${title}卡片宽度`}
+      aria-label={`调整${props.title}卡片宽度`}
       aria-valuemin={MINIMUM_CARD_SPAN}
       aria-valuemax={DASHBOARD_COLUMN_COUNT}
-      aria-valuenow={span}
-      aria-valuetext={sizeLabel(sizeForSpan(span))}
+      aria-valuenow={props.span}
+      aria-valuetext={sizeLabel(sizeForSpan(props.span))}
       className="dashboard-resize-handle"
-      title={`拖动调整${title}宽度`}
-      {...events}
+      title={`拖动调整${props.title}宽度`}
+      onPointerDown={(event) => props.interactions.startResize(event, props.card)}
+      onPointerMove={props.interactions.updateResize}
+      onPointerUp={props.interactions.finishResize}
+      onPointerCancel={props.interactions.cancelResize}
+      onKeyDown={(event) => resizeWithKeyboard(event, props.card, props.interactions)}
     >
       <span aria-hidden="true" />
     </span>
   );
+}
+
+function UndoToast({
+  state,
+  dispatch,
+}: {
+  state: LayoutEditorState;
+  dispatch: Dispatch<LayoutEditorAction>;
+}) {
+  if (!state.removedCard) return null;
+  const title = cardTitle(state.removedCard.card);
+  return (
+    <div className="layout-undo-toast" role="status">
+      <span>已移除 {title}</span>
+      <button
+        type="button"
+        aria-label={`撤销删除${title}`}
+        onClick={() => dispatch({ type: "removeUndone" })}
+      >
+        撤销
+      </button>
+    </div>
+  );
+}
+
+function useUndoExpiry(state: LayoutEditorState, dispatch: Dispatch<LayoutEditorAction>) {
+  useEffect(() => {
+    if (!state.removedCard) return;
+    const timer = window.setTimeout(() => dispatch({ type: "removeExpired" }), 4_000);
+    return () => window.clearTimeout(timer);
+  }, [dispatch, state.removedCard]);
+}
+
+function useEditorFocus(mode: LayoutEditorMode) {
+  const previousModeRef = useRef(mode);
+
+  useEffect(() => {
+    const selector = mode === "edit" ? "[data-layout-save-button]" : "[data-layout-edit-button]";
+    if (mode === "edit" || previousModeRef.current !== "view") {
+      document.querySelector<HTMLButtonElement>(selector)?.focus();
+    }
+    previousModeRef.current = mode;
+  }, [mode]);
+}
+
+function toggleEditorMode(mode: LayoutEditorMode, dispatch: Dispatch<LayoutEditorAction>) {
+  dispatch({ type: "modeChanged", mode: mode === "view" ? "edit" : "view" });
+}
+
+function discardChanges(state: LayoutEditorState, dispatch: Dispatch<LayoutEditorAction>) {
+  if (!isLayoutDirty(state) || window.confirm("放弃所有未保存的布局修改？")) {
+    dispatch({ type: "discarded" });
+  }
+}
+
+function restoreDefaults(dispatch: Dispatch<LayoutEditorAction>) {
+  if (window.confirm("将当前草稿恢复为默认布局？此操作仍需保存。")) {
+    dispatch({ type: "defaultsRestored" });
+  }
+}
+
+function reloadAfterConfirmation(onReload: () => void) {
+  if (window.confirm("重新加载会放弃当前草稿，是否继续？")) onReload();
+}
+
+function handleDragEnter(props: DashboardCardProps) {
+  if (!props.isEditing) return;
+  const draggedId = props.interactions.draggedId;
+  if (draggedId && draggedId !== props.card.id) {
+    props.interactions.moveCard(draggedId, props.index, true);
+  }
+}
+
+function startResize(
+  event: ReactPointerEvent<HTMLElement>,
+  card: DashboardLayoutCard,
+  sessionRef: MutableRefObject<ResizeSession | undefined>,
+  setPreview: Dispatch<SetStateAction<ResizePreview | undefined>>,
+) {
+  if (event.button > 0 || sessionRef.current) return;
+  const span = spanForSize(card.size);
+  sessionRef.current = {
+    cardId: card.id,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startSpan: span,
+    span,
+  };
+  setPreview({ cardId: card.id, span });
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+}
+
+function updateResize(
+  event: ReactPointerEvent<HTMLElement>,
+  gridRef: MutableRefObject<HTMLElement | null>,
+  sessionRef: MutableRefObject<ResizeSession | undefined>,
+  pendingRectsRef: MutableRefObject<CardRectMap | undefined>,
+  setPreview: Dispatch<SetStateAction<ResizePreview | undefined>>,
+) {
+  const session = sessionRef.current;
+  if (!session || session.pointerId !== event.pointerId) return;
+  const width = gridRef.current?.getBoundingClientRect().width ?? 0;
+  const span = previewSpan(session.startSpan, session.startX, event.clientX, width);
+  if (span === session.span) return;
+  pendingRectsRef.current = captureCardRects(gridRef.current);
+  session.span = span;
+  setPreview({ cardId: session.cardId, span });
+}
+
+function finishResize(
+  event: ReactPointerEvent<HTMLElement>,
+  gridRef: MutableRefObject<HTMLElement | null>,
+  sessionRef: MutableRefObject<ResizeSession | undefined>,
+  pendingRectsRef: MutableRefObject<CardRectMap | undefined>,
+  setPreview: Dispatch<SetStateAction<ResizePreview | undefined>>,
+  resizeCard: (cardId: string, size: DashboardLayoutSize) => void,
+) {
+  const session = sessionRef.current;
+  if (!session || session.pointerId !== event.pointerId) return;
+  event.currentTarget.releasePointerCapture?.(event.pointerId);
+  pendingRectsRef.current = captureCardRects(gridRef.current);
+  sessionRef.current = undefined;
+  setPreview(undefined);
+  resizeCard(session.cardId, sizeForSpan(session.span));
+}
+
+function cancelResize(
+  sessionRef: MutableRefObject<ResizeSession | undefined>,
+  pendingRectsRef: MutableRefObject<CardRectMap | undefined>,
+  setPreview: Dispatch<SetStateAction<ResizePreview | undefined>>,
+) {
+  sessionRef.current = undefined;
+  pendingRectsRef.current = undefined;
+  setPreview(undefined);
+}
+
+function resizeWithKeyboard(
+  event: ReactKeyboardEvent<HTMLElement>,
+  card: DashboardLayoutCard,
+  interactions: ReturnType<typeof useCardInteractions>,
+) {
+  if (event.key === "Escape") return interactions.cancelResize();
+  const nextSize = keyboardResizeTarget(event.key, card.size);
+  if (!nextSize) return;
+  event.preventDefault();
+  interactions.resizeCard(card.id, nextSize);
 }
 
 function renderCard(
@@ -440,51 +832,48 @@ function renderCard(
   data: AnalyticsDashboardResponse,
   periodLabel: string,
 ): ReactNode {
-  switch (card.component) {
-    case "metric":
-      return (
-        <MetricCard
-          metric={
-            data.metrics.find((metric) => metric.key === card.config.metric) ?? {
-              key: card.config.metric,
-              value: null,
-              changeRatio: null,
-            }
-          }
-          periodLabel={periodLabel}
-        />
-      );
-    case "salesTrend":
-      return <SalesTrend points={data.trend} periodLabel={periodLabel} />;
-    case "inventoryAlerts":
-      return (
-        <LowInventoryPanel
-          items={data.inventoryAlerts.slice(0, card.config.limit)}
-          periodLabel={periodLabel}
-        />
-      );
-    case "hotProducts":
-      return <HotProductsPanel items={data.products.slice(0, card.config.limit)} />;
+  if (card.component === "metric") {
+    const metric = data.metrics.find((candidate) => candidate.key === card.config.metric) ?? {
+      key: card.config.metric,
+      value: null,
+      changeRatio: null,
+    };
+    return <MetricCard metric={metric} periodLabel={periodLabel} />;
   }
+  if (card.component === "salesTrend") {
+    return <SalesTrend points={data.trend} periodLabel={periodLabel} />;
+  }
+  if (card.component === "inventoryAlerts") {
+    return (
+      <LowInventoryPanel
+        items={data.inventoryAlerts.slice(0, card.config.limit)}
+        periodLabel={periodLabel}
+      />
+    );
+  }
+  return <HotProductsPanel items={data.products.slice(0, card.config.limit)} />;
 }
 
 function useDashboardEditorShortcut(onToggle: () => void) {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.repeat ||
-        isEditableTarget(event.target) ||
-        document.querySelector("dialog[open]") ||
-        event.key.toLowerCase() !== "k" ||
-        (!event.ctrlKey && !event.metaKey)
-      )
-        return;
+      if (shouldIgnoreShortcut(event)) return;
       event.preventDefault();
       onToggle();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onToggle]);
+}
+
+function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
+  return (
+    event.repeat ||
+    isEditableTarget(event.target) ||
+    Boolean(document.querySelector("dialog[open]")) ||
+    event.key.toLowerCase() !== "k" ||
+    (!event.ctrlKey && !event.metaKey)
+  );
 }
 
 function startDragging(
@@ -505,28 +894,22 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 function reorderCards(
-  cards: DashboardLayoutCard[],
+  cards: readonly DashboardLayoutCard[],
   sourceIndex: number,
   targetIndex: number,
 ): DashboardLayoutCard[] {
   const next = [...cards];
   const [moved] = next.splice(sourceIndex, 1);
-  if (!moved) return cards;
+  if (!moved) return [...cards];
   next.splice(targetIndex, 0, moved);
   return next;
 }
 
 function cardTitle(card: DashboardLayoutCard): string {
-  switch (card.component) {
-    case "metric":
-      return metricLabels[card.config.metric];
-    case "salesTrend":
-      return "销售趋势";
-    case "inventoryAlerts":
-      return "库存提醒";
-    case "hotProducts":
-      return "热销商品";
-  }
+  if (card.component === "metric") return metricLabels[card.config.metric];
+  if (card.component === "salesTrend") return "销售趋势";
+  if (card.component === "inventoryAlerts") return "库存提醒";
+  return "热销商品";
 }
 
 function sizeLabel(size: DashboardLayoutSize): string {

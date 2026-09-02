@@ -10,6 +10,17 @@ vi.mock("./dashboard-api", () => ({
   fetchDashboard: api.fetchDashboard,
   isAbortError: (error: unknown) => error instanceof DOMException && error.name === "AbortError",
 }));
+vi.mock("./dashboard-layout-api", async () => {
+  const { DEFAULT_DASHBOARD_LAYOUT } = await import("@shopmate/contracts");
+  return {
+    fetchDashboardLayout: vi.fn(async () => ({
+      layout: DEFAULT_DASHBOARD_LAYOUT,
+      revision: 0,
+      updatedAt: null,
+    })),
+    saveDashboardLayout: vi.fn(),
+  };
+});
 
 import { DashboardClient } from "./dashboard-client";
 
@@ -24,7 +35,7 @@ beforeAll(() => {
 });
 
 describe("DashboardClient", () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => vi.clearAllMocks());
 
   it("切换外观不重新请求、不重置时段或改变金额", async () => {
     api.fetchDashboard.mockResolvedValue(dashboardResponsePreview);
@@ -33,7 +44,7 @@ describe("DashboardClient", () => {
     fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
     await screen.findByText("数据来自 Analytics API");
     const calls = api.fetchDashboard.mock.calls.length;
-    const card = screen.getByRole("article", { name: "近 30 天销售额" });
+    const card = await screen.findByRole("article", { name: "近 30 天销售额" });
     const amount = card.textContent;
     fireEvent.click(screen.getByRole("button", { name: "外观设置" }));
     fireEvent.click(screen.getByRole("radio", { name: "经典紫色" }));
@@ -84,6 +95,7 @@ describe("DashboardClient", () => {
       .mockReturnValueOnce(pending.promise);
     render(<DashboardClient asOfDate="2026-08-31" />);
     await screen.findByText("数据来自 Analytics API");
+    await screen.findByRole("article", { name: "近 7 天销售额" });
     fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
     expect(screen.getAllByText("¥12,680.00").length).toBeGreaterThan(0);
     expect(document.getElementById("main-content")).toHaveAttribute("aria-busy", "true");
