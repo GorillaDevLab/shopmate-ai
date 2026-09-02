@@ -35,4 +35,25 @@ describe("AI Chat API 契约", () => {
       AiChatResponseSchema.safeParse({ message: { role: "user", content: "错误角色" } }).success,
     ).toBe(false);
   });
+  it("允许 assistant 返回结构化商品文案", () => {
+    const response = {
+      message: {
+        role: "assistant",
+        content: "商品文案已生成，请查看下方标题、正文和标签。",
+
+        productCopy: {
+          productId: "product-001",
+          copyType: "XIAOHONGSHU",
+
+          title: "轻量随行保温杯",
+
+          body: "轻巧便携，适合日常通勤使用。",
+
+          tags: ["通勤", "随行杯"],
+        },
+      },
+    } as const;
+
+    expect(AiChatResponseSchema.parse(response)).toEqual(response);
+  });
 });

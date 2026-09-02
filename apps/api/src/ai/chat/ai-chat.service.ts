@@ -2,8 +2,10 @@ import { BadRequestException, Injectable, ServiceUnavailableException } from "@n
 import {
   AiChatRequestSchema,
   AiChatResponseSchema,
+  ProductCopyOutputSchema,
   type AiChatResponse,
   type LLMProvider,
+  type ProductCopyOutput,
 } from "@shopmate/contracts";
 
 import type { AuthContext } from "../../auth/contracts/index.js";
@@ -39,8 +41,14 @@ export class AiChatService {
 
       if (result.status !== "completed") throwChatUnavailable();
 
+      const productCopy = findLatestProductCopy(result);
+
       return AiChatResponseSchema.parse({
-        message: { role: "assistant", content: result.answer },
+        message: {
+          role: "assistant",
+          content: result.answer,
+          ...(productCopy ? { productCopy } : {}),
+        },
       });
     } catch (error: unknown) {
       if (error instanceof BadRequestException || error instanceof ServiceUnavailableException) {
@@ -53,6 +61,26 @@ export class AiChatService {
 
 function isAgent(value: BusinessAgentRunner | LLMProvider): value is BusinessAgentRunner {
   return "run" in value;
+}
+
+function findLatestProductCopy(result: BusinessAgentResult): ProductCopyOutput | undefined {
+  const outputs = result.toolOutputs ?? [];
+
+  for (let index = outputs.length - 1; index >= 0; index -= 1) {
+    const item = outputs[index];
+
+    if (item?.name !== "generate_product_copy") {
+      continue;
+    }
+
+    const parsed = ProductCopyOutputSchema.safeParse(item.output);
+
+    if (parsed.success) {
+      return parsed.data;
+    }
+  }
+
+  return undefined;
 }
 
 function throwInvalidChatMessage(): never {

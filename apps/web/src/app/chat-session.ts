@@ -1,5 +1,6 @@
 "use client";
 
+import type { ProductCopyOutput } from "@shopmate/contracts";
 import { useState } from "react";
 
 import { sendChatMessage } from "./chat-api";
@@ -7,9 +8,13 @@ import { sendChatMessage } from "./chat-api";
 export type ChatMessage = {
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly productCopy?: ProductCopyOutput;
 };
 
-type ChatFailure = { readonly message: string; readonly prompt: string };
+type ChatFailure = {
+  readonly message: string;
+  readonly prompt: string;
+};
 
 export function useChatSession() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -19,15 +24,34 @@ export function useChatSession() {
 
   async function send(prompt: string, appendUser: boolean) {
     setFailure(null);
-    if (appendUser) setMessages((current) => [...current, { role: "user", content: prompt }]);
+
+    if (appendUser) {
+      setMessages((current) => [
+        ...current,
+        {
+          role: "user",
+          content: prompt,
+        },
+      ]);
+    }
+
     setIsSending(true);
+
     try {
       const reply = await sendChatMessage(prompt);
+
       setMessages((current) => [...current, reply]);
     } catch (reason) {
-      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      if (reason instanceof DOMException && reason.name === "AbortError") {
+        return;
+      }
+
       const message = reason instanceof Error ? reason.message : "AI 服务暂时不可用，请稍后重试";
-      setFailure({ message, prompt });
+
+      setFailure({
+        message,
+        prompt,
+      });
     } finally {
       setIsSending(false);
     }
@@ -35,13 +59,20 @@ export function useChatSession() {
 
   async function submit(content = input) {
     const prompt = content.trim();
-    if (!prompt || isSending) return;
+
+    if (!prompt || isSending) {
+      return;
+    }
+
     setInput("");
     await send(prompt, true);
   }
 
   async function retry() {
-    if (!failure || isSending) return;
+    if (!failure || isSending) {
+      return;
+    }
+
     await send(failure.prompt, false);
   }
 

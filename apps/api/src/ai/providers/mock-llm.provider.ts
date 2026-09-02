@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 
 import {
   LLMProviderError,
+  ProductCopyOutputSchema,
+  ProductCopyTypeSchema,
   type LLMGenerationRequest,
   type LLMGenerationResult,
   type LLMProvider,
@@ -47,6 +49,14 @@ export class MockLLMProvider implements LLMProvider {
   async generate(request: LLMGenerationRequest): Promise<LLMGenerationResult> {
     this.throwConfiguredError();
 
+    if (isStructuredProductCopyGenerationRequest(request)) {
+      return structuredProductCopyResult(request);
+    }
+
+    if (hasProductCopyToolResult(request)) {
+      return productCopyCompletedResult();
+    }
+
     const toolContent = getLatestVerifiedToolContent(request);
 
     if (toolContent) {
@@ -54,6 +64,12 @@ export class MockLLMProvider implements LLMProvider {
     }
 
     const userText = getLatestUserText(request);
+
+    const productCopyIntent = parseProductCopyIntent(userText);
+
+    if (productCopyIntent) {
+      return productCopyToolResult(productCopyIntent);
+    }
 
     if (matchesInventoryIntent(userText)) {
       return inventoryToolResult();
@@ -143,6 +159,111 @@ function normalizeIntentText(value: string): string {
   return value.trim().toLocaleLowerCase("zh-CN");
 }
 
+type MockProductCopyIntent = {
+  readonly productId: string;
+  readonly copyType: "TITLE" | "DESCRIPTION" | "XIAOHONGSHU" | "DOUYIN" | "GENERAL";
+};
+
+function parseProductCopyIntent(value: string): MockProductCopyIntent | null {
+  const productIdMatch = value.match(/商品\s*id\s*[:：]\s*([a-z0-9_-]+)/iu);
+
+  const copyTypeMatch = value.match(
+    /文案类型\s*[:：]\s*(title|description|xiaohongshu|douyin|general)/iu,
+  );
+
+  const productId = productIdMatch?.[1];
+  const rawCopyType = copyTypeMatch?.[1]?.toUpperCase();
+
+  if (!productId || !rawCopyType) {
+    return null;
+  }
+
+  const copyType = ProductCopyTypeSchema.safeParse(rawCopyType);
+
+  if (!copyType.success) {
+    return null;
+  }
+
+  return {
+    productId,
+    copyType: copyType.data,
+  };
+}
+
+function isStructuredProductCopyGenerationRequest(request: LLMGenerationRequest): boolean {
+  return request.messages.some(
+    (message) => message.role === "system" && message.content.includes("中国电商商品营销文案助手"),
+  );
+}
+
+function structuredProductCopyResult(request: LLMGenerationRequest): LLMGenerationResult {
+  const productName = readStructuredProductName(request) ?? "当前商品";
+
+  return {
+    message: {
+      role: "assistant",
+      content: JSON.stringify({
+        title: `${productName}｜日常实用之选`,
+        body: `${productName}围绕当前已提供的真实商品信息进行介绍，突出已验证的商品特点与卖点。`,
+        tags: ["商品推荐", "日常实用"],
+      }),
+    },
+    finishReason: "stop",
+    usage: fixedUsage(),
+    requestId: "mock-request-product-copy-content",
+  };
+}
+
+function readStructuredProductName(request: LLMGenerationRequest): string | null {
+  for (let index = request.messages.length - 1; index >= 0; index -= 1) {
+    const message = request.messages[index];
+
+    if (message?.role !== "user") {
+      continue;
+    }
+
+    try {
+      const payload: unknown = JSON.parse(message.content);
+
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+        const product = (payload as Record<string, unknown>).product;
+
+        if (product && typeof product === "object" && !Array.isArray(product)) {
+          const name = (product as Record<string, unknown>).name;
+
+          if (typeof name === "string" && name.trim()) {
+            return name.trim();
+          }
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function hasProductCopyToolResult(request: LLMGenerationRequest): boolean {
+  for (let index = request.messages.length - 1; index >= 0; index -= 1) {
+    const message = request.messages[index];
+
+    if (message?.role !== "tool" || message.name !== "generate_product_copy") {
+      continue;
+    }
+
+    try {
+      const parsed = ProductCopyOutputSchema.safeParse(JSON.parse(message.content));
+
+      return parsed.success;
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function matchesInventoryIntent(value: string): boolean {
   return includesAny(value, [
     "库存",
@@ -193,6 +314,29 @@ function matchesCopywritingIntent(value: string): boolean {
 
 function includesAny(value: string, keywords: readonly string[]): boolean {
   return keywords.some((keyword) => value.includes(keyword));
+}
+
+function productCopyToolResult(intent: MockProductCopyIntent): LLMGenerationResult {
+  return toolCallGeneration({
+    id: `mock-call-product-copy-${intent.copyType.toLowerCase()}`,
+    name: "generate_product_copy",
+    arguments: {
+      productId: intent.productId,
+      copyType: intent.copyType,
+    },
+  });
+}
+
+function productCopyCompletedResult(): LLMGenerationResult {
+  return {
+    message: {
+      role: "assistant",
+      content: "商品文案已生成，请查看下方标题、正文和标签。",
+    },
+    finishReason: "stop",
+    usage: fixedUsage(),
+    requestId: "mock-request-product-copy-completed",
+  };
 }
 
 function inventoryToolResult(): LLMGenerationResult {

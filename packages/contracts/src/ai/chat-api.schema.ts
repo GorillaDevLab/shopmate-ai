@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ProductCopyOutputSchema } from "./product-copy.schema.js";
+
 const userMessageSchema = z.strictObject({
   role: z.literal("user"),
   content: z.string().trim().min(1).max(2000),
@@ -8,6 +10,8 @@ const userMessageSchema = z.strictObject({
 const assistantMessageSchema = z.strictObject({
   role: z.literal("assistant"),
   content: z.string().trim().min(1).max(8000),
+
+  productCopy: ProductCopyOutputSchema.optional(),
 });
 
 export const AiChatRequestSchema = z.strictObject({
@@ -19,4 +23,5 @@ export const AiChatResponseSchema = z.strictObject({
 });
 
 export type AiChatRequest = z.infer<typeof AiChatRequestSchema>;
+
 export type AiChatResponse = z.infer<typeof AiChatResponseSchema>;
