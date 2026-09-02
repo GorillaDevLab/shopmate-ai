@@ -34,3 +34,7 @@ docs/superpowers/
 packages/database/generated/
 packages/database/prisma.config.js
 packages/database/prisma.config.d.ts
+
+# Playwright test outputs
+playwright-report/
+test-results/
