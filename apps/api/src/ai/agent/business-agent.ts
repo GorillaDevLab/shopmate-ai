@@ -32,6 +32,7 @@ export const BUSINESS_AGENT_SYSTEM_POLICY_ZH_CN = [
   "所有经营数字必须使用阿拉伯数字表示，以便服务端核对数据来源。",
   "工具返回 empty 或 error 时，用简体中文说明数据不足或暂不可用，不得猜测。",
   "获得足够数据后立即用简体中文给出简洁解释，不要重复调用相同工具和参数。",
+  "当 generate_product_copy 工具成功返回后，不要重新编写或改写文案，只回复“商品文案已生成，请查看下方标题、正文和标签。”，结构化文案由客户端展示。",
 ].join("\n");
 
 export type BusinessAgentStatus = "completed" | "limited";
@@ -41,11 +42,17 @@ export interface BusinessAgentRunInput {
   readonly context: Readonly<ToolInvocationContext>;
 }
 
+export interface BusinessAgentToolOutput {
+  readonly name: string;
+  readonly output: unknown;
+}
+
 export interface BusinessAgentResult {
   readonly status: BusinessAgentStatus;
   readonly answer: string;
   readonly usedTools: readonly string[];
   readonly rounds: number;
+  readonly toolOutputs?: readonly BusinessAgentToolOutput[];
 }
 
 export interface BusinessAgentOptions {
@@ -75,6 +82,7 @@ interface AgentLimits {
 interface AgentState {
   readonly messages: LLMMessage[];
   readonly usedTools: Set<string>;
+  readonly toolOutputs: BusinessAgentToolOutput[];
   readonly fingerprints: Set<string>;
   rounds: number;
   toolRounds: number;
@@ -154,6 +162,14 @@ export class BusinessAgent {
       state.totalCalls += 1;
       const invocation = await this.invokeSafely(call, context, state.usedTools);
       invocation.numericEvidence.forEach((number) => state.numericEvidence.add(number));
+
+      if (call.name === "generate_product_copy" && invocation.output !== undefined) {
+        state.toolOutputs.push({
+          name: call.name,
+          output: invocation.output,
+        });
+      }
+
       state.messages.push({
         role: "tool",
         toolCallId: call.id,
@@ -186,6 +202,7 @@ function createState(question: string): AgentState {
       { role: "user", content: question },
     ],
     usedTools: new Set(),
+    toolOutputs: [],
     fingerprints: new Set(),
     rounds: 0,
     toolRounds: 0,
@@ -251,6 +268,12 @@ function finalResult(state: AgentState, generation: LLMGenerationResult): Busine
     answer: content,
     usedTools: [...state.usedTools],
     rounds: state.rounds,
+
+    ...(state.toolOutputs.length > 0
+      ? {
+          toolOutputs: [...state.toolOutputs],
+        }
+      : {}),
   };
 }
 
@@ -260,6 +283,12 @@ function limitedResult(state: AgentState, answer: string): BusinessAgentResult {
     answer,
     usedTools: [...state.usedTools],
     rounds: state.rounds,
+
+    ...(state.toolOutputs.length > 0
+      ? {
+          toolOutputs: [...state.toolOutputs],
+        }
+      : {}),
   };
 }
 
@@ -310,6 +339,7 @@ function isVerifiedDataOutput(value: unknown): boolean {
 interface InvocationResult {
   readonly content: string;
   readonly numericEvidence: readonly string[];
+  readonly output?: unknown;
 }
 
 function invocationResult(output: unknown): InvocationResult {
@@ -318,6 +348,7 @@ function invocationResult(output: unknown): InvocationResult {
   return {
     content: JSON.stringify(output),
     numericEvidence: [...numericEvidence],
+    output,
   };
 }
 

@@ -22,6 +22,11 @@ import {
   createProductDetailsToolRegistration,
 } from "./tools/inventory-product-read.tools.js";
 import { ToolRegistry } from "./tools/tool-registry.js";
+import {
+  GENERATE_PRODUCT_COPY_TOOL_NAME,
+  ProductCopyService,
+  createGenerateProductCopyToolRegistration,
+} from "./tools/product-copy.tool.js";
 import { AI_READ_TOOL_NAMES } from "@shopmate/contracts";
 
 export const AI_LLM_PROVIDER = Symbol("AI_LLM_PROVIDER");
@@ -46,17 +51,30 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         lowStockService: Parameters<typeof createInventoryRisksToolRegistration>[0],
         productService: Parameters<typeof createProductDetailsToolRegistration>[0],
         performanceService: Parameters<typeof createBestSellersToolRegistration>[0],
+        provider: DeepSeekLLMProvider | MockLLMProvider,
       ) => {
-        const registry = new ToolRegistry({ allowedToolNames: AI_READ_TOOL_NAMES });
+        const registry = new ToolRegistry({
+          allowedToolNames: [...AI_READ_TOOL_NAMES, GENERATE_PRODUCT_COPY_TOOL_NAME],
+        });
         registry.register(createProductDetailsToolRegistration(productService));
         registry.register(createInventoryRisksToolRegistration(lowStockService));
         registry.register(createSalesSummaryToolRegistration(dashboardService));
         registry.register(createSalesTrendToolRegistration(dashboardService));
         registry.register(createBestSellersToolRegistration(performanceService));
         registry.register(createProductPerformanceToolRegistration(performanceService));
+
+        const productCopyService = new ProductCopyService(productService, provider);
+        registry.register(createGenerateProductCopyToolRegistration(productCopyService));
+
         return registry;
       },
-      inject: [DashboardService, LowStockService, ProductService, ProductPerformanceService],
+      inject: [
+        DashboardService,
+        LowStockService,
+        ProductService,
+        ProductPerformanceService,
+        AI_LLM_PROVIDER,
+      ],
     },
     {
       provide: AI_BUSINESS_AGENT,
