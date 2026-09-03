@@ -79,12 +79,15 @@ Copy-Item .env.example .env
 - `DEMO_SESSION_SECRET`：至少 32 个字符的服务端会话密钥。
 - `DEEPSEEK_API_KEY`：实际调用 DeepSeek AI 时配置；当前 Demo 不配置也能启动。
 
-### 2. 初始化数据库（可选）
+### 2. 初始化 Demo 数据库
 
 ```bash
-pnpm --filter @shopmate/database prisma:migrate:deploy
-pnpm --filter @shopmate/database seed
+pnpm demo:init
 ```
+
+该命令按固定顺序执行 Prisma Migration、商品 Seed 和订单 Seed。
+
+完整的环境变量、部署、健康检查和回滚流程见 `docs/demo-deployment.md`。
 
 ### 3. 启动 Web 与 API
 

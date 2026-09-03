@@ -22,3 +22,23 @@ test("冒烟检查报告无法连接的具体地址", async () => {
   const failure = await checkEndpoint({ name: "Web", url: "http://127.0.0.1:1/" });
   assert.match(failure, /^Web 未就绪：http:\/\/127\.0\.0\.1:1\//);
 });
+
+test("Demo 健康检查支持部署环境地址", async () => {
+  const { resolveSmokeEndpoints } = await import("../scripts/smoke-test.mjs");
+
+  const endpoints = resolveSmokeEndpoints({
+    DEMO_WEB_URL: "https://demo.example.com/",
+    DEMO_API_URL: "https://api.example.com/",
+  });
+
+  assert.deepEqual(endpoints, [
+    {
+      name: "Web",
+      url: "https://demo.example.com/",
+    },
+    {
+      name: "API 健康检查",
+      url: "https://api.example.com/api/v1/health",
+    },
+  ]);
+});
