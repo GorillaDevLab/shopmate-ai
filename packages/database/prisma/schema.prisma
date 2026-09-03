@@ -23,6 +23,32 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum MonitoringRuleKind {
+  SALES_THRESHOLD
+  INVENTORY_THRESHOLD
+}
+
+enum MonitoringRuleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum MonitoringFrequency {
+  DAILY
+  WEEKLY
+}
+
+enum MonitoringSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum MonitoringResourceType {
+  MERCHANT
+  SKU
+}
+
 model Merchant {
   id     String         @id @default(cuid())
   name   String
@@ -33,6 +59,8 @@ model Merchant {
   skus             Sku[]
   orders           Order[]
   dashboardLayouts UserDashboardLayout[]
+  monitoringRules  UserMonitoringRule[]
+  notifications    MonitoringNotification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -139,5 +167,58 @@ model UserDashboardLayout {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, merchantId])
+  @@index([merchantId])
+}
+
+model UserMonitoringRule {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+
+  name       String
+  kind       MonitoringRuleKind
+  definition Json
+  frequency  MonitoringFrequency
+  status     MonitoringRuleStatus @default(ACTIVE)
+
+  lastRunAt        DateTime?
+  nextRunAt        DateTime
+  lastErrorCode    String?
+  lastErrorMessage String?
+
+  merchant      Merchant                 @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  notifications MonitoringNotification[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, merchantId, status, nextRunAt])
+  @@index([merchantId])
+}
+
+model MonitoringNotification {
+  id         String @id @default(cuid())
+  ruleId     String
+  userId     String
+  merchantId String
+
+  fingerprint  String
+  title        String
+  message      String
+  severity     MonitoringSeverity
+  resourceType MonitoringResourceType
+  resourceId   String
+  periodStart  DateTime
+  periodEnd    DateTime
+  readAt       DateTime?
+
+  rule     UserMonitoringRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  merchant Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, merchantId, fingerprint])
+  @@index([userId, merchantId, readAt, createdAt])
+  @@index([ruleId])
   @@index([merchantId])
 }
