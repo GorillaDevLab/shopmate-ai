@@ -2,13 +2,13 @@ import { z } from "zod";
 
 import { DashboardInsightQuerySchema } from "../ai/dashboard-insight.schema.js";
 
-export const DashboardLayoutVersionSchema = z.literal(2, {
+export const DashboardLayoutVersionSchema = z.literal(3, {
   error: "不支持的看板布局版本",
 });
 export type DashboardLayoutVersion = z.infer<typeof DashboardLayoutVersionSchema>;
 
-export const DashboardLayoutSizeSchema = z.enum(["1/3", "1/2", "2/3", "full"], {
-  error: "卡片尺寸必须是 1/3、1/2、2/3 或 full",
+export const DashboardLayoutSizeSchema = z.enum(["1x1", "2x1", "2x2"], {
+  error: "卡片尺寸必须是 1x1、2x1 或 2x2",
 });
 export type DashboardLayoutSize = z.infer<typeof DashboardLayoutSizeSchema>;
 
@@ -25,6 +25,26 @@ export const DashboardLayoutComponentSchema = z.enum(
   { error: "未知看板组件" },
 );
 export type DashboardLayoutComponent = z.infer<typeof DashboardLayoutComponentSchema>;
+
+export const DASHBOARD_COMPONENT_REGISTRY = {
+  metric: { label: "经营指标", defaultSize: "1x1", allowedSizes: ["1x1", "2x1"] },
+  salesTrend: { label: "销售趋势", defaultSize: "2x1", allowedSizes: ["2x1", "2x2"] },
+  inventoryAlerts: { label: "库存提醒", defaultSize: "2x1", allowedSizes: ["2x1", "2x2"] },
+  hotProducts: { label: "热销商品", defaultSize: "2x1", allowedSizes: ["2x1", "2x2"] },
+  pieChart: {
+    label: "AI 饼图",
+    defaultSize: "1x1",
+    allowedSizes: ["1x1", "2x1", "2x2"],
+  },
+  report: { label: "AI 经营报告", defaultSize: "2x1", allowedSizes: ["2x1", "2x2"] },
+} as const satisfies Record<
+  DashboardLayoutComponent,
+  {
+    label: string;
+    defaultSize: DashboardLayoutSize;
+    allowedSizes: readonly DashboardLayoutSize[];
+  }
+>;
 
 const metricConfigSchema = z.strictObject({
   metric: metricKeySchema,
@@ -48,7 +68,7 @@ const reportConfigSchema = z.strictObject({
   query: DashboardInsightQuerySchema.refine((query) => query.visualization === "report"),
 });
 
-export const DashboardLayoutCardSchema = z.discriminatedUnion("component", [
+const dashboardLayoutCardSchema = z.discriminatedUnion("component", [
   z.strictObject({
     id: cardIdSchema,
     component: z.literal("metric"),
@@ -86,6 +106,17 @@ export const DashboardLayoutCardSchema = z.discriminatedUnion("component", [
     config: reportConfigSchema,
   }),
 ]);
+
+export const DashboardLayoutCardSchema = dashboardLayoutCardSchema.superRefine((card, context) => {
+  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes;
+  if (!allowedSizes.some((size) => size === card.size)) {
+    context.addIssue({
+      code: "custom",
+      path: ["size"],
+      message: `该组件不支持尺寸 ${card.size}`,
+    });
+  }
+});
 export type DashboardLayoutCard = z.infer<typeof DashboardLayoutCardSchema>;
 
 const uniqueCardIds = (cards: DashboardLayoutCard[]) =>
@@ -100,75 +131,94 @@ export const DashboardLayoutSchema = z.strictObject({
 });
 export type DashboardLayout = z.infer<typeof DashboardLayoutSchema>;
 
-export const DASHBOARD_COMPONENT_REGISTRY = {
-  metric: { label: "经营指标", defaultSize: "1/3" },
-  salesTrend: { label: "销售趋势", defaultSize: "2/3" },
-  inventoryAlerts: { label: "库存提醒", defaultSize: "1/3" },
-  hotProducts: { label: "热销商品", defaultSize: "full" },
-  pieChart: { label: "AI 饼图", defaultSize: "1/2" },
-  report: { label: "AI 经营报告", defaultSize: "1/2" },
-} as const satisfies Record<
-  DashboardLayoutComponent,
-  { label: string; defaultSize: DashboardLayoutSize }
->;
-
 export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
-  version: 2,
+  version: 3,
   cards: [
-    { id: "metric-sales", component: "metric", size: "1/3", config: { metric: "sales" } },
-    { id: "metric-orders", component: "metric", size: "1/3", config: { metric: "orders" } },
-    { id: "metric-units", component: "metric", size: "1/3", config: { metric: "units" } },
+    { id: "metric-sales", component: "metric", size: "1x1", config: { metric: "sales" } },
+    { id: "metric-orders", component: "metric", size: "1x1", config: { metric: "orders" } },
+    { id: "metric-units", component: "metric", size: "1x1", config: { metric: "units" } },
     {
       id: "metric-average-order-value",
       component: "metric",
-      size: "1/3",
+      size: "1x1",
       config: { metric: "averageOrderValue" },
     },
-    { id: "sales-trend", component: "salesTrend", size: "2/3", config: { range: "7d" } },
-    { id: "inventory-alerts", component: "inventoryAlerts", size: "1/3", config: { limit: 4 } },
-    { id: "hot-products", component: "hotProducts", size: "full", config: { limit: 3 } },
+    { id: "sales-trend", component: "salesTrend", size: "2x1", config: { range: "7d" } },
+    { id: "inventory-alerts", component: "inventoryAlerts", size: "2x1", config: { limit: 4 } },
+    { id: "hot-products", component: "hotProducts", size: "2x1", config: { limit: 3 } },
   ],
 };
 
 DashboardLayoutSchema.parse(DEFAULT_DASHBOARD_LAYOUT);
 
+const LegacyDashboardLayoutSizeSchema = z.enum(["1/3", "1/2", "2/3", "full"]);
+type LegacyDashboardLayoutSize = z.infer<typeof LegacyDashboardLayoutSizeSchema>;
+
+const legacyCardSchema = z.discriminatedUnion("component", [
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("metric"),
+    size: LegacyDashboardLayoutSizeSchema,
+    config: metricConfigSchema,
+  }),
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("salesTrend"),
+    size: LegacyDashboardLayoutSizeSchema,
+    config: salesTrendConfigSchema,
+  }),
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("inventoryAlerts"),
+    size: LegacyDashboardLayoutSizeSchema,
+    config: inventoryAlertsConfigSchema,
+  }),
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("hotProducts"),
+    size: LegacyDashboardLayoutSizeSchema,
+    config: hotProductsConfigSchema,
+  }),
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("pieChart"),
+    size: LegacyDashboardLayoutSizeSchema,
+    config: pieChartConfigSchema,
+  }),
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("report"),
+    size: LegacyDashboardLayoutSizeSchema,
+    config: reportConfigSchema,
+  }),
+]);
+
 const legacyLayoutSchema = z.strictObject({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   cards: z
-    .array(
-      z.discriminatedUnion("component", [
-        z.strictObject({
-          id: cardIdSchema,
-          component: z.literal("metric"),
-          size: DashboardLayoutSizeSchema,
-          config: metricConfigSchema,
-        }),
-        z.strictObject({
-          id: cardIdSchema,
-          component: z.literal("salesTrend"),
-          size: DashboardLayoutSizeSchema,
-          config: salesTrendConfigSchema,
-        }),
-        z.strictObject({
-          id: cardIdSchema,
-          component: z.literal("inventoryAlerts"),
-          size: DashboardLayoutSizeSchema,
-          config: inventoryAlertsConfigSchema,
-        }),
-        z.strictObject({
-          id: cardIdSchema,
-          component: z.literal("hotProducts"),
-          size: DashboardLayoutSizeSchema,
-          config: hotProductsConfigSchema,
-        }),
-      ]),
-    )
+    .array(legacyCardSchema)
     .max(24),
 });
+
+function migrateSize(
+  component: DashboardLayoutComponent,
+  size: LegacyDashboardLayoutSize,
+): DashboardLayoutSize {
+  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[component].allowedSizes;
+  return size === "1/3" && allowedSizes.some((candidate) => candidate === "1x1")
+    ? "1x1"
+    : "2x1";
+}
 
 export function parseDashboardLayout(value: unknown): DashboardLayout {
   const current = DashboardLayoutSchema.safeParse(value);
   if (current.success) return current.data;
   const legacy = legacyLayoutSchema.parse(value);
-  return DashboardLayoutSchema.parse({ version: 2, cards: legacy.cards });
+  return DashboardLayoutSchema.parse({
+    version: 3,
+    cards: legacy.cards.map((card) => ({
+      ...card,
+      size: migrateSize(card.component, card.size),
+    })),
+  });
 }

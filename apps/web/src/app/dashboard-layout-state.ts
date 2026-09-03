@@ -1,4 +1,5 @@
 import {
+  DASHBOARD_COMPONENT_REGISTRY,
   DEFAULT_DASHBOARD_LAYOUT,
   type DashboardLayout,
   type DashboardLayoutCard,
@@ -103,16 +104,17 @@ export function createDashboardCard(
   createSuffix = () => crypto.randomUUID(),
 ): DashboardLayoutCard {
   const id = uniqueId(component, cards, createSuffix());
+  const size = DASHBOARD_COMPONENT_REGISTRY[component].defaultSize;
   if (component === "metric") {
-    return { id, component, size: "1/3", config: { metric: "sales" } };
+    return { id, component, size, config: { metric: "sales" } };
   }
   if (component === "salesTrend") {
-    return { id, component, size: "2/3", config: { range: "7d" } };
+    return { id, component, size, config: { range: "7d" } };
   }
   if (component === "inventoryAlerts") {
-    return { id, component, size: "1/3", config: { limit: 4 } };
+    return { id, component, size, config: { limit: 4 } };
   }
-  return { id, component, size: "full", config: { limit: 3 } };
+  return { id, component, size, config: { limit: 3 } };
 }
 
 export function createInsightDashboardCard(
@@ -123,7 +125,7 @@ export function createInsightDashboardCard(
   createSuffix = () => crypto.randomUUID(),
 ): DashboardLayoutCard {
   const id = uniqueId(component, cards, createSuffix());
-  const size = "1/2" as const;
+  const size = DASHBOARD_COMPONENT_REGISTRY[component].defaultSize;
   if (component === "pieChart") return { id, component, size, config: { title, query } };
   return { id, component, size, config: { title, query } };
 }

@@ -9,7 +9,17 @@ import {
 describe("用户看板布局契约", () => {
   it("默认布局可复现并通过严格校验", () => {
     expect(DashboardLayoutSchema.parse(DEFAULT_DASHBOARD_LAYOUT)).toEqual(DEFAULT_DASHBOARD_LAYOUT);
+    expect(DEFAULT_DASHBOARD_LAYOUT.version).toBe(3);
     expect(DEFAULT_DASHBOARD_LAYOUT.cards).toHaveLength(7);
+    expect(DEFAULT_DASHBOARD_LAYOUT.cards.map(({ size }) => size)).toEqual([
+      "1x1",
+      "1x1",
+      "1x1",
+      "1x1",
+      "2x1",
+      "2x1",
+      "2x1",
+    ]);
   });
 
   it("注册表覆盖所有可用组件", () => {
@@ -19,7 +29,7 @@ describe("用户看板布局契约", () => {
   });
 
   it.each([
-    { ...DEFAULT_DASHBOARD_LAYOUT, version: 3 },
+    { ...DEFAULT_DASHBOARD_LAYOUT, version: 2 },
     {
       ...DEFAULT_DASHBOARD_LAYOUT,
       cards: [{ ...DEFAULT_DASHBOARD_LAYOUT.cards[0], component: "unknown" }],
@@ -45,13 +55,13 @@ describe("用户看板布局契约", () => {
   });
 
   it("允许空布局，供用户删除全部卡片后保存", () => {
-    expect(DashboardLayoutSchema.parse({ version: 2, cards: [] })).toEqual({
-      version: 2,
+    expect(DashboardLayoutSchema.parse({ version: 3, cards: [] })).toEqual({
+      version: 3,
       cards: [],
     });
   });
 
-  it("接受饼图和报告配置，并迁移已有 version 1 布局", () => {
+  it("接受受支持的 AI 组件尺寸并拒绝组件不支持的尺寸", () => {
     const insightQuery = {
       dataset: "sales",
       metric: "revenue",
@@ -65,18 +75,50 @@ describe("用户看板布局契约", () => {
     } as const;
     expect(
       DashboardLayoutSchema.safeParse({
-        version: 2,
+        version: 3,
         cards: [
           {
             id: "ai-pie-1",
             component: "pieChart",
-            size: "1/2",
+            size: "1x1",
             config: { title: "商品销售额占比", query: insightQuery },
           },
         ],
       }).success,
     ).toBe(true);
+    expect(
+      DashboardLayoutSchema.safeParse({
+        version: 3,
+        cards: [
+          {
+            id: "trend",
+            component: "salesTrend",
+            size: "1x1",
+            config: { range: "7d" },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
 
-    expect(parseDashboardLayout({ version: 1, cards: [] })).toEqual({ version: 2, cards: [] });
+  it("迁移 version 1 和 version 2 布局并保留卡片内容与顺序", () => {
+    expect(parseDashboardLayout({ version: 1, cards: [] })).toEqual({ version: 3, cards: [] });
+    expect(
+      parseDashboardLayout({
+        version: 2,
+        cards: [
+          { id: "metric", component: "metric", size: "1/3", config: { metric: "sales" } },
+          { id: "trend", component: "salesTrend", size: "2/3", config: { range: "7d" } },
+          { id: "products", component: "hotProducts", size: "full", config: { limit: 3 } },
+        ],
+      }),
+    ).toEqual({
+      version: 3,
+      cards: [
+        { id: "metric", component: "metric", size: "1x1", config: { metric: "sales" } },
+        { id: "trend", component: "salesTrend", size: "2x1", config: { range: "7d" } },
+        { id: "products", component: "hotProducts", size: "2x1", config: { limit: 3 } },
+      ],
+    });
   });
 });

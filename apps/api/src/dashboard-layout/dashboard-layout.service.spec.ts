@@ -56,7 +56,7 @@ describe("DashboardLayoutService", () => {
       updatedAt: new Date("2026-09-02T00:00:00.000Z"),
     });
     await expect(service.get(context)).resolves.toMatchObject({
-      layout: { version: 2, cards: [] },
+      layout: { version: 3, cards: [] },
       revision: 3,
     });
   });

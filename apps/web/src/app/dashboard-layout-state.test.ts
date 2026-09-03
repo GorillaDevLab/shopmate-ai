@@ -114,23 +114,23 @@ describe("dashboard layout state", () => {
     );
 
     expect(cards).toEqual([
-      { id: "metric-fixed-0", component: "metric", size: "1/3", config: { metric: "sales" } },
+      { id: "metric-fixed-0", component: "metric", size: "1x1", config: { metric: "sales" } },
       {
         id: "salesTrend-fixed-1",
         component: "salesTrend",
-        size: "2/3",
+        size: "2x1",
         config: { range: "7d" },
       },
       {
         id: "inventoryAlerts-fixed-2",
         component: "inventoryAlerts",
-        size: "1/3",
+        size: "2x1",
         config: { limit: 4 },
       },
       {
         id: "hotProducts-fixed-3",
         component: "hotProducts",
-        size: "full",
+        size: "2x1",
         config: { limit: 3 },
       },
     ]);
@@ -163,6 +163,7 @@ describe("dashboard layout state", () => {
     const added = layoutEditorReducer(readyState(), { type: "cardAdded", card });
     const undone = layoutEditorReducer(added, { type: "addUndone" });
     expect(added.addedCard?.card.id).toBe("pieChart-one");
+    expect(card.size).toBe("1x1");
     expect(undone.draft.cards).toEqual(DEFAULT_DASHBOARD_LAYOUT.cards);
   });
 });

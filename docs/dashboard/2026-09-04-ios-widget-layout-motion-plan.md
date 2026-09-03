@@ -36,7 +36,7 @@
 - Produces: `parseDashboardLayout(value: unknown): DashboardLayout`，返回版本 3。
 - Consumes: 版本 1/2 的旧尺寸 `"1/3" | "1/2" | "2/3" | "full"`。
 
-- [ ] **Step 1: 写版本 3、组件约束与迁移失败测试**
+- [x] **Step 1: 写版本 3、组件约束与迁移失败测试**
 
 在 `dashboard-layout.spec.ts` 覆盖：
 
@@ -72,7 +72,7 @@ expect(
 
 同时更新状态测试，期望新建卡片使用注册表默认值：指标和 AI 饼图为 `1x1`，其余组件为 `2x1`。
 
-- [ ] **Step 2: 运行聚焦测试并确认 RED**
+- [x] **Step 2: 运行聚焦测试并确认 RED**
 
 Run:
 
@@ -83,7 +83,7 @@ pnpm --filter @shopmate/web exec vitest run src/app/dashboard-layout-state.test.
 
 Expected: FAIL；当前版本仍为 2，旧尺寸仍为分数值，组件尺寸组合未限制。
 
-- [ ] **Step 3: 实现版本 3 注册表和严格约束**
+- [x] **Step 3: 实现版本 3 注册表和严格约束**
 
 在 Schema 中定义：
 
@@ -118,7 +118,7 @@ export const DASHBOARD_COMPONENT_REGISTRY = {
 
 在 `DashboardLayoutCardSchema.superRefine` 中以注册表拒绝不支持的组合，错误 path 为 `["size"]`、文案为 `该组件不支持尺寸 ${card.size}`。
 
-- [ ] **Step 4: 实现版本 1/2 迁移**
+- [x] **Step 4: 实现版本 1/2 迁移**
 
 定义只在解析旧记录时使用的旧尺寸 Schema，并通过以下函数迁移：
 
@@ -138,7 +138,7 @@ function migrateSize(
 
 `parseDashboardLayout` 依次尝试当前版本、版本 2、版本 1，旧卡片仅替换 `size` 并返回 `version: 3`。
 
-- [ ] **Step 5: 让前端新建卡片只读取注册表默认值**
+- [x] **Step 5: 让前端新建卡片只读取注册表默认值**
 
 在 `dashboard-layout-state.ts` 中为每个组件保留原有 config，但尺寸统一读取：
 
@@ -148,7 +148,7 @@ const size = DASHBOARD_COMPONENT_REGISTRY[component].defaultSize;
 
 `createInsightDashboardCard` 同样根据 `pieChart` 或 `report` 读取对应默认值，不再硬编码 `1/2`。
 
-- [ ] **Step 6: 运行 Task 1 测试并提交**
+- [x] **Step 6: 运行 Task 1 测试并提交**
 
 Run:
 
