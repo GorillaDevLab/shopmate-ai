@@ -16,6 +16,9 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
   const [count, setCount] = useState(0);
   const [items, setItems] = useState<MonitoringNotificationView[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const [mutationError, setMutationError] = useState("");
+  const [pendingMutation, setPendingMutation] = useState<string>();
+  const pendingMutationRef = useRef<string | undefined>(undefined);
   const synced = useRef(false);
 
   const refreshCount = useCallback(async () => {
@@ -33,6 +36,7 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
   async function openCenter() {
     setOpen(true);
     setState("loading");
+    setMutationError("");
     try {
       setItems((await listMonitoringNotifications()).items);
       setState("idle");
@@ -42,18 +46,40 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
   }
 
   async function markRead(item: MonitoringNotificationView) {
-    const updated = await markMonitoringNotificationRead(item.id);
-    setItems((current) =>
-      current.map((entry) => (entry.id === item.id ? updated.notification : entry)),
-    );
-    setCount((current) => Math.max(0, current - (item.readAt ? 0 : 1)));
+    if (pendingMutationRef.current) return;
+    pendingMutationRef.current = item.id;
+    setPendingMutation(item.id);
+    setMutationError("");
+    try {
+      const updated = await markMonitoringNotificationRead(item.id);
+      setItems((current) =>
+        current.map((entry) => (entry.id === item.id ? updated.notification : entry)),
+      );
+      setCount((current) => Math.max(0, current - (item.readAt ? 0 : 1)));
+    } catch {
+      setMutationError("标记失败，请稍后重试");
+    } finally {
+      pendingMutationRef.current = undefined;
+      setPendingMutation(undefined);
+    }
   }
 
   async function markAllRead() {
-    await markAllMonitoringNotificationsRead();
-    const readAt = new Date().toISOString();
-    setItems((current) => current.map((item) => ({ ...item, readAt: item.readAt ?? readAt })));
-    setCount(0);
+    if (pendingMutationRef.current) return;
+    pendingMutationRef.current = "all";
+    setPendingMutation("all");
+    setMutationError("");
+    try {
+      await markAllMonitoringNotificationsRead();
+      const readAt = new Date().toISOString();
+      setItems((current) => current.map((item) => ({ ...item, readAt: item.readAt ?? readAt })));
+      setCount(0);
+    } catch {
+      setMutationError("标记失败，请稍后重试");
+    } finally {
+      pendingMutationRef.current = undefined;
+      setPendingMutation(undefined);
+    }
   }
 
   return (
@@ -100,14 +126,24 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
             <div className="notification-toolbar">
               <span>{count ? `${count} 条未读` : "已全部读完"}</span>
               {count > 0 && (
-                <button type="button" onClick={() => void markAllRead()}>
+                <button
+                  type="button"
+                  disabled={pendingMutation !== undefined}
+                  onClick={() => void markAllRead()}
+                >
                   全部已读
                 </button>
               )}
             </div>
+            {mutationError && (
+              <div className="monitoring-error" role="alert">
+                {mutationError}
+              </div>
+            )}
             <NotificationList
               state={state}
               items={items}
+              pendingMutation={pendingMutation}
               onRead={markRead}
               onRetry={() => void openCenter()}
             />
@@ -121,11 +157,13 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
 function NotificationList({
   state,
   items,
+  pendingMutation,
   onRead,
   onRetry,
 }: {
   readonly state: "idle" | "loading" | "error";
   readonly items: MonitoringNotificationView[];
+  readonly pendingMutation: string | undefined;
   readonly onRead: (item: MonitoringNotificationView) => Promise<void>;
   readonly onRetry: () => void;
 }) {
@@ -168,6 +206,7 @@ function NotificationList({
             <button
               type="button"
               aria-label={`标记${item.ruleName}为已读`}
+              disabled={pendingMutation !== undefined}
               onClick={() => void onRead(item)}
             >
               标为已读

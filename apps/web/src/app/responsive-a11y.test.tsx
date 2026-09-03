@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
@@ -13,6 +13,16 @@ vi.mock("./dashboard-layout-api", async () => {
     saveDashboardLayout: vi.fn(),
   };
 });
+vi.mock("./monitoring-api", () => ({
+  getMonitoringUnreadCount: vi.fn(async () => ({ count: 0 })),
+  listMonitoringNotifications: vi.fn(async () => ({ items: [] })),
+  listMonitoringRules: vi.fn(async () => ({ items: [] })),
+  syncMonitoring: vi.fn(async () => ({
+    evaluatedRules: 0,
+    createdNotifications: 0,
+    failedRules: 0,
+  })),
+}));
 
 import { dashboardResponsePreview } from "./dashboard-data";
 import { Dashboard } from "./dashboard";
@@ -54,6 +64,20 @@ describe("Dashboard 响应式与无障碍验收", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /编辑看板/ }));
     expect(screen.queryByRole("dialog", { name: "AI 经营助手" })).not.toBeInTheDocument();
+  });
+
+  it("经营监听面板可由键盘关闭并将焦点还给入口", async () => {
+    render(<Dashboard state="ready" data={dashboardResponsePreview} />);
+    const trigger = screen.getByRole("button", { name: "经营监听" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(await screen.findByRole("dialog", { name: "经营监听" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("监听内容")).toHaveFocus());
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "经营监听" })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it.each(["loading", "empty", "error"] as const)(

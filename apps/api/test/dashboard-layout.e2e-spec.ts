@@ -6,7 +6,9 @@ import { DEFAULT_DASHBOARD_LAYOUT, type DashboardLayout } from "@shopmate/contra
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AuthContext } from "../src/auth/contracts/index.js";
+import { createAuthContext, type AuthContext } from "../src/auth/contracts/index.js";
+import { DEMO_SESSION_COOKIE_NAME } from "../src/auth/session/demo-session-cookie.js";
+import { signDemoSession } from "../src/auth/session/demo-session.js";
 import {
   DASHBOARD_LAYOUT_REPOSITORY,
   type DashboardLayoutRecord,
@@ -111,6 +113,41 @@ describe("用户看板布局 API", () => {
       .send({ layout: DEFAULT_DASHBOARD_LAYOUT, expectedRevision: 0, merchantId: "other" })
       .expect(404);
   });
+
+  it("两个用户在同一 Merchant 下保存并恢复各自布局", async () => {
+    const firstCookie = sessionCookie("user-a", "shared-merchant");
+    const secondCookie = sessionCookie("user-b", "shared-merchant");
+    const firstLayout = reorderedLayout(1);
+    const secondLayout = reorderedLayout(2);
+
+    await saveLayout(app, firstCookie, firstLayout, 0).expect(200);
+    await saveLayout(app, secondCookie, secondLayout, 0).expect(200);
+
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer()).get("/api/v1/dashboard/layout").set("Cookie", firstCookie),
+      request(app.getHttpServer()).get("/api/v1/dashboard/layout").set("Cookie", secondCookie),
+    ]);
+    expect(first.body).toMatchObject({ layout: firstLayout, revision: 1 });
+    expect(second.body).toMatchObject({ layout: secondLayout, revision: 1 });
+  });
+
+  it("同一版本的两个并发保存只有一个成功且不会覆盖赢家", async () => {
+    const deviceCookie = sessionCookie("concurrent-user", "merchant-1");
+    await saveLayout(app, deviceCookie, DEFAULT_DASHBOARD_LAYOUT, 0).expect(200);
+    const candidates = [reorderedLayout(1), reorderedLayout(2)];
+
+    const responses = await Promise.all(
+      candidates.map((layout) => saveLayout(app, deviceCookie, layout, 1)),
+    );
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+
+    const winner = responses.find(({ status }) => status === 200);
+    const stored = await request(app.getHttpServer())
+      .get("/api/v1/dashboard/layout")
+      .set("Cookie", deviceCookie)
+      .expect(200);
+    expect(stored.body).toEqual(winner?.body);
+  });
 });
 
 class FixtureDashboardLayoutRepository implements DashboardLayoutRepository {
@@ -143,7 +180,7 @@ class FixtureDashboardLayoutRepository implements DashboardLayoutRepository {
 }
 
 function identityKey(context: AuthContext): string {
-  return `${context.userId}/${context.merchantId}`;
+  return `${encodeURIComponent(context.userId)}/${encodeURIComponent(context.merchantId)}`;
 }
 
 function configureTestEnvironment(): void {
@@ -154,6 +191,32 @@ function configureTestEnvironment(): void {
   vi.stubEnv("DEMO_AUTH_MERCHANT_ID", "demo-merchant");
   vi.stubEnv("DEMO_SESSION_SECRET", "test-session-key-with-at-least-32-characters");
   vi.stubEnv("DEMO_SESSION_TTL_SECONDS", "3600");
+}
+
+function sessionCookie(userId: string, merchantId: string): string {
+  const context = createAuthContext({ userId, merchantId, permissions: [] });
+  const session = signDemoSession(context, "test-session-key-with-at-least-32-characters", 3_600);
+  return `${DEMO_SESSION_COOKIE_NAME}=${session.token}`;
+}
+
+function reorderedLayout(offset: number): DashboardLayout {
+  const cards = [...DEFAULT_DASHBOARD_LAYOUT.cards];
+  return {
+    ...DEFAULT_DASHBOARD_LAYOUT,
+    cards: [...cards.slice(offset), ...cards.slice(0, offset)],
+  };
+}
+
+function saveLayout(
+  application: INestApplication,
+  session: string,
+  layout: DashboardLayout,
+  expectedRevision: number,
+) {
+  return request(application.getHttpServer())
+    .put("/api/v1/dashboard/layout")
+    .set("Cookie", session)
+    .send({ layout, expectedRevision });
 }
 
 async function login(app: INestApplication): Promise<string> {
