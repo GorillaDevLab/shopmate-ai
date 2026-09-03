@@ -57,6 +57,47 @@ describe("MonitoringRuleGenerator", () => {
     );
     expect(evaluator.evaluate).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["错误工具名", { name: "execute_sql", arguments: definition }],
+    [
+      "包含 SQL 字段",
+      { name: "propose_monitoring_rule", arguments: { ...definition, sql: "SELECT *" } },
+    ],
+    [
+      "包含身份字段",
+      { name: "propose_monitoring_rule", arguments: { ...definition, userId: "other-user" } },
+    ],
+  ])("拒绝%s且不进入求值器", async (_label, toolCall) => {
+    const evaluator = { evaluate: vi.fn() };
+    const provider = {
+      name: "test",
+      generate: vi.fn().mockResolvedValue({
+        message: { role: "assistant", content: null, toolCalls: [{ id: "call-1", ...toolCall }] },
+        finishReason: "tool_calls",
+      }),
+    };
+    const generator = new MonitoringRuleGenerator(provider, evaluator);
+
+    await expect(generator.generate(context, { question: "执行危险查询" })).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(evaluator.evaluate).not.toHaveBeenCalled();
+  });
+
+  it("Provider 失败时返回安全错误且不泄露内部消息", async () => {
+    const generator = new MonitoringRuleGenerator(
+      { name: "test", generate: vi.fn().mockRejectedValue(new Error("provider-secret")) },
+      { evaluate: vi.fn() },
+    );
+
+    const error = await generator
+      .generate(context, { question: "库存提醒" })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    if (!(error instanceof ServiceUnavailableException)) throw new Error("预期安全服务错误");
+    expect(JSON.stringify(error.getResponse())).not.toContain("provider-secret");
+  });
 });
 
 function providerStub(argumentsValue: object) {

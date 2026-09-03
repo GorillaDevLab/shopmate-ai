@@ -83,7 +83,8 @@ describe("监听规则管理", () => {
 });
 
 describe("通知中心", () => {
-  it("进入看板后同步到期规则并显示未读提醒", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(api.syncMonitoring).mockResolvedValue({
       evaluatedRules: 1,
       createdNotifications: 1,
@@ -91,6 +92,9 @@ describe("通知中心", () => {
     });
     vi.mocked(api.getMonitoringUnreadCount).mockResolvedValue({ count: 1 });
     vi.mocked(api.listMonitoringNotifications).mockResolvedValue({ items: [notification()] });
+  });
+
+  it("进入看板后同步到期规则并显示未读提醒", async () => {
     vi.mocked(api.markMonitoringNotificationRead).mockResolvedValue({
       notification: { ...notification(), readAt: "2026-09-03T01:00:00.000Z" },
     });
@@ -103,6 +107,21 @@ describe("通知中心", () => {
     await waitFor(() =>
       expect(api.markMonitoringNotificationRead).toHaveBeenCalledWith("notification-1"),
     );
+  });
+
+  it("标记已读失败时保留通知并显示安全错误", async () => {
+    vi.mocked(api.markMonitoringNotificationRead).mockRejectedValue(new Error("database secret"));
+    render(<NotificationCenter />);
+    await screen.findByText("1", { selector: ".notification-badge" });
+    fireEvent.click(screen.getByRole("button", { name: "通知，1 条未读" }));
+    expect(await screen.findByText("无线蓝牙耳机当前库存 4 件")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "标记低库存提醒为已读" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("标记失败，请稍后重试");
+    expect(screen.getByText("无线蓝牙耳机当前库存 4 件")).toBeInTheDocument();
+    expect(screen.queryByText("database secret")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "通知，1 条未读" })).toBeInTheDocument();
   });
 });
 

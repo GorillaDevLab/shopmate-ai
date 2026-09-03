@@ -16,6 +16,7 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
   const [count, setCount] = useState(0);
   const [items, setItems] = useState<MonitoringNotificationView[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const [mutationError, setMutationError] = useState("");
   const synced = useRef(false);
 
   const refreshCount = useCallback(async () => {
@@ -33,6 +34,7 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
   async function openCenter() {
     setOpen(true);
     setState("loading");
+    setMutationError("");
     try {
       setItems((await listMonitoringNotifications()).items);
       setState("idle");
@@ -42,18 +44,28 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
   }
 
   async function markRead(item: MonitoringNotificationView) {
-    const updated = await markMonitoringNotificationRead(item.id);
-    setItems((current) =>
-      current.map((entry) => (entry.id === item.id ? updated.notification : entry)),
-    );
-    setCount((current) => Math.max(0, current - (item.readAt ? 0 : 1)));
+    setMutationError("");
+    try {
+      const updated = await markMonitoringNotificationRead(item.id);
+      setItems((current) =>
+        current.map((entry) => (entry.id === item.id ? updated.notification : entry)),
+      );
+      setCount((current) => Math.max(0, current - (item.readAt ? 0 : 1)));
+    } catch {
+      setMutationError("标记失败，请稍后重试");
+    }
   }
 
   async function markAllRead() {
-    await markAllMonitoringNotificationsRead();
-    const readAt = new Date().toISOString();
-    setItems((current) => current.map((item) => ({ ...item, readAt: item.readAt ?? readAt })));
-    setCount(0);
+    setMutationError("");
+    try {
+      await markAllMonitoringNotificationsRead();
+      const readAt = new Date().toISOString();
+      setItems((current) => current.map((item) => ({ ...item, readAt: item.readAt ?? readAt })));
+      setCount(0);
+    } catch {
+      setMutationError("标记失败，请稍后重试");
+    }
   }
 
   return (
@@ -105,6 +117,11 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
                 </button>
               )}
             </div>
+            {mutationError && (
+              <div className="monitoring-error" role="alert">
+                {mutationError}
+              </div>
+            )}
             <NotificationList
               state={state}
               items={items}
