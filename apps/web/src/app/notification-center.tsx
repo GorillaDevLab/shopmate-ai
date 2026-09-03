@@ -18,7 +18,7 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   const [mutationError, setMutationError] = useState("");
   const [pendingMutation, setPendingMutation] = useState<string>();
-  const pendingMutationRef = useRef<string>();
+  const pendingMutationRef = useRef<string | undefined>(undefined);
   const synced = useRef(false);
 
   const refreshCount = useCallback(async () => {

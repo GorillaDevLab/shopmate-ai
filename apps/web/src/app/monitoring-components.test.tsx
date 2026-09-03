@@ -126,7 +126,7 @@ describe("通知中心", () => {
 
   it("同一条通知提交期间禁用重复标记和全部已读", async () => {
     let resolveRead:
-      | ((value: { notification: ReturnType<typeof notification> }) => void)
+      | ((value: Awaited<ReturnType<typeof api.markMonitoringNotificationRead>>) => void)
       | undefined;
     vi.mocked(api.markMonitoringNotificationRead).mockImplementation(
       () =>
