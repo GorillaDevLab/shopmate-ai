@@ -38,6 +38,10 @@ export class LowStockService {
     private readonly salesQueryService: Pick<SalesQueryService, "listEffectiveOrders">,
   ) {}
 
+  inventorySnapshot(context: AuthContext) {
+    return this.repository.listMerchantSkus(context);
+  }
+
   async analyze(
     context: AuthContext,
     asOfDate: string,

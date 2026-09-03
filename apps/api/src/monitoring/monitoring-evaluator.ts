@@ -18,11 +18,7 @@ interface DashboardReader {
 }
 
 interface InventoryReader {
-  analyze(
-    context: AuthContext,
-    endDate: string,
-    startDate?: string,
-  ): Promise<{ readonly risks: readonly InventoryRisk[] }>;
+  inventorySnapshot(context: AuthContext): Promise<readonly InventoryRisk[]>;
 }
 
 interface SalesMetrics {
@@ -33,9 +29,9 @@ interface SalesMetrics {
 }
 
 interface InventoryRisk {
+  readonly id: string;
   readonly productId: string;
   readonly productName: string;
-  readonly skuId: string;
   readonly code: string;
   readonly inventory: number;
 }
@@ -79,9 +75,9 @@ export class MonitoringEvaluator {
     now: Date,
   ) {
     const period = inventoryPeriod(now);
-    const data = await this.inventory.analyze(context, period.endDate, period.startDate);
+    const inventory = await this.inventory.inventorySnapshot(context);
     const allowed = definition.productIds.length > 0 ? new Set(definition.productIds) : undefined;
-    const matches = data.risks
+    const matches = inventory
       .filter(
         (risk) =>
           (!allowed || allowed.has(risk.productId)) && risk.inventory < definition.threshold,
@@ -134,7 +130,7 @@ function salesMatch(
 function inventoryMatch(risk: InventoryRisk): MonitoringMatch {
   return {
     resourceType: "SKU",
-    resourceId: risk.skuId,
+    resourceId: risk.id,
     title: `${risk.productName}库存不足`,
     message: `${risk.code} 当前库存 ${risk.inventory} 件，请及时检查。`,
     severity: risk.inventory === 0 ? "CRITICAL" : "WARNING",

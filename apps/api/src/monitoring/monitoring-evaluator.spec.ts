@@ -44,12 +44,10 @@ describe("监听规则求值", () => {
     const risks = Array.from({ length: 25 }, (_, index) => ({
       productId: index === 24 ? "other" : "product-1",
       productName: "测试商品",
-      skuId: `sku-${index}`,
+      id: `sku-${index}`,
       code: `SKU-${index}`,
       inventory: index,
       alertThreshold: 30,
-      recentSold: 1,
-      forecast: { status: "estimated" as const, days: 1 },
     }));
     const evaluator = new MonitoringEvaluator(dashboardReader(), inventoryReader(risks));
 
@@ -98,5 +96,5 @@ function dashboardReader(
 }
 
 function inventoryReader(risks: readonly object[]) {
-  return { analyze: vi.fn().mockResolvedValue({ risks }) };
+  return { inventorySnapshot: vi.fn().mockResolvedValue(risks) };
 }
