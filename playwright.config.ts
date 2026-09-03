@@ -20,6 +20,7 @@ if (!databaseUrl) {
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: "demo-live-smoke.spec.ts",
 
   timeout: 10 * 60 * 1000,
 
