@@ -3,7 +3,6 @@
 import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
 import { useState, type ReactNode } from "react";
 
-import { DashboardAiAssistant } from "./dashboard-ai-assistant";
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
 import { MetricGrid } from "./metric-card";
 import { ThemeSettings } from "./theme-settings";
@@ -50,6 +49,9 @@ export function Dashboard({
             <DashboardLayoutEditor
               data={data}
               periodLabel={periodLabel}
+              assistantOpen={assistantOpen}
+              onAssistantOpenChange={setAssistantOpen}
+              showAssistant={!authRequired}
               onEditingChange={(editing) => {
                 if (editing) setAssistantOpen(false);
               }}
@@ -73,9 +75,6 @@ export function Dashboard({
           中文界面 · 移动端优先 · 隐私友好
         </footer>
       </div>
-      {!authRequired && (
-        <DashboardAiAssistant open={assistantOpen} onOpenChange={setAssistantOpen} />
-      )}
     </main>
   );
 }

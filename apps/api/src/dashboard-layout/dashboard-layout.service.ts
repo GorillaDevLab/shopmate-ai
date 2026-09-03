@@ -8,8 +8,8 @@ import {
 import {
   DashboardLayoutReadResponseSchema,
   DashboardLayoutSaveRequestSchema,
-  DashboardLayoutSchema,
   DEFAULT_DASHBOARD_LAYOUT,
+  parseDashboardLayout,
   type DashboardLayoutReadResponse,
 } from "@shopmate/contracts";
 
@@ -57,7 +57,7 @@ export class DashboardLayoutService {
 }
 
 function toResponse(record: DashboardLayoutRecord): DashboardLayoutReadResponse {
-  const layout = DashboardLayoutSchema.parse(record.layout);
+  const layout = parseDashboardLayout(record.layout);
   return DashboardLayoutReadResponseSchema.parse({
     layout,
     revision: record.revision,

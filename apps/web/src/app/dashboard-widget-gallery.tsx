@@ -1,12 +1,26 @@
 "use client";
 
-import { DASHBOARD_COMPONENT_REGISTRY, type DashboardLayoutComponent } from "@shopmate/contracts";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  DASHBOARD_COMPONENT_REGISTRY,
+  type DashboardInsightPreviewResponse,
+  type DashboardLayoutComponent,
+} from "@shopmate/contracts";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+
+import { generateDashboardInsight } from "./dashboard-insight-api";
+import { DashboardPieChart } from "./dashboard-pie-chart";
+import { DashboardReportCard } from "./dashboard-report-card";
+
+type StandardComponent = Exclude<DashboardLayoutComponent, "pieChart" | "report">;
 
 type DashboardWidgetGalleryProps = {
   open: boolean;
   cardCount: number;
-  onAdd: (component: DashboardLayoutComponent) => void;
+  onAdd: (component: StandardComponent) => void;
+  onAddInsight?: (
+    component: "pieChart" | "report",
+    preview: DashboardInsightPreviewResponse,
+  ) => void;
   onClose: () => void;
 };
 
@@ -17,16 +31,23 @@ const previewCopy: Record<DashboardLayoutComponent, string> = {
   salesTrend: "查看当前统计周期的每日销售变化。",
   inventoryAlerts: "集中查看库存偏低、需要补货的商品。",
   hotProducts: "展示当前周期表现最好的商品。",
+  pieChart: "用自然语言生成可保存、可刷新的经营占比图。",
+  report: "让 AI 将经营数据整理成结构化报告。",
 };
 
 export function DashboardWidgetGallery({
   open,
   cardCount,
   onAdd,
+  onAddInsight,
   onClose,
 }: DashboardWidgetGalleryProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [selected, setSelected] = useState<DashboardLayoutComponent>("metric");
+  const [question, setQuestion] = useState("");
+  const [preview, setPreview] = useState<DashboardInsightPreviewResponse>();
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string>();
   useGalleryDialog(open, dialogRef);
   if (!open) return null;
 
@@ -60,8 +81,12 @@ export function DashboardWidgetGallery({
             ))}
           </nav>
           <section className="widget-gallery-preview" aria-live="polite">
-            <div className="widget-gallery-preview-card" aria-hidden="true">
-              <WidgetPreview component={selected} />
+            <div className="widget-gallery-preview-card">
+              {preview && isInsightComponent(selected) ? (
+                <InsightPreview preview={preview} />
+              ) : (
+                <WidgetPreview component={selected} />
+              )}
             </div>
             <div>
               <p className="widget-gallery-kicker">预览</p>
@@ -69,9 +94,38 @@ export function DashboardWidgetGallery({
               <p>{previewCopy[selected]}</p>
             </div>
             {isFull && <p className="widget-gallery-limit">看板最多包含 24 张卡片</p>}
-            <button type="button" disabled={isFull} onClick={() => onAdd(selected)}>
-              添加到看板
-            </button>
+            {isInsightComponent(selected) ? (
+              <InsightGenerator
+                component={selected}
+                question={question}
+                preview={preview}
+                generating={generating}
+                error={generationError}
+                isFull={isFull}
+                onQuestionChange={setQuestion}
+                onGenerate={async () => {
+                  setGenerating(true);
+                  setGenerationError(undefined);
+                  try {
+                    setPreview(
+                      await generateDashboardInsight(
+                        question,
+                        selected === "pieChart" ? "pie" : "report",
+                      ),
+                    );
+                  } catch (error: unknown) {
+                    setGenerationError(error instanceof Error ? error.message : "生成失败，请重试");
+                  } finally {
+                    setGenerating(false);
+                  }
+                }}
+                onAdd={() => preview && onAddInsight?.(selected, preview)}
+              />
+            ) : (
+              <button type="button" disabled={isFull} onClick={() => onAdd(selected)}>
+                添加到看板
+              </button>
+            )}
           </section>
         </div>
       </div>
@@ -100,6 +154,8 @@ function WidgetMark({ component }: { component: DashboardLayoutComponent }) {
     inventoryAlerts: "M5 7h10v9H5zM7 4h6v3",
     hotProducts:
       "M10 3c3 3 4 5 2 7 2-1 4 1 3 4-1 3-3 4-5 4s-4-1-5-4c-1-3 1-6 3-8 0 2 1 3 2 4 1-2 1-4 0-7Z",
+    pieChart: "M10 3v7h7a7 7 0 1 1-7-7Zm2 0a5 5 0 0 1 5 5h-5Z",
+    report: "M5 3h10v14H5zM8 7h4m-4 3h5m-5 3h3",
   };
   return (
     <span className="widget-gallery-mark" aria-hidden="true">
@@ -114,7 +170,67 @@ function WidgetPreview({ component }: { component: DashboardLayoutComponent }) {
   if (component === "metric") return <strong>¥24,860</strong>;
   if (component === "salesTrend") return <span className="widget-preview-line" />;
   if (component === "inventoryAlerts") return <span>4 项需要关注</span>;
+  if (component === "pieChart") return <span>输入问题后生成饼图预览</span>;
+  if (component === "report") return <span>输入问题后生成报告预览</span>;
   return <span>本期热销排行</span>;
+}
+
+function InsightGenerator(props: {
+  component: "pieChart" | "report";
+  question: string;
+  preview?: DashboardInsightPreviewResponse;
+  generating: boolean;
+  error?: string;
+  isFull: boolean;
+  onQuestionChange: (value: string) => void;
+  onGenerate: () => Promise<void>;
+  onAdd: () => void;
+}) {
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    void props.onGenerate();
+  };
+  return (
+    <form className="widget-insight-form" onSubmit={submit}>
+      <label htmlFor="widget-insight-question">想分析什么？</label>
+      <textarea
+        id="widget-insight-question"
+        value={props.question}
+        onChange={(event) => props.onQuestionChange(event.target.value)}
+        placeholder={
+          props.component === "pieChart"
+            ? "例如：按商品生成近 30 天销售额占比"
+            : "例如：总结近 90 天经营表现"
+        }
+        maxLength={2000}
+        rows={3}
+      />
+      {props.error && (
+        <p className="widget-gallery-limit" role="alert">
+          {props.error}
+        </p>
+      )}
+      <div className="widget-insight-actions">
+        <button type="submit" disabled={props.generating || !props.question.trim()}>
+          {props.generating ? "生成中…" : "生成预览"}
+        </button>
+        <button type="button" disabled={props.isFull || !props.preview} onClick={props.onAdd}>
+          添加到看板
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function InsightPreview({ preview }: { preview: DashboardInsightPreviewResponse }) {
+  if (preview.result.kind === "pie") return <DashboardPieChart result={preview.result} />;
+  return <DashboardReportCard result={preview.result} />;
+}
+
+function isInsightComponent(
+  component: DashboardLayoutComponent,
+): component is "pieChart" | "report" {
+  return component === "pieChart" || component === "report";
 }
 
 function useGalleryDialog(open: boolean, dialogRef: React.RefObject<HTMLDialogElement | null>) {

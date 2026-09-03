@@ -28,6 +28,9 @@ import {
   createGenerateProductCopyToolRegistration,
 } from "./tools/product-copy.tool.js";
 import { AI_READ_TOOL_NAMES } from "@shopmate/contracts";
+import { DashboardInsightController } from "./insights/dashboard-insight.controller.js";
+import { DashboardInsightExecutor } from "./insights/dashboard-insight-executor.js";
+import { DashboardInsightService } from "./insights/dashboard-insight.service.js";
 
 export const AI_LLM_PROVIDER = Symbol("AI_LLM_PROVIDER");
 export const AI_TOOL_REGISTRY = Symbol("AI_TOOL_REGISTRY");
@@ -35,7 +38,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
 
 @Module({
   imports: [AnalyticsModule, ProductModule],
-  controllers: [AiChatController],
+  controllers: [AiChatController, DashboardInsightController],
   providers: [
     {
       provide: AI_LLM_PROVIDER,
@@ -86,6 +89,23 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
       provide: AiChatService,
       useFactory: (agent: BusinessAgent) => new AiChatService(agent),
       inject: [AI_BUSINESS_AGENT],
+    },
+    {
+      provide: DashboardInsightExecutor,
+      useFactory: (
+        dashboard: DashboardService,
+        performance: ProductPerformanceService,
+        inventory: LowStockService,
+      ) => new DashboardInsightExecutor(dashboard, performance, inventory),
+      inject: [DashboardService, ProductPerformanceService, LowStockService],
+    },
+    {
+      provide: DashboardInsightService,
+      useFactory: (
+        provider: DeepSeekLLMProvider | MockLLMProvider,
+        executor: DashboardInsightExecutor,
+      ) => new DashboardInsightService(provider, executor),
+      inject: [AI_LLM_PROVIDER, DashboardInsightExecutor],
     },
   ],
   exports: [AiChatService],

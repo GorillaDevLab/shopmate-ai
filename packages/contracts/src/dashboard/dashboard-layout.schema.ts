@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-export const DashboardLayoutVersionSchema = z.literal(1, {
+import { DashboardInsightQuerySchema } from "../ai/dashboard-insight.schema.js";
+
+export const DashboardLayoutVersionSchema = z.literal(2, {
   error: "不支持的看板布局版本",
 });
 export type DashboardLayoutVersion = z.infer<typeof DashboardLayoutVersionSchema>;
@@ -19,7 +21,7 @@ const cardIdSchema = z
   .regex(/^[a-zA-Z0-9_-]+$/, { error: "卡片 ID 只能包含字母、数字、下划线和连字符" });
 
 export const DashboardLayoutComponentSchema = z.enum(
-  ["metric", "salesTrend", "inventoryAlerts", "hotProducts"],
+  ["metric", "salesTrend", "inventoryAlerts", "hotProducts", "pieChart", "report"],
   { error: "未知看板组件" },
 );
 export type DashboardLayoutComponent = z.infer<typeof DashboardLayoutComponentSchema>;
@@ -35,6 +37,15 @@ const inventoryAlertsConfigSchema = z.strictObject({
 });
 const hotProductsConfigSchema = z.strictObject({
   limit: z.number().int().min(1).max(10),
+});
+const insightTitleSchema = z.string().trim().min(1).max(120);
+const pieChartConfigSchema = z.strictObject({
+  title: insightTitleSchema,
+  query: DashboardInsightQuerySchema.refine((query) => query.visualization === "pie"),
+});
+const reportConfigSchema = z.strictObject({
+  title: insightTitleSchema,
+  query: DashboardInsightQuerySchema.refine((query) => query.visualization === "report"),
 });
 
 export const DashboardLayoutCardSchema = z.discriminatedUnion("component", [
@@ -62,6 +73,18 @@ export const DashboardLayoutCardSchema = z.discriminatedUnion("component", [
     size: DashboardLayoutSizeSchema,
     config: hotProductsConfigSchema,
   }),
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("pieChart"),
+    size: DashboardLayoutSizeSchema,
+    config: pieChartConfigSchema,
+  }),
+  z.strictObject({
+    id: cardIdSchema,
+    component: z.literal("report"),
+    size: DashboardLayoutSizeSchema,
+    config: reportConfigSchema,
+  }),
 ]);
 export type DashboardLayoutCard = z.infer<typeof DashboardLayoutCardSchema>;
 
@@ -82,13 +105,15 @@ export const DASHBOARD_COMPONENT_REGISTRY = {
   salesTrend: { label: "销售趋势", defaultSize: "2/3" },
   inventoryAlerts: { label: "库存提醒", defaultSize: "1/3" },
   hotProducts: { label: "热销商品", defaultSize: "full" },
+  pieChart: { label: "AI 饼图", defaultSize: "1/2" },
+  report: { label: "AI 经营报告", defaultSize: "1/2" },
 } as const satisfies Record<
   DashboardLayoutComponent,
   { label: string; defaultSize: DashboardLayoutSize }
 >;
 
 export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
-  version: 1,
+  version: 2,
   cards: [
     { id: "metric-sales", component: "metric", size: "1/3", config: { metric: "sales" } },
     { id: "metric-orders", component: "metric", size: "1/3", config: { metric: "orders" } },
@@ -106,3 +131,44 @@ export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
 };
 
 DashboardLayoutSchema.parse(DEFAULT_DASHBOARD_LAYOUT);
+
+const legacyLayoutSchema = z.strictObject({
+  version: z.literal(1),
+  cards: z
+    .array(
+      z.discriminatedUnion("component", [
+        z.strictObject({
+          id: cardIdSchema,
+          component: z.literal("metric"),
+          size: DashboardLayoutSizeSchema,
+          config: metricConfigSchema,
+        }),
+        z.strictObject({
+          id: cardIdSchema,
+          component: z.literal("salesTrend"),
+          size: DashboardLayoutSizeSchema,
+          config: salesTrendConfigSchema,
+        }),
+        z.strictObject({
+          id: cardIdSchema,
+          component: z.literal("inventoryAlerts"),
+          size: DashboardLayoutSizeSchema,
+          config: inventoryAlertsConfigSchema,
+        }),
+        z.strictObject({
+          id: cardIdSchema,
+          component: z.literal("hotProducts"),
+          size: DashboardLayoutSizeSchema,
+          config: hotProductsConfigSchema,
+        }),
+      ]),
+    )
+    .max(24),
+});
+
+export function parseDashboardLayout(value: unknown): DashboardLayout {
+  const current = DashboardLayoutSchema.safeParse(value);
+  if (current.success) return current.data;
+  const legacy = legacyLayoutSchema.parse(value);
+  return DashboardLayoutSchema.parse({ version: 2, cards: legacy.cards });
+}

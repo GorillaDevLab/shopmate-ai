@@ -49,6 +49,10 @@ export class MockLLMProvider implements LLMProvider {
   async generate(request: LLMGenerationRequest): Promise<LLMGenerationResult> {
     this.throwConfiguredError();
 
+    if (isDashboardInsightRequest(request)) {
+      return dashboardInsightResult(request);
+    }
+
     if (isStructuredProductCopyGenerationRequest(request)) {
       return structuredProductCopyResult(request);
     }
@@ -109,6 +113,33 @@ export class MockLLMProvider implements LLMProvider {
       retryable: fixture.retryable,
     });
   }
+}
+
+function isDashboardInsightRequest(request: LLMGenerationRequest): boolean {
+  return request.messages.some(
+    (message) => message.role === "system" && message.content.includes("propose_dashboard_insight"),
+  );
+}
+
+function dashboardInsightResult(request: LLMGenerationRequest): LLMGenerationResult {
+  const userText = getLatestUserText(request);
+  const visualization = userText.includes("目标组件：report") ? "report" : "pie";
+  const metric = userText.includes("销量") ? "unitsSold" : "revenue";
+  return toolCallGeneration({
+    id: "mock-call-dashboard-insight-001",
+    name: "propose_dashboard_insight",
+    arguments: {
+      dataset: "sales",
+      metric,
+      aggregation: "sum",
+      groupBy: visualization === "pie" ? "product" : null,
+      dateRange: { start: "2026-08-25", end: "2026-08-31" },
+      filters: [],
+      order: "desc",
+      limit: 8,
+      visualization,
+    },
+  });
 }
 
 function getLatestVerifiedToolContent(request: LLMGenerationRequest): string | null {

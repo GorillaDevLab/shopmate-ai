@@ -54,6 +54,7 @@ export {
   DashboardLayoutSizeSchema,
   DashboardLayoutVersionSchema,
   DEFAULT_DASHBOARD_LAYOUT,
+  parseDashboardLayout,
 } from "./dashboard/dashboard-layout.schema.js";
 export type {
   DashboardLayout,
@@ -113,6 +114,26 @@ export {
 
 export { AiChatRequestSchema, AiChatResponseSchema } from "./ai/chat-api.schema.js";
 export type { AiChatRequest, AiChatResponse } from "./ai/chat-api.schema.js";
+export {
+  DashboardInsightAggregationSchema,
+  DashboardInsightDatasetSchema,
+  DashboardInsightDimensionSchema,
+  DashboardInsightExecuteRequestSchema,
+  DashboardInsightExecuteResponseSchema,
+  DashboardInsightGenerateRequestSchema,
+  DashboardInsightMetricSchema,
+  DashboardInsightPreviewResponseSchema,
+  DashboardInsightQuerySchema,
+  DashboardInsightResultSchema,
+} from "./ai/dashboard-insight.schema.js";
+export type {
+  DashboardInsightGenerateRequest,
+  DashboardInsightExecuteRequest,
+  DashboardInsightExecuteResponse,
+  DashboardInsightPreviewResponse,
+  DashboardInsightQuery,
+  DashboardInsightResult,
+} from "./ai/dashboard-insight.schema.js";
 export type {
   AiReadToolContract,
   AiReadToolEmpty,

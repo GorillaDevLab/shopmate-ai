@@ -16,7 +16,11 @@ type ChatFailure = {
   readonly prompt: string;
 };
 
-export function useChatSession() {
+type ChatSessionOptions = {
+  readonly resolveMessage?: (prompt: string) => Promise<ChatMessage | undefined>;
+};
+
+export function useChatSession(options: ChatSessionOptions = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -38,7 +42,7 @@ export function useChatSession() {
     setIsSending(true);
 
     try {
-      const reply = await sendChatMessage(prompt);
+      const reply = (await options.resolveMessage?.(prompt)) ?? (await sendChatMessage(prompt));
 
       setMessages((current) => [...current, reply]);
     } catch (reason) {

@@ -50,7 +50,7 @@ describe("PrismaDashboardLayoutRepository", () => {
       data: {
         userId: "user-1",
         merchantId: "merchant-1",
-        schemaVersion: 1,
+        schemaVersion: 2,
         revision: 1,
         layout: DEFAULT_DASHBOARD_LAYOUT,
       },
@@ -73,7 +73,7 @@ describe("PrismaDashboardLayoutRepository", () => {
     });
     expect(databaseMocks.userDashboardLayout.updateManyAndReturn).toHaveBeenCalledWith({
       where: { userId: "user-1", merchantId: "merchant-1", revision: 2 },
-      data: { layout: DEFAULT_DASHBOARD_LAYOUT, schemaVersion: 1, revision: { increment: 1 } },
+      data: { layout: DEFAULT_DASHBOARD_LAYOUT, schemaVersion: 2, revision: { increment: 1 } },
       select: { layout: true, revision: true, updatedAt: true },
     });
     expect(databaseMocks.userDashboardLayout.findUnique).not.toHaveBeenCalled();
