@@ -184,7 +184,7 @@ git commit -m "feat: add versioned widget footprint schema"
 - Produces: `footprintForSize(size)`、`adjacentAllowedSize(size, direction, allowed)`、`previewWidgetSize(...)`。
 - Produces: 卡片 CSS 变量 `--widget-columns` 与 `--widget-rows`。
 
-- [ ] **Step 1: 写二维尺寸纯函数失败测试**
+- [x] **Step 1: 写二维尺寸纯函数失败测试**
 
 创建 `dashboard-layout-resize.test.ts`：
 
@@ -213,7 +213,7 @@ expect(
 ).toBe("2x2");
 ```
 
-- [ ] **Step 2: 写编辑器尺寸与控件失败测试**
+- [x] **Step 2: 写编辑器尺寸与控件失败测试**
 
 更新编辑器测试，验证：
 
@@ -229,7 +229,7 @@ expect(screen.getByRole("menuitem", { name: "下移" })).toBeInTheDocument();
 
 将缩放手柄名称改为“调整销售额卡片尺寸”，指针事件同时提供 `clientX` 与 `clientY`，预览属性改为 `data-preview-size="2x1"` 或 `data-preview-size="2x2"`。
 
-- [ ] **Step 3: 运行聚焦测试并确认 RED**
+- [x] **Step 3: 运行聚焦测试并确认 RED**
 
 Run:
 
@@ -239,7 +239,7 @@ pnpm --filter @shopmate/web exec vitest run src/app/dashboard-layout-resize.test
 
 Expected: FAIL；二维 footprint 函数不存在，编辑器仍显示旧尺寸与顶部移动按钮。
 
-- [ ] **Step 4: 实现二维尺寸函数**
+- [x] **Step 4: 实现二维尺寸函数**
 
 在 `dashboard-layout-resize.ts` 中定义：
 
@@ -257,7 +257,7 @@ export function footprintForSize(size: DashboardLayoutSize): WidgetFootprint {
 
 `previewWidgetSize` 把指针 delta 换算为目标 columns/rows，并在 `allowedSizes` 中选择平方距离最小的 footprint；距离相同时保持当前尺寸，防止边界抖动。
 
-- [ ] **Step 5: 改造编辑器尺寸状态与菜单**
+- [x] **Step 5: 改造编辑器尺寸状态与菜单**
 
 将 `ResizeSession` 改为保存 `startY`、`startSize`、`size`，将 `ResizePreview` 改为 `{ cardId, size }`。卡片渲染时由 footprint 写入：
 
@@ -271,7 +271,7 @@ const style = {
 
 顶部控件只保留拖动把手、尺寸徽标和更多菜单；`CardMoreMenu` 从 `DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes` 渲染尺寸，并在菜单内提供“上移”“下移”“删除”。鼠标点击移动传入 `event.detail > 0`，键盘激活传入 `false`。
 
-- [ ] **Step 6: 实现二维 CSS Grid**
+- [x] **Step 6: 实现二维 CSS Grid**
 
 在 `globals.css` 中加入：
 
@@ -308,7 +308,7 @@ const style = {
 
 `ReadyLayoutEditor` 使用 `.dashboard-layout-shell` 包住工具栏、消息和 Grid，使 `cqw` 相对看板可用宽度计算。卡片内部 panel 使用 `height: 100%` 与受控 overflow；紧凑顶部控件不得扩大网格行高。
 
-- [ ] **Step 7: 运行 Task 2 验证并提交**
+- [x] **Step 7: 运行 Task 2 验证并提交**
 
 Run:
 
