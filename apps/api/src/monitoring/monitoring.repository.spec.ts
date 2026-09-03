@@ -79,4 +79,25 @@ describe("PrismaMonitoringRepository", () => {
       },
     });
   });
+
+  it("规则不在当前用户范围时不写入提醒", async () => {
+    databaseMocks.userMonitoringRule.updateMany.mockResolvedValue({ count: 0 });
+    const completedAt = new Date("2026-09-03T00:00:00.000Z");
+
+    await expect(
+      repository.completeRun(context, "other-rule", completedAt, completedAt, [
+        {
+          fingerprint: "foreign-rule-fingerprint",
+          title: "不应创建",
+          message: "不应为其他用户规则创建提醒",
+          severity: "WARNING",
+          resourceType: "SKU",
+          resourceId: "sku-1",
+          periodStart: completedAt,
+          periodEnd: completedAt,
+        },
+      ]),
+    ).resolves.toBe(0);
+    expect(databaseMocks.monitoringNotification.createMany).not.toHaveBeenCalled();
+  });
 });

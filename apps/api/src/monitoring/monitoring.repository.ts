@@ -204,6 +204,11 @@ export class PrismaMonitoringRepository implements MonitoringRepository {
     notifications: readonly PendingMonitoringNotification[],
   ): Promise<number> {
     return getPrismaClient().$transaction(async (transaction) => {
+      const claimed = await transaction.userMonitoringRule.updateMany({
+        where: { id, ...identity(context) },
+        data: { lastRunAt: completedAt, nextRunAt, lastErrorCode: null, lastErrorMessage: null },
+      });
+      if (claimed.count === 0) return 0;
       const created = await transaction.monitoringNotification.createMany({
         data: notifications.map((notification) => ({
           ...notification,
@@ -211,10 +216,6 @@ export class PrismaMonitoringRepository implements MonitoringRepository {
           ...identity(context),
         })),
         skipDuplicates: true,
-      });
-      await transaction.userMonitoringRule.updateMany({
-        where: { id, ...identity(context) },
-        data: { lastRunAt: completedAt, nextRunAt, lastErrorCode: null, lastErrorMessage: null },
       });
       return created.count;
     });
