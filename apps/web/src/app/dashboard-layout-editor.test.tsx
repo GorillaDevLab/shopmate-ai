@@ -33,6 +33,24 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("DashboardLayoutEditor", () => {
+  it("重新渲染期间保持同一个快捷键监听器", async () => {
+    const addListener = vi.spyOn(window, "addEventListener");
+    const removeListener = vi.spyOn(window, "removeEventListener");
+    const view = render(
+      <DashboardLayoutEditor data={dashboardResponsePreview} periodLabel="近 7 天" />,
+    );
+    await screen.findByRole("button", { name: "编辑看板" });
+    await waitFor(() => expect(keydownListenerCalls(addListener.mock.calls)).toBeGreaterThan(0));
+    const initialAdds = keydownListenerCalls(addListener.mock.calls);
+
+    view.rerender(<DashboardLayoutEditor data={dashboardResponsePreview} periodLabel="近 30 天" />);
+
+    expect(keydownListenerCalls(addListener.mock.calls)).toBe(initialAdds);
+    expect(keydownListenerCalls(removeListener.mock.calls)).toBe(0);
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("toolbar", { name: "看板布局编辑工具" })).toBeInTheDocument();
+  });
+
   it("加载用户布局后可通过 Ctrl/Cmd+K 切换编辑模式", async () => {
     await renderEditor();
     expect(api.fetchDashboardLayout).toHaveBeenCalledOnce();
@@ -195,6 +213,10 @@ describe("DashboardLayoutEditor", () => {
     ).toHaveAttribute("aria-valuemin", "4");
   });
 });
+
+function keydownListenerCalls(calls: readonly (readonly unknown[])[]): number {
+  return calls.filter(([eventName]) => eventName === "keydown").length;
+}
 
 async function renderEditor() {
   render(<DashboardLayoutEditor data={dashboardResponsePreview} periodLabel="近 7 天" />);

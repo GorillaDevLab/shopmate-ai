@@ -905,15 +905,20 @@ function renderCard(
 }
 
 function useDashboardEditorShortcut(onToggle: () => void) {
+  const onToggleRef = useRef(onToggle);
+  useLayoutEffect(() => {
+    onToggleRef.current = onToggle;
+  }, [onToggle]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (shouldIgnoreShortcut(event)) return;
       event.preventDefault();
-      onToggle();
+      onToggleRef.current();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onToggle]);
+  }, []);
 }
 
 function shouldIgnoreShortcut(event: KeyboardEvent): boolean {
