@@ -23,6 +23,7 @@
 **Files:**
 - Modify: `apps/web/src/app/theme.test.ts`
 - Modify: `apps/web/src/app/theme-settings.test.tsx`
+- Modify: `apps/web/src/app/page.test.tsx`
 - Modify: `apps/web/src/app/theme.ts`
 - Modify: `apps/web/src/app/layout.tsx`
 
@@ -30,7 +31,7 @@
 - Consumes: `localStorage['shopmate-theme']` 和 `<html data-theme>`。
 - Produces: `themeValue(value: unknown): Theme`；无效输入返回 `purple`，有效 `terracotta`/`purple` 原样返回。
 
-- [ ] **Step 1: 写首屏主题的失败测试**
+- [x] **Step 1: 写首屏主题的失败测试**
 
 将 `apps/web/src/app/theme.test.ts` 的期望改为：
 
@@ -46,7 +47,7 @@ expect(document.documentElement.dataset.theme).toBe(
 expect(document.documentElement.dataset.theme).toBe("purple");
 ```
 
-- [ ] **Step 2: 写设置面板默认选项的失败测试**
+- [x] **Step 2: 写设置面板默认选项的失败测试**
 
 在 `apps/web/src/app/theme-settings.test.tsx` 中把双向切换用例改为从经典紫色开始：
 
@@ -68,17 +69,17 @@ it("默认经典紫色，可双向切换并保存，关闭不撤销选择", () =
 });
 ```
 
-- [ ] **Step 3: 运行聚焦测试并确认 RED**
+- [x] **Step 3: 运行聚焦测试并确认 RED**
 
 Run:
 
 ```bash
-pnpm --filter @shopmate/web exec vitest run src/app/theme.test.ts src/app/theme-settings.test.tsx
+pnpm --filter @shopmate/web exec vitest run src/app/theme.test.ts src/app/theme-settings.test.tsx src/app/page.test.tsx
 ```
 
-Expected: FAIL；无存储与读取失败仍得到 `terracotta`，设置面板仍默认选中暖灰陶土。
+Expected: FAIL；无存储与读取失败仍得到 `terracotta`，设置面板仍默认选中暖灰陶土，服务端 HTML 仍输出陶土主题。
 
-- [ ] **Step 4: 实现最小生产代码**
+- [x] **Step 4: 实现最小生产代码**
 
 在 `apps/web/src/app/theme.ts` 中保留有效陶土主题，否则回退紫色：
 
@@ -106,17 +107,17 @@ root.dataset.theme = 'purple';
 <html lang="zh-CN" data-theme="purple" suppressHydrationWarning>
 ```
 
-- [ ] **Step 5: 运行聚焦测试并确认 GREEN**
+- [x] **Step 5: 运行聚焦测试并确认 GREEN**
 
 Run:
 
 ```bash
-pnpm --filter @shopmate/web exec vitest run src/app/theme.test.ts src/app/theme-settings.test.tsx
+pnpm --filter @shopmate/web exec vitest run src/app/theme.test.ts src/app/theme-settings.test.tsx src/app/page.test.tsx
 ```
 
-Expected: 两个测试文件全部 PASS，且没有警告或未捕获错误。
+Expected: 三个测试文件全部 PASS，且没有警告或未捕获错误。
 
-- [ ] **Step 6: 运行完整质量检查**
+- [x] **Step 6: 运行完整质量检查**
 
 Run:
 
@@ -130,10 +131,9 @@ pnpm secret:scan
 
 Expected: 所有命令退出码为 0。
 
-- [ ] **Step 7: 提交实现**
+- [x] **Step 7: 提交实现**
 
 ```bash
-git add apps/web/src/app/theme.test.ts apps/web/src/app/theme-settings.test.tsx apps/web/src/app/theme.ts apps/web/src/app/layout.tsx docs/dashboard/2026-09-04-purple-default-theme-plan.md
+git add apps/web/src/app/theme.test.ts apps/web/src/app/theme-settings.test.tsx apps/web/src/app/page.test.tsx apps/web/src/app/theme.ts apps/web/src/app/layout.tsx docs/dashboard/2026-09-04-purple-default-theme-plan.md
 git commit -m "feat: make purple the default dashboard theme"
 ```
-

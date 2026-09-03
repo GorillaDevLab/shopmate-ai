@@ -36,20 +36,20 @@ describe("外观设置", () => {
     openSettings();
     expect(screen.getByRole("alert")).toHaveTextContent("当前浏览器无法保存外观设置");
   });
-  it("默认暖灰，可双向切换并保存，关闭不撤销选择", () => {
+  it("默认经典紫色，可双向切换并保存，关闭不撤销选择", () => {
     render(<Dashboard />);
-    openSettings();
-    expect(screen.getByRole("radio", { name: "暖灰陶土" })).toBeChecked();
-    fireEvent.click(screen.getByRole("radio", { name: "经典紫色" }));
-    expect(document.documentElement).toHaveAttribute("data-theme", "purple");
-    expect(localStorage.getItem("shopmate-theme")).toBe("purple");
-    fireEvent.click(screen.getByRole("button", { name: "关闭外观设置" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     openSettings();
     expect(screen.getByRole("radio", { name: "经典紫色" })).toBeChecked();
     fireEvent.click(screen.getByRole("radio", { name: "暖灰陶土" }));
     expect(document.documentElement).toHaveAttribute("data-theme", "terracotta");
     expect(localStorage.getItem("shopmate-theme")).toBe("terracotta");
+    fireEvent.click(screen.getByRole("button", { name: "关闭外观设置" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    openSettings();
+    expect(screen.getByRole("radio", { name: "暖灰陶土" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "经典紫色" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "purple");
+    expect(localStorage.getItem("shopmate-theme")).toBe("purple");
   });
   it("设置反映首屏已经恢复的主题", () => {
     document.documentElement.dataset.theme = "purple";
@@ -63,8 +63,8 @@ describe("外观设置", () => {
     });
     render(<Dashboard />);
     openSettings();
-    fireEvent.click(screen.getByRole("radio", { name: "经典紫色" }));
-    expect(document.documentElement).toHaveAttribute("data-theme", "purple");
+    fireEvent.click(screen.getByRole("radio", { name: "暖灰陶土" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "terracotta");
     expect(screen.getByRole("alert")).toHaveTextContent("当前浏览器无法保存外观设置");
   });
 });
