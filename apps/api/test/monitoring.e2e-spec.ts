@@ -80,7 +80,10 @@ describe("Monitoring API", () => {
       .set("Cookie", cookie)
       .send({ question: "库存低于 5 件时提醒我" })
       .expect(200);
-    expect(preview.body).toMatchObject({ definition: { threshold: 5 }, evaluation: { matched: true } });
+    expect(preview.body).toMatchObject({
+      definition: { threshold: 5 },
+      evaluation: { matched: true },
+    });
 
     const created = await request(app.getHttpServer())
       .post("/api/v1/monitoring/rules")
@@ -177,11 +180,7 @@ function sessionCookie(userId: string, merchantId: string): string {
     merchantId,
     permissions: [AuthPermission.OrdersRead, AuthPermission.ProductsRead],
   });
-  const session = signDemoSession(
-    context,
-    "test-session-key-with-at-least-32-characters",
-    3_600,
-  );
+  const session = signDemoSession(context, "test-session-key-with-at-least-32-characters", 3_600);
   return `${DEMO_SESSION_COOKIE_NAME}=${session.token}`;
 }
 
