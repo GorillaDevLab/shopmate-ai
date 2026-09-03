@@ -159,6 +159,59 @@ export {
   matchesInventoryAlertConfirmationActor,
 } from "./inventory/inventory-alert-update.schema.js";
 
+export {
+  InventoryThresholdRuleSchema,
+  MonitoringFrequencySchema,
+  MonitoringResourceTypeSchema,
+  MonitoringRuleDefinitionSchema,
+  MonitoringRuleStatusSchema,
+  MonitoringSeveritySchema,
+  SalesThresholdRuleSchema,
+} from "./monitoring/monitoring-rule.schema.js";
+export type {
+  MonitoringFrequency,
+  MonitoringResourceType,
+  MonitoringRuleDefinition,
+  MonitoringRuleStatus,
+  MonitoringSeverity,
+} from "./monitoring/monitoring-rule.schema.js";
+export {
+  MonitoringEvaluationSchema,
+  MonitoringMatchSchema,
+  MonitoringNotificationListResponseSchema,
+  MonitoringNotificationViewSchema,
+  MonitoringReadAllResponseSchema,
+  MonitoringReadResponseSchema,
+  MonitoringRuleCreateRequestSchema,
+  MonitoringRuleListResponseSchema,
+  MonitoringRulePreviewRequestSchema,
+  MonitoringRulePreviewResponseSchema,
+  MonitoringRuleResponseSchema,
+  MonitoringRuleRunResponseSchema,
+  MonitoringRuleStatusRequestSchema,
+  MonitoringRuleViewSchema,
+  MonitoringSyncResponseSchema,
+  MonitoringUnreadCountResponseSchema,
+} from "./monitoring/monitoring-api.schema.js";
+export type {
+  MonitoringEvaluation,
+  MonitoringMatch,
+  MonitoringNotificationListResponse,
+  MonitoringNotificationView,
+  MonitoringReadAllResponse,
+  MonitoringReadResponse,
+  MonitoringRuleCreateRequest,
+  MonitoringRuleListResponse,
+  MonitoringRulePreviewRequest,
+  MonitoringRulePreviewResponse,
+  MonitoringRuleResponse,
+  MonitoringRuleRunResponse,
+  MonitoringRuleStatusRequest,
+  MonitoringRuleView,
+  MonitoringSyncResponse,
+  MonitoringUnreadCountResponse,
+} from "./monitoring/monitoring-api.schema.js";
+
 export type {
   InventoryAlertActor,
   InventoryAlertSkuSnapshot,
