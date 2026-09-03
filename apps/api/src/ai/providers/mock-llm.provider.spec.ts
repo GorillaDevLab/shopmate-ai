@@ -210,6 +210,22 @@ describe("MockLLMProvider", () => {
     expect(result.message.content).toContain("没有足够信息");
   });
 
+  it("监听规则会采用用户提供的库存阈值", async () => {
+    const provider = new MockLLMProvider();
+
+    const result = await provider.generate({
+      messages: [
+        { role: "system", content: "只能调用 propose_monitoring_rule。" },
+        { role: "user", content: "库存低于 5 件时提醒我" },
+      ],
+    });
+
+    expect(result.message.toolCalls?.[0]).toMatchObject({
+      name: "propose_monitoring_rule",
+      arguments: { kind: "inventoryThreshold", threshold: 5 },
+    });
+  });
+
   it("调用过程中不会发出网络请求", async () => {
     const fetchSpy = vi.fn(() => {
       throw new Error("Mock Provider 不允许访问网络");

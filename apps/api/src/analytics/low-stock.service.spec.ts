@@ -114,6 +114,11 @@ describe("LowStockService", () => {
     ]);
   });
 
+  it("为受限监听返回当前商家的完整库存快照", async () => {
+    await expect(service.inventorySnapshot(context)).resolves.toEqual(skuFixtures);
+    expect(repository.listMerchantSkus).toHaveBeenCalledWith(context);
+  });
+
   it("查询当前 Merchant 的 SKU 和最近七天有效订单", async () => {
     await service.analyze(context, "2026-08-30");
 

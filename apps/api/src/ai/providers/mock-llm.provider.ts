@@ -49,6 +49,10 @@ export class MockLLMProvider implements LLMProvider {
   async generate(request: LLMGenerationRequest): Promise<LLMGenerationResult> {
     this.throwConfiguredError();
 
+    if (isMonitoringRuleRequest(request)) {
+      return monitoringRuleResult(request);
+    }
+
     if (isDashboardInsightRequest(request)) {
       return dashboardInsightResult(request);
     }
@@ -113,6 +117,49 @@ export class MockLLMProvider implements LLMProvider {
       retryable: fixture.retryable,
     });
   }
+}
+
+function isMonitoringRuleRequest(request: LLMGenerationRequest): boolean {
+  return request.messages.some(
+    (message) => message.role === "system" && message.content.includes("propose_monitoring_rule"),
+  );
+}
+
+function monitoringRuleResult(request: LLMGenerationRequest): LLMGenerationResult {
+  const userText = getLatestUserText(request);
+  if (matchesInventoryIntent(userText)) {
+    return toolCallGeneration({
+      id: "mock-call-monitoring-inventory-001",
+      name: "propose_monitoring_rule",
+      arguments: {
+        kind: "inventoryThreshold",
+        metric: "inventory",
+        operator: "below",
+        threshold: inventoryThreshold(userText),
+        scope: "allProducts",
+        productIds: [],
+        frequency: "daily",
+      },
+    });
+  }
+  return toolCallGeneration({
+    id: "mock-call-monitoring-sales-001",
+    name: "propose_monitoring_rule",
+    arguments: {
+      kind: "salesThreshold",
+      metric: "revenue",
+      operator: "below",
+      threshold: 100_000,
+      window: "30d",
+      frequency: "daily",
+    },
+  });
+}
+
+function inventoryThreshold(userText: string): number {
+  const match = userText.match(/(?:低于|少于|不足)\s*(\d{1,7})/u);
+  if (!match?.[1]) return 10;
+  return Math.min(Number.parseInt(match[1], 10), 1_000_000);
 }
 
 function isDashboardInsightRequest(request: LLMGenerationRequest): boolean {

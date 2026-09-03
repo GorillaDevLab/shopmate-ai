@@ -692,6 +692,370 @@ button:focus-visible {
   }
 }
 
+.header-icon-button,
+.icon-button {
+  position: relative;
+  display: inline-grid;
+  min-width: 44px;
+  min-height: 44px;
+  place-items: center;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-size: 20px;
+}
+.notification-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 2px solid var(--app-bg);
+  border-radius: 999px;
+  background: var(--danger);
+  padding: 0 4px;
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+}
+.monitoring-overlay {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(30 27 24 / 24%);
+  backdrop-filter: blur(6px);
+  animation: monitoring-fade 160ms ease-out;
+}
+.monitoring-sheet,
+.notification-sheet {
+  width: min(100%, 560px);
+  height: 100%;
+  overflow-y: auto;
+  border-left: 1px solid var(--app-line);
+  background: color-mix(in srgb, var(--app-bg) 96%, white);
+  padding: 24px;
+  box-shadow: -20px 0 60px rgb(40 32 26 / 12%);
+  animation: monitoring-slide 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.notification-sheet {
+  width: min(100%, 460px);
+}
+.monitoring-sheet-header,
+.monitoring-list-header,
+.notification-toolbar,
+.notification-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.monitoring-sheet-header h2 {
+  margin: 2px 0 0;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+.monitoring-eyebrow {
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+.monitoring-composer,
+.monitoring-preview {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+  border: 1px solid var(--app-line);
+  border-radius: 18px;
+  background: var(--app-surface);
+  padding: 18px;
+}
+.monitoring-composer label {
+  font-size: 14px;
+  font-weight: 750;
+}
+.monitoring-composer > p,
+.monitoring-preview p,
+.monitoring-state p,
+.notification-list p {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.monitoring-input-row {
+  display: flex;
+  gap: 8px;
+}
+.monitoring-input-row input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--app-line);
+  border-radius: 12px;
+  background: var(--app-bg);
+  padding: 12px;
+  color: var(--app-text);
+}
+.monitoring-input-row button,
+.monitoring-actions button,
+.monitoring-rule-actions button,
+.notification-toolbar button,
+.monitoring-state button {
+  min-height: 42px;
+  border-radius: 11px;
+  background: var(--brand);
+  padding: 9px 14px;
+  color: white;
+  font-size: 13px;
+  font-weight: 750;
+}
+.monitoring-input-row button:disabled,
+.monitoring-actions button:disabled,
+.monitoring-rule-actions button:disabled {
+  opacity: 0.5;
+}
+.monitoring-preview {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--app-line));
+  background: var(--brand-soft);
+}
+.monitoring-preview span {
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 750;
+}
+.monitoring-preview h3 {
+  margin: 3px 0 4px;
+  font-size: 17px;
+}
+.monitoring-preview strong {
+  font-size: 13px;
+}
+.monitoring-preview strong.is-warning {
+  color: var(--warning);
+}
+.monitoring-preview-match {
+  border-left: 2px solid var(--brand);
+  padding-left: 10px;
+}
+.monitoring-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.monitoring-actions .secondary-button {
+  border: 1px solid var(--app-line);
+  background: var(--app-surface);
+  color: var(--app-text);
+}
+.monitoring-actions .danger-button {
+  background: var(--danger);
+}
+.monitoring-error {
+  margin-top: 12px;
+  border-radius: 12px;
+  background: #fff0f1;
+  padding: 12px 14px;
+  color: var(--danger);
+  font-size: 13px;
+}
+.monitoring-list-header {
+  margin: 26px 0 10px;
+}
+.monitoring-list-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.monitoring-list-header span,
+.notification-toolbar {
+  color: var(--app-muted);
+  font-size: 12px;
+}
+.monitoring-state {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  min-height: 150px;
+  border: 1px dashed var(--app-line);
+  border-radius: 16px;
+  color: var(--app-muted);
+  text-align: center;
+}
+.monitoring-rule-list,
+.notification-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.monitoring-rule-list > li,
+.notification-list > li {
+  border: 1px solid var(--app-line);
+  border-radius: 16px;
+  background: var(--app-surface);
+  padding: 15px;
+}
+.monitoring-rule-list > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.monitoring-rule-copy {
+  min-width: 0;
+}
+.monitoring-rule-copy p {
+  margin: 5px 0 0;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+.monitoring-rule-copy small {
+  display: block;
+  margin-top: 6px;
+  color: var(--danger);
+}
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--app-subtle);
+}
+.status-dot.active {
+  background: var(--positive);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--positive) 16%, transparent);
+}
+.monitoring-rule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.monitoring-rule-actions button {
+  min-height: 36px;
+  border: 1px solid var(--app-line);
+  background: var(--app-bg);
+  padding: 7px 10px;
+  color: var(--app-text);
+}
+.monitoring-rule-actions .danger-text {
+  color: var(--danger);
+}
+.confirmation-backdrop {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(20 18 17 / 35%);
+  padding: 20px;
+}
+.confirmation-dialog {
+  width: min(100%, 400px);
+  border-radius: 20px;
+  background: var(--app-surface);
+  padding: 22px;
+  box-shadow: 0 24px 80px rgb(20 18 17 / 25%);
+}
+.confirmation-dialog h3 {
+  margin: 0;
+}
+.confirmation-dialog p {
+  color: var(--app-muted);
+  line-height: 1.6;
+}
+.notification-toolbar {
+  margin: 22px 0 10px;
+}
+.notification-toolbar button {
+  min-height: 34px;
+  background: transparent;
+  padding: 5px 8px;
+  color: var(--brand);
+}
+.notification-list > li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  gap: 10px;
+}
+.notification-list > li.is-read {
+  opacity: 0.65;
+}
+.notification-severity {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+.notification-meta time {
+  color: var(--app-muted);
+  font-size: 11px;
+}
+.notification-list h3 {
+  margin: 8px 0 4px;
+  font-size: 14px;
+}
+.notification-list button {
+  align-self: start;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+@keyframes monitoring-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes monitoring-slide {
+  from {
+    transform: translateX(24px);
+    opacity: 0.65;
+  }
+}
+
+@media (max-width: 639px) {
+  .monitoring-sheet,
+  .notification-sheet {
+    width: 100%;
+    border-left: 0;
+    padding: 18px 16px;
+  }
+  .monitoring-input-row {
+    flex-direction: column;
+  }
+  .monitoring-rule-list > li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .monitoring-rule-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .notification-list > li {
+    grid-template-columns: 8px 1fr;
+  }
+  .notification-list > li > button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monitoring-overlay,
+  .monitoring-sheet,
+  .notification-sheet {
+    animation: none;
+  }
+}
+
 .range-segments {
   position: relative;
   display: inline-grid;
