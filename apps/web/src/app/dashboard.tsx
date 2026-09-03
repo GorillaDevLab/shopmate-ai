@@ -7,6 +7,8 @@ import { DashboardLayoutEditor } from "./dashboard-layout-editor";
 import { MetricGrid } from "./metric-card";
 import { ThemeSettings } from "./theme-settings";
 import { LogoutButton } from "./logout-button";
+import { MonitoringRuleManager } from "./monitoring-rule-manager";
+import { NotificationCenter } from "./notification-center";
 
 export type DashboardState = "ready" | "loading" | "empty" | "error";
 
@@ -31,6 +33,7 @@ export function Dashboard({
 }: DashboardProps) {
   const visibleState = state === "ready" && !data ? "empty" : state;
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [monitoringOpen, setMonitoringOpen] = useState(false);
   return (
     <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
       <div className="mx-auto w-full max-w-[1440px]">
@@ -38,6 +41,8 @@ export function Dashboard({
           ready={visibleState === "ready"}
           assistantOpen={assistantOpen}
           onOpenAssistant={() => setAssistantOpen(true)}
+          monitoringOpen={monitoringOpen}
+          onOpenMonitoring={() => setMonitoringOpen(true)}
         />
         <section
           id="main-content"
@@ -74,6 +79,7 @@ export function Dashboard({
         <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted lg:mt-4">
           中文界面 · 移动端优先 · 隐私友好
         </footer>
+        <MonitoringRuleManager open={monitoringOpen} onOpenChange={setMonitoringOpen} />
       </div>
     </main>
   );
@@ -83,10 +89,14 @@ function DashboardHeader({
   ready,
   assistantOpen,
   onOpenAssistant,
+  monitoringOpen,
+  onOpenMonitoring,
 }: {
   ready: boolean;
   assistantOpen: boolean;
   onOpenAssistant: () => void;
+  monitoringOpen: boolean;
+  onOpenMonitoring: () => void;
 }) {
   return (
     <header className="flex items-center justify-between gap-3 border-b border-app-line pb-3">
@@ -107,6 +117,18 @@ function DashboardHeader({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <NotificationCenter enabled={ready} />
+          <button
+            type="button"
+            className="inline-flex min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-2 text-sm font-semibold hover:bg-brand-soft sm:px-3"
+            aria-haspopup="dialog"
+            aria-expanded={monitoringOpen}
+            aria-label="经营监听"
+            onClick={onOpenMonitoring}
+          >
+            <span aria-hidden="true" className="sm:hidden">◎</span>
+            <span className="hidden sm:inline">经营监听</span>
+          </button>
           <button
             type="button"
             className="hidden min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:bg-brand-soft sm:inline-flex"
