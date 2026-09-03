@@ -17,7 +17,12 @@ ShopMate AI 将商品、库存和经营数据整理成易读的中文界面，�
 - 商品 API：当前 Merchant 隔离的商品分页列表、状态筛选和 SKU 详情。
 - 健康检查：版本化 API 端点 `GET /api/v1/health`。
 - 工程质量：pnpm workspace、共享 TypeScript 契约、自动化测试和 GitHub Actions 质量门禁。
-- AI 配置入口：支持通过环境变量配置 DeepSeek；未配置密钥时 Demo 仍可启动。
+- AI 经营助手：通过受控 Tool 查询低库存、销售汇总、热销商品、销售趋势、商品表现和商品详情。
+- 中文商品文案：基于真实 Demo 商品生成标题、描述、小红书、抖音和通用营销文案。
+- Dashboard 自定义：支持布局编辑、尺寸调整和服务端保存。
+- 经营监听：支持创建经营规则、执行检查并展示通知。
+- AI Provider：支持 DeepSeek；未配置密钥时使用 Mock Provider，Demo 仍可启动。
+- Production Live Smoke：可验证 Production Build、数据库、真实 DeepSeek、Agent、Tool 和中文 Web 入口。
 
 ## 技术栈
 
@@ -106,6 +111,36 @@ pnpm dev
 pnpm --filter @shopmate/web dev
 pnpm --filter @shopmate/api dev
 ```
+
+## 5～10 分钟中文演示
+
+完整演示步骤见：`docs/demo-checklist.md`
+
+推荐顺序：
+
+1. Demo 登录
+2. 中文经营 Dashboard
+3. AI 查询低库存
+4. AI 分析热销商品
+5. AI 总结销售趋势
+6. 生成中文商品文案
+7. 展示 Dashboard 自定义或经营监听
+8. 说明 Demo 能力与边界
+
+## Demo 边界
+
+ShopMate AI 当前是 **Demo v0.1**，不是完整生产 SaaS。
+
+- 使用固定 Seed 商品、SKU 和订单数据
+- Demo 登录不是生产身份系统
+- 未配置 DeepSeek API Key 时使用 Mock Provider
+- 真实 LLM 输出存在非确定性
+- AI 经营数字必须来自已验证 Tool
+- 不连接真实淘宝、天猫、京东或拼多多店铺
+- 不处理真实支付、物流或订单履约
+- 不自动修改真实电商平台数据
+- 部分写操作采用 Demo / Fixture 演示
+- `.env` 和真实 Secret 禁止提交 Git
 
 ## 常用命令
 
