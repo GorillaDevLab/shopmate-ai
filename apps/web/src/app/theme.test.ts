@@ -14,7 +14,7 @@ it.each([null, "invalid", "<script>alert(1)</script>", "terracotta", "purple"])(
     if (value !== null) localStorage.setItem("shopmate-theme", value);
     window.eval(THEME_INIT_SCRIPT);
     expect(document.documentElement.dataset.theme).toBe(
-      value === "purple" ? "purple" : "terracotta",
+      value === "terracotta" ? "terracotta" : "purple",
     );
   },
 );
@@ -23,6 +23,6 @@ it("读取被阻止时首屏安全回退并记录可见提示状态", () => {
     throw new Error("blocked");
   });
   expect(() => window.eval(THEME_INIT_SCRIPT)).not.toThrow();
-  expect(document.documentElement.dataset.theme).toBe("terracotta");
+  expect(document.documentElement.dataset.theme).toBe("purple");
   expect(document.documentElement.dataset.themeStorageError).toBe("true");
 });

@@ -3,7 +3,7 @@ export const THEME_STORAGE_KEY = "shopmate-theme";
 export const THEME_STORAGE_ERROR = "当前浏览器无法保存外观设置，刷新后将恢复默认主题。";
 
 export function themeValue(value: unknown): Theme {
-  return value === "purple" ? "purple" : "terracotta";
+  return value === "terracotta" ? "terracotta" : "purple";
 }
 
 // Fixed code only: restore before paint without interpolating browser-controlled storage.
@@ -11,9 +11,9 @@ export const THEME_INIT_SCRIPT = `(() => {
   const root = document.documentElement;
   try {
     const value = localStorage.getItem('shopmate-theme');
-    root.dataset.theme = value === 'purple' ? 'purple' : 'terracotta';
+    root.dataset.theme = value === 'terracotta' ? 'terracotta' : 'purple';
   } catch {
-    root.dataset.theme = 'terracotta';
+    root.dataset.theme = 'purple';
     root.dataset.themeStorageError = 'true';
   }
 })();`;

@@ -52,6 +52,7 @@ describe("中文应用基础", () => {
     );
 
     expect(markup).toContain('lang="zh-CN"');
+    expect(markup).toContain('data-theme="purple"');
     expect(metadata.title).toBe("ShopMate AI｜智能经营助手");
     expect(metadata.description).toBe("面向电商商家的中文经营看板，集中查看销售、商品与库存信息。");
   });
