@@ -4,6 +4,7 @@ import {
   type DashboardLayoutCard,
   type DashboardLayoutComponent,
   type DashboardLayoutReadResponse,
+  type DashboardInsightQuery,
 } from "@shopmate/contracts";
 
 export type LayoutEditorMode = "view" | "edit" | "preview";
@@ -19,6 +20,7 @@ export type LayoutEditorState = {
   saveStatus: LayoutSaveStatus;
   message?: string;
   removedCard?: RemovedCardSnapshot;
+  addedCard?: RemovedCardSnapshot;
 };
 
 type RemovedCardSnapshot = {
@@ -36,6 +38,8 @@ export type LayoutEditorAction =
   | { type: "cardRemoved"; cardId: string }
   | { type: "removeUndone" }
   | { type: "removeExpired" }
+  | { type: "addUndone" }
+  | { type: "addExpired" }
   | { type: "discarded" }
   | { type: "defaultsRestored" }
   | { type: "saveStarted" }
@@ -69,10 +73,18 @@ export function layoutEditorReducer(
   }
   if (action.type === "modeChanged") return { ...state, mode: action.mode };
   if (action.type === "cardsChanged") return withCards(state, action.cards);
-  if (action.type === "cardAdded") return withCards(state, [...state.draft.cards, action.card]);
+  if (action.type === "cardAdded") {
+    const index = state.draft.cards.length;
+    return {
+      ...withCards(state, [...state.draft.cards, action.card]),
+      addedCard: { card: action.card, index },
+    };
+  }
   if (action.type === "cardRemoved") return removeCard(state, action.cardId);
   if (action.type === "removeUndone") return undoRemove(state);
   if (action.type === "removeExpired") return { ...state, removedCard: undefined };
+  if (action.type === "addUndone") return undoAdd(state);
+  if (action.type === "addExpired") return { ...state, addedCard: undefined };
   if (action.type === "discarded") return discardDraft(state);
   if (action.type === "defaultsRestored") return restoreDefaults(state);
   if (action.type === "saveStarted") {
@@ -86,7 +98,7 @@ export function layoutEditorReducer(
 }
 
 export function createDashboardCard(
-  component: DashboardLayoutComponent,
+  component: Exclude<DashboardLayoutComponent, "pieChart" | "report">,
   cards: readonly DashboardLayoutCard[],
   createSuffix = () => crypto.randomUUID(),
 ): DashboardLayoutCard {
@@ -103,6 +115,19 @@ export function createDashboardCard(
   return { id, component, size: "full", config: { limit: 3 } };
 }
 
+export function createInsightDashboardCard(
+  component: "pieChart" | "report",
+  title: string,
+  query: DashboardInsightQuery,
+  cards: readonly DashboardLayoutCard[],
+  createSuffix = () => crypto.randomUUID(),
+): DashboardLayoutCard {
+  const id = uniqueId(component, cards, createSuffix());
+  const size = "1/2" as const;
+  if (component === "pieChart") return { id, component, size, config: { title, query } };
+  return { id, component, size, config: { title, query } };
+}
+
 function applyLoadedLayout(
   state: LayoutEditorState,
   response: DashboardLayoutReadResponse,
@@ -117,6 +142,7 @@ function applyLoadedLayout(
     saveStatus: "idle",
     message: undefined,
     removedCard: undefined,
+    addedCard: undefined,
   };
 }
 
@@ -134,6 +160,7 @@ function applySavedLayout(
     saveStatus: "saved",
     message: "已保存",
     removedCard: undefined,
+    addedCard: undefined,
   };
 }
 
@@ -159,6 +186,7 @@ function removeCard(state: LayoutEditorState, cardId: string): LayoutEditorState
       state.draft.cards.filter((candidate) => candidate.id !== cardId),
     ),
     removedCard: { card, index },
+    addedCard: undefined,
   };
 }
 
@@ -169,6 +197,13 @@ function undoRemove(state: LayoutEditorState): LayoutEditorState {
   return { ...withCards(state, cards), removedCard: undefined };
 }
 
+function undoAdd(state: LayoutEditorState): LayoutEditorState {
+  if (!state.addedCard) return state;
+  const id = state.addedCard.card.id;
+  const cards = state.draft.cards.filter((card) => card.id !== id);
+  return { ...withCards(state, cards), addedCard: undefined };
+}
+
 function discardDraft(state: LayoutEditorState): LayoutEditorState {
   return {
     ...state,
@@ -177,6 +212,7 @@ function discardDraft(state: LayoutEditorState): LayoutEditorState {
     saveStatus: "idle",
     message: undefined,
     removedCard: undefined,
+    addedCard: undefined,
   };
 }
 
@@ -187,6 +223,7 @@ function restoreDefaults(state: LayoutEditorState): LayoutEditorState {
     saveStatus: "idle",
     message: undefined,
     removedCard: undefined,
+    addedCard: undefined,
   };
 }
 
@@ -220,5 +257,11 @@ function cloneCard(card: DashboardLayoutCard): DashboardLayoutCard {
   if (card.component === "inventoryAlerts") {
     return { ...card, config: { ...card.config } };
   }
-  return { ...card, config: { ...card.config } };
+  if (card.component === "hotProducts") {
+    return { ...card, config: { ...card.config } };
+  }
+  if (card.component === "pieChart") {
+    return { ...card, config: { ...card.config, query: { ...card.config.query } } };
+  }
+  return { ...card, config: { ...card.config, query: { ...card.config.query } } };
 }

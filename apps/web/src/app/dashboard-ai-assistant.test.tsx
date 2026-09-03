@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ sendChatMessage: vi.fn() }));
 vi.mock("./chat-api", () => ({ sendChatMessage: api.sendChatMessage }));
+const insightApi = vi.hoisted(() => ({ generateDashboardInsight: vi.fn() }));
+vi.mock("./dashboard-insight-api", () => ({
+  generateDashboardInsight: insightApi.generateDashboardInsight,
+}));
 
 import { DashboardAiAssistant } from "./dashboard-ai-assistant";
 
@@ -62,5 +66,26 @@ describe("看板悬浮 AI 助手", () => {
 
     expect(await screen.findByText("已恢复，可以继续查询。")).toBeInTheDocument();
     expect(api.sendChatMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("饼图请求直接加入草稿并提示可撤销", async () => {
+    const onInsightCreated = vi.fn();
+    insightApi.generateDashboardInsight.mockResolvedValue({
+      query: { visualization: "pie" },
+      result: { kind: "pie", title: "商品销售占比", slices: [] },
+    });
+    render(
+      <DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onInsightCreated} />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+      target: { value: "生成商品销售额饼图" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    expect(
+      await screen.findByText("已加入看板草稿，可撤销或删除。保存后将在其他设备恢复。"),
+    ).toBeInTheDocument();
+    expect(onInsightCreated).toHaveBeenCalledTimes(1);
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 });

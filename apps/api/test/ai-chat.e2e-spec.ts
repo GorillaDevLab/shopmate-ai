@@ -88,4 +88,25 @@ describe("AI Chat API", () => {
       retryable: false,
     });
   });
+
+  it("AI 看板预览端点要求登录", async () => {
+    await request(app.getHttpServer())
+      .post("/api/v1/ai/dashboard-insights/preview")
+      .send({ question: "生成销售额饼图", kind: "pie" })
+      .expect(401);
+  });
+
+  it("AI 看板预览拒绝客户端提交商家身份", async () => {
+    const response = await request(app.getHttpServer())
+      .post("/api/v1/ai/dashboard-insights/preview")
+      .set("Cookie", cookie)
+      .send({ question: "生成销售额饼图", kind: "pie", merchantId: "attacker-merchant" })
+      .expect(404);
+
+    expect(response.body).toEqual({
+      statusCode: 404,
+      code: "RESOURCE_NOT_FOUND",
+      message: "资源不存在",
+    });
+  });
 });

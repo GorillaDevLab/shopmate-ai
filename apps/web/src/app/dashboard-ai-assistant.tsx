@@ -11,20 +11,35 @@ import {
 } from "react";
 
 import { type ChatMessage, useChatSession } from "./chat-session";
+import { generateDashboardInsight } from "./dashboard-insight-api";
+import type { DashboardInsightPreviewResponse } from "@shopmate/contracts";
 
 const suggestions = [
   { label: "查看低库存", prompt: "最近哪些商品值得补货？" },
   { label: "分析热销商品", prompt: "请分析最近的热销商品" },
   { label: "总结销售趋势", prompt: "请总结最近的销售趋势" },
+  { label: "生成销售饼图", prompt: "生成近 30 天各商品销售额占比饼图" },
 ] as const;
 
 type AssistantProps = {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  readonly onInsightCreated?: (preview: DashboardInsightPreviewResponse) => void;
 };
 
-export function DashboardAiAssistant({ open, onOpenChange }: AssistantProps) {
-  const chat = useChatSession();
+export function DashboardAiAssistant({ open, onOpenChange, onInsightCreated }: AssistantProps) {
+  const chat = useChatSession({
+    resolveMessage: async (prompt) => {
+      const kind = insightKind(prompt);
+      if (!kind || !onInsightCreated) return undefined;
+      const preview = await generateDashboardInsight(prompt, kind);
+      onInsightCreated(preview);
+      return {
+        role: "assistant",
+        content: "已加入看板草稿，可撤销或删除。保存后将在其他设备恢复。",
+      };
+    },
+  });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -198,4 +213,10 @@ function closeOnEscape(
   if (event.key !== "Escape") return;
   event.preventDefault();
   onOpenChange(false);
+}
+
+function insightKind(prompt: string): "pie" | "report" | undefined {
+  if (/饼图|占比图|圆饼/u.test(prompt)) return "pie";
+  if (/生成.{0,8}报告|报告卡/u.test(prompt)) return "report";
+  return undefined;
 }

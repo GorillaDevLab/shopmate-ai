@@ -49,6 +49,18 @@ describe("DashboardLayoutService", () => {
     expect(repository.save).toHaveBeenCalledWith(context, DEFAULT_DASHBOARD_LAYOUT, 0);
   });
 
+  it("读取已有 version 1 布局时迁移为当前版本", async () => {
+    repository.find.mockResolvedValue({
+      layout: { version: 1, cards: [] },
+      revision: 3,
+      updatedAt: new Date("2026-09-02T00:00:00.000Z"),
+    });
+    await expect(service.get(context)).resolves.toMatchObject({
+      layout: { version: 2, cards: [] },
+      revision: 3,
+    });
+  });
+
   it("拒绝 userId、merchantId 和未知布局配置", async () => {
     for (const body of [
       { layout: DEFAULT_DASHBOARD_LAYOUT, expectedRevision: 0, userId: "other" },

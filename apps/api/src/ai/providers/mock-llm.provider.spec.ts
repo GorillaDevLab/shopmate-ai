@@ -179,6 +179,20 @@ describe("MockLLMProvider", () => {
     expect(result.message.content).toContain("可验证");
   });
 
+  it("为 Demo 生成受限的看板查询工具调用", async () => {
+    const provider = new MockLLMProvider();
+    const result = await provider.generate({
+      messages: [
+        { role: "system", content: "你是经营看板查询规划器，只能调用 propose_dashboard_insight。" },
+        { role: "user", content: "目标组件：pie\n经营问题：按商品生成销量饼图" },
+      ],
+    });
+    expect(result.message.toolCalls?.[0]).toMatchObject({
+      name: "propose_dashboard_insight",
+      arguments: { metric: "unitsSold", groupBy: "product", visualization: "pie" },
+    });
+  });
+
   it("没有 user message 时安全返回固定兜底回答", async () => {
     const provider = new MockLLMProvider();
 

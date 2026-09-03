@@ -29,6 +29,7 @@ import {
 } from "./dashboard-layout-api";
 import {
   createDashboardCard,
+  createInsightDashboardCard,
   initialLayoutEditorState,
   isLayoutDirty,
   layoutEditorReducer,
@@ -48,6 +49,8 @@ import {
   type CardRectMap,
 } from "./dashboard-layout-resize";
 import { DashboardWidgetGallery } from "./dashboard-widget-gallery";
+import { DashboardInsightCard } from "./dashboard-insight-card";
+import { DashboardAiAssistant } from "./dashboard-ai-assistant";
 import { HotProductsPanel } from "./hot-products-panel";
 import { LowInventoryPanel } from "./low-inventory-panel";
 import { MetricCard } from "./metric-card";
@@ -78,6 +81,9 @@ type EditorProps = {
   data: AnalyticsDashboardResponse;
   periodLabel: string;
   onEditingChange?: (isEditing: boolean) => void;
+  assistantOpen?: boolean;
+  onAssistantOpenChange?: (open: boolean) => void;
+  showAssistant?: boolean;
 };
 
 type ResizeSession = {
@@ -104,6 +110,9 @@ function ReadyLayoutEditor({
   data,
   periodLabel,
   persistence,
+  assistantOpen = false,
+  onAssistantOpenChange = () => undefined,
+  showAssistant = true,
 }: EditorProps & { persistence: Persistence }) {
   const { state, dispatch } = persistence;
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -154,8 +163,42 @@ function ReadyLayoutEditor({
           setGalleryOpen(false);
           interactions.announce("组件已添加到看板末尾");
         }}
+        onAddInsight={(component, preview) => {
+          dispatch({
+            type: "cardAdded",
+            card: createInsightDashboardCard(
+              component,
+              preview.result.title,
+              preview.query,
+              state.draft.cards,
+            ),
+          });
+          setGalleryOpen(false);
+          interactions.announce("AI 组件已加入草稿，可撤销或删除");
+        }}
       />
       <UndoToast state={state} dispatch={dispatch} />
+      {showAssistant && (
+        <DashboardAiAssistant
+          open={assistantOpen}
+          onOpenChange={onAssistantOpenChange}
+          onInsightCreated={(preview) => {
+            if (state.draft.cards.length >= 24) throw new Error("看板最多包含 24 张卡片");
+            const component = preview.result.kind === "pie" ? "pieChart" : "report";
+            dispatch({ type: "modeChanged", mode: "edit" });
+            dispatch({
+              type: "cardAdded",
+              card: createInsightDashboardCard(
+                component,
+                preview.result.title,
+                preview.query,
+                state.draft.cards,
+              ),
+            });
+            interactions.announce("AI 组件已加入草稿，可撤销或删除");
+          }}
+        />
+      )}
       <p className="sr-only" role="status" aria-label="布局编辑反馈" aria-live="polite">
         {interactions.announcement}
       </p>
@@ -688,15 +731,17 @@ function UndoToast({
   state: LayoutEditorState;
   dispatch: Dispatch<LayoutEditorAction>;
 }) {
-  if (!state.removedCard) return null;
-  const title = cardTitle(state.removedCard.card);
+  const snapshot = state.removedCard ?? state.addedCard;
+  if (!snapshot) return null;
+  const isAddition = Boolean(state.addedCard) && !state.removedCard;
+  const title = cardTitle(snapshot.card);
   return (
     <div className="layout-undo-toast" role="status">
-      <span>已移除 {title}</span>
+      <span>{isAddition ? `已添加 ${title}` : `已移除 ${title}`}</span>
       <button
         type="button"
-        aria-label={`撤销删除${title}`}
-        onClick={() => dispatch({ type: "removeUndone" })}
+        aria-label={`撤销${isAddition ? "添加" : "删除"}${title}`}
+        onClick={() => dispatch({ type: isAddition ? "addUndone" : "removeUndone" })}
       >
         撤销
       </button>
@@ -705,11 +750,13 @@ function UndoToast({
 }
 
 function useUndoExpiry(state: LayoutEditorState, dispatch: Dispatch<LayoutEditorAction>) {
+  const snapshot = state.removedCard ?? state.addedCard;
   useEffect(() => {
-    if (!state.removedCard) return;
-    const timer = window.setTimeout(() => dispatch({ type: "removeExpired" }), 4_000);
+    if (!snapshot) return;
+    const type = state.removedCard ? "removeExpired" : "addExpired";
+    const timer = window.setTimeout(() => dispatch({ type }), 4_000);
     return () => window.clearTimeout(timer);
-  }, [dispatch, state.removedCard]);
+  }, [dispatch, snapshot, state.removedCard]);
 }
 
 function useEditorFocus(mode: LayoutEditorMode) {
@@ -851,6 +898,9 @@ function renderCard(
       />
     );
   }
+  if (card.component === "pieChart" || card.component === "report") {
+    return <DashboardInsightCard query={card.config.query} />;
+  }
   return <HotProductsPanel items={data.products.slice(0, card.config.limit)} />;
 }
 
@@ -909,6 +959,7 @@ function cardTitle(card: DashboardLayoutCard): string {
   if (card.component === "metric") return metricLabels[card.config.metric];
   if (card.component === "salesTrend") return "销售趋势";
   if (card.component === "inventoryAlerts") return "库存提醒";
+  if (card.component === "pieChart" || card.component === "report") return card.config.title;
   return "热销商品";
 }
 

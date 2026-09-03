@@ -1,8 +1,9 @@
-import { DEFAULT_DASHBOARD_LAYOUT } from "@shopmate/contracts";
+import { DEFAULT_DASHBOARD_LAYOUT, type DashboardInsightQuery } from "@shopmate/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
   createDashboardCard,
+  createInsightDashboardCard,
   initialLayoutEditorState,
   isLayoutDirty,
   layoutEditorReducer,
@@ -144,6 +145,25 @@ describe("dashboard layout state", () => {
     );
     expect(second.id).not.toBe(first.id);
     expect(second.id).toMatch(/^metric-same-\d+$/);
+  });
+
+  it("AI 组件加入草稿后可以撤销", () => {
+    const query = {
+      dataset: "sales",
+      metric: "revenue",
+      aggregation: "sum",
+      groupBy: "product",
+      dateRange: { start: "2026-08-01", end: "2026-08-31" },
+      filters: [],
+      order: "desc",
+      limit: 8,
+      visualization: "pie",
+    } as DashboardInsightQuery;
+    const card = createInsightDashboardCard("pieChart", "商品销售占比", query, [], () => "one");
+    const added = layoutEditorReducer(readyState(), { type: "cardAdded", card });
+    const undone = layoutEditorReducer(added, { type: "addUndone" });
+    expect(added.addedCard?.card.id).toBe("pieChart-one");
+    expect(undone.draft.cards).toEqual(DEFAULT_DASHBOARD_LAYOUT.cards);
   });
 });
 
