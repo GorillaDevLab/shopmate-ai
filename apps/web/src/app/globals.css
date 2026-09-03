@@ -124,10 +124,16 @@ button:focus-visible {
   background: color-mix(in srgb, var(--brand-soft) 68%, var(--app-surface));
   box-shadow: 0 10px 30px color-mix(in srgb, var(--brand-ring) 28%, transparent);
 }
+.dashboard-layout-card.is-editing > .dashboard-panel {
+  height: calc(100% - 52px);
+}
 .dashboard-layout-card.is-dragging {
   z-index: 3;
+}
+.dashboard-layout-card.is-dragging > .dashboard-panel {
   opacity: 0.58;
   transform: scale(0.985);
+  box-shadow: 0 20px 52px color-mix(in srgb, var(--brand-ring) 42%, transparent);
 }
 .dashboard-layout-card.is-resizing {
   z-index: 4;
@@ -281,7 +287,7 @@ button:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dashboard-layout-card.is-dragging,
+  .dashboard-layout-card.is-dragging > .dashboard-panel,
   .layout-edit-button,
   .dashboard-card-controls button,
   .ai-assistant-pill,

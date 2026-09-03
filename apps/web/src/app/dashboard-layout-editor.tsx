@@ -39,12 +39,14 @@ import {
   type LayoutEditorState,
 } from "./dashboard-layout-state";
 import {
-  adjacentAllowedSize,
   animateCardReflow,
   captureCardRects,
+  type CardRectMap,
+} from "./dashboard-layout-motion";
+import {
+  adjacentAllowedSize,
   footprintForSize,
   previewWidgetSize,
-  type CardRectMap,
 } from "./dashboard-layout-resize";
 import { DashboardWidgetGallery } from "./dashboard-widget-gallery";
 import { DashboardInsightCard } from "./dashboard-insight-card";
@@ -150,6 +152,7 @@ function ReadyLayoutEditor({
         cardCount={state.draft.cards.length}
         onClose={() => setGalleryOpen(false)}
         onAdd={(component) => {
+          interactions.prepareAnimation();
           dispatch({
             type: "cardAdded",
             card: createDashboardCard(component, state.draft.cards),
@@ -158,6 +161,7 @@ function ReadyLayoutEditor({
           interactions.announce("组件已添加到看板末尾");
         }}
         onAddInsight={(component, preview) => {
+          interactions.prepareAnimation();
           dispatch({
             type: "cardAdded",
             card: createInsightDashboardCard(
@@ -171,7 +175,13 @@ function ReadyLayoutEditor({
           interactions.announce("AI 组件已加入草稿，可撤销或删除");
         }}
       />
-      <UndoToast state={state} dispatch={dispatch} />
+      <UndoToast
+        state={state}
+        onUndo={(type) => {
+          interactions.prepareAnimation();
+          dispatch({ type });
+        }}
+      />
       {showAssistant && (
         <DashboardAiAssistant
           open={assistantOpen}
@@ -180,6 +190,7 @@ function ReadyLayoutEditor({
             if (state.draft.cards.length >= 24) throw new Error("看板最多包含 24 张卡片");
             const component = preview.result.kind === "pie" ? "pieChart" : "report";
             dispatch({ type: "modeChanged", mode: "edit" });
+            interactions.prepareAnimation();
             dispatch({
               type: "cardAdded",
               card: createInsightDashboardCard(
@@ -351,10 +362,13 @@ function useCardInteractions(
     changeCards(reorderCards(cards, currentIndex, targetIndex), animate);
     setAnnouncement(`${cardTitle(cards[currentIndex])}已移至第 ${targetIndex + 1} 位`);
   };
-  const resizeCard = (cardId: string, size: DashboardLayoutSize) => {
+  const resizeCard = (cardId: string, size: DashboardLayoutSize, animate = false) => {
     const card = state.draft.cards.find((candidate) => candidate.id === cardId);
     if (!card || card.size === size) return;
-    changeCards(state.draft.cards.map((item) => (item.id === cardId ? { ...item, size } : item)));
+    changeCards(
+      state.draft.cards.map((item) => (item.id === cardId ? { ...item, size } : item)),
+      animate,
+    );
     setAnnouncement(`${cardTitle(card)}尺寸已调整为${sizeLabel(size)}`);
   };
   const removeCard = (card: DashboardLayoutCard) => {
@@ -372,6 +386,9 @@ function useCardInteractions(
     moveCard,
     resizeCard,
     removeCard,
+    prepareAnimation: () => {
+      pendingRectsRef.current = captureCardRects(gridRef.current);
+    },
     startResize: (event: ReactPointerEvent<HTMLElement>, card: DashboardLayoutCard) =>
       startResize(event, card, resizeSessionRef, setResizePreview),
     updateResize: (event: ReactPointerEvent<HTMLElement>) =>
@@ -677,8 +694,8 @@ function CardMoreMenu(
                 type="button"
                 role="menuitemradio"
                 aria-checked={props.card.size === option.value}
-                onClick={() => {
-                  props.interactions.resizeCard(props.card.id, option.value);
+                onClick={(event) => {
+                  props.interactions.resizeCard(props.card.id, option.value, event.detail > 0);
                   props.onOpenChange(false);
                 }}
               >
@@ -731,10 +748,10 @@ function CardResizeHandle(props: DashboardCardProps & { title: string; size: Das
 
 function UndoToast({
   state,
-  dispatch,
+  onUndo,
 }: {
   state: LayoutEditorState;
-  dispatch: Dispatch<LayoutEditorAction>;
+  onUndo: (type: "addUndone" | "removeUndone") => void;
 }) {
   const snapshot = state.removedCard ?? state.addedCard;
   if (!snapshot) return null;
@@ -746,7 +763,7 @@ function UndoToast({
       <button
         type="button"
         aria-label={`撤销${isAddition ? "添加" : "删除"}${title}`}
-        onClick={() => dispatch({ type: isAddition ? "addUndone" : "removeUndone" })}
+        onClick={() => onUndo(isAddition ? "addUndone" : "removeUndone")}
       >
         撤销
       </button>
@@ -856,7 +873,7 @@ function finishResize(
   sessionRef: MutableRefObject<ResizeSession | undefined>,
   pendingRectsRef: MutableRefObject<CardRectMap | undefined>,
   setPreview: Dispatch<SetStateAction<ResizePreview | undefined>>,
-  resizeCard: (cardId: string, size: DashboardLayoutSize) => void,
+  resizeCard: (cardId: string, size: DashboardLayoutSize, animate?: boolean) => void,
 ) {
   const session = sessionRef.current;
   if (!session || session.pointerId !== event.pointerId) return;
@@ -864,7 +881,7 @@ function finishResize(
   pendingRectsRef.current = captureCardRects(gridRef.current);
   sessionRef.current = undefined;
   setPreview(undefined);
-  resizeCard(session.cardId, session.size);
+  resizeCard(session.cardId, session.size, true);
 }
 
 function cancelResize(

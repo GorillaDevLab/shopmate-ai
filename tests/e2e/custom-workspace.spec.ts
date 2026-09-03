@@ -1,22 +1,24 @@
 import { expect, test, type Page } from "@playwright/test";
 
 test("K7 桌面端保存布局并完成监听提醒流程", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await login(page);
   const originalLayout = await readLayout(page);
   let createdRuleId: string | undefined;
   try {
     await resetLayoutToDefault(page);
+    await expectDefaultDesktopFootprints(page);
     await page.getByRole("button", { name: /编辑看板/ }).click();
-    await page.getByRole("button", { name: "销售额下移" }).click();
     await page.getByRole("button", { name: "销售额更多操作" }).click();
-    await page.getByRole("menuitemradio", { name: "中" }).click();
+    await page.getByRole("menuitem", { name: "下移" }).click();
+    await page.getByRole("menuitemradio", { name: "2 × 1" }).click();
     await page.getByRole("button", { name: "完成并保存" }).click();
     await expect(page.getByRole("status", { name: "布局保存状态" })).toContainText("已保存");
 
     await page.reload();
     await expect(page.locator('[data-dashboard-card-id="metric-sales"]')).toHaveAttribute(
       "data-size",
-      "1/2",
+      "2x1",
     );
 
     await removeRulesNamed(page, "库存低于 4 件");
@@ -49,13 +51,46 @@ test("K7 桌面端保存布局并完成监听提醒流程", async ({ page }) => 
 test("K7 375px 面板占满视口且页面不横向滚动", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await login(page);
-  await page.getByRole("button", { name: "经营监听" }).click();
+  const originalLayout = await readLayout(page);
+  try {
+    await resetLayoutToDefault(page);
+    await page.getByRole("button", { name: /编辑看板/ }).click();
+    await expect(page.locator('[data-dashboard-card-id="metric-sales"]')).toHaveAttribute(
+      "data-size",
+      "1x1",
+    );
+    await expect(page.getByRole("button", { name: "销售额更多操作" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 
-  const panel = page.getByRole("dialog", { name: "经营监听" });
-  await expect(panel).toBeVisible();
-  expect((await panel.boundingBox())?.width).toBe(375);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await page.getByRole("button", { name: "经营监听" }).click();
+
+    const panel = page.getByRole("dialog", { name: "经营监听" });
+    await expect(panel).toBeVisible();
+    expect((await panel.boundingBox())?.width).toBe(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+  } finally {
+    await restoreLayout(page, originalLayout);
+  }
 });
+
+async function expectDefaultDesktopFootprints(page: Page): Promise<void> {
+  const metricIds = ["metric-sales", "metric-orders", "metric-units", "metric-average-order-value"];
+  const metricBoxes = await Promise.all(
+    metricIds.map((id) => page.locator(`[data-dashboard-card-id="${id}"]`).boundingBox()),
+  );
+  const tops = metricBoxes.map((box) => box?.y);
+  expect(new Set(tops).size).toBe(1);
+  const lefts = metricBoxes.map((box) => box?.x ?? 0);
+  expect(lefts).toEqual([...lefts].sort((left, right) => left - right));
+  await expect(page.locator('[data-dashboard-card-id="sales-trend"]')).toHaveAttribute(
+    "data-size",
+    "2x1",
+  );
+  await expect(page.locator('[data-dashboard-card-id="inventory-alerts"]')).toHaveAttribute(
+    "data-size",
+    "2x1",
+  );
+}
 
 async function login(page: Page): Promise<void> {
   await page.clock.setFixedTime(new Date("2026-08-31T04:00:00.000Z"));

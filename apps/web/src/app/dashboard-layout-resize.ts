@@ -8,8 +8,6 @@ const footprints: Record<DashboardLayoutSize, WidgetFootprint> = {
   "2x2": { columns: 2, rows: 2 },
 };
 
-export type CardRectMap = Map<string, DOMRect>;
-
 export function footprintForSize(size: DashboardLayoutSize): WidgetFootprint {
   return footprints[size];
 }
@@ -56,40 +54,4 @@ function footprintDistance(
   target: { columns: number; rows: number },
 ): number {
   return (footprint.columns - target.columns) ** 2 + (footprint.rows - target.rows) ** 2;
-}
-
-export function captureCardRects(container: HTMLElement | null): CardRectMap {
-  const rects: CardRectMap = new Map();
-  container?.querySelectorAll<HTMLElement>("[data-dashboard-card-id]").forEach((card) => {
-    const cardId = card.dataset.dashboardCardId;
-    if (cardId) rects.set(cardId, card.getBoundingClientRect());
-  });
-  return rects;
-}
-
-export function animateCardReflow(container: HTMLElement | null, before: CardRectMap): void {
-  if (!container || prefersReducedMotion()) return;
-  container.querySelectorAll<HTMLElement>("[data-dashboard-card-id]").forEach((card) => {
-    const previous = before.get(card.dataset.dashboardCardId ?? "");
-    if (previous) animateCardFromPreviousPosition(card, previous);
-  });
-}
-
-function animateCardFromPreviousPosition(card: HTMLElement, previous: DOMRect): void {
-  const current = card.getBoundingClientRect();
-  const deltaX = previous.left - current.left;
-  const deltaY = previous.top - current.top;
-  if ((!deltaX && !deltaY) || typeof card.animate !== "function") return;
-  card.getAnimations().forEach((animation) => animation.cancel());
-  card.animate(
-    [
-      { transform: `translate3d(${deltaX}px, ${deltaY}px, 0)` },
-      { transform: "translate3d(0, 0, 0)" },
-    ],
-    { duration: 210, easing: "cubic-bezier(0.23, 1, 0.32, 1)" },
-  );
-}
-
-function prefersReducedMotion(): boolean {
-  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }

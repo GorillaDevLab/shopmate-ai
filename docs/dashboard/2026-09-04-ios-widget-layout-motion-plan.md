@@ -344,7 +344,7 @@ git commit -m "feat: add responsive widget footprint grid"
 - Produces: `animateCardReflow(container, before): void`。
 - Consumes: `[data-dashboard-card-id]`、`Element.getAnimations()`、`Element.animate()` 与 reduced-motion media query。
 
-- [ ] **Step 1: 写 FLIP 失败测试**
+- [x] **Step 1: 写 FLIP 失败测试**
 
 创建 motion 测试，使用可控 DOMRect 和 WAAPI spy 验证：
 
@@ -372,7 +372,7 @@ expect(animate).toHaveBeenCalledWith(
 
 再覆盖：位置未变化不调用 animate、缺少 WAAPI 不抛错、reduced-motion 不调用 animate、旧矩形不存在时跳过。
 
-- [ ] **Step 2: 运行 motion 测试并确认 RED**
+- [x] **Step 2: 运行 motion 测试并确认 RED**
 
 Run:
 
@@ -382,7 +382,7 @@ pnpm --filter @shopmate/web exec vitest run src/app/dashboard-layout-motion.test
 
 Expected: FAIL；独立 motion 模块尚不存在。
 
-- [ ] **Step 3: 实现独立 WAAPI FLIP 模块**
+- [x] **Step 3: 实现独立 WAAPI FLIP 模块**
 
 核心顺序必须是：保存旧可见矩形 → React 更新 → 取消旧动画 → 读取无 transform 目标矩形 → 计算 delta/scale → 启动新动画。
 
@@ -418,11 +418,11 @@ function animateCardFromPreviousPosition(card: HTMLElement, previous: DOMRect): 
 
 将矩形捕获和重排动画从 `dashboard-layout-resize.ts` 移到该模块，编辑器只依赖 motion 模块公开接口。
 
-- [ ] **Step 4: 连接所有可视化布局变更**
+- [x] **Step 4: 连接所有可视化布局变更**
 
 排序、菜单尺寸切换、指针缩放完成、删除和撤销前均调用 `captureCardRects`；键盘上移/下移与键盘尺寸调整传入 `animate = false`。拖动状态的 scale 和 shadow 移到 `.dashboard-layout-card.is-dragging > .dashboard-panel`，外层 transform 专供 FLIP。
 
-- [ ] **Step 5: 添加 375px 与桌面端到端断言**
+- [x] **Step 5: 添加 375px 与桌面端到端断言**
 
 在 `custom-workspace.spec.ts` 中登录并进入编辑模式后验证：
 
@@ -440,6 +440,10 @@ await expect(page.getByRole("button", { name: "销售额更多操作" })).toBeVi
 
 - [ ] **Step 6: 运行完整验证**
 
+本地结果：`pnpm test`、`pnpm typecheck`、`pnpm lint`、`pnpm build` 和
+`pnpm secret:scan` 已通过。Playwright 测试已添加，但本机未配置可认证的
+`DATABASE_URL`，因此 E2E 在 Seed 阶段停止，尚未执行浏览器断言。
+
 Run:
 
 ```bash
@@ -453,7 +457,7 @@ pnpm test:e2e -- tests/e2e/custom-workspace.spec.ts
 
 Expected: 所有命令退出码为 0；Playwright 在 375px 与桌面断言均通过。
 
-- [ ] **Step 7: 提交动效和验收测试**
+- [x] **Step 7: 提交动效和验收测试**
 
 ```bash
 git add apps/web/src/app/dashboard-layout-motion.ts apps/web/src/app/dashboard-layout-motion.test.ts apps/web/src/app/dashboard-layout-resize.ts apps/web/src/app/dashboard-layout-editor.tsx apps/web/src/app/dashboard-layout-editor.test.tsx apps/web/src/app/globals.css tests/e2e/custom-workspace.spec.ts docs/dashboard/2026-09-04-ios-widget-layout-motion-plan.md
