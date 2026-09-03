@@ -126,7 +126,9 @@ function DashboardHeader({
             aria-label="经营监听"
             onClick={onOpenMonitoring}
           >
-            <span aria-hidden="true" className="sm:hidden">◎</span>
+            <span aria-hidden="true" className="sm:hidden">
+              ◎
+            </span>
             <span className="hidden sm:inline">经营监听</span>
           </button>
           <button

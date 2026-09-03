@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createMonitoringRule, deleteMonitoringRule, previewMonitoringRule } from "./monitoring-api";
+import {
+  createMonitoringRule,
+  deleteMonitoringRule,
+  previewMonitoringRule,
+} from "./monitoring-api";
 
 describe("monitoring API", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -26,7 +30,9 @@ describe("monitoring API", () => {
     const fetchMock = vi.fn(async () => jsonResponse(rule, 201));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createMonitoringRule({ name: rule.rule.name, definition: rule.rule.definition })).resolves.toEqual(rule);
+    await expect(
+      createMonitoringRule({ name: rule.rule.name, definition: rule.rule.definition }),
+    ).resolves.toEqual(rule);
   });
 
   it("删除规则接受 204 空响应", async () => {
@@ -37,7 +43,10 @@ describe("monitoring API", () => {
   });
 
   it("错误响应只显示安全中文文案", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "database secret" }, 500)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ message: "database secret" }, 500)),
+    );
 
     await expect(previewMonitoringRule("检查销售额")).rejects.toMatchObject({
       status: 500,
@@ -85,5 +94,8 @@ function ruleResponse() {
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }

@@ -43,25 +43,31 @@ describe("监听规则管理", () => {
         matched: true,
         periodStart: "2026-09-03T00:00:00.000Z",
         periodEnd: "2026-09-03T23:59:59.999Z",
-        matches: [{
-          resourceType: "SKU",
-          resourceId: "sku-1",
-          title: "库存低于阈值",
-          message: "无线蓝牙耳机当前库存 4 件",
-          severity: "WARNING",
-        }],
+        matches: [
+          {
+            resourceType: "SKU",
+            resourceId: "sku-1",
+            title: "库存低于阈值",
+            message: "无线蓝牙耳机当前库存 4 件",
+            severity: "WARNING",
+          },
+        ],
       },
     });
     vi.mocked(api.createMonitoringRule).mockResolvedValue({ rule: ruleView() });
 
     render(<MonitoringRuleManager open onOpenChange={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText("监听内容"), { target: { value: "库存低于 5 件时提醒我" } });
+    fireEvent.change(screen.getByLabelText("监听内容"), {
+      target: { value: "库存低于 5 件时提醒我" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "生成预览" }));
 
     expect(await screen.findByText("AI 理解为")).toBeInTheDocument();
     expect(screen.getByText("当前有 1 项命中")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认创建" }));
-    await waitFor(() => expect(api.createMonitoringRule).toHaveBeenCalledWith({ name: "低库存提醒", definition }));
+    await waitFor(() =>
+      expect(api.createMonitoringRule).toHaveBeenCalledWith({ name: "低库存提醒", definition }),
+    );
   });
 
   it("删除规则前要求二次确认", async () => {
@@ -78,34 +84,56 @@ describe("监听规则管理", () => {
 
 describe("通知中心", () => {
   it("进入看板后同步到期规则并显示未读提醒", async () => {
-    vi.mocked(api.syncMonitoring).mockResolvedValue({ evaluatedRules: 1, createdNotifications: 1, failedRules: 0 });
+    vi.mocked(api.syncMonitoring).mockResolvedValue({
+      evaluatedRules: 1,
+      createdNotifications: 1,
+      failedRules: 0,
+    });
     vi.mocked(api.getMonitoringUnreadCount).mockResolvedValue({ count: 1 });
     vi.mocked(api.listMonitoringNotifications).mockResolvedValue({ items: [notification()] });
-    vi.mocked(api.markMonitoringNotificationRead).mockResolvedValue({ notification: { ...notification(), readAt: "2026-09-03T01:00:00.000Z" } });
+    vi.mocked(api.markMonitoringNotificationRead).mockResolvedValue({
+      notification: { ...notification(), readAt: "2026-09-03T01:00:00.000Z" },
+    });
 
     render(<NotificationCenter />);
     expect(await screen.findByText("1", { selector: ".notification-badge" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "通知，1 条未读" }));
     expect(await screen.findByText("无线蓝牙耳机当前库存 4 件")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "标记低库存提醒为已读" }));
-    await waitFor(() => expect(api.markMonitoringNotificationRead).toHaveBeenCalledWith("notification-1"));
+    await waitFor(() =>
+      expect(api.markMonitoringNotificationRead).toHaveBeenCalledWith("notification-1"),
+    );
   });
 });
 
 function ruleView() {
   return {
-    id: "rule-1", name: "低库存提醒", definition, status: "ACTIVE" as const,
-    lastRunAt: null, nextRunAt: "2026-09-04T00:00:00.000Z", lastErrorCode: null,
-    lastErrorMessage: null, createdAt: "2026-09-03T00:00:00.000Z", updatedAt: "2026-09-03T00:00:00.000Z",
+    id: "rule-1",
+    name: "低库存提醒",
+    definition,
+    status: "ACTIVE" as const,
+    lastRunAt: null,
+    nextRunAt: "2026-09-04T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    createdAt: "2026-09-03T00:00:00.000Z",
+    updatedAt: "2026-09-03T00:00:00.000Z",
   };
 }
 
 function notification() {
   return {
-    id: "notification-1", ruleId: "rule-1", ruleName: "低库存提醒", title: "库存低于阈值",
-    message: "无线蓝牙耳机当前库存 4 件", severity: "WARNING" as const,
-    resourceType: "SKU" as const, resourceId: "sku-1",
-    periodStart: "2026-09-03T00:00:00.000Z", periodEnd: "2026-09-03T23:59:59.999Z",
-    readAt: null, createdAt: "2026-09-03T00:05:00.000Z",
+    id: "notification-1",
+    ruleId: "rule-1",
+    ruleName: "低库存提醒",
+    title: "库存低于阈值",
+    message: "无线蓝牙耳机当前库存 4 件",
+    severity: "WARNING" as const,
+    resourceType: "SKU" as const,
+    resourceId: "sku-1",
+    periodStart: "2026-09-03T00:00:00.000Z",
+    periodEnd: "2026-09-03T23:59:59.999Z",
+    readAt: null,
+    createdAt: "2026-09-03T00:05:00.000Z",
   };
 }

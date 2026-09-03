@@ -19,7 +19,11 @@ interface ResponseSchema<T> {
 }
 
 export class MonitoringApiError extends Error {
-  constructor(message: string, readonly status: number, readonly retryable: boolean) {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryable: boolean,
+  ) {
     super(message);
     this.name = "MonitoringApiError";
   }
@@ -43,7 +47,12 @@ export function listMonitoringRules() {
 
 export function updateMonitoringRuleStatus(id: string, status: "ACTIVE" | "INACTIVE") {
   const body = MonitoringRuleStatusRequestSchema.parse({ status });
-  return requestJson(`rules/${encodeURIComponent(id)}/status`, MonitoringRuleResponseSchema, "PATCH", body);
+  return requestJson(
+    `rules/${encodeURIComponent(id)}/status`,
+    MonitoringRuleResponseSchema,
+    "PATCH",
+    body,
+  );
 }
 
 export async function deleteMonitoringRule(id: string): Promise<void> {
@@ -51,7 +60,11 @@ export async function deleteMonitoringRule(id: string): Promise<void> {
 }
 
 export function runMonitoringRule(id: string) {
-  return requestJson(`rules/${encodeURIComponent(id)}/run`, MonitoringRuleRunResponseSchema, "POST");
+  return requestJson(
+    `rules/${encodeURIComponent(id)}/run`,
+    MonitoringRuleRunResponseSchema,
+    "POST",
+  );
 }
 
 export function syncMonitoring() {
@@ -67,16 +80,27 @@ export function getMonitoringUnreadCount() {
 }
 
 export function markMonitoringNotificationRead(id: string) {
-  return requestJson(`notifications/${encodeURIComponent(id)}/read`, MonitoringReadResponseSchema, "PATCH");
+  return requestJson(
+    `notifications/${encodeURIComponent(id)}/read`,
+    MonitoringReadResponseSchema,
+    "PATCH",
+  );
 }
 
 export function markAllMonitoringNotificationsRead() {
   return requestJson("notifications/read-all", MonitoringReadAllResponseSchema, "POST");
 }
 
-async function requestJson<T>(path: string, schema: ResponseSchema<T>, method = "GET", body?: unknown) {
+async function requestJson<T>(
+  path: string,
+  schema: ResponseSchema<T>,
+  method = "GET",
+  body?: unknown,
+) {
   const response = await requestRaw(path, method, body);
-  const payload = await response.json().catch(() => { throw invalidResponse(); });
+  const payload = await response.json().catch(() => {
+    throw invalidResponse();
+  });
   const parsed = schema.safeParse(payload);
   if (!parsed.success) throw invalidResponse();
   return parsed.data;
@@ -89,7 +113,10 @@ async function requestRaw(path: string, method: string, body?: unknown): Promise
       method,
       credentials: "include",
       cache: "no-store",
-      headers: { Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
+      headers: {
+        Accept: "application/json",
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
   } catch {
