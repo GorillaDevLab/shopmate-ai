@@ -108,6 +108,6 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
       inject: [AI_LLM_PROVIDER, DashboardInsightExecutor],
     },
   ],
-  exports: [AiChatService],
+  exports: [AiChatService, AI_LLM_PROVIDER],
 })
 export class AiModule {}
