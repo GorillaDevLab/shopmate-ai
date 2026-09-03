@@ -180,7 +180,7 @@ class FixtureDashboardLayoutRepository implements DashboardLayoutRepository {
 }
 
 function identityKey(context: AuthContext): string {
-  return `${context.userId}/${context.merchantId}`;
+  return `${encodeURIComponent(context.userId)}/${encodeURIComponent(context.merchantId)}`;
 }
 
 function configureTestEnvironment(): void {
@@ -195,17 +195,16 @@ function configureTestEnvironment(): void {
 
 function sessionCookie(userId: string, merchantId: string): string {
   const context = createAuthContext({ userId, merchantId, permissions: [] });
-  const session = signDemoSession(
-    context,
-    "test-session-key-with-at-least-32-characters",
-    3_600,
-  );
+  const session = signDemoSession(context, "test-session-key-with-at-least-32-characters", 3_600);
   return `${DEMO_SESSION_COOKIE_NAME}=${session.token}`;
 }
 
 function reorderedLayout(offset: number): DashboardLayout {
   const cards = [...DEFAULT_DASHBOARD_LAYOUT.cards];
-  return { ...DEFAULT_DASHBOARD_LAYOUT, cards: [...cards.slice(offset), ...cards.slice(0, offset)] };
+  return {
+    ...DEFAULT_DASHBOARD_LAYOUT,
+    cards: [...cards.slice(offset), ...cards.slice(0, offset)],
+  };
 }
 
 function saveLayout(

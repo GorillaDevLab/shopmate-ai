@@ -85,6 +85,30 @@ describe("MonitoringRuleGenerator", () => {
     expect(evaluator.evaluate).not.toHaveBeenCalled();
   });
 
+  it("拒绝夹带其他工具调用的规则建议", async () => {
+    const evaluator = { evaluate: vi.fn() };
+    const provider = {
+      name: "test",
+      generate: vi.fn().mockResolvedValue({
+        message: {
+          role: "assistant",
+          content: null,
+          toolCalls: [
+            { id: "call-1", name: "propose_monitoring_rule", arguments: definition },
+            { id: "call-2", name: "execute_sql", arguments: { sql: "SELECT *" } },
+          ],
+        },
+        finishReason: "tool_calls",
+      }),
+    };
+    const generator = new MonitoringRuleGenerator(provider, evaluator);
+
+    await expect(generator.generate(context, { question: "库存提醒" })).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(evaluator.evaluate).not.toHaveBeenCalled();
+  });
+
   it("Provider 失败时返回安全错误且不泄露内部消息", async () => {
     const generator = new MonitoringRuleGenerator(
       { name: "test", generate: vi.fn().mockRejectedValue(new Error("provider-secret")) },

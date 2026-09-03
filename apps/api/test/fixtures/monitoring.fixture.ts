@@ -184,9 +184,9 @@ export class FixtureMonitoringRepository implements MonitoringRepository {
 }
 
 function scopeKey(context: AuthContext): string {
-  return `${context.userId}/${context.merchantId}`;
+  return `${encodeURIComponent(context.userId)}/${encodeURIComponent(context.merchantId)}`;
 }
 
 function resourceKey(context: AuthContext, id: string): string {
-  return `${scopeKey(context)}/${id}`;
+  return `${scopeKey(context)}/${encodeURIComponent(id)}`;
 }

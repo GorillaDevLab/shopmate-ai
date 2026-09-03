@@ -123,6 +123,36 @@ describe("通知中心", () => {
     expect(screen.queryByText("database secret")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "通知，1 条未读" })).toBeInTheDocument();
   });
+
+  it("同一条通知提交期间禁用重复标记和全部已读", async () => {
+    let resolveRead:
+      | ((value: { notification: ReturnType<typeof notification> }) => void)
+      | undefined;
+    vi.mocked(api.markMonitoringNotificationRead).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRead = resolve;
+        }),
+    );
+    render(<NotificationCenter />);
+    await screen.findByText("1", { selector: ".notification-badge" });
+    fireEvent.click(screen.getByRole("button", { name: "通知，1 条未读" }));
+    const readButton = await screen.findByRole("button", { name: "标记低库存提醒为已读" });
+
+    fireEvent.click(readButton);
+    fireEvent.click(readButton);
+
+    expect(api.markMonitoringNotificationRead).toHaveBeenCalledTimes(1);
+    expect(readButton).toBeDisabled();
+    expect(screen.getByRole("button", { name: "全部已读" })).toBeDisabled();
+
+    resolveRead?.({
+      notification: { ...notification(), readAt: "2026-09-03T01:00:00.000Z" },
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("1", { selector: ".notification-badge" })).toBeNull(),
+    );
+  });
 });
 
 function ruleView() {

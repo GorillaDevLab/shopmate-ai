@@ -74,8 +74,10 @@ const MONITORING_RULE_TOOL: LLMToolDefinition = {
 function readDefinition(
   calls: readonly { readonly name: string; readonly arguments: JsonObject }[] | undefined,
 ) {
-  const candidate = calls?.find((call) => call.name === TOOL_NAME)?.arguments;
-  return MonitoringRuleDefinitionSchema.parse(candidate);
+  if (calls?.length !== 1 || calls[0]?.name !== TOOL_NAME) {
+    return MonitoringRuleDefinitionSchema.parse(undefined);
+  }
+  return MonitoringRuleDefinitionSchema.parse(calls[0].arguments);
 }
 
 function suggestedName(definition: MonitoringRuleDefinition): string {
