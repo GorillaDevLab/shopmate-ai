@@ -76,7 +76,10 @@ describe("dashboard layout FLIP motion", () => {
     const { card, container } = createCard();
     const animate = vi.fn();
     card.animate = animate;
-    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true }) as MediaQueryList));
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true }) as MediaQueryList),
+    );
 
     animateCardReflow(
       container,

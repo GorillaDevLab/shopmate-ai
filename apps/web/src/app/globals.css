@@ -264,9 +264,7 @@ button:focus-visible {
 
 @media (min-width: 768px) {
   .dashboard-layout-grid {
-    --widget-unit: calc(
-      (100cqw - var(--widget-gap) - var(--widget-gap) - var(--widget-gap)) / 4
-    );
+    --widget-unit: calc((100cqw - var(--widget-gap) - var(--widget-gap) - var(--widget-gap)) / 4);
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }

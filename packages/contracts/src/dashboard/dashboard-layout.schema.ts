@@ -195,9 +195,7 @@ const legacyCardSchema = z.discriminatedUnion("component", [
 
 const legacyLayoutSchema = z.strictObject({
   version: z.union([z.literal(1), z.literal(2)]),
-  cards: z
-    .array(legacyCardSchema)
-    .max(24),
+  cards: z.array(legacyCardSchema).max(24),
 });
 
 function migrateSize(
@@ -205,9 +203,7 @@ function migrateSize(
   size: LegacyDashboardLayoutSize,
 ): DashboardLayoutSize {
   const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[component].allowedSizes;
-  return size === "1/3" && allowedSizes.some((candidate) => candidate === "1x1")
-    ? "1x1"
-    : "2x1";
+  return size === "1/3" && allowedSizes.some((candidate) => candidate === "1x1") ? "1x1" : "2x1";
 }
 
 export function parseDashboardLayout(value: unknown): DashboardLayout {

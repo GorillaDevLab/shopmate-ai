@@ -38,11 +38,7 @@ import {
   type LayoutEditorMode,
   type LayoutEditorState,
 } from "./dashboard-layout-state";
-import {
-  animateCardReflow,
-  captureCardRects,
-  type CardRectMap,
-} from "./dashboard-layout-motion";
+import { animateCardReflow, captureCardRects, type CardRectMap } from "./dashboard-layout-motion";
 import {
   adjacentAllowedSize,
   footprintForSize,
@@ -721,7 +717,9 @@ function CardMoreMenu(
   );
 }
 
-function CardResizeHandle(props: DashboardCardProps & { title: string; size: DashboardLayoutSize }) {
+function CardResizeHandle(
+  props: DashboardCardProps & { title: string; size: DashboardLayoutSize },
+) {
   const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes;
   const currentIndex = allowedSizes.findIndex((size) => size === props.size);
   return (

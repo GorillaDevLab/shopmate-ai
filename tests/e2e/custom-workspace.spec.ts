@@ -60,14 +60,18 @@ test("K7 375px 面板占满视口且页面不横向滚动", async ({ page }) => 
       "1x1",
     );
     await expect(page.getByRole("button", { name: "销售额更多操作" })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      375,
+    );
 
     await page.getByRole("button", { name: "经营监听" }).click();
 
     const panel = page.getByRole("dialog", { name: "经营监听" });
     await expect(panel).toBeVisible();
     expect((await panel.boundingBox())?.width).toBe(375);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      375,
+    );
   } finally {
     await restoreLayout(page, originalLayout);
   }
