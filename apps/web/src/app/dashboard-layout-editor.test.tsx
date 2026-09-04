@@ -68,7 +68,8 @@ describe("DashboardLayoutEditor", () => {
   it("可用键盘按钮和拖放调整顺序且不提前保存", async () => {
     await renderEditor();
     enterEditMode();
-    fireEvent.click(screen.getByRole("button", { name: "销售额下移" }));
+    openCardMenu("销售额");
+    fireEvent.click(screen.getByRole("menuitem", { name: "下移" }));
     expect(cardOrder().slice(0, 2)).toEqual(["metric-orders", "metric-sales"]);
     expect(screen.getByText("草稿未保存")).toBeInTheDocument();
     fireEvent.dragStart(dragHandle("销售额"));
@@ -101,13 +102,22 @@ describe("DashboardLayoutEditor", () => {
       screen.getByRole("region", { name: "经营看板卡片" }),
       "getBoundingClientRect",
     ).mockReturnValue(rect({ width: 1_200 }));
-    const resizeHandle = screen.getByRole("slider", { name: "调整销售额卡片宽度" });
-    fireEvent(resizeHandle, pointerEvent("pointerdown", { clientX: 400, pointerId: 7 }));
-    fireEvent(resizeHandle, pointerEvent("pointermove", { clientX: 700, pointerId: 7 }));
-    expect(card("metric-sales")).toHaveAttribute("data-preview-span", "7");
-    fireEvent(resizeHandle, pointerEvent("pointerup", { clientX: 700, pointerId: 7 }));
-    expect(card("metric-sales")).toHaveAttribute("data-size", "2/3");
-    expect(card("metric-sales")).not.toHaveAttribute("data-preview-span");
+    const resizeHandle = screen.getByRole("slider", { name: "调整销售额卡片尺寸" });
+    fireEvent(
+      resizeHandle,
+      pointerEvent("pointerdown", { clientX: 400, clientY: 200, pointerId: 7 }),
+    );
+    fireEvent(
+      resizeHandle,
+      pointerEvent("pointermove", { clientX: 750, clientY: 200, pointerId: 7 }),
+    );
+    expect(card("metric-sales")).toHaveAttribute("data-preview-size", "2x1");
+    fireEvent(
+      resizeHandle,
+      pointerEvent("pointerup", { clientX: 750, clientY: 200, pointerId: 7 }),
+    );
+    expect(card("metric-sales")).toHaveAttribute("data-size", "2x1");
+    expect(card("metric-sales")).not.toHaveAttribute("data-preview-size");
     expect(api.saveDashboardLayout).not.toHaveBeenCalled();
   });
 
@@ -118,14 +128,20 @@ describe("DashboardLayoutEditor", () => {
       screen.getByRole("region", { name: "经营看板卡片" }),
       "getBoundingClientRect",
     ).mockReturnValue(rect({ width: 1_200 }));
-    const resizeHandle = screen.getByRole("slider", { name: "调整销售额卡片宽度" });
+    const resizeHandle = screen.getByRole("slider", { name: "调整销售额卡片尺寸" });
     fireEvent.keyDown(resizeHandle, { key: "ArrowRight" });
-    expect(card("metric-sales")).toHaveAttribute("data-size", "1/2");
-    fireEvent(resizeHandle, pointerEvent("pointerdown", { clientX: 600, pointerId: 8 }));
-    fireEvent(resizeHandle, pointerEvent("pointermove", { clientX: 1_000, pointerId: 8 }));
+    expect(card("metric-sales")).toHaveAttribute("data-size", "2x1");
+    fireEvent(
+      resizeHandle,
+      pointerEvent("pointerdown", { clientX: 600, clientY: 200, pointerId: 8 }),
+    );
+    fireEvent(
+      resizeHandle,
+      pointerEvent("pointermove", { clientX: 1_000, clientY: 600, pointerId: 8 }),
+    );
     fireEvent.keyDown(resizeHandle, { key: "Escape" });
-    expect(card("metric-sales")).toHaveAttribute("data-size", "1/2");
-    expect(card("metric-sales")).not.toHaveAttribute("data-preview-span");
+    expect(card("metric-sales")).toHaveAttribute("data-size", "2x1");
+    expect(card("metric-sales")).not.toHaveAttribute("data-preview-size");
   });
 
   it("新增组件、只读预览并显式保存", async () => {
@@ -160,7 +176,8 @@ describe("DashboardLayoutEditor", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     await renderEditor();
     enterEditMode();
-    fireEvent.click(screen.getByRole("button", { name: "销售额下移" }));
+    openCardMenu("销售额");
+    fireEvent.click(screen.getByRole("menuitem", { name: "下移" }));
     openLayoutMenu();
     fireEvent.click(screen.getByRole("menuitem", { name: "放弃修改" }));
     expect(cardOrder()).toEqual(DEFAULT_DASHBOARD_LAYOUT.cards.map(({ id }) => id));
@@ -180,7 +197,8 @@ describe("DashboardLayoutEditor", () => {
     );
     await renderEditor();
     enterEditMode();
-    fireEvent.click(screen.getByRole("button", { name: "销售额下移" }));
+    openCardMenu("销售额");
+    fireEvent.click(screen.getByRole("menuitem", { name: "下移" }));
     const changedOrder = cardOrder();
     fireEvent.click(screen.getByRole("button", { name: "完成并保存" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("其他设备");
@@ -199,18 +217,20 @@ describe("DashboardLayoutEditor", () => {
     expect(api.fetchDashboardLayout).toHaveBeenCalledTimes(2);
   });
 
-  it("移动端保持单列且所有编辑控件都有可读名称", async () => {
+  it("使用二维尺寸菜单且所有编辑控件都有可读名称", async () => {
     await renderEditor();
     enterEditMode();
-    expect(screen.getByRole("region", { name: "经营看板卡片" })).toHaveClass(
-      "grid-cols-1",
-      "grid-flow-dense",
-      "items-start",
-    );
+    expect(card("metric-sales")).toHaveAttribute("data-size", "1x1");
+    openCardMenu("销售额");
+    expect(screen.getByRole("menuitemradio", { name: "1 × 1" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "2 × 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: "2 × 2" })).not.toBeInTheDocument();
+    expect(screen.queryByText("整行")).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "下移" })).toBeInTheDocument();
     for (const button of screen.getAllByRole("button")) expect(button).toHaveAccessibleName();
     expect(
-      within(card("metric-sales")).getByRole("slider", { name: "调整销售额卡片宽度" }),
-    ).toHaveAttribute("aria-valuemin", "4");
+      within(card("metric-sales")).getByRole("slider", { name: "调整销售额卡片尺寸" }),
+    ).toHaveAttribute("aria-valuetext", "1 × 1");
   });
 });
 
@@ -256,9 +276,14 @@ function rect(overrides: Partial<DOMRect> = {}): DOMRect {
 
 function pointerEvent(
   type: "pointerdown" | "pointermove" | "pointerup",
-  init: { clientX: number; pointerId: number },
+  init: { clientX: number; clientY: number; pointerId: number },
 ): MouseEvent {
-  const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: init.clientX });
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    button: 0,
+    clientX: init.clientX,
+    clientY: init.clientY,
+  });
   Object.defineProperty(event, "pointerId", { value: init.pointerId });
   return event;
 }

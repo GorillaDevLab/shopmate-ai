@@ -5,6 +5,7 @@ import type {
   DashboardLayoutCard,
   DashboardLayoutSize,
 } from "@shopmate/contracts";
+import { DASHBOARD_COMPONENT_REGISTRY } from "@shopmate/contracts";
 import {
   useCallback,
   useEffect,
@@ -37,16 +38,11 @@ import {
   type LayoutEditorMode,
   type LayoutEditorState,
 } from "./dashboard-layout-state";
+import { animateCardReflow, captureCardRects, type CardRectMap } from "./dashboard-layout-motion";
 import {
-  adjacentSize,
-  animateCardReflow,
-  captureCardRects,
-  DASHBOARD_COLUMN_COUNT,
-  MINIMUM_CARD_SPAN,
-  previewSpan,
-  sizeForSpan,
-  spanForSize,
-  type CardRectMap,
+  adjacentAllowedSize,
+  footprintForSize,
+  previewWidgetSize,
 } from "./dashboard-layout-resize";
 import { DashboardWidgetGallery } from "./dashboard-widget-gallery";
 import { DashboardInsightCard } from "./dashboard-insight-card";
@@ -57,18 +53,10 @@ import { MetricCard } from "./metric-card";
 import { SalesTrend } from "./sales-trend";
 
 const sizeOptions = [
-  { value: "1/3", label: "小" },
-  { value: "1/2", label: "中" },
-  { value: "2/3", label: "大" },
-  { value: "full", label: "整行" },
+  { value: "1x1", label: "1 × 1" },
+  { value: "2x1", label: "2 × 1" },
+  { value: "2x2", label: "2 × 2" },
 ] as const satisfies ReadonlyArray<{ value: DashboardLayoutSize; label: string }>;
-
-const sizeClasses: Record<DashboardLayoutSize, string> = {
-  "1/3": "md:col-span-4",
-  "1/2": "md:col-span-6",
-  "2/3": "md:col-span-8",
-  full: "md:col-span-12",
-};
 
 const metricLabels = {
   sales: "销售额",
@@ -90,11 +78,13 @@ type ResizeSession = {
   cardId: string;
   pointerId: number;
   startX: number;
-  startSpan: number;
-  span: number;
+  startY: number;
+  startSize: DashboardLayoutSize;
+  size: DashboardLayoutSize;
+  allowedSizes: readonly DashboardLayoutSize[];
 };
 
-type ResizePreview = Pick<ResizeSession, "cardId" | "span">;
+type ResizePreview = Pick<ResizeSession, "cardId" | "size">;
 
 export function DashboardLayoutEditor(props: EditorProps) {
   const persistence = useLayoutPersistence(props.onEditingChange);
@@ -132,30 +122,33 @@ function ReadyLayoutEditor({
 
   return (
     <>
-      <EditorHeader
-        state={state}
-        isDirty={isDirty}
-        layoutMenuOpen={layoutMenuOpen}
-        onLayoutMenuChange={setLayoutMenuOpen}
-        onAdd={() => setGalleryOpen(true)}
-        onModeChange={(mode) => dispatch({ type: "modeChanged", mode })}
-        onSave={persistence.save}
-        onDiscard={() => discardChanges(state, dispatch)}
-        onRestore={() => restoreDefaults(dispatch)}
-      />
-      <LayoutMessage state={state} onRetrySave={persistence.save} onReload={persistence.reload} />
-      <DashboardGrid
-        data={data}
-        periodLabel={periodLabel}
-        state={state}
-        gridRef={gridRef}
-        interactions={interactions}
-      />
+      <div className="dashboard-layout-shell">
+        <EditorHeader
+          state={state}
+          isDirty={isDirty}
+          layoutMenuOpen={layoutMenuOpen}
+          onLayoutMenuChange={setLayoutMenuOpen}
+          onAdd={() => setGalleryOpen(true)}
+          onModeChange={(mode) => dispatch({ type: "modeChanged", mode })}
+          onSave={persistence.save}
+          onDiscard={() => discardChanges(state, dispatch)}
+          onRestore={() => restoreDefaults(dispatch)}
+        />
+        <LayoutMessage state={state} onRetrySave={persistence.save} onReload={persistence.reload} />
+        <DashboardGrid
+          data={data}
+          periodLabel={periodLabel}
+          state={state}
+          gridRef={gridRef}
+          interactions={interactions}
+        />
+      </div>
       <DashboardWidgetGallery
         open={galleryOpen}
         cardCount={state.draft.cards.length}
         onClose={() => setGalleryOpen(false)}
         onAdd={(component) => {
+          interactions.prepareAnimation();
           dispatch({
             type: "cardAdded",
             card: createDashboardCard(component, state.draft.cards),
@@ -164,6 +157,7 @@ function ReadyLayoutEditor({
           interactions.announce("组件已添加到看板末尾");
         }}
         onAddInsight={(component, preview) => {
+          interactions.prepareAnimation();
           dispatch({
             type: "cardAdded",
             card: createInsightDashboardCard(
@@ -177,7 +171,13 @@ function ReadyLayoutEditor({
           interactions.announce("AI 组件已加入草稿，可撤销或删除");
         }}
       />
-      <UndoToast state={state} dispatch={dispatch} />
+      <UndoToast
+        state={state}
+        onUndo={(type) => {
+          interactions.prepareAnimation();
+          dispatch({ type });
+        }}
+      />
       {showAssistant && (
         <DashboardAiAssistant
           open={assistantOpen}
@@ -186,6 +186,7 @@ function ReadyLayoutEditor({
             if (state.draft.cards.length >= 24) throw new Error("看板最多包含 24 张卡片");
             const component = preview.result.kind === "pie" ? "pieChart" : "report";
             dispatch({ type: "modeChanged", mode: "edit" });
+            interactions.prepareAnimation();
             dispatch({
               type: "cardAdded",
               card: createInsightDashboardCard(
@@ -226,7 +227,7 @@ function DashboardGrid({
       ref={gridRef}
       id="dashboard-layout-grid"
       aria-label="经营看板卡片"
-      className="dashboard-layout-grid grid grid-flow-dense grid-cols-1 items-start gap-4 md:grid-cols-12"
+      className="dashboard-layout-grid"
     >
       {state.draft.cards.map((card, index) => (
         <DashboardCard
@@ -237,9 +238,9 @@ function DashboardGrid({
           isEditing={isEditing}
           isDragging={interactions.draggedId === card.id}
           isResizing={interactions.resizePreview?.cardId === card.id}
-          previewSpan={
+          previewSize={
             interactions.resizePreview?.cardId === card.id
-              ? interactions.resizePreview.span
+              ? interactions.resizePreview.size
               : undefined
           }
           interactions={interactions}
@@ -357,11 +358,14 @@ function useCardInteractions(
     changeCards(reorderCards(cards, currentIndex, targetIndex), animate);
     setAnnouncement(`${cardTitle(cards[currentIndex])}已移至第 ${targetIndex + 1} 位`);
   };
-  const resizeCard = (cardId: string, size: DashboardLayoutSize) => {
+  const resizeCard = (cardId: string, size: DashboardLayoutSize, animate = false) => {
     const card = state.draft.cards.find((candidate) => candidate.id === cardId);
     if (!card || card.size === size) return;
-    changeCards(state.draft.cards.map((item) => (item.id === cardId ? { ...item, size } : item)));
-    setAnnouncement(`${cardTitle(card)}宽度已调整为${sizeLabel(size)}`);
+    changeCards(
+      state.draft.cards.map((item) => (item.id === cardId ? { ...item, size } : item)),
+      animate,
+    );
+    setAnnouncement(`${cardTitle(card)}尺寸已调整为${sizeLabel(size)}`);
   };
   const removeCard = (card: DashboardLayoutCard) => {
     pendingRectsRef.current = captureCardRects(gridRef.current);
@@ -378,6 +382,9 @@ function useCardInteractions(
     moveCard,
     resizeCard,
     removeCard,
+    prepareAnimation: () => {
+      pendingRectsRef.current = captureCardRects(gridRef.current);
+    },
     startResize: (event: ReactPointerEvent<HTMLElement>, card: DashboardLayoutCard) =>
       startResize(event, card, resizeSessionRef, setResizePreview),
     updateResize: (event: ReactPointerEvent<HTMLElement>) =>
@@ -561,26 +568,27 @@ type DashboardCardProps = {
   isEditing: boolean;
   isDragging: boolean;
   isResizing: boolean;
-  previewSpan?: number;
+  previewSize?: DashboardLayoutSize;
   interactions: ReturnType<typeof useCardInteractions>;
   children: ReactNode;
 };
 
 function DashboardCard(props: DashboardCardProps) {
-  const { card, isEditing, isDragging, isResizing, previewSpan, children } = props;
+  const { card, isEditing, isDragging, isResizing, previewSize, children } = props;
   const title = cardTitle(card);
-  const currentSpan = previewSpan ?? spanForSize(card.size);
-  const style =
-    previewSpan === undefined
-      ? undefined
-      : ({ "--dashboard-card-span": previewSpan } as CSSProperties);
+  const currentSize = previewSize ?? card.size;
+  const footprint = footprintForSize(currentSize);
+  const style = {
+    "--widget-columns": footprint.columns,
+    "--widget-rows": footprint.rows,
+  } as CSSProperties;
   return (
     <div
       data-dashboard-card-id={card.id}
       data-size={card.size}
-      data-preview-span={previewSpan}
+      data-preview-size={previewSize}
       style={style}
-      className={`dashboard-layout-card min-w-0 ${sizeClasses[card.size]} ${isEditing ? "is-editing" : ""} ${isDragging ? "is-dragging" : ""} ${isResizing ? "is-resizing has-size-preview" : ""}`}
+      className={`dashboard-layout-card min-w-0 ${isEditing ? "is-editing" : ""} ${isDragging ? "is-dragging" : ""} ${isResizing ? "is-resizing has-size-preview" : ""}`}
       onDragOver={(event) => isEditing && event.preventDefault()}
       onDragEnter={() => handleDragEnter(props)}
       onDrop={(event) => {
@@ -588,14 +596,14 @@ function DashboardCard(props: DashboardCardProps) {
         props.interactions.setDraggedId(undefined);
       }}
     >
-      {isEditing && <CardControls {...props} title={title} span={currentSpan} />}
+      {isEditing && <CardControls {...props} title={title} size={currentSize} />}
       {children}
-      {isEditing && <CardResizeHandle {...props} title={title} span={currentSpan} />}
+      {isEditing && <CardResizeHandle {...props} title={title} size={currentSize} />}
     </div>
   );
 }
 
-function CardControls(props: DashboardCardProps & { title: string; span: number }) {
+function CardControls(props: DashboardCardProps & { title: string; size: DashboardLayoutSize }) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className="dashboard-card-controls" aria-label={`${props.title}布局设置`}>
@@ -612,9 +620,8 @@ function CardControls(props: DashboardCardProps & { title: string; span: number 
       >
         ⠿
       </span>
-      <MoveButtons {...props} />
       <span className="dashboard-size-readout" aria-hidden="true">
-        {sizeReadout(props.card.size, props.span)}
+        {sizeLabel(props.size)}
       </span>
       <CardMoreMenu {...props} open={menuOpen} onOpenChange={setMenuOpen} />
     </div>
@@ -626,23 +633,25 @@ function MoveButtons(props: DashboardCardProps & { title: string }) {
     <>
       <button
         type="button"
-        aria-label={`${props.title}上移`}
+        role="menuitem"
+        aria-label="上移"
         disabled={props.index === 0}
         onClick={(event) =>
           props.interactions.moveCard(props.card.id, props.index - 1, event.detail > 0)
         }
       >
-        ↑
+        上移
       </button>
       <button
         type="button"
-        aria-label={`${props.title}下移`}
+        role="menuitem"
+        aria-label="下移"
         disabled={props.index === props.count - 1}
         onClick={(event) =>
           props.interactions.moveCard(props.card.id, props.index + 1, event.detail > 0)
         }
       >
-        ↓
+        下移
       </button>
     </>
   );
@@ -669,20 +678,27 @@ function CardMoreMenu(
       {props.open && (
         <div role="menu" aria-label={`${props.title}更多操作`} className="layout-card-more-menu">
           <p>调整大小</p>
-          {sizeOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={props.card.size === option.value}
-              onClick={() => {
-                props.interactions.resizeCard(props.card.id, option.value);
-                props.onOpenChange(false);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
+          {sizeOptions
+            .filter((option) =>
+              DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes.some(
+                (size) => size === option.value,
+              ),
+            )
+            .map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={props.card.size === option.value}
+                onClick={(event) => {
+                  props.interactions.resizeCard(props.card.id, option.value, event.detail > 0);
+                  props.onOpenChange(false);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          <MoveButtons {...props} />
           <button
             type="button"
             role="menuitem"
@@ -701,18 +717,22 @@ function CardMoreMenu(
   );
 }
 
-function CardResizeHandle(props: DashboardCardProps & { title: string; span: number }) {
+function CardResizeHandle(
+  props: DashboardCardProps & { title: string; size: DashboardLayoutSize },
+) {
+  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes;
+  const currentIndex = allowedSizes.findIndex((size) => size === props.size);
   return (
     <span
       role="slider"
       tabIndex={0}
-      aria-label={`调整${props.title}卡片宽度`}
-      aria-valuemin={MINIMUM_CARD_SPAN}
-      aria-valuemax={DASHBOARD_COLUMN_COUNT}
-      aria-valuenow={props.span}
-      aria-valuetext={sizeLabel(sizeForSpan(props.span))}
+      aria-label={`调整${props.title}卡片尺寸`}
+      aria-valuemin={1}
+      aria-valuemax={allowedSizes.length}
+      aria-valuenow={currentIndex + 1}
+      aria-valuetext={sizeLabel(props.size)}
       className="dashboard-resize-handle"
-      title={`拖动调整${props.title}宽度`}
+      title={`拖动调整${props.title}尺寸`}
       onPointerDown={(event) => props.interactions.startResize(event, props.card)}
       onPointerMove={props.interactions.updateResize}
       onPointerUp={props.interactions.finishResize}
@@ -726,10 +746,10 @@ function CardResizeHandle(props: DashboardCardProps & { title: string; span: num
 
 function UndoToast({
   state,
-  dispatch,
+  onUndo,
 }: {
   state: LayoutEditorState;
-  dispatch: Dispatch<LayoutEditorAction>;
+  onUndo: (type: "addUndone" | "removeUndone") => void;
 }) {
   const snapshot = state.removedCard ?? state.addedCard;
   if (!snapshot) return null;
@@ -741,7 +761,7 @@ function UndoToast({
       <button
         type="button"
         aria-label={`撤销${isAddition ? "添加" : "删除"}${title}`}
-        onClick={() => dispatch({ type: isAddition ? "addUndone" : "removeUndone" })}
+        onClick={() => onUndo(isAddition ? "addUndone" : "removeUndone")}
       >
         撤销
       </button>
@@ -806,15 +826,17 @@ function startResize(
   setPreview: Dispatch<SetStateAction<ResizePreview | undefined>>,
 ) {
   if (event.button > 0 || sessionRef.current) return;
-  const span = spanForSize(card.size);
+  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes;
   sessionRef.current = {
     cardId: card.id,
     pointerId: event.pointerId,
     startX: event.clientX,
-    startSpan: span,
-    span,
+    startY: event.clientY,
+    startSize: card.size,
+    size: card.size,
+    allowedSizes,
   };
-  setPreview({ cardId: card.id, span });
+  setPreview({ cardId: card.id, size: card.size });
   event.currentTarget.setPointerCapture?.(event.pointerId);
 }
 
@@ -828,11 +850,19 @@ function updateResize(
   const session = sessionRef.current;
   if (!session || session.pointerId !== event.pointerId) return;
   const width = gridRef.current?.getBoundingClientRect().width ?? 0;
-  const span = previewSpan(session.startSpan, session.startX, event.clientX, width);
-  if (span === session.span) return;
+  const columns = width >= 768 ? 4 : 2;
+  const unitSize = (width - 16 * (columns - 1)) / columns;
+  const size = previewWidgetSize({
+    startSize: session.startSize,
+    deltaX: event.clientX - session.startX,
+    deltaY: event.clientY - session.startY,
+    unitSize,
+    allowedSizes: session.allowedSizes,
+  });
+  if (size === session.size) return;
   pendingRectsRef.current = captureCardRects(gridRef.current);
-  session.span = span;
-  setPreview({ cardId: session.cardId, span });
+  session.size = size;
+  setPreview({ cardId: session.cardId, size });
 }
 
 function finishResize(
@@ -841,7 +871,7 @@ function finishResize(
   sessionRef: MutableRefObject<ResizeSession | undefined>,
   pendingRectsRef: MutableRefObject<CardRectMap | undefined>,
   setPreview: Dispatch<SetStateAction<ResizePreview | undefined>>,
-  resizeCard: (cardId: string, size: DashboardLayoutSize) => void,
+  resizeCard: (cardId: string, size: DashboardLayoutSize, animate?: boolean) => void,
 ) {
   const session = sessionRef.current;
   if (!session || session.pointerId !== event.pointerId) return;
@@ -849,7 +879,7 @@ function finishResize(
   pendingRectsRef.current = captureCardRects(gridRef.current);
   sessionRef.current = undefined;
   setPreview(undefined);
-  resizeCard(session.cardId, sizeForSpan(session.span));
+  resizeCard(session.cardId, session.size, true);
 }
 
 function cancelResize(
@@ -868,7 +898,8 @@ function resizeWithKeyboard(
   interactions: ReturnType<typeof useCardInteractions>,
 ) {
   if (event.key === "Escape") return interactions.cancelResize();
-  const nextSize = keyboardResizeTarget(event.key, card.size);
+  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes;
+  const nextSize = keyboardResizeTarget(event.key, card.size, allowedSizes);
   if (!nextSize) return;
   event.preventDefault();
   interactions.resizeCard(card.id, nextSize);
@@ -972,17 +1003,18 @@ function sizeLabel(size: DashboardLayoutSize): string {
   return sizeOptions.find((option) => option.value === size)?.label ?? size;
 }
 
-function sizeReadout(size: DashboardLayoutSize, span: number): string {
-  return span === spanForSize(size) ? sizeLabel(size) : `${span} / ${DASHBOARD_COLUMN_COUNT}`;
-}
-
 function keyboardResizeTarget(
   key: string,
   current: DashboardLayoutSize,
+  allowedSizes: readonly DashboardLayoutSize[],
 ): DashboardLayoutSize | undefined {
-  if (key === "ArrowLeft" || key === "ArrowDown") return adjacentSize(current, -1);
-  if (key === "ArrowRight" || key === "ArrowUp") return adjacentSize(current, 1);
-  if (key === "Home") return "1/3";
-  if (key === "End") return "full";
+  if (key === "ArrowLeft" || key === "ArrowDown") {
+    return adjacentAllowedSize(current, -1, allowedSizes);
+  }
+  if (key === "ArrowRight" || key === "ArrowUp") {
+    return adjacentAllowedSize(current, 1, allowedSizes);
+  }
+  if (key === "Home") return allowedSizes[0];
+  if (key === "End") return allowedSizes.at(-1);
   return undefined;
 }

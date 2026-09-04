@@ -89,13 +89,32 @@ button:focus-visible {
   box-shadow: var(--panel-shadow);
 }
 
+.dashboard-layout-shell {
+  container-type: inline-size;
+}
+
+.dashboard-layout-grid {
+  --widget-gap: 1rem;
+  --widget-unit: calc((100cqw - var(--widget-gap)) / 2);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: dense;
+  grid-auto-rows: var(--widget-unit);
+  gap: var(--widget-gap);
+  align-items: stretch;
+}
+
 .dashboard-layout-card {
   position: relative;
   width: 100%;
+  min-height: 0;
+  grid-column: span var(--widget-columns);
+  grid-row: span var(--widget-rows);
   transform-origin: center;
 }
 .dashboard-layout-card > .dashboard-panel {
   height: 100%;
+  overflow: auto;
 }
 .dashboard-layout-card.is-editing {
   isolation: isolate;
@@ -105,10 +124,16 @@ button:focus-visible {
   background: color-mix(in srgb, var(--brand-soft) 68%, var(--app-surface));
   box-shadow: 0 10px 30px color-mix(in srgb, var(--brand-ring) 28%, transparent);
 }
+.dashboard-layout-card.is-editing > .dashboard-panel {
+  height: calc(100% - 52px);
+}
 .dashboard-layout-card.is-dragging {
   z-index: 3;
+}
+.dashboard-layout-card.is-dragging > .dashboard-panel {
   opacity: 0.58;
   transform: scale(0.985);
+  box-shadow: 0 20px 52px color-mix(in srgb, var(--brand-ring) 42%, transparent);
 }
 .dashboard-layout-card.is-resizing {
   z-index: 4;
@@ -238,8 +263,9 @@ button:focus-visible {
 }
 
 @media (min-width: 768px) {
-  .dashboard-layout-card.has-size-preview {
-    grid-column: span var(--dashboard-card-span) / span var(--dashboard-card-span);
+  .dashboard-layout-grid {
+    --widget-unit: calc((100cqw - var(--widget-gap) - var(--widget-gap) - var(--widget-gap)) / 4);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -259,7 +285,7 @@ button:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dashboard-layout-card.is-dragging,
+  .dashboard-layout-card.is-dragging > .dashboard-panel,
   .layout-edit-button,
   .dashboard-card-controls button,
   .ai-assistant-pill,
