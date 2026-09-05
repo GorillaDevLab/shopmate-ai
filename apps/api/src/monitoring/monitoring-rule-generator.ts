@@ -39,6 +39,7 @@ export class MonitoringRuleGenerator {
     if (!request.success) throwInvalidRequest();
     try {
       const now = new Date();
+      console.log("=== Monitoring DeepSeek Request Start ===");
       const generation = await this.provider.generate({
         messages: [
           { role: "system", content: POLICY },
@@ -51,6 +52,10 @@ export class MonitoringRuleGenerator {
         temperature: 0,
         maxOutputTokens: 800,
       });
+      console.log(
+  "=== Monitoring Generation Result ===",
+  JSON.stringify(generation, null, 2),
+);
       const definition = readDefinition(generation.message.toolCalls);
       const evaluation = await this.evaluator.evaluate(context, definition, now);
       return MonitoringRulePreviewResponseSchema.parse({
@@ -58,10 +63,17 @@ export class MonitoringRuleGenerator {
         definition,
         evaluation,
       });
-    } catch (error: unknown) {
-      if (error instanceof HttpException) throw error;
-      throwUnavailable();
-    }
+}
+     catch (error: unknown) {
+  console.error(
+    "=== Monitoring DeepSeek Error ===",
+    error,
+  );
+
+  if (error instanceof HttpException) throw error;
+
+  throwUnavailable();
+}
   }
 }
 
@@ -72,12 +84,27 @@ const MONITORING_RULE_TOOL: LLMToolDefinition = {
 };
 
 function readDefinition(
-  calls: readonly { readonly name: string; readonly arguments: JsonObject }[] | undefined,
+  calls:
+    | readonly {
+        readonly name: string;
+        readonly arguments: JsonObject;
+      }[]
+    | undefined,
 ) {
   if (calls?.length !== 1 || calls[0]?.name !== TOOL_NAME) {
     return MonitoringRuleDefinitionSchema.parse(undefined);
   }
-  return MonitoringRuleDefinitionSchema.parse(calls[0].arguments);
+
+  const argumentsJson = { ...calls[0].arguments };
+
+  if (
+    argumentsJson.kind === "inventoryThreshold" &&
+    !("productIds" in argumentsJson)
+  ) {
+    argumentsJson.productIds = [];
+  }
+
+  return MonitoringRuleDefinitionSchema.parse(argumentsJson);
 }
 
 function suggestedName(definition: MonitoringRuleDefinition): string {
@@ -95,38 +122,80 @@ function suggestedName(definition: MonitoringRuleDefinition): string {
 
 function ruleJsonSchema(): JsonObject {
   return {
-    oneOf: [
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["kind", "metric", "operator", "threshold", "window", "frequency"],
-        properties: {
-          kind: { const: "salesThreshold" },
-          metric: {
-            type: "string",
-            enum: ["revenue", "orderCount", "unitsSold", "averageOrderValue"],
-          },
-          operator: { type: "string", enum: ["above", "below"] },
-          threshold: { type: "number", minimum: 0 },
-          window: { type: "string", enum: ["7d", "30d", "90d"] },
-          frequency: { type: "string", enum: ["daily", "weekly"] },
-        },
-      },
-      {
-        type: "object",
-        additionalProperties: false,
-        required: ["kind", "metric", "operator", "threshold", "scope", "productIds", "frequency"],
-        properties: {
-          kind: { const: "inventoryThreshold" },
-          metric: { const: "inventory" },
-          operator: { const: "below" },
-          threshold: { type: "integer", minimum: 0, maximum: 1_000_000 },
-          scope: { const: "allProducts" },
-          productIds: { type: "array", maxItems: 20, items: { type: "string" } },
-          frequency: { type: "string", enum: ["daily", "weekly"] },
-        },
-      },
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "kind",
+      "metric",
+      "operator",
+      "threshold",
+      "frequency",
     ],
+    properties: {
+      kind: {
+        type: "string",
+        enum: [
+          "salesThreshold",
+          "inventoryThreshold",
+        ],
+      },
+
+      metric: {
+        type: "string",
+        enum: [
+          "revenue",
+          "orderCount",
+          "unitsSold",
+          "averageOrderValue",
+          "inventory",
+        ],
+      },
+
+      operator: {
+        type: "string",
+        enum: [
+          "above",
+          "below",
+        ],
+      },
+
+      threshold: {
+        type: "number",
+        minimum: 0,
+      },
+
+      window: {
+        type: "string",
+        enum: [
+          "7d",
+          "30d",
+          "90d",
+        ],
+      },
+
+      scope: {
+        type: "string",
+        enum: [
+          "allProducts",
+        ],
+      },
+
+      productIds: {
+        type: "array",
+        items: {
+          type: "string",
+        },
+        maxItems: 20,
+      },
+
+      frequency: {
+        type: "string",
+        enum: [
+          "daily",
+          "weekly",
+        ],
+      },
+    },
   };
 }
 
