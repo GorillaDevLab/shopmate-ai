@@ -39,7 +39,6 @@ export class MonitoringRuleGenerator {
     if (!request.success) throwInvalidRequest();
     try {
       const now = new Date();
-      console.log("=== Monitoring DeepSeek Request Start ===");
       const generation = await this.provider.generate({
         messages: [
           { role: "system", content: POLICY },
@@ -52,7 +51,6 @@ export class MonitoringRuleGenerator {
         temperature: 0,
         maxOutputTokens: 800,
       });
-      console.log("=== Monitoring Generation Result ===", JSON.stringify(generation, null, 2));
       const definition = readDefinition(generation.message.toolCalls);
       const evaluation = await this.evaluator.evaluate(context, definition, now);
       return MonitoringRulePreviewResponseSchema.parse({
@@ -61,7 +59,6 @@ export class MonitoringRuleGenerator {
         evaluation,
       });
     } catch (error: unknown) {
-      console.error("=== Monitoring DeepSeek Error ===", error);
 
       if (error instanceof HttpException) throw error;
 
