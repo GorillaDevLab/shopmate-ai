@@ -52,10 +52,7 @@ export class MonitoringRuleGenerator {
         temperature: 0,
         maxOutputTokens: 800,
       });
-      console.log(
-  "=== Monitoring Generation Result ===",
-  JSON.stringify(generation, null, 2),
-);
+      console.log("=== Monitoring Generation Result ===", JSON.stringify(generation, null, 2));
       const definition = readDefinition(generation.message.toolCalls);
       const evaluation = await this.evaluator.evaluate(context, definition, now);
       return MonitoringRulePreviewResponseSchema.parse({
@@ -63,17 +60,13 @@ export class MonitoringRuleGenerator {
         definition,
         evaluation,
       });
-}
-     catch (error: unknown) {
-  console.error(
-    "=== Monitoring DeepSeek Error ===",
-    error,
-  );
+    } catch (error: unknown) {
+      console.error("=== Monitoring DeepSeek Error ===", error);
 
-  if (error instanceof HttpException) throw error;
+      if (error instanceof HttpException) throw error;
 
-  throwUnavailable();
-}
+      throwUnavailable();
+    }
   }
 }
 
@@ -97,10 +90,7 @@ function readDefinition(
 
   const argumentsJson = { ...calls[0].arguments };
 
-  if (
-    argumentsJson.kind === "inventoryThreshold" &&
-    !("productIds" in argumentsJson)
-  ) {
+  if (argumentsJson.kind === "inventoryThreshold" && !("productIds" in argumentsJson)) {
     argumentsJson.productIds = [];
   }
 
@@ -124,39 +114,21 @@ function ruleJsonSchema(): JsonObject {
   return {
     type: "object",
     additionalProperties: false,
-    required: [
-      "kind",
-      "metric",
-      "operator",
-      "threshold",
-      "frequency",
-    ],
+    required: ["kind", "metric", "operator", "threshold", "frequency"],
     properties: {
       kind: {
         type: "string",
-        enum: [
-          "salesThreshold",
-          "inventoryThreshold",
-        ],
+        enum: ["salesThreshold", "inventoryThreshold"],
       },
 
       metric: {
         type: "string",
-        enum: [
-          "revenue",
-          "orderCount",
-          "unitsSold",
-          "averageOrderValue",
-          "inventory",
-        ],
+        enum: ["revenue", "orderCount", "unitsSold", "averageOrderValue", "inventory"],
       },
 
       operator: {
         type: "string",
-        enum: [
-          "above",
-          "below",
-        ],
+        enum: ["above", "below"],
       },
 
       threshold: {
@@ -166,18 +138,12 @@ function ruleJsonSchema(): JsonObject {
 
       window: {
         type: "string",
-        enum: [
-          "7d",
-          "30d",
-          "90d",
-        ],
+        enum: ["7d", "30d", "90d"],
       },
 
       scope: {
         type: "string",
-        enum: [
-          "allProducts",
-        ],
+        enum: ["allProducts"],
       },
 
       productIds: {
@@ -190,10 +156,7 @@ function ruleJsonSchema(): JsonObject {
 
       frequency: {
         type: "string",
-        enum: [
-          "daily",
-          "weekly",
-        ],
+        enum: ["daily", "weekly"],
       },
     },
   };
