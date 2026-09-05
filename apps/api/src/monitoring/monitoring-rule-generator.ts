@@ -59,7 +59,6 @@ export class MonitoringRuleGenerator {
         evaluation,
       });
     } catch (error: unknown) {
-
       if (error instanceof HttpException) throw error;
 
       throwUnavailable();
