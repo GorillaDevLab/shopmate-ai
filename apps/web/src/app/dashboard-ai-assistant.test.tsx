@@ -36,7 +36,8 @@ describe("看板悬浮 AI 助手", () => {
   it("使用经营建议发起对话并提供完整页面入口", async () => {
     api.sendChatMessage.mockResolvedValue({
       role: "assistant",
-      content: "根据近 7 天销量，建议优先补货无线蓝牙耳机。",
+      content:
+        "## 库存风险\n\n建议优先补货无线蓝牙耳机。\n\n| 商品 | 库存 |\n| --- | --- |\n| 耳机 | 5 |",
     });
     render(<AssistantHarness />);
     fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
@@ -46,6 +47,8 @@ describe("看板悬浮 AI 助手", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
 
     expect(await screen.findByText(/建议优先补货无线蓝牙耳机/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "库存风险" })).toBeInTheDocument();
+    expect(screen.getByRole("table")).toHaveTextContent("耳机");
     expect(screen.getByRole("link", { name: "打开完整聊天" })).toHaveAttribute("href", "/chat");
     expect(api.sendChatMessage).toHaveBeenCalledWith("最近哪些商品值得补货？");
   });

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AssistantMarkdown } from "./assistant-markdown";
 import {
   useEffect,
   useRef,
@@ -109,9 +110,13 @@ function Conversation({ messages, isSending }: { messages: ChatMessage[]; isSend
   return (
     <div className="ai-assistant-conversation" aria-live="polite">
       {messages.map((message, index) => (
-        <p key={`${message.role}-${index}`} className={`ai-message is-${message.role}`}>
-          {message.content}
-        </p>
+        <div key={`${message.role}-${index}`} className={`ai-message is-${message.role}`}>
+          {message.role === "assistant" ? (
+            <AssistantMarkdown content={message.content} />
+          ) : (
+            message.content
+          )}
+        </div>
       ))}
       {isSending && (
         <p className="ai-assistant-thinking" role="status">
