@@ -1,4 +1,11 @@
-import { BadRequestException, ServiceUnavailableException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ServiceUnavailableException,
+  HttpException,
+  NotFoundException,
+} from "@nestjs/common";
+import { LLMProviderError } from "@shopmate/contracts";
+import { ToolRegistryError } from "../tools/tool-registry.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { AuthPermission, createAuthContext } from "../../auth/contracts/index.js";
@@ -11,6 +18,43 @@ const authContext = createAuthContext({
 });
 
 describe("AiChatService", () => {
+  it.each([
+    [
+      new LLMProviderError({ code: "TIMEOUT", message: "secret detail", retryable: true }),
+      "AI_TIMEOUT",
+      504,
+    ],
+    [
+      new ToolRegistryError({
+        code: "HANDLER_FAILED",
+        toolName: "generate_product_copy",
+        message: "internal",
+        cause: new NotFoundException(),
+      }),
+      "PRODUCT_NOT_FOUND",
+      404,
+    ],
+    [
+      new LLMProviderError({
+        code: "INVALID_RESPONSE",
+        message: "private response",
+        retryable: false,
+      }),
+      "AI_INVALID_RESPONSE",
+      503,
+    ],
+  ])("返回安全错误分类，不重试模型", async (failure, code, status) => {
+    const run = vi.fn().mockRejectedValue(failure);
+    const service = new AiChatService({ run });
+    const error = await service
+      .chat(authContext, { message: { role: "user", content: "生成文案" } })
+      .catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(status);
+    expect((error as HttpException).getResponse()).toMatchObject({ code });
+    expect(JSON.stringify((error as HttpException).getResponse())).not.toContain("secret");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
   it("只把服务端 AuthContext 和已校验消息传给 Agent", async () => {
     const run = vi.fn(async () => ({
       status: "completed" as const,

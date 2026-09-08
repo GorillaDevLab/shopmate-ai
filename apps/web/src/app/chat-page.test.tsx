@@ -108,6 +108,8 @@ describe("中文聊天页", () => {
 
     expect(mocks.sendChatMessage).toHaveBeenCalledWith(
       `请为商品 product-001 生成${label}。商品 ID：product-001；文案类型：${copyType}。请使用真实商品信息。`,
+      undefined,
+      { productId: "product-001", copyType },
     );
   });
 
@@ -190,7 +192,10 @@ describe("中文聊天页", () => {
     const expectedPrompt =
       "请为商品 product-001 生成抖音文案。商品 ID：product-001；文案类型：DOUYIN。请使用真实商品信息。";
 
-    expect(mocks.sendChatMessage).toHaveBeenNthCalledWith(1, expectedPrompt);
+    expect(mocks.sendChatMessage).toHaveBeenNthCalledWith(1, expectedPrompt, undefined, {
+      productId: "product-001",
+      copyType: "DOUYIN",
+    });
 
     fireEvent.click(
       screen.getByRole("button", {
@@ -200,7 +205,10 @@ describe("中文聊天页", () => {
 
     expect(await screen.findByText("DOUYIN 示例标题")).toBeInTheDocument();
 
-    expect(mocks.sendChatMessage).toHaveBeenNthCalledWith(2, expectedPrompt);
+    expect(mocks.sendChatMessage).toHaveBeenNthCalledWith(2, expectedPrompt, undefined, {
+      productId: "product-001",
+      copyType: "DOUYIN",
+    });
   });
 
   it("普通聊天失败后仍提供重试", async () => {

@@ -1,5 +1,7 @@
 import {
   DEFAULT_LLM_SYSTEM_POLICY_ZH_CN,
+  ProductCopyOutputSchema,
+  LLMProviderError,
   type JsonObject,
   type JsonValue,
   type LLMGenerationResult,
@@ -51,6 +53,7 @@ export interface BusinessAgentToolOutput {
 }
 
 export interface BusinessAgentResult {
+  readonly failureCode?: "AI_RESPONSE_REJECTED" | "AI_TOOL_LIMIT";
   readonly status: BusinessAgentStatus;
   readonly answer: string;
   readonly usedTools: readonly string[];
@@ -124,13 +127,23 @@ export class BusinessAgent {
         state.toolRounds >= this.limits.maxToolRounds ||
         !canExecuteCalls(calls, state, this.limits)
       ) {
-        return limitedResult(state, SAFE_LIMIT_ANSWER);
+        return { ...limitedResult(state, SAFE_LIMIT_ANSWER), failureCode: "AI_TOOL_LIMIT" };
       }
 
       state.messages.push(assistant);
       const completed = await this.executeCalls(calls, state, input.context);
+      const copy = state.toolOutputs.find((item) => item.name === "generate_product_copy");
+      if (copy && ProductCopyOutputSchema.safeParse(copy.output).success) {
+        return {
+          status: "completed",
+          answer: "商品文案已生成，请查看下方标题、正文和标签。",
+          usedTools: [...state.usedTools],
+          rounds: state.rounds,
+          toolOutputs: state.toolOutputs,
+        };
+      }
       if (!completed) {
-        return limitedResult(state, SAFE_LIMIT_ANSWER);
+        return { ...limitedResult(state, SAFE_LIMIT_ANSWER), failureCode: "AI_TOOL_LIMIT" };
       }
       state.toolRounds += 1;
     }
@@ -145,7 +158,8 @@ export class BusinessAgent {
       });
       state.rounds += 1;
       return result;
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof LLMProviderError) throw error;
       return null;
     }
   }
@@ -171,6 +185,8 @@ export class BusinessAgent {
           name: call.name,
           output: invocation.output,
         });
+        // A validated copy is the deliverable; subsequent calls can only add cost or lose it.
+        if (ProductCopyOutputSchema.safeParse(invocation.output).success) return true;
       }
 
       state.messages.push({
@@ -193,6 +209,7 @@ export class BusinessAgent {
       usedTools.add(call.name);
       return invocationResult(output);
     } catch (error: unknown) {
+      if (call.name === "generate_product_copy") throw error;
       return { content: JSON.stringify(safeToolError(error)), numericEvidence: [] };
     }
   }
@@ -264,7 +281,7 @@ function finalResult(state: AgentState, generation: LLMGenerationResult): Busine
     return limitedResult(state, CHINESE_REQUIRED_ANSWER);
   }
   if (!hasValidNumericEvidence(content, state)) {
-    return limitedResult(state, SAFE_FAILURE_ANSWER);
+    return { ...limitedResult(state, SAFE_FAILURE_ANSWER), failureCode: "AI_RESPONSE_REJECTED" };
   }
   return {
     status: "completed",

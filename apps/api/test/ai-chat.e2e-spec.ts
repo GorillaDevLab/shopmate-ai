@@ -11,6 +11,7 @@ describe("AI Chat API", () => {
 
   beforeAll(async () => {
     vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("DEEPSEEK_API_KEY", "");
     vi.stubEnv("DEMO_AUTH_EMAIL", "owner@shopmate.co.nz");
     vi.stubEnv("DEMO_AUTH_PASSWORD", "demo-pass-2026");
     vi.stubEnv("DEMO_AUTH_USER_ID", "demo-user");

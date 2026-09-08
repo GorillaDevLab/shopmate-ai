@@ -5,6 +5,32 @@ import { sendChatMessage } from "./chat-api";
 describe("sendChatMessage", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("超时给出明确提示且不自动重试，也不透传服务端敏感文本", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ code: "AI_TIMEOUT", message: "secret" }), { status: 504 }),
+    );
+    await expect(sendChatMessage("生成文案")).rejects.toMatchObject({
+      message: expect.stringContaining("未自动重试"),
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("传递已选商品与类型，不传递商家身份", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: { role: "assistant", content: "完成" } })),
+    );
+    await sendChatMessage("生成标题", undefined, { productId: "p1", copyType: "TITLE" });
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/ai/chat",
+      expect.objectContaining({
+        body: JSON.stringify({
+          message: { role: "user", content: "生成标题" },
+          productCopy: { productId: "p1", copyType: "TITLE" },
+        }),
+      }),
+    );
+  });
+
   it("发送中文消息并解析 assistant 回复", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ message: { role: "assistant", content: "库存还有 5 件。" } }), {
