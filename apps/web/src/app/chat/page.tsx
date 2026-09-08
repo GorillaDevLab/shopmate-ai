@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 
 import { useChatSession } from "../chat-session";
 import { AssistantMarkdown } from "../assistant-markdown";
+import { ChatPending } from "../chat-pending";
 
 const examples = [
   {
@@ -70,7 +71,10 @@ export default function ChatPage() {
 
     setCopyFeedback(null);
 
-    void submit(buildProductCopyPrompt(normalizedProductId, option));
+    void submit(buildProductCopyPrompt(normalizedProductId, option), {
+      productId: normalizedProductId,
+      copyType: option.type,
+    });
   }
 
   async function copyProductCopy(copy: ProductCopyOutput) {
@@ -160,6 +164,7 @@ export default function ChatPage() {
                 key={example.label}
                 type="button"
                 className="min-h-10 rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:border-brand hover:bg-brand-soft"
+                disabled={isSending}
                 onClick={() => setInput(example.prompt)}
               >
                 {example.label}
@@ -200,11 +205,7 @@ export default function ChatPage() {
               </div>
             ))}
 
-            {isSending && (
-              <p className="text-sm text-app-muted" role="status">
-                正在整理经营数据…
-              </p>
-            )}
+            {isSending && <ChatPending />}
 
             {copyFeedback && (
               <p className="text-sm font-semibold text-brand" role="status">

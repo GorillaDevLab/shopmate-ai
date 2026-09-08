@@ -190,9 +190,10 @@ export class ToolRegistry {
 
     try {
       rawOutput = await tool.handler(parsedInput, context);
-    } catch {
+    } catch (cause: unknown) {
       throw new ToolRegistryError({
         code: "HANDLER_FAILED",
+        cause,
         toolName,
         message: `工具 "${toolName}" 执行失败。`,
       });

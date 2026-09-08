@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ProductCopyOutputSchema,
+  LLMProviderError,
   type LLMGenerationRequest,
   type LLMGenerationResult,
   type LLMProvider,
@@ -11,7 +12,14 @@ import {
 
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
 
-import { ProductCopyService } from "./product-copy.tool.js";
+import {
+  ProductCopyService,
+  createGenerateProductCopyToolRegistration,
+} from "./product-copy.tool.js";
+import { ToolRegistry } from "./tool-registry.js";
+import { AiChatService } from "../chat/ai-chat.service.js";
+import { createAuthContext } from "../../auth/contracts/index.js";
+import { BusinessAgent } from "../agent/business-agent.js";
 
 const productFixture: ProductDetail = {
   id: "product-001",
@@ -56,6 +64,78 @@ const productFixture: ProductDetail = {
 };
 
 describe("I4 generateProductCopy", () => {
+  it("直接生成仍验证权限，拒绝后不调用模型", async () => {
+    const { service, provider } = createHarness();
+    const registry = new ToolRegistry({ allowedToolNames: ["generate_product_copy"] });
+    registry.register(createGenerateProductCopyToolRegistration(service));
+    const chat = new AiChatService({ run: vi.fn() }, registry);
+    await expect(
+      chat.chat(createAuthContext({ ...context(), permissions: [] }), {
+        message: { role: "user", content: "标题" },
+        productCopy: { productId: "product-001", copyType: "TITLE" },
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(provider.generate).not.toHaveBeenCalled();
+  });
+
+  it("直接生成超时穿过工具层返回 504 且只调用一次模型", async () => {
+    const { service, provider } = createHarness();
+    provider.generate.mockRejectedValue(
+      new LLMProviderError({ code: "TIMEOUT", message: "private", retryable: true }),
+    );
+    const registry = new ToolRegistry({ allowedToolNames: ["generate_product_copy"] });
+    registry.register(createGenerateProductCopyToolRegistration(service));
+    const chat = new AiChatService({ run: vi.fn() }, registry);
+    await expect(
+      chat.chat(createAuthContext(context()), {
+        message: { role: "user", content: "标题" },
+        productCopy: { productId: "product-001", copyType: "TITLE" },
+      }),
+    ).rejects.toMatchObject({ status: 504, response: { code: "AI_TIMEOUT", retryable: false } });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+  });
+  it("结构化文案请求只生成一次，跳过选工具和结束语", async () => {
+    const { service, provider } = createHarness();
+    const registry = new ToolRegistry({ allowedToolNames: ["generate_product_copy"] });
+    registry.register(createGenerateProductCopyToolRegistration(service));
+    const run = vi.fn();
+    const chat = new AiChatService({ run }, registry);
+    const result = await chat.chat(createAuthContext(context()), {
+      message: { role: "user", content: "生成标题" },
+      productCopy: { productId: "product-001", copyType: "TITLE" },
+    });
+    expect(result.message.productCopy?.productId).toBe("product-001");
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("聊天选中工具后保留生成结果，不再请求结束语", async () => {
+    const { service, provider } = createHarness();
+    const registry = new ToolRegistry({ allowedToolNames: ["generate_product_copy"] });
+    registry.register(createGenerateProductCopyToolRegistration(service));
+    const selectTool = vi.fn(async () => ({
+      message: {
+        role: "assistant" as const,
+        content: null,
+        toolCalls: [
+          {
+            id: "copy",
+            name: "generate_product_copy",
+            arguments: { productId: "product-001", copyType: "TITLE" },
+          },
+        ],
+      },
+      finishReason: "tool_calls" as const,
+    }));
+    const result = await new BusinessAgent({ name: "test", generate: selectTool }, registry).run({
+      question: "生成文案",
+      context: context(),
+    });
+    expect(result.status).toBe("completed");
+    expect(result.toolOutputs).toHaveLength(1);
+    expect(selectTool).toHaveBeenCalledTimes(1);
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+  });
   it("不接受客户端伪造商品详情", async () => {
     const { productService, provider, service } = createHarness();
 
@@ -149,7 +229,7 @@ describe("I4 generateProductCopy", () => {
 
         copyType: "GENERAL",
       }),
-    ).rejects.toThrow("模型返回的商品文案不是有效 JSON。");
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
   it("模型返回不符合 Schema 的文案时拒绝结果", async () => {

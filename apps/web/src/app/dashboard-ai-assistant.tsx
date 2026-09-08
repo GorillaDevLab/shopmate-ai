@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AssistantMarkdown } from "./assistant-markdown";
+import { ChatPending } from "./chat-pending";
 import {
   useEffect,
   useRef,
@@ -118,11 +119,7 @@ function Conversation({ messages, isSending }: { messages: ChatMessage[]; isSend
           )}
         </div>
       ))}
-      {isSending && (
-        <p className="ai-assistant-thinking" role="status">
-          正在整理经营数据…
-        </p>
-      )}
+      {isSending && <ChatPending />}
     </div>
   );
 }
@@ -147,6 +144,7 @@ function AssistantComposer({
           <button
             key={suggestion.label}
             type="button"
+            disabled={chat.isSending}
             onClick={() => chat.setInput(suggestion.prompt)}
           >
             {suggestion.label}

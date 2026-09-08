@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import { AiChatRequestSchema, AiChatResponseSchema } from "./chat-api.schema.js";
 
 describe("AI Chat API 契约", () => {
+  it("接受文案选择并拒绝其中的商家身份和伪造商品详情", () => {
+    const request = {
+      message: { role: "user", content: "生成标题" },
+      productCopy: { productId: "p1", copyType: "TITLE" },
+    };
+    expect(AiChatRequestSchema.safeParse(request).success).toBe(true);
+    for (const field of [{ merchantId: "other" }, { name: "伪造商品" }, { copyType: "UNKNOWN" }]) {
+      expect(
+        AiChatRequestSchema.safeParse({
+          ...request,
+          productCopy: { ...request.productCopy, ...field },
+        }).success,
+      ).toBe(false);
+    }
+  });
   it("接受并规范化单条用户消息", () => {
     expect(
       AiChatRequestSchema.parse({

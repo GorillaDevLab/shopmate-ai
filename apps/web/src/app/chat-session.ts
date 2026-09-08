@@ -1,7 +1,7 @@
 "use client";
 
-import type { ProductCopyOutput } from "@shopmate/contracts";
-import { useState } from "react";
+import type { ProductCopyOutput, ProductCopyRequest } from "@shopmate/contracts";
+import { useRef, useState } from "react";
 
 import { sendChatMessage } from "./chat-api";
 
@@ -14,6 +14,7 @@ export type ChatMessage = {
 type ChatFailure = {
   readonly message: string;
   readonly prompt: string;
+  readonly productCopy?: ProductCopyRequest;
 };
 
 type ChatSessionOptions = {
@@ -21,12 +22,15 @@ type ChatSessionOptions = {
 };
 
 export function useChatSession(options: ChatSessionOptions = {}) {
+  const inFlight = useRef(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [failure, setFailure] = useState<ChatFailure | null>(null);
 
-  async function send(prompt: string, appendUser: boolean) {
+  async function send(prompt: string, appendUser: boolean, productCopy?: ProductCopyRequest) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setFailure(null);
 
     if (appendUser) {
@@ -42,7 +46,9 @@ export function useChatSession(options: ChatSessionOptions = {}) {
     setIsSending(true);
 
     try {
-      const reply = (await options.resolveMessage?.(prompt)) ?? (await sendChatMessage(prompt));
+      const reply = productCopy
+        ? await sendChatMessage(prompt, undefined, productCopy)
+        : ((await options.resolveMessage?.(prompt)) ?? (await sendChatMessage(prompt)));
 
       setMessages((current) => [...current, reply]);
     } catch (reason) {
@@ -55,21 +61,23 @@ export function useChatSession(options: ChatSessionOptions = {}) {
       setFailure({
         message,
         prompt,
+        productCopy,
       });
     } finally {
+      inFlight.current = false;
       setIsSending(false);
     }
   }
 
-  async function submit(content = input) {
+  async function submit(content = input, productCopy?: ProductCopyRequest) {
     const prompt = content.trim();
 
-    if (!prompt || isSending) {
+    if (!prompt || inFlight.current) {
       return;
     }
 
     setInput("");
-    await send(prompt, true);
+    await send(prompt, true, productCopy);
   }
 
   async function retry() {
@@ -77,7 +85,7 @@ export function useChatSession(options: ChatSessionOptions = {}) {
       return;
     }
 
-    await send(failure.prompt, false);
+    await send(failure.prompt, false, failure.productCopy);
   }
 
   return {

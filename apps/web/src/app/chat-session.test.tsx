@@ -9,6 +9,28 @@ import { useChatSession } from "./chat-session";
 describe("共享聊天会话", () => {
   beforeEach(() => vi.resetAllMocks());
 
+  it("同一帧重复发送只提交一次请求", async () => {
+    let finish!: (value: { role: string; content: string }) => void;
+    api.sendChatMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useChatSession());
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.submit("查库存");
+      void result.current.submit("查库存");
+    });
+    expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish({ role: "assistant", content: "完成" });
+      await pending;
+    });
+    expect(result.current.isSending).toBe(false);
+  });
+
   it("清理输入后发送，并保留用户和助手消息", async () => {
     api.sendChatMessage.mockResolvedValue({ role: "assistant", content: "建议优先补货。" });
     const { result } = renderHook(() => useChatSession());

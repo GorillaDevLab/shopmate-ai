@@ -87,8 +87,9 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
     },
     {
       provide: AiChatService,
-      useFactory: (agent: BusinessAgent) => new AiChatService(agent),
-      inject: [AI_BUSINESS_AGENT],
+      useFactory: (agent: BusinessAgent, registry: ToolRegistry) =>
+        new AiChatService(agent, registry),
+      inject: [AI_BUSINESS_AGENT, AI_TOOL_REGISTRY],
     },
     {
       provide: DashboardInsightExecutor,

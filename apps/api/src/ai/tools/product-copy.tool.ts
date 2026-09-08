@@ -1,5 +1,6 @@
 import {
   ProductCopyContentSchema,
+  LLMProviderError,
   ProductCopyOutputSchema,
   ProductCopyRequestSchema,
   type LLMGenerationRequest,
@@ -45,11 +46,7 @@ export class ProductCopyService {
 
     const rawContent = result.message.content?.trim();
 
-    if (!rawContent) {
-      throw new Error("模型未返回商品文案。");
-    }
-
-    const modelPayload = ProductCopyContentSchema.parse(parseModelJson(rawContent));
+    const modelPayload = parseCopyContent(rawContent, result.finishReason);
 
     /*
      * productId 和 copyType 不采用模型输出。
@@ -61,6 +58,19 @@ export class ProductCopyService {
       productId: product.id,
       copyType: input.copyType,
       ...modelPayload,
+    });
+  }
+}
+
+function parseCopyContent(content: string | undefined, finishReason: string) {
+  try {
+    if (!content || finishReason !== "stop") throw new Error("Incomplete content");
+    return ProductCopyContentSchema.parse(parseModelJson(content));
+  } catch {
+    throw new LLMProviderError({
+      code: "INVALID_RESPONSE",
+      message: "模型返回的商品文案格式无效或不完整。",
+      retryable: false,
     });
   }
 }
