@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 
 import { useChatSession } from "../chat-session";
+import { AssistantMarkdown } from "../assistant-markdown";
 
 const examples = [
   {
@@ -179,10 +180,10 @@ export default function ChatPage() {
                 className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 {message.role === "assistant" ? (
-                  <div className="max-w-[85%] space-y-3">
-                    <p className="whitespace-pre-wrap rounded-2xl bg-brand-soft px-4 py-3 text-sm leading-6 text-app-text">
-                      {message.content}
-                    </p>
+                  <div className="min-w-0 max-w-[100%] space-y-3 sm:max-w-[85%]">
+                    <div className="rounded-2xl bg-brand-soft px-4 py-3 text-sm leading-6 text-app-text">
+                      <AssistantMarkdown content={message.content} />
+                    </div>
 
                     {message.productCopy && (
                       <ProductCopyCard
