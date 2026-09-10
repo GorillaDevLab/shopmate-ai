@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const demoEmail = requireEnv("DEMO_AUTH_EMAIL");
 const demoPassword = requireEnv("DEMO_AUTH_PASSWORD");
 
-const apiHealthUrl = "http:" + "//127.0.0.1:3001/api/v1/health";
+const apiHealthUrl = "http:" + "//127.0.0.1:3101/api/v1/health";
 
 test("J4 Production Demo 中文冒烟流程", async ({ page, request }) => {
   await page.clock.setFixedTime(new Date("2026-08-31T04:00:00.000Z"));
