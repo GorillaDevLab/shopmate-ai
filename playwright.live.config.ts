@@ -88,6 +88,7 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         API_BASE_URL: apiUrl,
+        NEXT_DIST_DIR: process.env.NEXT_DIST_DIR ?? ".next-live",
       },
     },
   ],
