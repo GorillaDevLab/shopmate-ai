@@ -5,6 +5,7 @@ import { resolveLiveDemoEnv } from "./demo-live-env.mjs";
 const env = {
   ...resolveLiveDemoEnv(),
   API_BASE_URL: "http://127.0.0.1:3101",
+  NEXT_DIST_DIR: ".next-live",
   RUN_J4_LIVE_AGENT: "1",
 };
 
