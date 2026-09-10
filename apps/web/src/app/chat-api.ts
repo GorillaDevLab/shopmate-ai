@@ -41,20 +41,29 @@ export async function sendChatMessage(
     throw new ChatApiError("无法连接 AI 服务，请稍后重试", 0, true);
   }
 
-  if (!response.ok) {
-    const payload: unknown = await response.json().catch(() => null);
-    const code =
-      payload && typeof payload === "object" && "code" in payload ? String(payload.code) : "";
-    throw new ChatApiError(
-      response.status === 401
-        ? "登录已失效，请重新登录"
-        : Object.hasOwn(CHAT_ERRORS, code)
-          ? CHAT_ERRORS[code]!
-          : "AI 服务暂时不可用，请稍后重试",
-      response.status,
-      response.status >= 500,
-    );
-  }
+if (!response.ok) {
+  const payload: unknown = await response.json().catch(() => null);
+  const code =
+    payload && typeof payload === "object" && "code" in payload ? String(payload.code) : "";
+
+  const retryable =
+    payload &&
+    typeof payload === "object" &&
+    "retryable" in payload &&
+    typeof payload.retryable === "boolean"
+      ? payload.retryable
+      : response.status >= 500;
+
+  throw new ChatApiError(
+    response.status === 401
+      ? "登录已失效，请重新登录"
+      : Object.hasOwn(CHAT_ERRORS, code)
+        ? CHAT_ERRORS[code]!
+        : "AI 服务暂时不可用，请稍后重试",
+    response.status,
+    retryable,
+  );
+}
   const payload = await readJson(response);
   const parsed = AiChatResponseSchema.safeParse(payload);
   if (!parsed.success) throw new ChatApiError("AI 回复格式异常，请稍后重试", 502, true);

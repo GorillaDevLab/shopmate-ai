@@ -52,8 +52,8 @@ const copyOptions = [
 type CopyOption = (typeof copyOptions)[number];
 
 export default function ChatPage() {
-  const { messages, input, setInput, isSending, error, submit, retry } = useChatSession();
-
+  const { messages, input, setInput, isSending, error, retryable, submit, retry } =
+    useChatSession();
   const [productId, setProductId] = useState("");
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
@@ -217,13 +217,15 @@ export default function ChatPage() {
               <div className="flex items-center gap-3" role="alert">
                 <p className="text-sm text-danger">{error}</p>
 
-                <button
-                  type="button"
-                  className="min-h-10 rounded-xl border border-app-line px-3 text-sm font-semibold hover:bg-brand-soft"
-                  onClick={() => void retry()}
-                >
-                  重试
-                </button>
+                {retryable && (
+                  <button
+                    type="button"
+                    className="min-h-10 rounded-xl border border-app-line px-3 text-sm font-semibold hover:bg-brand-soft"
+                    onClick={() => void retry()}
+                  >
+                    重试
+                  </button>
+                )}
               </div>
             )}
           </div>
