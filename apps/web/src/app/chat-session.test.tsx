@@ -46,17 +46,48 @@ describe("共享聊天会话", () => {
 
   it("失败后使用原问题重试", async () => {
     api.sendChatMessage
-      .mockRejectedValueOnce(new Error("AI 服务暂时不可用，请稍后重试"))
-      .mockResolvedValueOnce({ role: "assistant", content: "已恢复。" });
+      .mockRejectedValueOnce(
+        Object.assign(new Error("AI 服务暂时不可用，请稍后重试"), {
+          retryable: true,
+        }),
+      )
+      .mockResolvedValueOnce({
+        role: "assistant",
+        content: "已恢复。",
+      });
+
     const { result } = renderHook(() => useChatSession());
 
     await act(() => result.current.submit("请看销售趋势"));
     expect(result.current.error).toBe("AI 服务暂时不可用，请稍后重试");
+    expect(result.current.retryable).toBe(true);
 
     await act(() => result.current.retry());
 
     expect(api.sendChatMessage).toHaveBeenNthCalledWith(2, "请看销售趋势");
     expect(result.current.error).toBeNull();
-    expect(result.current.messages.at(-1)).toEqual({ role: "assistant", content: "已恢复。" });
+    expect(result.current.messages.at(-1)).toEqual({
+      role: "assistant",
+      content: "已恢复。",
+    });
+  });
+
+  it("不可重试错误不会重新提交原问题", async () => {
+    api.sendChatMessage.mockRejectedValueOnce(
+      Object.assign(new Error("回答未通过数据校验，请缩小查询范围"), {
+        retryable: false,
+      }),
+    );
+
+    const { result } = renderHook(() => useChatSession());
+
+    await act(() => result.current.submit("分析全部销售数据"));
+
+    expect(result.current.error).toBe("回答未通过数据校验，请缩小查询范围");
+    expect(result.current.retryable).toBe(false);
+
+    await act(() => result.current.retry());
+
+    expect(api.sendChatMessage).toHaveBeenCalledTimes(1);
   });
 });

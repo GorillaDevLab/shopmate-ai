@@ -55,7 +55,11 @@ describe("看板悬浮 AI 助手", () => {
 
   it("失败时显示具体错误并可重试", async () => {
     api.sendChatMessage
-      .mockRejectedValueOnce(new Error("AI 服务暂时不可用，请稍后重试"))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("AI 服务暂时不可用，请稍后重试"), {
+          retryable: true,
+        }),
+      )
       .mockResolvedValueOnce({ role: "assistant", content: "已恢复，可以继续查询。" });
     render(<AssistantHarness />);
     fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
@@ -69,6 +73,26 @@ describe("看板悬浮 AI 助手", () => {
 
     expect(await screen.findByText("已恢复，可以继续查询。")).toBeInTheDocument();
     expect(api.sendChatMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("不可重试错误只显示提示，不显示重试按钮", async () => {
+    api.sendChatMessage.mockRejectedValueOnce(
+      Object.assign(new Error("回答未通过数据校验，请缩小查询范围"), {
+        retryable: false,
+      }),
+    );
+
+    render(<AssistantHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+      target: { value: "分析全部销售数据" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("缩小查询范围");
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
   });
 
   it("饼图请求直接加入草稿并提示可撤销", async () => {

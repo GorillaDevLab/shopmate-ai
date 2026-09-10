@@ -14,6 +14,7 @@ export type ChatMessage = {
 type ChatFailure = {
   readonly message: string;
   readonly prompt: string;
+  readonly retryable: boolean;
   readonly productCopy?: ProductCopyRequest;
 };
 
@@ -58,9 +59,16 @@ export function useChatSession(options: ChatSessionOptions = {}) {
 
       const message = reason instanceof Error ? reason.message : "AI 服务暂时不可用，请稍后重试";
 
+      const retryable =
+        typeof reason === "object" &&
+        reason !== null &&
+        "retryable" in reason &&
+        reason.retryable === true;
+
       setFailure({
         message,
         prompt,
+        retryable,
         productCopy,
       });
     } finally {
@@ -81,7 +89,7 @@ export function useChatSession(options: ChatSessionOptions = {}) {
   }
 
   async function retry() {
-    if (!failure || isSending) {
+    if (!failure?.retryable || isSending) {
       return;
     }
 
@@ -94,6 +102,7 @@ export function useChatSession(options: ChatSessionOptions = {}) {
     setInput,
     isSending,
     error: failure?.message ?? null,
+    retryable: failure?.retryable ?? false,
     submit,
     retry,
   };

@@ -154,9 +154,11 @@ function AssistantComposer({
       {chat.error && (
         <div className="ai-assistant-error" role="alert">
           <span>{chat.error}</span>
-          <button type="button" onClick={() => void chat.retry()}>
-            重试
-          </button>
+          {chat.retryable && (
+            <button type="button" onClick={() => void chat.retry()}>
+              重试
+            </button>
+          )}
         </div>
       )}
       <form className="ai-assistant-composer" onSubmit={submit}>

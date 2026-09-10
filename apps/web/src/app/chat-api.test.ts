@@ -7,10 +7,18 @@ describe("sendChatMessage", () => {
 
   it("超时给出明确提示且不自动重试，也不透传服务端敏感文本", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ code: "AI_TIMEOUT", message: "secret" }), { status: 504 }),
+      new Response(
+        JSON.stringify({
+          code: "AI_TIMEOUT",
+          message: "secret",
+          retryable: false,
+        }),
+        { status: 504 },
+      ),
     );
     await expect(sendChatMessage("生成文案")).rejects.toMatchObject({
       message: expect.stringContaining("未自动重试"),
+      retryable: false,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
   });

@@ -164,7 +164,11 @@ describe("中文聊天页", () => {
 
   it("生成失败后保留商品 ID，重试继续使用原商品上下文", async () => {
     mocks.sendChatMessage
-      .mockRejectedValueOnce(new Error("AI 服务暂时不可用，请稍后重试"))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("AI 服务暂时不可用，请稍后重试"), {
+          retryable: true,
+        }),
+      )
       .mockResolvedValueOnce(productCopyReply("DOUYIN"));
 
     render(<ChatPage />);
@@ -212,8 +216,11 @@ describe("中文聊天页", () => {
   });
 
   it("普通聊天失败后仍提供重试", async () => {
-    mocks.sendChatMessage.mockRejectedValue(new Error("AI 服务暂时不可用，请稍后重试"));
-
+    mocks.sendChatMessage.mockRejectedValue(
+      Object.assign(new Error("AI 服务暂时不可用，请稍后重试"), {
+        retryable: true,
+      }),
+    );
     render(<ChatPage />);
 
     const input = screen.getByRole("textbox", {
