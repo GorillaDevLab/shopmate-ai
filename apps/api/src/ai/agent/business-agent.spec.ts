@@ -75,6 +75,40 @@ describe("BusinessAgent", () => {
     });
   });
 
+  it("允许 Markdown 有序列表编号而不把编号视为经营数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("1. 销售额为 1,742 元。\n2. 共 5 单。"),
+    ]);
+
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe("1. 销售额为 1,742 元。\n2. 共 5 单。");
+  });
+
+  it("忽略列表编号后仍拒绝来源不明的经营数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("1. 销售额为 1,742 元。\n2. 订单数为 999 单。"),
+    ]);
+
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).not.toContain("999");
+  });
+
   it("无须经营工具的中文回答可直接完成", async () => {
     const provider = scriptedProvider([finalResult("请告诉我你想分析的商品或时段。")]);
     const agent = new BusinessAgent(provider, salesRegistry());

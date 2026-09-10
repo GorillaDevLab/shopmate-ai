@@ -406,8 +406,16 @@ function hasValidNumericEvidence(content: string, state: AgentState): boolean {
   if (containsChineseBusinessNumber(content)) {
     return false;
   }
-  const answerNumbers = numericTokens(content).map(canonicalNumber);
+
+  const answerNumbers = answerNumericTokens(content).map(canonicalNumber);
   return answerNumbers.every((number) => state.numericEvidence.has(number));
+}
+
+function answerNumericTokens(value: string): string[] {
+  return value.split(/\r?\n/u).flatMap((line) => {
+    const withoutOrderedListMarker = line.replace(/^\s*\d+[.)]\s+/u, "");
+    return numericTokens(withoutOrderedListMarker);
+  });
 }
 
 function numericTokens(value: string): string[] {
