@@ -112,6 +112,23 @@ button:focus-visible {
   grid-row: span var(--widget-rows);
   transform-origin: center;
 }
+
+.dashboard-layout-card.is-newly-added {
+  animation: dashboard-card-newly-added 1600ms ease-out;
+}
+
+@keyframes dashboard-card-newly-added {
+  0% {
+    box-shadow:
+      0 0 0 3px var(--brand),
+      0 18px 48px color-mix(in srgb, var(--brand-ring) 52%, transparent);
+  }
+
+  100% {
+    box-shadow: none;
+  }
+}
+
 .dashboard-layout-card > .dashboard-panel {
   height: 100%;
   overflow: auto;
@@ -285,6 +302,9 @@ button:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .dashboard-layout-card.is-newly-added {
+    animation: none;
+  }
   .dashboard-layout-card.is-dragging > .dashboard-panel,
   .layout-edit-button,
   .dashboard-card-controls button,
