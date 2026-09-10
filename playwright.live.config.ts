@@ -18,8 +18,8 @@ const demoUserId = requireEnv("DEMO_AUTH_USER_ID");
 const demoMerchantId = requireEnv("DEMO_AUTH_MERCHANT_ID");
 const demoSessionSecret = requireEnv("DEMO_SESSION_SECRET");
 
-const webUrl = "http:" + "//127.0.0.1:3000";
-const apiUrl = "http:" + "//127.0.0.1:3001";
+const webUrl = "http:" + "//127.0.0.1:3100";
+const apiUrl = "http:" + "//127.0.0.1:3101";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -64,11 +64,9 @@ export default defineConfig({
 
       timeout: 120_000,
       reuseExistingServer: false,
-
       env: {
         DATABASE_URL: databaseUrl,
-        PORT: "3001",
-
+        PORT: "3101",
         DEMO_AUTH_EMAIL: demoEmail,
         DEMO_AUTH_PASSWORD: demoPassword,
         DEMO_AUTH_USER_ID: demoUserId,
@@ -83,13 +81,11 @@ export default defineConfig({
       },
     },
     {
-      command: "pnpm --filter @shopmate/web exec next start --hostname 127.0.0.1 --port 3000",
-
+      command: "pnpm --filter @shopmate/web exec next start --hostname 127.0.0.1 --port 3100",
       url: `${webUrl}/login`,
 
       timeout: 120_000,
       reuseExistingServer: false,
-
       env: {
         API_BASE_URL: apiUrl,
       },
