@@ -120,6 +120,37 @@ function ReadyLayoutEditor({
     announce(state.mode === "edit" ? "已进入看板编辑模式" : "已退出看板编辑模式");
   }, [announce, state.mode]);
 
+  useEffect(() => {
+    const addedCardId = state.addedCard?.card.id;
+    if (!addedCardId) return;
+
+    let highlightTimer: number | undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      const card = Array.from(
+        gridRef.current?.querySelectorAll<HTMLElement>("[data-dashboard-card-id]") ?? [],
+      ).find((element) => element.dataset.dashboardCardId === addedCardId);
+
+      if (!card) return;
+
+      card.scrollIntoView?.({
+        behavior: "smooth",
+        block: "center",
+      });
+
+      card.classList.add("is-newly-added");
+
+      highlightTimer = window.setTimeout(() => {
+        card.classList.remove("is-newly-added");
+      }, 1600);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (highlightTimer !== undefined) window.clearTimeout(highlightTimer);
+    };
+  }, [state.addedCard?.card.id]);
+
   return (
     <>
       <div className="dashboard-layout-shell">
@@ -168,7 +199,7 @@ function ReadyLayoutEditor({
             ),
           });
           setGalleryOpen(false);
-          interactions.announce("AI 组件已加入草稿，可撤销或删除");
+          interactions.announce("AI 组件已加入草稿，请点击“完成并保存”");
         }}
       />
       <UndoToast
@@ -196,7 +227,7 @@ function ReadyLayoutEditor({
                 state.draft.cards,
               ),
             });
-            interactions.announce("AI 组件已加入草稿，可撤销或删除");
+            interactions.announce("AI 组件已加入草稿，请点击“完成并保存”");
           }}
         />
       )}
@@ -757,7 +788,7 @@ function UndoToast({
   const title = cardTitle(snapshot.card);
   return (
     <div className="layout-undo-toast" role="status">
-      <span>{isAddition ? `已添加 ${title}` : `已移除 ${title}`}</span>
+      <span>{isAddition ? `已添加 ${title}，请点击“完成并保存”` : `已移除 ${title}`}</span>
       <button
         type="button"
         aria-label={`撤销${isAddition ? "添加" : "删除"}${title}`}
