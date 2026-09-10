@@ -89,7 +89,7 @@ interface AgentState {
   readonly messages: LLMMessage[];
   readonly usedTools: Set<string>;
   readonly toolOutputs: BusinessAgentToolOutput[];
-  readonly fingerprints: Set<string>;
+  readonly invocationCache: Map<string, InvocationResult>;
   rounds: number;
   toolRounds: number;
   totalCalls: number;
@@ -171,20 +171,36 @@ export class BusinessAgent {
   ): Promise<boolean> {
     for (const call of calls) {
       const fingerprint = toolFingerprint(call);
-      if (state.fingerprints.has(fingerprint)) {
-        return false;
+
+      state.totalCalls += 1;
+
+      const cachedInvocation = state.invocationCache.get(fingerprint);
+      if (cachedInvocation) {
+        cachedInvocation.numericEvidence.forEach((number) => state.numericEvidence.add(number));
+
+        state.messages.push({
+          role: "tool",
+          toolCallId: call.id,
+          name: call.name,
+          content: cachedInvocation.content,
+        });
+
+        continue;
       }
 
-      state.fingerprints.add(fingerprint);
-      state.totalCalls += 1;
       const invocation = await this.invokeSafely(call, context, state.usedTools);
       invocation.numericEvidence.forEach((number) => state.numericEvidence.add(number));
+
+      if (invocation.output !== undefined) {
+        state.invocationCache.set(fingerprint, invocation);
+      }
 
       if (call.name === "generate_product_copy" && invocation.output !== undefined) {
         state.toolOutputs.push({
           name: call.name,
           output: invocation.output,
         });
+
         // A validated copy is the deliverable; subsequent calls can only add cost or lose it.
         if (ProductCopyOutputSchema.safeParse(invocation.output).success) return true;
       }
@@ -196,6 +212,7 @@ export class BusinessAgent {
         content: invocation.content,
       });
     }
+
     return true;
   }
 
@@ -223,7 +240,7 @@ function createState(question: string): AgentState {
     ],
     usedTools: new Set(),
     toolOutputs: [],
-    fingerprints: new Set(),
+    invocationCache: new Map(),
     rounds: 0,
     toolRounds: 0,
     totalCalls: 0,

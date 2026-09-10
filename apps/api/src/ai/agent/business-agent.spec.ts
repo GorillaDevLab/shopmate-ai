@@ -142,19 +142,55 @@ describe("BusinessAgent", () => {
     expect(provider.requests[1]?.messages.at(-1)?.content).not.toContain("SELECT 1");
   });
 
-  it("拒绝重复的相同工具调用，避免无限循环", async () => {
-    const repeated = toolCallResult("call-sales", "get_sales_summary", period);
-    const provider = scriptedProvider([repeated, repeated]);
+  it("重复的相同工具调用复用已有结果而不重复执行工具", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales-1", "get_sales_summary", period),
+      toolCallResult("call-sales-2", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，共 5 单。"),
+    ]);
+
     const handler = vi.fn(() => salesResult);
     const agent = new BusinessAgent(provider, salesRegistry(handler));
 
     const result = await agent.run({ question: "查询销售额", context });
 
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe("销售额为 1,742 元，共 5 单。");
+    expect(result.rounds).toBe(3);
+
+    // 相同工具和参数只真正执行一次。
+    expect(handler).toHaveBeenCalledOnce();
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+
+    expect(provider.requests[2]?.messages.at(-1)).toEqual({
+      role: "tool",
+      toolCallId: "call-sales-2",
+      name: "get_sales_summary",
+      content: JSON.stringify(salesResult),
+    });
+  });
+
+  it("持续重复相同工具调用时仍受工具轮次上限保护", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales-1", "get_sales_summary", period),
+      toolCallResult("call-sales-2", "get_sales_summary", period),
+      toolCallResult("call-sales-3", "get_sales_summary", period),
+    ]);
+
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler), {
+      maxToolRounds: 2,
+    });
+
+    const result = await agent.run({ question: "查询销售额", context });
+
     expect(result.status).toBe("limited");
     expect(result.answer).toContain("无法继续安全查询");
-    expect(result.rounds).toBe(2);
+    expect(result.rounds).toBe(3);
+
+    // 第二轮复用缓存，第三轮在执行前被轮次上限拦截。
     expect(handler).toHaveBeenCalledOnce();
-    expect(provider.generate).toHaveBeenCalledTimes(2);
+    expect(provider.generate).toHaveBeenCalledTimes(3);
   });
 
   it("达到工具轮次上限后停止，不会继续调用 Provider", async () => {
