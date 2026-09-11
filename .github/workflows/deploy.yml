@@ -1,0 +1,39 @@
+name: Deploy Tencent Cloud
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Tencent Cloud
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+script: |
+  cd ~/shopmate-ai
+
+  git fetch origin
+
+  git checkout main
+
+  git reset --hard origin/main
+
+  pnpm install --frozen-lockfile
+
+  pnpm build
+
+  pm2 restart shopmate-api
+  pm2 restart shopmate-web
+
+  pm2 save
