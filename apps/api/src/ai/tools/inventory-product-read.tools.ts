@@ -9,6 +9,7 @@ import { LowStockService, type LowStockAnalysisResult } from "../../analytics/lo
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
 import { ProductService } from "../../products/product.service.js";
 
+import { resolveReadToolPeriod } from "./read-tool-period.js";
 import type { ToolInvocationContext, ToolRegistration } from "./tool-registry.js";
 
 type ProductDetailsInput = ReturnType<typeof GetProductDetailsTool.input.parse>;
@@ -58,7 +59,8 @@ async function readInventoryRisks(
   context: Readonly<ToolInvocationContext>,
 ): Promise<InventoryRisksOutput> {
   try {
-    const result = await service.analyze(context, input.endDate, input.startDate);
+    const period = resolveReadToolPeriod(input);
+    const result = await service.analyze(context, period.endDate, period.startDate);
     if (result.risks.length === 0) return inventoryEmptyResult();
     return GetInventoryRisksTool.output.parse({
       status: "ok",

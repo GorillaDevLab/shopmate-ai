@@ -30,6 +30,27 @@ describe("AI 只读工具契约", () => {
     }
   });
 
+  it("允许省略日期使用默认周期，并拒绝只有开始日期", () => {
+    expect(GetInventoryRisksTool.input.parse({})).toMatchObject({
+      limit: 20,
+    });
+
+    expect(
+      GetInventoryRisksTool.input.parse({
+        endDate: "2026-08-31",
+      }),
+    ).toMatchObject({
+      endDate: "2026-08-31",
+      limit: 20,
+    });
+
+    expect(() =>
+      GetInventoryRisksTool.input.parse({
+        startDate: "2026-08-25",
+      }),
+    ).toThrow();
+  });
+
   it("校验有效日期范围和分页上限", () => {
     expect(() =>
       GetInventoryRisksTool.input.parse({

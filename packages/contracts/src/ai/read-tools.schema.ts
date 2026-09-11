@@ -28,8 +28,15 @@ const countSchema = z
 const limitSchema = z.number().int().min(1).max(100).default(20);
 
 const periodInputSchema = z
-  .strictObject({ startDate: dateOnlySchema, endDate: dateOnlySchema })
-  .refine(({ startDate, endDate }) => startDate <= endDate, {
+  .strictObject({
+    startDate: dateOnlySchema.optional(),
+    endDate: dateOnlySchema.optional(),
+  })
+  .refine(({ startDate, endDate }) => !startDate || Boolean(endDate), {
+    error: "提供开始日期时必须同时提供结束日期",
+    path: ["endDate"],
+  })
+  .refine(({ startDate, endDate }) => !startDate || !endDate || startDate <= endDate, {
     error: "开始日期不能晚于结束日期",
     path: ["startDate"],
   });
@@ -209,35 +216,35 @@ export const GetProductDetailsTool = defineTool(
 
 export const GetInventoryRisksTool = defineTool(
   "get_inventory_risks",
-  "读取当前 Merchant 在指定日期范围内的低库存风险。",
+  "读取当前 Merchant 的低库存风险；日期可省略，省略时使用服务端默认最近周期。",
   inventoryRisksInputSchema,
   toolResultSchema(inventoryRisksDataSchema),
 );
 
 export const GetSalesSummaryTool = defineTool(
   "get_sales_summary",
-  "读取当前 Merchant 在指定日期范围内的销售汇总。",
+  "读取当前 Merchant 的销售汇总；日期可省略，省略时使用服务端默认最近周期。",
   salesSummaryInputSchema,
   toolResultSchema(salesSummaryDataSchema),
 );
 
 export const GetBestSellersTool = defineTool(
   "get_best_sellers",
-  "读取当前 Merchant 在指定日期范围内的热销商品排行。",
+  "读取当前 Merchant 的热销商品排行；日期可省略，省略时使用服务端默认最近周期。",
   bestSellersInputSchema,
   toolResultSchema(bestSellersDataSchema),
 );
 
 export const GetSalesTrendTool = defineTool(
   "get_sales_trend",
-  "读取当前 Merchant 在指定日期范围内的每日销售额趋势。",
+  "读取当前 Merchant 的每日销售额趋势；日期可省略，省略时使用服务端默认最近周期。",
   salesTrendInputSchema,
   toolResultSchema(salesTrendDataSchema),
 );
 
 export const GetProductPerformanceTool = defineTool(
   "get_product_performance",
-  "读取当前 Merchant 在指定日期范围内的商品销售表现。",
+  "读取当前 Merchant 的商品销售表现；日期可省略，省略时使用服务端默认最近周期。",
   productPerformanceInputSchema,
   toolResultSchema(productPerformanceDataSchema),
 );
