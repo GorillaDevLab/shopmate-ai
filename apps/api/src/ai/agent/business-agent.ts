@@ -25,6 +25,8 @@ const DEFAULT_LIMITS = {
 const SAFE_FAILURE_ANSWER = "暂时无法完成这次查询，请稍后重试或缩小查询范围。";
 const SAFE_LIMIT_ANSWER = "为避免重复或过量调用，当前无法继续安全查询，请调整问题后重试。";
 const CHINESE_REQUIRED_ANSWER = "模型未返回有效的中文解释，请换一种问法后重试。";
+const FINAL_RESPONSE_REPAIR_PROMPT =
+  "上一条候选回答未通过服务端数据校验。请仅根据此前已经验证的工具结果重新回答原问题。不要调用任何工具，不要引入工具结果之外的数字或日期；如果现有证据不足，请用简体中文明确说明数据不足，不得猜测。";
 
 export const BUSINESS_AGENT_SYSTEM_POLICY_ZH_CN = [
   DEFAULT_LLM_SYSTEM_POLICY_ZH_CN,
@@ -122,7 +124,17 @@ export class BusinessAgent {
       const assistant = generation.message;
       const calls = assistant.toolCalls ?? [];
       if (calls.length === 0) {
-        return finalResult(state, generation);
+        const result = finalResult(state, generation);
+        if (result.failureCode !== "AI_RESPONSE_REJECTED") {
+          return result;
+        }
+
+        const repairedGeneration = await this.repairFinalAnswer(state);
+        if (!repairedGeneration) {
+          return result;
+        }
+
+        return finalResult(state, repairedGeneration);
       }
 
       if (
@@ -152,11 +164,14 @@ export class BusinessAgent {
     }
   }
 
-  private async generate(state: AgentState): Promise<LLMGenerationResult | null> {
+  private async generate(
+    state: AgentState,
+    includeTools = true,
+  ): Promise<LLMGenerationResult | null> {
     try {
       const result = await this.provider.generate({
         messages: state.messages,
-        tools: this.registry.listDefinitions(),
+        tools: includeTools ? this.registry.listDefinitions() : [],
         locale: "zh-CN",
       });
       state.rounds += 1;
@@ -165,6 +180,15 @@ export class BusinessAgent {
       if (error instanceof LLMProviderError) throw error;
       return null;
     }
+  }
+
+  private async repairFinalAnswer(state: AgentState): Promise<LLMGenerationResult | null> {
+    state.messages.push({
+      role: "user",
+      content: FINAL_RESPONSE_REPAIR_PROMPT,
+    });
+
+    return this.generate(state, false);
   }
 
   private async executeCalls(
