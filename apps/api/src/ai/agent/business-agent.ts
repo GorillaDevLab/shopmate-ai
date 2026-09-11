@@ -96,6 +96,7 @@ interface AgentState {
   toolRounds: number;
   totalCalls: number;
   readonly numericEvidence: Set<string>;
+  readonly dateEvidence: Set<string>;
 }
 
 export class BusinessAgent {
@@ -174,6 +175,7 @@ export class BusinessAgent {
     for (const call of calls) {
       const fingerprint = toolFingerprint(call);
 
+      collectToolDateEvidence(call.arguments, state.dateEvidence);
       state.totalCalls += 1;
 
       const cachedInvocation = state.invocationCache.get(fingerprint);
@@ -247,6 +249,7 @@ function createState(question: string): AgentState {
     toolRounds: 0,
     totalCalls: 0,
     numericEvidence: new Set(),
+    dateEvidence: new Set(),
   };
 }
 
@@ -426,8 +429,37 @@ function hasValidNumericEvidence(content: string, state: AgentState): boolean {
     return false;
   }
 
-  const answerNumbers = answerNumericTokens(content).map(canonicalNumber);
+  const contentWithoutDates = stripValidatedIsoDates(content, state.dateEvidence);
+  if (contentWithoutDates === null) {
+    return false;
+  }
+
+  const answerNumbers = answerNumericTokens(contentWithoutDates).map(canonicalNumber);
   return answerNumbers.every((number) => state.numericEvidence.has(number));
+}
+
+function collectToolDateEvidence(argumentsValue: JsonObject, evidence: Set<string>): void {
+  for (const key of ["startDate", "endDate"] as const) {
+    const value = argumentsValue[key];
+
+    if (typeof value === "string" && isIsoDate(value)) {
+      evidence.add(value);
+    }
+  }
+}
+
+function stripValidatedIsoDates(value: string, evidence: ReadonlySet<string>): string | null {
+  const dates = value.match(/\b\d{4}-\d{2}-\d{2}\b/gu) ?? [];
+
+  if (dates.some((date) => !evidence.has(date))) {
+    return null;
+  }
+
+  return value.replace(/\b\d{4}-\d{2}-\d{2}\b/gu, "");
+}
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/u.test(value);
 }
 
 function answerNumericTokens(value: string): string[] {

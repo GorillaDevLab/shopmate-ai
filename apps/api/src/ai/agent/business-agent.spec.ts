@@ -280,6 +280,68 @@ describe("BusinessAgent", () => {
     expect(result.answer).not.toContain("999");
   });
 
+  it("工具返回 empty 时允许回答引用已查询的 ISO 日期范围", async () => {
+    const emptyResult: SalesSummaryOutput = {
+      status: "empty",
+      reason: "NO_DATA",
+      message: "当前时段没有销售数据。",
+    };
+    const provider = scriptedProvider([
+      toolCallResult("call-empty", "get_sales_summary", period),
+      finalResult("2026-08-25 到 2026-08-31 暂无销售数据。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(vi.fn(() => emptyResult)));
+
+    const result = await agent.run({
+      question: "查询 2026-08-25 到 2026-08-31 的销售情况",
+      context,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe("2026-08-25 到 2026-08-31 暂无销售数据。");
+  });
+
+  it("允许已查询日期后仍拒绝模型编造经营数字", async () => {
+    const emptyResult: SalesSummaryOutput = {
+      status: "empty",
+      reason: "NO_DATA",
+      message: "当前时段没有销售数据。",
+    };
+    const provider = scriptedProvider([
+      toolCallResult("call-empty", "get_sales_summary", period),
+      finalResult("2026-08-25 到 2026-08-31 暂无数据，但共有 999 单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(vi.fn(() => emptyResult)));
+
+    const result = await agent.run({
+      question: "查询 2026-08-25 到 2026-08-31 的销售情况",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).not.toContain("999");
+  });
+
+  it("拒绝回答中出现未经工具调用验证的 ISO 日期", async () => {
+    const emptyResult: SalesSummaryOutput = {
+      status: "empty",
+      reason: "NO_DATA",
+      message: "当前时段没有销售数据。",
+    };
+    const provider = scriptedProvider([
+      toolCallResult("call-empty", "get_sales_summary", period),
+      finalResult("2026-08-20 到 2026-08-31 暂无销售数据。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(vi.fn(() => emptyResult)));
+
+    const result = await agent.run({
+      question: "查询 2026-08-25 到 2026-08-31 的销售情况",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+  });
+
   it("工具只返回 empty 时仍拒绝模型编造经营数字", async () => {
     const emptyResult: SalesSummaryOutput = {
       status: "empty",
