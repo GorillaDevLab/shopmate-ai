@@ -360,6 +360,59 @@ describe("BusinessAgent", () => {
     expect(result.answer).not.toContain("999");
   });
 
+  it("最终回答数据校验失败后自动 repair 一次并返回修正结果", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，但订单数为 999 单。"),
+      finalResult("销售额为 1,742 元，共 5 单。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler));
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "销售额为 1,742 元，共 5 单。",
+      usedTools: ["get_sales_summary"],
+      rounds: 3,
+    });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+
+    const repairRequest = provider.requests[2];
+    expect(repairRequest?.tools).toEqual([]);
+    expect(repairRequest?.messages.at(-1)).toMatchObject({
+      role: "user",
+    });
+  });
+
+  it("自动 repair 后仍包含来源不明数字时保持拒绝", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，但订单数为 999 单。"),
+      finalResult("销售额为 1,742 元，但订单数为 888 单。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler));
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+    expect(result.answer).not.toContain("888");
+    expect(handler).toHaveBeenCalledOnce();
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+    expect(provider.requests[2]?.tools).toEqual([]);
+  });
+
   it("成功工具结果存在时仍拒绝混入来源不明的经营数字", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-sales", "get_sales_summary", period),
