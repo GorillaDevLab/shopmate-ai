@@ -17,6 +17,7 @@ import {
 } from "../../analytics/product-performance.service.js";
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
 
+import { resolveReadToolPeriod } from "./read-tool-period.js";
 import type { ToolInvocationContext, ToolRegistration } from "./tool-registry.js";
 
 type DashboardReader = Pick<DashboardService, "summarize">;
@@ -80,7 +81,8 @@ async function readSalesSummary(
   context: Readonly<ToolInvocationContext>,
 ): Promise<SalesSummaryOutput> {
   try {
-    const summary = await service.summarize(context, input.endDate, input.startDate);
+    const period = resolveReadToolPeriod(input);
+    const summary = await service.summarize(context, period.endDate, period.startDate);
     if (summary.recent.metrics.orderCount === 0)
       return empty(GetSalesSummaryTool, "没有销售数据。");
     return GetSalesSummaryTool.output.parse({ status: "ok", data: mapSalesSummary(summary) });
@@ -95,7 +97,8 @@ async function readSalesTrend(
   context: Readonly<ToolInvocationContext>,
 ): Promise<SalesTrendOutput> {
   try {
-    const summary = await service.summarize(context, input.endDate, input.startDate);
+    const period = resolveReadToolPeriod(input);
+    const summary = await service.summarize(context, period.endDate, period.startDate);
     if (summary.recent.metrics.orderCount === 0) return empty(GetSalesTrendTool, "没有趋势数据。");
     return GetSalesTrendTool.output.parse({ status: "ok", data: mapSalesTrend(summary) });
   } catch (error: unknown) {
@@ -109,7 +112,8 @@ async function readBestSellers(
   context: Readonly<ToolInvocationContext>,
 ): Promise<BestSellersOutput> {
   try {
-    const result = await service.analyze(context, input.endDate, input.startDate);
+    const period = resolveReadToolPeriod(input);
+    const result = await service.analyze(context, period.endDate, period.startDate);
     const sellers = result.hotSellers
       .filter((product) => product.unitsSold > 0)
       .slice(0, input.limit);
@@ -129,7 +133,8 @@ async function readProductPerformance(
   context: Readonly<ToolInvocationContext>,
 ): Promise<ProductPerformanceOutput> {
   try {
-    const result = await service.analyze(context, input.endDate, input.startDate);
+    const period = resolveReadToolPeriod(input);
+    const result = await service.analyze(context, period.endDate, period.startDate);
     const products = selectProducts(result.products, input.productId).slice(0, input.limit);
     if (input.productId && products.length === 0) return productNotFound();
     if (products.length === 0) return empty(GetProductPerformanceTool, "没有商品表现数据。");
