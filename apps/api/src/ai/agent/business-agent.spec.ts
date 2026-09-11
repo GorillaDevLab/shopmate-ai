@@ -1,4 +1,5 @@
 import {
+  GetInventoryRisksTool,
   GetSalesSummaryTool,
   type LLMGenerationRequest,
   type LLMGenerationResult,
@@ -14,6 +15,12 @@ const context: ToolInvocationContext = {
   userId: "user-1",
   merchantId: "merchant-1",
   permissions: [AuthPermission.OrdersRead],
+};
+
+const inventoryContext: ToolInvocationContext = {
+  userId: "user-1",
+  merchantId: "merchant-1",
+  permissions: [AuthPermission.ProductsRead, AuthPermission.OrdersRead],
 };
 
 const period = {
@@ -33,6 +40,66 @@ const salesResult = {
     averageOrderValueMinor: 34_840,
   },
 };
+
+const inventoryResult = {
+  status: "ok" as const,
+  data: {
+    source: "LowStockService" as const,
+    period: { ...period, timezone: "Asia/Shanghai" as const },
+    items: [
+      {
+        productId: "product-1",
+        productName: "商品 A",
+        skuId: "sku-1",
+        skuCode: "SKU-001",
+        inventory: 3,
+        alertThreshold: 10,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+      {
+        productId: "product-2",
+        productName: "商品 B",
+        skuId: "sku-2",
+        skuCode: "SKU-002",
+        inventory: 4,
+        alertThreshold: 10,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+      {
+        productId: "product-3",
+        productName: "商品 C",
+        skuId: "sku-3",
+        skuCode: "SKU-003",
+        inventory: 6,
+        alertThreshold: 12,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+      {
+        productId: "product-4",
+        productName: "商品 D",
+        skuId: "sku-4",
+        skuCode: "SKU-004",
+        inventory: 9,
+        alertThreshold: 12,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+    ],
+  },
+};
+
+type InventoryRisksOutput = ReturnType<typeof GetInventoryRisksTool.output.parse>;
 
 type SalesSummaryOutput = ReturnType<typeof GetSalesSummaryTool.output.parse>;
 
@@ -413,6 +480,62 @@ describe("BusinessAgent", () => {
     expect(provider.requests[2]?.tools).toEqual([]);
   });
 
+  it("默认最近周期允许引用工具输出中的实际日期范围", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", {}),
+      finalResult("2026-08-25 到 2026-08-31 销售额为 1,742 元，共 5 单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "最近销售情况怎么样？",
+      context,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toContain("2026-08-25 到 2026-08-31");
+  });
+
+  it("允许使用已验证 items 数量说明低库存商品数量", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-inventory", "get_inventory_risks", {}),
+      finalResult("共有 4 款商品库存不足。"),
+    ]);
+    const agent = new BusinessAgent(provider, inventoryRegistry());
+
+    const result = await agent.run({
+      question: "最近哪些商品库存不足？",
+      context: inventoryContext,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "共有 4 款商品库存不足。",
+      usedTools: ["get_inventory_risks"],
+      rounds: 2,
+    });
+  });
+
+  it("允许统计 items 数量但仍拒绝编造补货数量", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-inventory", "get_inventory_risks", {}),
+      finalResult("共有 4 款商品库存不足，建议每款补货 999 件。"),
+      finalResult("共有 4 款商品库存不足，建议每款补货 999 件。"),
+    ]);
+    const handler = vi.fn(() => inventoryResult);
+    const agent = new BusinessAgent(provider, inventoryRegistry(handler));
+
+    const result = await agent.run({
+      question: "最近哪些商品值得补货？",
+      context: inventoryContext,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it("成功工具结果存在时仍拒绝混入来源不明的经营数字", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-sales", "get_sales_summary", period),
@@ -514,6 +637,20 @@ describe("BusinessAgent", () => {
     expect(result.status).toBe("limited");
   });
 });
+
+function inventoryRegistry(
+  handler: () => InventoryRisksOutput = vi.fn(() => inventoryResult),
+): ToolRegistry {
+  const registry = new ToolRegistry({
+    allowedToolNames: [GetInventoryRisksTool.name],
+  });
+  registry.register({
+    ...GetInventoryRisksTool,
+    requiredPermissions: [AuthPermission.ProductsRead, AuthPermission.OrdersRead],
+    handler,
+  });
+  return registry;
+}
 
 function salesRegistry(handler: () => SalesSummaryOutput = vi.fn(() => salesResult)): ToolRegistry {
   const registry = new ToolRegistry({ allowedToolNames: [GetSalesSummaryTool.name] });
