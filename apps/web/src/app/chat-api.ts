@@ -1,6 +1,7 @@
 import {
   AiChatResponseSchema,
   type AiChatResponse,
+  type AiChatRequest,
   type ProductCopyRequest,
 } from "@shopmate/contracts";
 
@@ -19,6 +20,7 @@ export async function sendChatMessage(
   content: string,
   signal?: AbortSignal,
   productCopy?: ProductCopyRequest,
+  history?: AiChatRequest["history"],
 ): Promise<AiChatResponse["message"]> {
   const message = content.trim();
   if (!message) throw new ChatApiError("请输入想了解的经营问题", 400);
@@ -33,6 +35,7 @@ export async function sendChatMessage(
       body: JSON.stringify({
         message: { role: "user", content: message },
         ...(productCopy ? { productCopy } : {}),
+        ...(history?.length ? { history } : {}),
       }),
       signal,
     });

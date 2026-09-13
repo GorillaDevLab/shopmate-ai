@@ -10,6 +10,7 @@ import {
   ProductCopyOutputSchema,
   LLMProviderError,
   type AiChatResponse,
+  type AiChatRequest,
   type LLMProvider,
   type ProductCopyOutput,
   type ProductCopyRequest,
@@ -26,6 +27,7 @@ import {
 export interface BusinessAgentRunner {
   run(input: {
     readonly question: string;
+    readonly history?: AiChatRequest["history"];
     readonly context: ReturnType<typeof createToolInvocationContext>;
   }): Promise<BusinessAgentResult>;
 }
@@ -52,6 +54,7 @@ export class AiChatService {
         return await this.generateCopy(context, request.data.productCopy);
       const result = await this.agent.run({
         question: request.data.message.content,
+        ...(request.data.history ? { history: request.data.history } : {}),
         context: createToolInvocationContext(context),
       });
 

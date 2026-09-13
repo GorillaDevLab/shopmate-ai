@@ -5,6 +5,28 @@ import { sendChatMessage } from "./chat-api";
 describe("sendChatMessage", () => {
   beforeEach(() => vi.restoreAllMocks());
 
+  it("将追问历史随认证请求发送", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          message: { role: "assistant", content: "已查询。" },
+        }),
+      ),
+    );
+    const history = [
+      { role: "user" as const, content: "查趋势" },
+      { role: "assistant" as const, content: "查汇总？" },
+    ];
+    await sendChatMessage("1", undefined, undefined, history);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/ai/chat",
+      expect.objectContaining({
+        credentials: "include",
+        body: JSON.stringify({ message: { role: "user", content: "1" }, history }),
+      }),
+    );
+  });
+
   it("超时给出明确提示且不自动重试，也不透传服务端敏感文本", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
