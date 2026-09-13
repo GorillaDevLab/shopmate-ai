@@ -1559,6 +1559,11 @@ button:focus-visible {
   background: color-mix(in srgb, var(--app-text) 22%, transparent);
   backdrop-filter: blur(3px);
 }
+.widget-gallery-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100dvh - 48px);
+}
 .widget-gallery-shell > header {
   display: flex;
   min-height: 76px;
@@ -1596,7 +1601,9 @@ button:focus-visible {
 .widget-gallery-body {
   display: grid;
   grid-template-columns: minmax(190px, 0.72fr) minmax(0, 1.28fr);
-  min-height: 380px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .widget-gallery-body nav {
   display: grid;
@@ -1637,7 +1644,7 @@ button:focus-visible {
 }
 .widget-gallery-preview {
   display: grid;
-  align-content: center;
+  align-content: start;
   justify-items: start;
   gap: 16px;
   padding: 30px;
