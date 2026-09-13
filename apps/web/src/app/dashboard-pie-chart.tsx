@@ -2,7 +2,7 @@ import type { DashboardInsightResult } from "@shopmate/contracts";
 import type { CSSProperties } from "react";
 
 type PieResult = Extract<DashboardInsightResult, { kind: "pie" }>;
-const colors = ["#A64F36", "#E08A5B", "#D8A657", "#698A78", "#657A9C", "#826A9B"];
+const colors = ["#6550d9", "#9988ef", "#3c8f88", "#d99a43", "#6384b9", "#b6708e"];
 
 export function DashboardPieChart({ result }: { result: PieResult }) {
   const total = result.slices.reduce((sum, slice) => sum + slice.value, 0);

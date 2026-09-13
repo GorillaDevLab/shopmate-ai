@@ -19,10 +19,10 @@ interface InsightDimensionDefinition {
 }
 
 const metrics = {
-  revenue: salesMetric("sum", "currencyMinor", ["date", "product"]),
-  orderCount: salesMetric("count", "count", []),
-  unitsSold: salesMetric("sum", "count", ["product"]),
-  averageOrderValue: salesMetric("average", "currencyMinor", []),
+  revenue: salesMetric("sum", "currencyMinor", ["date", "product", "store", "platform"]),
+  orderCount: salesMetric("count", "count", ["store", "platform"]),
+  unitsSold: salesMetric("sum", "count", ["product", "store", "platform"]),
+  averageOrderValue: salesMetric("average", "currencyMinor", ["store", "platform"]),
   inventory: inventoryMetric("sum", "count", ["product", "sku", "inventoryRisk"]),
   productCount: productMetric("count", "count", ["product"]),
 } as const satisfies Record<MetricKey, InsightMetricDefinition>;
@@ -33,8 +33,8 @@ const dimensions = {
   sku: dimension(["sales", "inventory"]),
   orderStatus: dimension(["sales"]),
   inventoryRisk: dimension(["inventory"]),
-  platform: dimension(["sales", "products", "inventory"], false),
-  store: dimension(["sales", "products", "inventory"], false),
+  platform: dimension(["sales"]),
+  store: dimension(["sales"]),
 } as const satisfies Record<DimensionKey, InsightDimensionDefinition>;
 
 export const DASHBOARD_INSIGHT_FIELDS = { metrics, dimensions } as const;

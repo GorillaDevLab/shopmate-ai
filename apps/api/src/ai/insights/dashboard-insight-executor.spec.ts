@@ -24,6 +24,52 @@ const productQuery = {
 } as const;
 
 describe("受限经营查询执行器", () => {
+  it("库存图不误标为销售额，客单价比较不误标为占比", async () => {
+    const stores = { catalog: vi.fn(), read: vi.fn().mockResolvedValue([]) };
+    const executor = new DashboardInsightExecutor(
+      stubDashboard(),
+      stubPerformance(),
+      stubInventory(),
+      stores,
+    );
+    await expect(
+      executor.execute(context, {
+        ...productQuery,
+        dataset: "inventory",
+        metric: "inventory",
+      }),
+    ).resolves.toMatchObject({ title: "商品库存占比" });
+    await expect(
+      executor.execute(context, {
+        ...productQuery,
+        metric: "averageOrderValue",
+        aggregation: "average",
+        groupBy: "store",
+      }),
+    ).resolves.toMatchObject({ title: "门店客单价对比" });
+  });
+  it("门店分组和平台筛选走同一个受限销售读取器", async () => {
+    const stores = {
+      catalog: vi.fn(),
+      read: vi.fn().mockResolvedValue([{ key: "s", label: "演示门店", value: 1234 }]),
+    };
+    const executor = new DashboardInsightExecutor(
+      stubDashboard(),
+      stubPerformance(),
+      stubInventory(),
+      stores,
+    );
+    const query = {
+      ...productQuery,
+      groupBy: "store",
+      filters: [{ field: "platform", operator: "equals", values: ["TAOBAO"] }],
+    };
+    await expect(executor.execute(context, query)).resolves.toMatchObject({
+      kind: "pie",
+      slices: [{ key: "s", label: "演示门店", value: 1234 }],
+    });
+    expect(stores.read).toHaveBeenCalledWith(context, query);
+  });
   it("在当前 Merchant Scope 内生成商品销售额饼图", async () => {
     const performance = {
       analyze: vi.fn().mockResolvedValue({
