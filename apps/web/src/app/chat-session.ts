@@ -24,6 +24,8 @@ type ChatSessionOptions = {
 
 export function useChatSession(options: ChatSessionOptions = {}) {
   const inFlight = useRef(false);
+  // Only completed turns enter context; failed requests and retries cannot duplicate it.
+  const completed = useRef<ChatMessage[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -49,8 +51,16 @@ export function useChatSession(options: ChatSessionOptions = {}) {
     try {
       const reply = productCopy
         ? await sendChatMessage(prompt, undefined, productCopy)
-        : ((await options.resolveMessage?.(prompt)) ?? (await sendChatMessage(prompt)));
+        : ((await options.resolveMessage?.(prompt)) ??
+          (await (completed.current.length
+            ? sendChatMessage(prompt, undefined, undefined, completed.current)
+            : sendChatMessage(prompt))));
 
+      completed.current = boundedHistory([
+        ...completed.current,
+        { role: "user", content: prompt },
+        { role: "assistant", content: reply.content },
+      ]);
       setMessages((current) => [...current, reply]);
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === "AbortError") {
@@ -106,4 +116,12 @@ export function useChatSession(options: ChatSessionOptions = {}) {
     submit,
     retry,
   };
+}
+
+function boundedHistory(messages: ChatMessage[]): ChatMessage[] {
+  const history = messages.slice(-12);
+  while (history.reduce((size, message) => size + message.content.length, 0) > 24000) {
+    history.splice(0, 2);
+  }
+  return history;
 }

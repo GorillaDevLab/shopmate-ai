@@ -104,6 +104,45 @@ type InventoryRisksOutput = ReturnType<typeof GetInventoryRisksTool.output.parse
 type SalesSummaryOutput = ReturnType<typeof GetSalesSummaryTool.output.parse>;
 
 describe("BusinessAgent", () => {
+  it("历史中的数字不成为本轮经营证据", async () => {
+    const provider = scriptedProvider([
+      finalResult("销售额为 999 元。"),
+      finalResult("销售额为 999 元。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+    const result = await agent.run({
+      question: "继续",
+      context,
+      history: [
+        { role: "user", content: "销售额？" },
+        { role: "assistant", content: "销售额为 999 元。" },
+      ],
+    });
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+  });
+  it("追问保留选项上下文，并使用当前认证身份重新查询", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("follow-up", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，共 5 单。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const history = [
+      { role: "user" as const, content: "分析趋势" },
+      { role: "assistant" as const, content: "回复 1 查询销售汇总。" },
+    ];
+    const result = await new BusinessAgent(provider, salesRegistry(handler)).run({
+      question: "1",
+      context,
+      history,
+    });
+    expect(provider.requests[0]?.messages.slice(1, 4)).toEqual([
+      ...history,
+      { role: "user", content: "1" },
+    ]);
+    expect(result.status).toBe("completed");
+    expect(handler).toHaveBeenCalledOnce();
+  });
   it("把允许的工具交给 Provider，并把已验证结果注入中文回答", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-sales-1", "get_sales_summary", period),
