@@ -1544,6 +1544,266 @@ button:focus-visible {
   }
 }
 
+.workspace-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.workspace-sidebar {
+  width: 224px;
+  height: 100dvh;
+  position: sticky;
+  top: 0;
+  padding: 24px 14px;
+  border-right: 1px solid var(--app-line);
+  background: var(--app-surface);
+  display: flex;
+  flex-direction: column;
+}
+.workspace-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 28px;
+  white-space: nowrap;
+}
+.workspace-brand > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--brand);
+  color: white;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.workspace-brand strong {
+  font-size: 15px;
+  letter-spacing: -0.03em;
+}
+.workspace-menu {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.workspace-nav-label {
+  margin: 0 12px 12px;
+  font-size: 11px;
+  color: var(--app-muted);
+  letter-spacing: 0.08em;
+}
+.workspace-menu nav {
+  display: grid;
+  gap: 5px;
+}
+.workspace-menu nav > * {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 46px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--app-muted);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-menu nav > *:hover {
+  background: var(--app-bg);
+}
+.workspace-menu nav > [aria-current] {
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-weight: 700;
+  box-shadow: inset 3px 0 var(--brand);
+}
+.workspace-menu nav svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.workspace-menu nav > *:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+.workspace-settings {
+  margin-top: auto;
+  padding-top: 32px;
+  display: grid;
+  gap: 8px;
+}
+.workspace-settings > button {
+  justify-content: flex-start;
+  width: 100%;
+  font-size: 13px;
+}
+.workspace-collapse {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 12px;
+  margin-top: 12px;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+.workspace-sidebar[data-collapsed="true"] {
+  width: 76px;
+}
+.workspace-sidebar[data-collapsed="true"] .workspace-brand strong,
+.workspace-sidebar[data-collapsed="true"] .workspace-nav-label,
+.workspace-sidebar[data-collapsed="true"] nav span,
+.workspace-sidebar[data-collapsed="true"] .workspace-collapse span {
+  display: none;
+}
+.workspace-sidebar[data-collapsed="true"] .workspace-settings {
+  display: none;
+}
+.workspace-content {
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+  padding: 20px 32px 32px;
+  margin-inline: auto;
+}
+.workspace-breadcrumb {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 44px;
+}
+.workspace-breadcrumb span {
+  color: var(--app-muted);
+}
+.workspace-mobile-toggle {
+  display: none;
+}
+.comparison-chart {
+  min-width: 0;
+  width: 100%;
+  color: var(--app-text);
+}
+.comparison-switch {
+  display: flex;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 10px 14px 0;
+  background: var(--app-surface);
+  border-radius: 16px 16px 0 0;
+}
+.comparison-switch button {
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+.comparison-switch button[aria-pressed="true"] {
+  color: var(--brand-strong);
+  background: var(--brand-soft);
+  font-weight: 700;
+}
+.comparison-switch button:focus-visible {
+  outline: 2px solid var(--brand);
+}
+.comparison-bars > ul {
+  list-style: none;
+  display: grid;
+  gap: 18px;
+  margin: 24px 0;
+  padding: 0;
+}
+.comparison-bar-label {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 7px;
+}
+.comparison-bar-label > span {
+  overflow-wrap: anywhere;
+}
+.comparison-bar-label strong {
+  white-space: nowrap;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.comparison-bar-track {
+  height: 9px;
+  overflow: hidden;
+  background: var(--app-bg);
+  border-radius: 3px;
+}
+.comparison-bar-track > span {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  border-radius: inherit;
+}
+.comparison-footnote {
+  font-size: 11px;
+  color: var(--app-muted);
+  border-top: 1px solid var(--app-line);
+  padding-top: 12px;
+}
+@media (max-width: 767px) {
+  .workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-sidebar,
+  .workspace-sidebar[data-collapsed="true"] {
+    position: static;
+    width: 100%;
+    height: auto;
+    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--app-line);
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .workspace-brand {
+    padding: 0;
+  }
+  .workspace-sidebar[data-collapsed="true"] .workspace-brand strong {
+    display: inline;
+  }
+  .workspace-mobile-toggle {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+  .workspace-menu {
+    grid-column: 1 / -1;
+    display: none;
+  }
+  .workspace-sidebar[data-mobile-open="true"] .workspace-menu {
+    display: flex;
+    padding-top: 18px;
+  }
+  .workspace-sidebar[data-collapsed="true"] nav span {
+    display: inline;
+  }
+  .workspace-sidebar[data-collapsed="true"] .workspace-settings {
+    display: grid;
+  }
+  .workspace-settings {
+    padding-top: 14px;
+  }
+  .workspace-collapse {
+    display: none;
+  }
+  .workspace-content {
+    padding: 14px 16px 24px;
+  }
+}
+
 .widget-gallery {
   width: min(720px, calc(100vw - 32px));
   max-width: none;
@@ -1558,6 +1818,11 @@ button:focus-visible {
 .widget-gallery::backdrop {
   background: color-mix(in srgb, var(--app-text) 22%, transparent);
   backdrop-filter: blur(3px);
+}
+.widget-gallery-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100dvh - 48px);
 }
 .widget-gallery-shell > header {
   display: flex;
@@ -1596,7 +1861,9 @@ button:focus-visible {
 .widget-gallery-body {
   display: grid;
   grid-template-columns: minmax(190px, 0.72fr) minmax(0, 1.28fr);
-  min-height: 380px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .widget-gallery-body nav {
   display: grid;
@@ -1637,7 +1904,7 @@ button:focus-visible {
 }
 .widget-gallery-preview {
   display: grid;
-  align-content: center;
+  align-content: start;
   justify-items: start;
   gap: 16px;
   padding: 30px;

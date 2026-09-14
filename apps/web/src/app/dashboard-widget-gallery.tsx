@@ -8,7 +8,7 @@ import {
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { generateDashboardInsight } from "./dashboard-insight-api";
-import { DashboardPieChart } from "./dashboard-pie-chart";
+import { DashboardComparisonChart } from "./dashboard-comparison-chart";
 import { DashboardReportCard } from "./dashboard-report-card";
 
 type StandardComponent = Exclude<DashboardLayoutComponent, "pieChart" | "report">;
@@ -223,7 +223,19 @@ function InsightGenerator(props: {
 }
 
 function InsightPreview({ preview }: { preview: DashboardInsightPreviewResponse }) {
-  if (preview.result.kind === "pie") return <DashboardPieChart result={preview.result} />;
+  if (preview.result.kind === "pie")
+    return (
+      <DashboardComparisonChart
+        key={JSON.stringify(preview.query)}
+        result={preview.result}
+        allowDonut={preview.query.metric !== "averageOrderValue"}
+        initialView={
+          preview.query.groupBy === "store" || preview.query.groupBy === "platform"
+            ? "bar"
+            : "donut"
+        }
+      />
+    );
   return <DashboardReportCard result={preview.result} />;
 }
 
