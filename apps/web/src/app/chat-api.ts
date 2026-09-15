@@ -78,7 +78,7 @@ const CHAT_ERRORS: Record<string, string> = {
   AI_CONFIGURATION: "AI 服务配置异常，请联系管理员。",
   AI_RATE_LIMIT: "AI 服务繁忙，请稍后再试。未自动重试。",
   AI_INVALID_RESPONSE: "生成结果格式不符合要求，未自动重试。",
-  AI_RESPONSE_REJECTED: "自动修正后仍未通过数据校验，请缩小查询范围。",
+  AI_RESPONSE_REJECTED: "回复中的数据未能核实，已拦截。请联系管理员排查，避免反复提交产生费用。",
   AI_TOOL_LIMIT: "本次查询达到处理上限，请缩小查询范围。未自动重试。",
   PRODUCT_NOT_FOUND: "当前店铺未找到该商品，请检查商品 ID（不是 SKU 编码）。",
   AI_FORBIDDEN: "没有访问该商品的权限。",

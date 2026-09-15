@@ -466,6 +466,50 @@ describe("BusinessAgent", () => {
     expect(result.answer).not.toContain("999");
   });
 
+  it("中文列表编号不是销售证据，不应触发额外修正请求", async () => {
+    const answer = "1、销售额为 1,742 元。\n2、订单数为 5 单。";
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult(answer),
+      finalResult(answer),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "查销售",
+      context,
+    });
+    expect(result.status).toBe("completed");
+    expect(provider.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("中文列表正文中的无依据数字仍被拒绝", async () => {
+    const answer = "1、销售额为 999 元。\n2、订单数为 888 单。";
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult(answer),
+      finalResult(answer),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "查销售",
+      context,
+    });
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+  });
+
+  it("行首数字并列不是列表编号，不能隐藏无依据数字", async () => {
+    const answer = "999、5 单分别是两家店的订单量。";
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult(answer),
+      finalResult(answer),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "查销售",
+      context,
+    });
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+  });
+
   it("最终回答数据校验失败后自动 repair 一次并返回修正结果", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-sales", "get_sales_summary", period),

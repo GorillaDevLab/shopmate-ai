@@ -530,7 +530,11 @@ function isIsoDate(value: string): boolean {
 
 function answerNumericTokens(value: string): string[] {
   return value.split(/\r?\n/u).flatMap((line) => {
-    const withoutOrderedListMarker = line.replace(/^\s*\d+[.)]\s+/u, "");
+    // Do not mistake numeric enumeration (e.g. "999、5 单") for a list marker.
+    const withoutOrderedListMarker = line.replace(
+      /^\s*(?:\d+[.)]\s+|\d+、(?!\s*[\d零〇一二两三四五六七八九十百千万亿¥￥$+-])\s*)/u,
+      "",
+    );
     return numericTokens(withoutOrderedListMarker);
   });
 }

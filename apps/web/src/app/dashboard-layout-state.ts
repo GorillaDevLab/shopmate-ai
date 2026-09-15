@@ -101,7 +101,7 @@ export function layoutEditorReducer(
 export function createDashboardCard(
   component: Exclude<DashboardLayoutComponent, "pieChart" | "report">,
   cards: readonly DashboardLayoutCard[],
-  createSuffix = () => crypto.randomUUID(),
+  createSuffix = createCardSuffix,
 ): DashboardLayoutCard {
   const id = uniqueId(component, cards, createSuffix());
   const size = DASHBOARD_COMPONENT_REGISTRY[component].defaultSize;
@@ -122,12 +122,23 @@ export function createInsightDashboardCard(
   title: string,
   query: DashboardInsightQuery,
   cards: readonly DashboardLayoutCard[],
-  createSuffix = () => crypto.randomUUID(),
+  createSuffix = createCardSuffix,
 ): DashboardLayoutCard {
   const id = uniqueId(component, cards, createSuffix());
   const size = DASHBOARD_COMPONENT_REGISTRY[component].defaultSize;
   if (component === "pieChart") return { id, component, size, config: { title, query } };
   return { id, component, size, config: { title, query } };
+}
+
+function createCardSuffix(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  // Public HTTP origins lack randomUUID, but still expose secure random bytes.
+  // These are card identifiers, never authentication tokens.
+  if (typeof globalThis.crypto?.getRandomValues !== "function") {
+    throw new Error("当前浏览器不支持创建卡片，请升级浏览器或使用 HTTPS 访问。");
+  }
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function applyLoadedLayout(
