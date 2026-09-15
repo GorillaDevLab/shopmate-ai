@@ -228,6 +228,7 @@ function ReadyLayoutEditor({
               ),
             });
             interactions.announce("AI 组件已加入草稿，请点击“完成并保存”");
+            onAssistantOpenChange(false);
           }}
         />
       )}

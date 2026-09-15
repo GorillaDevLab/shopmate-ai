@@ -21,10 +21,36 @@ export async function generateDashboardInsight(
   question: string,
   kind: "pie" | "report",
 ): Promise<DashboardInsightPreviewResponse> {
-  const payload = await postInsight("preview", { question: question.trim(), kind });
+  const payload = await requestPreview({ question: question.trim(), kind });
   const parsed = DashboardInsightPreviewResponseSchema.safeParse(payload);
   if (!parsed.success) throw invalidResponse();
   return parsed.data;
+}
+
+async function requestPreview(body: {
+  question: string;
+  kind: "pie" | "report";
+}): Promise<unknown> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new DashboardInsightApiError(
+          "图表生成等待超时，结果尚未确认，未自动重试。再次提交可能产生费用。",
+          504,
+          false,
+        ),
+      );
+      controller.abort();
+    }, 180000);
+  });
+  try {
+    // Bound both response headers and body; late results must never add a card.
+    return await Promise.race([postInsight("preview", body, controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function executeDashboardInsight(
