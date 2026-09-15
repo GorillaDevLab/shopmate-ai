@@ -6,6 +6,7 @@ import { ChatPending } from "./chat-pending";
 import {
   useEffect,
   useRef,
+  useState,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
@@ -15,6 +16,8 @@ import {
 import { type ChatMessage, useChatSession } from "./chat-session";
 import { generateDashboardInsight } from "./dashboard-insight-api";
 import type { DashboardInsightPreviewResponse } from "@shopmate/contracts";
+import { DashboardPieChart } from "./dashboard-pie-chart";
+import { DashboardReportCard } from "./dashboard-report-card";
 
 const suggestions = [
   { label: "查看低库存", prompt: "最近哪些商品值得补货？" },
@@ -27,18 +30,25 @@ type AssistantProps = {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onInsightCreated?: (preview: DashboardInsightPreviewResponse) => void;
+  readonly isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
 };
 
-export function DashboardAiAssistant({ open, onOpenChange, onInsightCreated }: AssistantProps) {
+export function DashboardAiAssistant({
+  open,
+  onOpenChange,
+  onInsightCreated,
+  isInsightAdded,
+}: AssistantProps) {
+  const added = useRef(new Set<DashboardInsightPreviewResponse>());
   const chat = useChatSession({
     resolveMessage: async (prompt) => {
       const kind = insightKind(prompt);
       if (!kind || !onInsightCreated) return undefined;
       const preview = await generateDashboardInsight(prompt, kind);
-      onInsightCreated(preview);
       return {
         role: "assistant",
-        content: "已加入看板草稿，可撤销或删除。保存后将在其他设备恢复。",
+        content: "分析已完成。可以先查看结果，再决定是否加入看板。",
+        insightPreview: preview,
       };
     },
   });
@@ -79,7 +89,15 @@ export function DashboardAiAssistant({ open, onOpenChange, onInsightCreated }: A
           onKeyDown={(event) => closeOnEscape(event, onOpenChange)}
         >
           <AssistantHeader onClose={() => onOpenChange(false)} />
-          {conversation && <Conversation messages={chat.messages} isSending={chat.isSending} />}
+          {conversation && (
+            <Conversation
+              messages={chat.messages}
+              isSending={chat.isSending}
+              added={added.current}
+              onAdd={onInsightCreated}
+              isInsightAdded={isInsightAdded}
+            />
+          )}
           <AssistantComposer chat={chat} inputRef={inputRef} />
         </dialog>
       )}
@@ -107,7 +125,19 @@ function AssistantHeader({ onClose }: { onClose: () => void }) {
   );
 }
 
-function Conversation({ messages, isSending }: { messages: ChatMessage[]; isSending: boolean }) {
+function Conversation({
+  messages,
+  isSending,
+  added,
+  onAdd,
+  isInsightAdded,
+}: {
+  messages: ChatMessage[];
+  isSending: boolean;
+  added: Set<DashboardInsightPreviewResponse>;
+  onAdd?: (preview: DashboardInsightPreviewResponse) => void;
+  isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
+}) {
   return (
     <div className="ai-assistant-conversation" aria-live="polite">
       {messages.map((message, index) => (
@@ -117,10 +147,67 @@ function Conversation({ messages, isSending }: { messages: ChatMessage[]; isSend
           ) : (
             message.content
           )}
+          {message.insightPreview && onAdd && (
+            <InsightPreview
+              preview={message.insightPreview}
+              added={added}
+              onAdd={onAdd}
+              currentlyAdded={isInsightAdded?.(message.insightPreview)}
+            />
+          )}
         </div>
       ))}
       {isSending && <ChatPending />}
     </div>
+  );
+}
+
+function InsightPreview({
+  preview,
+  added,
+  onAdd,
+  currentlyAdded,
+}: {
+  preview: DashboardInsightPreviewResponse;
+  added: Set<DashboardInsightPreviewResponse>;
+  onAdd: (preview: DashboardInsightPreviewResponse) => void;
+  currentlyAdded?: boolean;
+}) {
+  const [isAdded, setIsAdded] = useState(added.has(preview));
+  const [error, setError] = useState("");
+  const disabled = currentlyAdded ?? isAdded;
+  const empty =
+    preview.result.kind === "pie" && !preview.result.slices.some((slice) => slice.value > 0);
+  const add = () => {
+    if (disabled) return;
+    try {
+      onAdd(preview);
+      added.add(preview);
+      setIsAdded(true);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "暂时无法加入看板，分析结果已保留。");
+    }
+  };
+  return (
+    <section className="ai-insight-preview" aria-label="分析结果预览">
+      {preview.result.kind === "pie" ? (
+        <DashboardPieChart result={preview.result} />
+      ) : (
+        <DashboardReportCard result={preview.result} />
+      )}
+      {!empty && (
+        <button type="button" disabled={disabled} onClick={add}>
+          {disabled ? "已加入看板草稿" : "加入看板并查看"}
+        </button>
+      )}
+      <p>
+        {empty
+          ? "请调整日期或筛选条件，当前结果不生成空白组件。"
+          : "加入后可撤销或删除；点击看板上的“完成并保存”后才会保存。"}
+      </p>
+      {error && <p role="alert">{error}</p>}
+    </section>
   );
 }
 

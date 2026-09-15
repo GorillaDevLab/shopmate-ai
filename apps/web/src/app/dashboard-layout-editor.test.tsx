@@ -39,7 +39,7 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("DashboardLayoutEditor", () => {
-  it("生成饼图后关闭遮罩，加入可见草稿且不自动保存", async () => {
+  it("先预览，再主动加入可见草稿，复用结果且不自动保存", async () => {
     const result = {
       kind: "pie" as const,
       title: "测试销售占比",
@@ -76,12 +76,22 @@ describe("DashboardLayoutEditor", () => {
       target: { value: "生成饼图" },
     });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    const add = await screen.findByRole("button", { name: "加入看板并查看" });
+    expect(screen.getByRole("dialog", { name: "AI 经营助手" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "测试销售占比" })).toBeInTheDocument();
+    fireEvent.click(add);
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "AI 经营助手" })).not.toBeInTheDocument(),
     );
     expect(await screen.findByRole("heading", { name: "测试销售占比" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "完成并保存" })).toBeInTheDocument();
     expect(api.saveDashboardLayout).not.toHaveBeenCalled();
+    expect(insights.executeDashboardInsight).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "完成并保存" }));
+    await waitFor(() => expect(api.saveDashboardLayout).toHaveBeenCalledTimes(1));
+    const savedCards = vi.mocked(api.saveDashboardLayout).mock.calls[0][0].layout.cards;
+    expect(savedCards.at(-1)).toMatchObject({ component: "pieChart", config: { query } });
+    expect(JSON.stringify(savedCards)).not.toContain('"slices"');
   });
   it("重新渲染期间保持同一个快捷键监听器", async () => {
     const addListener = vi.spyOn(window, "addEventListener");

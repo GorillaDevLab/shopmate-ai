@@ -1,6 +1,10 @@
 "use client";
 
-import type { ProductCopyOutput, ProductCopyRequest } from "@shopmate/contracts";
+import type {
+  ProductCopyOutput,
+  ProductCopyRequest,
+  DashboardInsightPreviewResponse,
+} from "@shopmate/contracts";
 import { useRef, useState } from "react";
 
 import { sendChatMessage } from "./chat-api";
@@ -9,6 +13,7 @@ export type ChatMessage = {
   readonly role: "user" | "assistant";
   readonly content: string;
   readonly productCopy?: ProductCopyOutput;
+  readonly insightPreview?: DashboardInsightPreviewResponse;
 };
 
 type ChatFailure = {

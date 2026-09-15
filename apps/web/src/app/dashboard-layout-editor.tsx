@@ -4,6 +4,7 @@ import type {
   AnalyticsDashboardResponse,
   DashboardLayoutCard,
   DashboardLayoutSize,
+  DashboardInsightResult,
 } from "@shopmate/contracts";
 import { DASHBOARD_COMPONENT_REGISTRY } from "@shopmate/contracts";
 import {
@@ -106,6 +107,7 @@ function ReadyLayoutEditor({
 }: EditorProps & { persistence: Persistence }) {
   const { state, dispatch } = persistence;
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [initialResults, setInitialResults] = useState<Record<string, DashboardInsightResult>>({});
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const gridRef = useRef<HTMLElement>(null);
   const interactions = useCardInteractions(state, dispatch, gridRef);
@@ -167,6 +169,7 @@ function ReadyLayoutEditor({
         />
         <LayoutMessage state={state} onRetrySave={persistence.save} onReload={persistence.reload} />
         <DashboardGrid
+          initialResults={initialResults}
           data={data}
           periodLabel={periodLabel}
           state={state}
@@ -189,14 +192,16 @@ function ReadyLayoutEditor({
         }}
         onAddInsight={(component, preview) => {
           interactions.prepareAnimation();
+          const card = createInsightDashboardCard(
+            component,
+            preview.result.title,
+            preview.query,
+            state.draft.cards,
+          );
+          setInitialResults((results) => ({ ...results, [card.id]: preview.result }));
           dispatch({
             type: "cardAdded",
-            card: createInsightDashboardCard(
-              component,
-              preview.result.title,
-              preview.query,
-              state.draft.cards,
-            ),
+            card,
           });
           setGalleryOpen(false);
           interactions.announce("AI 组件已加入草稿，请点击“完成并保存”");
@@ -213,19 +218,24 @@ function ReadyLayoutEditor({
         <DashboardAiAssistant
           open={assistantOpen}
           onOpenChange={onAssistantOpenChange}
+          isInsightAdded={(preview) =>
+            state.draft.cards.some((card) => initialResults[card.id] === preview.result)
+          }
           onInsightCreated={(preview) => {
             if (state.draft.cards.length >= 24) throw new Error("看板最多包含 24 张卡片");
             const component = preview.result.kind === "pie" ? "pieChart" : "report";
+            const card = createInsightDashboardCard(
+              component,
+              preview.result.title,
+              preview.query,
+              state.draft.cards,
+            );
+            setInitialResults((results) => ({ ...results, [card.id]: preview.result }));
             dispatch({ type: "modeChanged", mode: "edit" });
             interactions.prepareAnimation();
             dispatch({
               type: "cardAdded",
-              card: createInsightDashboardCard(
-                component,
-                preview.result.title,
-                preview.query,
-                state.draft.cards,
-              ),
+              card,
             });
             interactions.announce("AI 组件已加入草稿，请点击“完成并保存”");
             onAssistantOpenChange(false);
@@ -241,12 +251,14 @@ function ReadyLayoutEditor({
 }
 
 function DashboardGrid({
+  initialResults,
   data,
   periodLabel,
   state,
   gridRef,
   interactions,
 }: {
+  initialResults: Record<string, DashboardInsightResult>;
   data: AnalyticsDashboardResponse;
   periodLabel: string;
   state: LayoutEditorState;
@@ -277,7 +289,7 @@ function DashboardGrid({
           }
           interactions={interactions}
         >
-          {renderCard(card, data, periodLabel)}
+          {renderCard(card, data, periodLabel, initialResults[card.id])}
         </DashboardCard>
       ))}
     </section>
@@ -941,6 +953,7 @@ function renderCard(
   card: DashboardLayoutCard,
   data: AnalyticsDashboardResponse,
   periodLabel: string,
+  initialResult?: DashboardInsightResult,
 ): ReactNode {
   if (card.component === "metric") {
     const metric = data.metrics.find((candidate) => candidate.key === card.config.metric) ?? {
@@ -962,7 +975,7 @@ function renderCard(
     );
   }
   if (card.component === "pieChart" || card.component === "report") {
-    return <DashboardInsightCard query={card.config.query} />;
+    return <DashboardInsightCard query={card.config.query} initialResult={initialResult} />;
   }
   return <HotProductsPanel items={data.products.slice(0, card.config.limit)} />;
 }

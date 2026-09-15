@@ -1,7 +1,7 @@
 "use client";
 
 import type { DashboardInsightQuery, DashboardInsightResult } from "@shopmate/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { executeDashboardInsight } from "./dashboard-insight-api";
 import { DashboardPieChart } from "./dashboard-pie-chart";
@@ -12,20 +12,45 @@ type InsightState =
   | { status: "ready"; result: DashboardInsightResult }
   | { status: "error"; message: string };
 
-export function DashboardInsightCard({ query }: { query: DashboardInsightQuery }) {
+export function DashboardInsightCard({
+  query,
+  initialResult,
+}: {
+  query: DashboardInsightQuery;
+  initialResult?: DashboardInsightResult;
+}) {
+  const initial = useRef({ key: JSON.stringify(query), result: initialResult });
   const [reloadKey, setReloadKey] = useState(0);
-  const [state, setState] = useState<InsightState>({ status: "loading" });
+  const [state, setState] = useState<InsightState>(
+    initialResult ? { status: "ready", result: initialResult } : { status: "loading" },
+  );
   const retry = useCallback(() => {
     setState({ status: "loading" });
     setReloadKey((key) => key + 1);
   }, []);
 
   useEffect(() => {
+    // Preview already executed this query; layout edits must not run it again.
+    if (
+      reloadKey === 0 &&
+      initial.current.result &&
+      initial.current.key === JSON.stringify(query)
+    ) {
+      setState({ status: "ready", result: initial.current.result });
+      return;
+    }
     const controller = new AbortController();
+    setState({ status: "loading" });
     void executeDashboardInsight(query, controller.signal).then(
-      (result) => setState({ status: "ready", result }),
+      (result) => {
+        if (!controller.signal.aborted) setState({ status: "ready", result });
+      },
       (error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === "AbortError")
+        )
+          return;
         setState({ status: "error", message: safeMessage(error) });
       },
     );

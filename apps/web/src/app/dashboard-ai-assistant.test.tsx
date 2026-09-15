@@ -95,7 +95,7 @@ describe("看板悬浮 AI 助手", () => {
     expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
   });
 
-  it("饼图请求直接加入草稿并提示可撤销", async () => {
+  it("无数据时展示空态，不创建空白组件", async () => {
     const onInsightCreated = vi.fn();
     insightApi.generateDashboardInsight.mockResolvedValue({
       query: { visualization: "pie" },
@@ -109,10 +109,60 @@ describe("看板悬浮 AI 助手", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
 
-    expect(
-      await screen.findByText("已加入看板草稿，可撤销或删除。保存后将在其他设备恢复。"),
-    ).toBeInTheDocument();
-    expect(onInsightCreated).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("所选范围暂无可展示数据")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "加入看板并查看" })).not.toBeInTheDocument();
+    expect(onInsightCreated).not.toHaveBeenCalled();
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("加入失败保留预览；成功后重新打开也不能重复加入", async () => {
+    const onInsightCreated = vi.fn().mockImplementationOnce(() => {
+      throw new Error("看板最多包含 24 张卡片");
+    });
+    insightApi.generateDashboardInsight.mockResolvedValue({
+      query: { visualization: "pie" },
+      result: {
+        kind: "pie",
+        title: "销售占比",
+        summary: "近30天",
+        unit: "currencyMinor",
+        slices: [{ key: "p", label: "商品", value: 100 }],
+      },
+    });
+    const view = render(
+      <DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onInsightCreated} />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+      target: { value: "生成饼图" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    fireEvent.click(await screen.findByRole("button", { name: "加入看板并查看" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("24 张卡片");
+    expect(screen.getByRole("heading", { name: "销售占比" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "加入看板并查看" }));
+    view.rerender(
+      <DashboardAiAssistant
+        open={false}
+        onOpenChange={vi.fn()}
+        onInsightCreated={onInsightCreated}
+      />,
+    );
+    view.rerender(
+      <DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onInsightCreated} />,
+    );
+    expect(screen.getByRole("button", { name: "已加入看板草稿" })).toBeDisabled();
+    expect(onInsightCreated).toHaveBeenCalledTimes(2);
+    view.rerender(
+      <DashboardAiAssistant
+        open
+        onOpenChange={vi.fn()}
+        onInsightCreated={onInsightCreated}
+        isInsightAdded={() => false}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "加入看板并查看" }));
+    expect(onInsightCreated).toHaveBeenCalledTimes(3);
+    expect(insightApi.generateDashboardInsight).toHaveBeenCalledTimes(1);
     expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
 });
