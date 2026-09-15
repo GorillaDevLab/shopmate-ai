@@ -4,7 +4,7 @@ import type { DashboardInsightQuery, DashboardInsightResult } from "@shopmate/co
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { executeDashboardInsight } from "./dashboard-insight-api";
-import { DashboardPieChart } from "./dashboard-pie-chart";
+import { DashboardComparisonChart } from "./dashboard-comparison-chart";
 import { DashboardReportCard } from "./dashboard-report-card";
 
 type InsightState =
@@ -59,7 +59,15 @@ export function DashboardInsightCard({
 
   if (state.status === "loading") return <InsightLoading />;
   if (state.status === "error") return <InsightError message={state.message} onRetry={retry} />;
-  if (state.result.kind === "pie") return <DashboardPieChart result={state.result} />;
+  if (state.result.kind === "pie")
+    return (
+      <DashboardComparisonChart
+        key={JSON.stringify(query)}
+        result={state.result}
+        allowDonut={query.metric !== "averageOrderValue"}
+        initialView={query.groupBy === "store" || query.groupBy === "platform" ? "bar" : "donut"}
+      />
+    );
   return <DashboardReportCard result={state.result} />;
 }
 

@@ -5,8 +5,7 @@ import { useState, type ReactNode } from "react";
 
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
 import { MetricGrid } from "./metric-card";
-import { ThemeSettings } from "./theme-settings";
-import { LogoutButton } from "./logout-button";
+import { DashboardNavigation } from "./dashboard-navigation";
 import { MonitoringRuleManager } from "./monitoring-rule-manager";
 import { NotificationCenter } from "./notification-center";
 
@@ -35,15 +34,13 @@ export function Dashboard({
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [monitoringOpen, setMonitoringOpen] = useState(false);
   return (
-    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
-      <div className="mx-auto w-full max-w-[1440px]">
-        <DashboardHeader
-          ready={visibleState === "ready"}
-          assistantOpen={assistantOpen}
-          onOpenAssistant={() => setAssistantOpen(true)}
-          monitoringOpen={monitoringOpen}
-          onOpenMonitoring={() => setMonitoringOpen(true)}
-        />
+    <main className="workspace-layout min-h-dvh bg-app-bg text-app-text">
+      <DashboardNavigation
+        onAssistant={() => setAssistantOpen(true)}
+        onMonitoring={() => setMonitoringOpen(true)}
+      />
+      <div className="workspace-content">
+        <DashboardHeader ready={visibleState === "ready"} />
         <section
           id="main-content"
           className={`mt-8 lg:mt-4 ${isRefreshing ? "dashboard-refreshing" : ""}`}
@@ -85,29 +82,11 @@ export function Dashboard({
   );
 }
 
-function DashboardHeader({
-  ready,
-  assistantOpen,
-  onOpenAssistant,
-  monitoringOpen,
-  onOpenMonitoring,
-}: {
-  ready: boolean;
-  assistantOpen: boolean;
-  onOpenAssistant: () => void;
-  monitoringOpen: boolean;
-  onOpenMonitoring: () => void;
-}) {
+function DashboardHeader({ ready }: { ready: boolean }) {
   return (
     <header className="flex items-center justify-between gap-3 border-b border-app-line pb-3">
-      <a
-        className="inline-flex min-h-11 items-center gap-3 rounded-full focus-ring"
-        href="#main-content"
-      >
-        <span className="grid size-9 place-items-center rounded-xl bg-brand text-lg font-bold text-white">
-          S
-        </span>
-        <span className="text-base font-bold tracking-tight">ShopMate AI</span>
+      <a className="workspace-breadcrumb focus-ring" href="#main-content">
+        工作台 <span aria-hidden="true">/</span> 经营分析
       </a>
       <div className="flex items-center gap-4 text-right">
         <div className="hidden sm:block">
@@ -118,30 +97,6 @@ function DashboardHeader({
         </div>
         <div className="flex items-center gap-2">
           <NotificationCenter enabled={ready} />
-          <button
-            type="button"
-            className="inline-flex min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-2 text-sm font-semibold hover:bg-brand-soft sm:px-3"
-            aria-haspopup="dialog"
-            aria-expanded={monitoringOpen}
-            aria-label="经营监听"
-            onClick={onOpenMonitoring}
-          >
-            <span aria-hidden="true" className="sm:hidden">
-              ◎
-            </span>
-            <span className="hidden sm:inline">经营监听</span>
-          </button>
-          <button
-            type="button"
-            className="hidden min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:bg-brand-soft sm:inline-flex"
-            aria-haspopup="dialog"
-            aria-expanded={assistantOpen}
-            onClick={onOpenAssistant}
-          >
-            AI 助手
-          </button>
-          <LogoutButton />
-          <ThemeSettings />
         </div>
       </div>
     </header>

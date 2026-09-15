@@ -22,6 +22,51 @@ const query = {
 } as const;
 
 describe("AI 看板组件生成服务", () => {
+  it("模型工具声明门店、渠道分组和筛选结构，并传入当前商家目录", async () => {
+    const storeQuery = { ...query, groupBy: "store" };
+    const provider = scriptedProvider(storeQuery);
+    const catalog = [{ id: "s1", name: "朝阳店", platform: "OFFLINE" }];
+    const executor = {
+      catalog: vi.fn().mockResolvedValue(catalog),
+      execute: vi.fn().mockResolvedValue({
+        kind: "pie",
+        title: "门店销售额",
+        summary: "近30天",
+        unit: "currencyMinor",
+        slices: [],
+      }),
+    };
+    await new DashboardInsightService(provider, executor).preview(context, {
+      question: "各门店销售额",
+      kind: "pie",
+    });
+    expect(executor.catalog).toHaveBeenCalledWith(context);
+    expect(provider.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining(JSON.stringify(catalog)),
+          }),
+        ]),
+        tools: [
+          expect.objectContaining({
+            inputSchema: expect.objectContaining({
+              properties: expect.objectContaining({
+                groupBy: expect.objectContaining({
+                  enum: expect.arrayContaining(["store", "platform"]),
+                }),
+                filters: expect.objectContaining({
+                  items: expect.objectContaining({ required: ["field", "operator", "values"] }),
+                }),
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(executor.execute).toHaveBeenCalledWith(context, storeQuery);
+  });
   it("严格校验模型 DSL 后在服务端身份范围执行", async () => {
     const provider = scriptedProvider(query);
     const executor = {

@@ -9,6 +9,7 @@ import type { ToolInvocationContext } from "../tools/tool-registry.js";
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
 import { getInsightMetric } from "./dashboard-insight-registry.js";
 import { validateDashboardInsightQuery } from "./dashboard-insight-validator.js";
+import { StoreSalesReader } from "./store-sales-reader.js";
 
 interface DashboardReader {
   summarize(
@@ -71,7 +72,12 @@ export class DashboardInsightExecutor {
     private readonly dashboard: DashboardReader,
     private readonly performance: PerformanceReader,
     private readonly inventory: InventoryReader,
+    private readonly stores: Pick<StoreSalesReader, "catalog" | "read"> = new StoreSalesReader(),
   ) {}
+
+  catalog(context: ToolInvocationContext) {
+    return this.stores.catalog(context);
+  }
 
   async execute(
     context: ToolInvocationContext,
@@ -79,6 +85,29 @@ export class DashboardInsightExecutor {
   ): Promise<DashboardInsightResult> {
     const query = validateDashboardInsightQuery(rawQuery);
     assertReadPermissions(context, query);
+    if (
+      query.dataset === "sales" &&
+      (query.groupBy === "store" ||
+        query.groupBy === "platform" ||
+        query.filters.some((filter) => filter.field === "store" || filter.field === "platform"))
+    ) {
+      const result = pieResult(query, await this.stores.read(context, query));
+      return DashboardInsightResultSchema.parse(
+        query.visualization === "pie"
+          ? result
+          : {
+              kind: "report",
+              title: "门店渠道经营报告",
+              summary: result.summary,
+              highlights: ["仅统计已支付订单；未分配门店的数据单独列示。"],
+              metrics: result.slices.slice(0, 8).map((slice) => ({
+                label: slice.label,
+                value:
+                  result.unit === "currencyMinor" ? formatCurrency(slice.value) : `${slice.value}`,
+              })),
+            },
+      );
+    }
     const result =
       query.visualization === "report"
         ? await this.report(context, query)
@@ -218,9 +247,25 @@ interface PieSlice {
 }
 
 function insightTitle(query: DashboardInsightQuery): string {
-  const metric = query.metric === "unitsSold" ? "销量" : "销售额";
-  const dimension = query.groupBy === "date" ? "日期" : query.groupBy === "sku" ? "SKU" : "商品";
-  return `${dimension}${metric}占比`;
+  const metric = {
+    revenue: "销售额",
+    unitsSold: "销量",
+    orderCount: "订单量",
+    averageOrderValue: "客单价",
+    inventory: "库存",
+    productCount: "商品数",
+  }[query.metric];
+  const dimension =
+    query.groupBy === "store"
+      ? "门店"
+      : query.groupBy === "platform"
+        ? "渠道"
+        : query.groupBy === "date"
+          ? "日期"
+          : query.groupBy === "sku"
+            ? "SKU"
+            : "商品";
+  return `${dimension}${metric}${query.metric === "averageOrderValue" ? "对比" : "占比"}`;
 }
 
 function reportMetrics(metrics: SalesMetrics) {
