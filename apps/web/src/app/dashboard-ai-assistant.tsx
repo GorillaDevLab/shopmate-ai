@@ -39,7 +39,7 @@ export function DashboardAiAssistant({
   onInsightCreated,
   isInsightAdded,
 }: AssistantProps) {
-  const added = useRef(new Set<DashboardInsightPreviewResponse>());
+  const [added, setAdded] = useState(() => new Set<DashboardInsightPreviewResponse>());
   const chat = useChatSession({
     resolveMessage: async (prompt) => {
       const kind = insightKind(prompt);
@@ -93,8 +93,15 @@ export function DashboardAiAssistant({
             <Conversation
               messages={chat.messages}
               isSending={chat.isSending}
-              added={added.current}
+              added={added}
               onAdd={onInsightCreated}
+              onRememberAdded={(preview) => {
+                setAdded((current) => {
+                  const next = new Set(current);
+                  next.add(preview);
+                  return next;
+                });
+              }}
               isInsightAdded={isInsightAdded}
             />
           )}
@@ -130,12 +137,14 @@ function Conversation({
   isSending,
   added,
   onAdd,
+  onRememberAdded,
   isInsightAdded,
 }: {
   messages: ChatMessage[];
   isSending: boolean;
-  added: Set<DashboardInsightPreviewResponse>;
+  added: ReadonlySet<DashboardInsightPreviewResponse>;
   onAdd?: (preview: DashboardInsightPreviewResponse) => void;
+  onRememberAdded: (preview: DashboardInsightPreviewResponse) => void;
   isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
 }) {
   return (
@@ -152,6 +161,7 @@ function Conversation({
               preview={message.insightPreview}
               added={added}
               onAdd={onAdd}
+              onRememberAdded={onRememberAdded}
               currentlyAdded={isInsightAdded?.(message.insightPreview)}
             />
           )}
@@ -166,11 +176,13 @@ function InsightPreview({
   preview,
   added,
   onAdd,
+  onRememberAdded,
   currentlyAdded,
 }: {
   preview: DashboardInsightPreviewResponse;
-  added: Set<DashboardInsightPreviewResponse>;
+  added: ReadonlySet<DashboardInsightPreviewResponse>;
   onAdd: (preview: DashboardInsightPreviewResponse) => void;
+  onRememberAdded: (preview: DashboardInsightPreviewResponse) => void;
   currentlyAdded?: boolean;
 }) {
   const [isAdded, setIsAdded] = useState(added.has(preview));
@@ -182,7 +194,7 @@ function InsightPreview({
     if (disabled) return;
     try {
       onAdd(preview);
-      added.add(preview);
+      onRememberAdded(preview);
       setIsAdded(true);
       setError("");
     } catch (cause) {
