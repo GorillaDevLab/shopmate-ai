@@ -3,6 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { sendChatMessage } from "./chat-api";
 
 describe("sendChatMessage", () => {
+  it("校验失败不误导用户缩小范围或反复付费重试", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ code: "AI_RESPONSE_REJECTED", retryable: false }), {
+        status: 502,
+      }),
+    );
+    await expect(sendChatMessage("2")).rejects.toMatchObject({
+      message: "回复中的数据未能核实，已拦截。请联系管理员排查，避免反复提交产生费用。",
+    });
+  });
   beforeEach(() => vi.restoreAllMocks());
 
   it("将追问历史随认证请求发送", async () => {

@@ -26,6 +26,31 @@ const result = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Dashboard Insight API", () => {
+  it("生成请求卡住会释放等待且不自动重试", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(
+      (_url: string, options: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const assertion = expect(generateDashboardInsight("生成饼图", "pie")).rejects.toMatchObject({
+        retryable: false,
+        message: expect.stringContaining("超时"),
+      });
+      await vi.advanceTimersByTimeAsync(180001);
+      await assertion;
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("使用认证 Cookie 生成预览", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ query, result }), {
