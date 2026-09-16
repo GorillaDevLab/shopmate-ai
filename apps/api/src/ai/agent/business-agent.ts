@@ -337,13 +337,13 @@ function finalResult(state: AgentState, generation: LLMGenerationResult): Busine
   if (!containsChinese(content)) {
     return limitedResult(state, CHINESE_REQUIRED_ANSWER);
   }
-  if (!hasValidNumericEvidence(content, state)) {
-    logValidationRejection(content, state);
+  const normalizedContent = normalizeChineseBusinessNumbers(content, state.numericEvidence);
+  if (normalizedContent === null || !hasValidNumericEvidence(normalizedContent, state)) {
     return { ...limitedResult(state, SAFE_FAILURE_ANSWER), failureCode: "AI_RESPONSE_REJECTED" };
   }
   return {
     status: "completed",
-    answer: content,
+    answer: normalizedContent,
     usedTools: [...state.usedTools],
     rounds: state.rounds,
 
@@ -471,6 +471,112 @@ function addNumberEvidence(value: number, key: string, evidence: Set<string>): v
   }
 }
 
+function normalizeChineseBusinessNumbers(
+  value: string,
+  evidence: ReadonlySet<string>,
+): string | null {
+  let valid = true;
+
+  const normalized = value.replace(
+    /([零〇一二两三四五六七八九十百千万亿]+)(元|单|件|个|笔|台|天|款|%)/gu,
+    (match, numeral: string, unit: string) => {
+      const parsed = chineseNumeralToNumber(numeral);
+      if (parsed === null) {
+        valid = false;
+        return match;
+      }
+
+      const canonical = canonicalNumber(String(parsed));
+      if (!evidence.has(canonical)) {
+        valid = false;
+        return match;
+      }
+
+      return `${canonical}${unit}`;
+    },
+  );
+
+  return valid ? normalized : null;
+}
+
+function chineseNumeralToNumber(value: string): number | null {
+  const digits: Readonly<Record<string, number>> = {
+    零: 0,
+    〇: 0,
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+
+  if (!/[十百千万亿]/u.test(value)) {
+    let result = "";
+
+    for (const character of value) {
+      const digit = digits[character];
+      if (digit === undefined) return null;
+      result += String(digit);
+    }
+
+    if (result.length === 0) return null;
+
+    const parsed = Number(result);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  const smallUnits: Readonly<Record<string, number>> = {
+    十: 10,
+    百: 100,
+    千: 1000,
+  };
+
+  let total = 0;
+  let section = 0;
+  let currentDigit: number | null = null;
+
+  for (const character of value) {
+    const digit = digits[character];
+    if (digit !== undefined) {
+      currentDigit = digit;
+      continue;
+    }
+
+    const smallUnit = smallUnits[character];
+    if (smallUnit !== undefined) {
+      section += (currentDigit ?? 1) * smallUnit;
+      currentDigit = null;
+      continue;
+    }
+
+    if (character === "万") {
+      section += currentDigit ?? 0;
+      total += (section === 0 ? 1 : section) * 10_000;
+      section = 0;
+      currentDigit = null;
+      continue;
+    }
+
+    if (character === "亿") {
+      section += currentDigit ?? 0;
+      total = (total + (section === 0 ? 1 : section)) * 100_000_000;
+      section = 0;
+      currentDigit = null;
+      continue;
+    }
+
+    return null;
+  }
+
+  const result = total + section + (currentDigit ?? 0);
+  return Number.isSafeInteger(result) ? result : null;
+}
+
 function hasValidNumericEvidence(content: string, state: AgentState): boolean {
   if (containsChineseBusinessNumber(content)) {
     return false;
@@ -483,31 +589,6 @@ function hasValidNumericEvidence(content: string, state: AgentState): boolean {
 
   const answerNumbers = answerNumericTokens(contentWithoutDates).map(canonicalNumber);
   return answerNumbers.every((number) => state.numericEvidence.has(number));
-}
-
-function logValidationRejection(content: string, state: AgentState): void {
-  if (process.env.NODE_ENV === "test") {
-    return;
-  }
-
-  const dates = content.match(/\\b\\d{4}-\\d{2}-\\d{2}\\b/gu) ?? [];
-  const unsupportedDates = [...new Set(dates.filter((date) => !state.dateEvidence.has(date)))];
-
-  const contentWithoutDates = content.replace(/\\b\\d{4}-\\d{2}-\\d{2}\\b/gu, "");
-  const answerNumbers = answerNumericTokens(contentWithoutDates).map(canonicalNumber);
-  const unsupportedNumbers = [
-    ...new Set(answerNumbers.filter((number) => !state.numericEvidence.has(number))),
-  ];
-
-  process.stderr.write(
-    `[BusinessAgent] validation_rejected ${JSON.stringify({
-      rounds: state.rounds,
-      usedTools: [...state.usedTools],
-      unsupportedNumbers,
-      unsupportedDates,
-      containsChineseBusinessNumber: containsChineseBusinessNumber(content),
-    })}\\n`,
-  );
 }
 
 function collectVerifiedDateEvidence(value: unknown, evidence: Set<string>, key = ""): void {
@@ -574,5 +655,5 @@ function canonicalNumber(value: string): string {
 }
 
 function containsChineseBusinessNumber(value: string): boolean {
-  return /[零〇一二两三四五六七八九十百千万亿]+(?:元|单|件|个|笔|台|天|%)/u.test(value);
+  return /[零〇一二两三四五六七八九十百千万亿]+(?:元|单|件|个|笔|台|天|款|%)/u.test(value);
 }
