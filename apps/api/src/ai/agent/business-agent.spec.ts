@@ -599,6 +599,46 @@ describe("BusinessAgent", () => {
     });
   });
 
+  it("允许与工具证据一致的中文订单数量并规范为阿拉伯数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("订单数为五单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "查询订单数",
+      context,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "订单数为5单。",
+      usedTools: ["get_sales_summary"],
+      rounds: 2,
+    });
+  });
+
+  it("允许与 items 数量一致的中文商品数量并规范为阿拉伯数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-inventory", "get_inventory_risks", {}),
+      finalResult("共有四款商品库存不足。"),
+    ]);
+    const agent = new BusinessAgent(provider, inventoryRegistry());
+
+    const result = await agent.run({
+      question: "最近哪些商品库存不足？",
+      context: inventoryContext,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "共有4款商品库存不足。",
+      usedTools: ["get_inventory_risks"],
+      rounds: 2,
+    });
+  });
+
   it("允许统计 items 数量但仍拒绝编造补货数量", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-inventory", "get_inventory_risks", {}),
