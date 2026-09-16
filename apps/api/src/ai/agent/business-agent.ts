@@ -339,6 +339,7 @@ function finalResult(state: AgentState, generation: LLMGenerationResult): Busine
   }
   const normalizedContent = normalizeChineseBusinessNumbers(content, state.numericEvidence);
   if (normalizedContent === null || !hasValidNumericEvidence(normalizedContent, state)) {
+    logValidationTokenDiagnostics(content, state);
     return { ...limitedResult(state, SAFE_FAILURE_ANSWER), failureCode: "AI_RESPONSE_REJECTED" };
   }
   return {
@@ -469,6 +470,45 @@ function addNumberEvidence(value: number, key: string, evidence: Set<string>): v
   if (key.endsWith("Ratio")) {
     evidence.add(canonicalNumber(String(value * 100)));
   }
+}
+
+function logValidationTokenDiagnostics(content: string, state: AgentState): void {
+  if (process.env.NODE_ENV === "test") return;
+
+  const chineseMatches = [
+    ...content.matchAll(/([零〇一二两三四五六七八九十百千万亿]+)(元|单|件|个|笔|台|天|款|%)/gu),
+  ].map((match) => {
+    const parsed = chineseNumeralToNumber(match[1] ?? "");
+    const canonical = parsed === null ? null : canonicalNumber(String(parsed));
+
+    return {
+      text: match[0],
+      parsed: canonical,
+      grounded: canonical !== null && state.numericEvidence.has(canonical),
+    };
+  });
+
+  const dates = content.match(/\b\d{4}-\d{2}-\d{2}\b/gu) ?? [];
+  const unsupportedDates = [...new Set(dates.filter((date) => !state.dateEvidence.has(date)))];
+
+  const withoutDates = content.replace(/\b\d{4}-\d{2}-\d{2}\b/gu, "");
+  const unsupportedNumbers = [
+    ...new Set(
+      answerNumericTokens(withoutDates)
+        .map(canonicalNumber)
+        .filter((number) => !state.numericEvidence.has(number)),
+    ),
+  ];
+
+  process.stderr.write(
+    `[BusinessAgent] validation_token_diagnostics ${JSON.stringify({
+      rounds: state.rounds,
+      usedTools: [...state.usedTools],
+      unsupportedNumbers,
+      unsupportedDates,
+      chineseBusinessNumbers: chineseMatches,
+    })}\n`,
+  );
 }
 
 function normalizeChineseBusinessNumbers(
