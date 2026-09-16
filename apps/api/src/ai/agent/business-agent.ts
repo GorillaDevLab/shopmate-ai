@@ -338,6 +338,7 @@ function finalResult(state: AgentState, generation: LLMGenerationResult): Busine
     return limitedResult(state, CHINESE_REQUIRED_ANSWER);
   }
   if (!hasValidNumericEvidence(content, state)) {
+    logValidationRejection(content, state);
     return { ...limitedResult(state, SAFE_FAILURE_ANSWER), failureCode: "AI_RESPONSE_REJECTED" };
   }
   return {
@@ -482,6 +483,31 @@ function hasValidNumericEvidence(content: string, state: AgentState): boolean {
 
   const answerNumbers = answerNumericTokens(contentWithoutDates).map(canonicalNumber);
   return answerNumbers.every((number) => state.numericEvidence.has(number));
+}
+
+function logValidationRejection(content: string, state: AgentState): void {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  const dates = content.match(/\\b\\d{4}-\\d{2}-\\d{2}\\b/gu) ?? [];
+  const unsupportedDates = [...new Set(dates.filter((date) => !state.dateEvidence.has(date)))];
+
+  const contentWithoutDates = content.replace(/\\b\\d{4}-\\d{2}-\\d{2}\\b/gu, "");
+  const answerNumbers = answerNumericTokens(contentWithoutDates).map(canonicalNumber);
+  const unsupportedNumbers = [
+    ...new Set(answerNumbers.filter((number) => !state.numericEvidence.has(number))),
+  ];
+
+  process.stderr.write(
+    `[BusinessAgent] validation_rejected ${JSON.stringify({
+      rounds: state.rounds,
+      usedTools: [...state.usedTools],
+      unsupportedNumbers,
+      unsupportedDates,
+      containsChineseBusinessNumber: containsChineseBusinessNumber(content),
+    })}\\n`,
+  );
 }
 
 function collectVerifiedDateEvidence(value: unknown, evidence: Set<string>, key = ""): void {
