@@ -282,15 +282,15 @@ describe("DashboardLayoutEditor", () => {
     enterEditMode();
     expect(card("metric-sales")).toHaveAttribute("data-size", "1x1");
     openCardMenu("销售额");
-    expect(screen.getByRole("menuitemradio", { name: "1 × 1" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitemradio", { name: "2 × 1" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "窄卡 · 高度自适应" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "宽卡 · 高度自适应" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitemradio", { name: "2 × 2" })).not.toBeInTheDocument();
     expect(screen.queryByText("整行")).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "下移" })).toBeInTheDocument();
     for (const button of screen.getAllByRole("button")) expect(button).toHaveAccessibleName();
     expect(
       within(card("metric-sales")).getByRole("slider", { name: "调整销售额卡片尺寸" }),
-    ).toHaveAttribute("aria-valuetext", "1 × 1");
+    ).toHaveAttribute("aria-valuetext", "窄卡 · 高度自适应");
   });
 });
 

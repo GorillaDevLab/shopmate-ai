@@ -14,7 +14,7 @@ describe("dashboard layout two-dimensional resizing", () => {
   });
 
   it("moves only between sizes allowed by the component", () => {
-    expect(adjacentAllowedSize("2x1", 1, ["2x1", "2x2"])).toBe("2x2");
+    expect(adjacentAllowedSize("2x1", 1, ["2x1", "2x2"])).toBe("2x1");
     expect(adjacentAllowedSize("2x1", -1, ["2x1", "2x2"])).toBe("2x1");
   });
 
@@ -36,7 +36,7 @@ describe("dashboard layout two-dimensional resizing", () => {
         unitSize: 160,
         allowedSizes: ["2x1", "2x2"],
       }),
-    ).toBe("2x2");
+    ).toBe("2x1");
   });
 
   it("keeps the current size when candidates are equally close", () => {
