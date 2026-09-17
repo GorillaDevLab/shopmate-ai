@@ -1630,12 +1630,19 @@ button:focus-visible {
 .workspace-layout {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  min-height: 100dvh;
 }
 .workspace-sidebar {
   width: 224px;
   height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
   position: sticky;
   top: 0;
+  align-self: start;
+  box-sizing: border-box;
+  overflow: hidden;
   padding: 24px 14px;
   border-right: 1px solid var(--app-line);
   background: var(--app-surface);
@@ -1842,6 +1849,10 @@ button:focus-visible {
     position: static;
     width: 100%;
     height: auto;
+    min-height: 0;
+    max-height: none;
+    align-self: auto;
+    overflow: visible;
     padding: 12px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--app-line);
