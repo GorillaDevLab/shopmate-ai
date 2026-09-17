@@ -40,10 +40,12 @@ import {
   type LayoutEditorState,
 } from "./dashboard-layout-state";
 import { animateCardReflow, captureCardRects, type CardRectMap } from "./dashboard-layout-motion";
+import { observeContentFit } from "./dashboard-content-fit";
 import {
   adjacentAllowedSize,
   footprintForSize,
   previewWidgetSize,
+  widthSizes,
 } from "./dashboard-layout-resize";
 import { DashboardWidgetGallery } from "./dashboard-widget-gallery";
 import { DashboardInsightCard } from "./dashboard-insight-card";
@@ -56,9 +58,9 @@ import { MetricCard } from "./metric-card";
 import { SalesTrend } from "./sales-trend";
 
 const sizeOptions = [
-  { value: "1x1", label: "1 × 1" },
-  { value: "2x1", label: "2 × 1" },
-  { value: "2x2", label: "2 × 2" },
+  { value: "1x1", label: "窄卡 · 高度自适应" },
+  { value: "2x1", label: "宽卡 · 高度自适应" },
+  { value: "2x2", label: "宽卡 · 高度自适应" },
 ] as const satisfies ReadonlyArray<{ value: DashboardLayoutSize; label: string }>;
 
 const metricLabels = {
@@ -273,6 +275,9 @@ function DashboardGrid({
   interactions: ReturnType<typeof useCardInteractions>;
 }) {
   const isEditing = state.mode === "edit";
+  useLayoutEffect(() => {
+    if (gridRef.current) return observeContentFit(gridRef.current);
+  }, [gridRef]);
   return (
     <section
       ref={gridRef}
@@ -633,7 +638,6 @@ function DashboardCard(props: DashboardCardProps) {
   const style = {
     ...materialVariables(settings.cards[card.id] ?? settings.widgets),
     "--widget-columns": footprint.columns,
-    "--widget-rows": footprint.rows,
   } as CSSProperties;
   return (
     <div
@@ -675,7 +679,7 @@ function CardControls(props: DashboardCardProps & { title: string; size: Dashboa
         ⠿
       </span>
       <span className="dashboard-size-readout" aria-hidden="true">
-        {sizeLabel(props.size)}
+        {footprintForSize(props.size).columns === 1 ? "窄卡" : "宽卡"}
       </span>
       <CardMoreMenu {...props} open={menuOpen} onOpenChange={setMenuOpen} />
     </div>
@@ -731,12 +735,13 @@ function CardMoreMenu(
       </button>
       {props.open && (
         <div role="menu" aria-label={`${props.title}更多操作`} className="layout-card-more-menu">
-          <p>调整大小</p>
+          <p>调整宽度 · 高度随内容变化</p>
           {sizeOptions
             .filter((option) =>
-              DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes.some(
-                (size) => size === option.value,
-              ),
+              widthSizes(
+                DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes,
+                props.card.size,
+              ).some((size) => size === option.value),
             )
             .map((option) => (
               <button
@@ -774,7 +779,10 @@ function CardMoreMenu(
 function CardResizeHandle(
   props: DashboardCardProps & { title: string; size: DashboardLayoutSize },
 ) {
-  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes;
+  const allowedSizes = widthSizes(
+    DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes,
+    props.size,
+  );
   const currentIndex = allowedSizes.findIndex((size) => size === props.size);
   return (
     <span
@@ -904,7 +912,9 @@ function updateResize(
   const session = sessionRef.current;
   if (!session || session.pointerId !== event.pointerId) return;
   const width = gridRef.current?.getBoundingClientRect().width ?? 0;
-  const columns = width >= 768 ? 4 : 2;
+  const columns = gridRef.current
+    ? getComputedStyle(gridRef.current).gridTemplateColumns.split(" ").filter(Boolean).length || 2
+    : 2;
   const unitSize = (width - 16 * (columns - 1)) / columns;
   const size = previewWidgetSize({
     startSize: session.startSize,
@@ -952,7 +962,10 @@ function resizeWithKeyboard(
   interactions: ReturnType<typeof useCardInteractions>,
 ) {
   if (event.key === "Escape") return interactions.cancelResize();
-  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes;
+  const allowedSizes = widthSizes(
+    DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes,
+    card.size,
+  );
   const nextSize = keyboardResizeTarget(event.key, card.size, allowedSizes);
   if (!nextSize) return;
   event.preventDefault();
