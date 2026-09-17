@@ -1,6 +1,10 @@
-# Interactive chart implementation
+# Interactive chart implementation plan
 
 > Execute using subagent-driven-development and TDD. Approved design: `docs/superpowers/specs/2026-09-17-interactive-chart-system-design.md`.
+
+**Goal:** Make generated charts accurate, interactive and reusable, with automatic and manual presentation selection.
+**Architecture:** Strict shared chart/query contracts feed tenant-scoped existing readers; reusable SVG chart components consume typed category/series results. Presentation preferences are independent of query identity and saved by the layout draft workflow.
+**Tech Stack:** TypeScript, Zod, NestJS, React/Next.js, Vitest, SVG and existing CSS tokens.
 
 ## Global Constraints
 
@@ -28,10 +32,26 @@ Own frontend presentation files in `apps/web/src/app/`: shared `dashboard-chart-
 
 Implement real SVG donut with center displayed-total/selected item, top5+other exact aggregation and expand, sorted bars with stable key colors and additive shares, focus/hover transient detail and click pin selection with deselect/reset. Shared number formatting, labels and robust zero/single/large numeric behavior. Nonadditive bar has no sum/share. Keep legacy public props compatible, expose optional controlled view and change callback; legacy standalone uses local state. A generic series component accepts new points/unit and supports line/area/bar with chronological sparse ticks, tooltip/reference and keyboard selection; integrate existing SalesTrend wrapper preserving heading and amount tests. Honest data geometry, no invented series. CSS motion one-shot and reduced-motion safe, vivid/calm styling and375px containment. Reuse primitive presentations across preview and saved cards. TDD behavior and data math, focused tests then web unit suite. Commit owned files. Report `.superpowers/sdd/charts-task-2-report.md`.
 
+Interfaces: `DashboardComparisonChart` retains `result`, `initialView?:"bar"|"donut"`, `allowDonut?:boolean`, adds `view?:"bar"|"pie"`, `onViewChange?:(view:"bar"|"pie")=>void`. `DashboardSeriesChart` in `dashboard-series-chart.tsx` takes `result:Extract<DashboardInsightResult,{kind:"series"}>`, `view?:"line"|"area"|"bar"`, `onViewChange?:(view:"line"|"area"|"bar")=>void`. `SalesTrend` retains points/periodLabel, adds `view?:"line"|"area"`, `onViewChange?:(view:"line"|"area")=>void`. Internal chart selection helpers and series drawing/control files may be separated by responsibility; keep each under300lines. Add CSS in `dashboard-charts.css` imported from globals.css. Read existing sales-trend tests, update obsolete assertion of zero buttons to accept new view controls but preserve date-slider assertion. Core TDD assertions: exact sum of top5+other, stable colors after reorder, hover leave restores pin, absent key resets selection, average has no percentage, 30points rendered in date order, area/line switches without data changes.
+
+Visual direction: refined business analytics within the existing user-chosen purple theme, not a new site theme. Compact segmented chart controls in one cohesive card (avoid stacked outer card borders); tabular values, quieter axis/secondary labels, clear ranked labels and restrained positive teal/amber companion colors. True ring with readable center, neutral Other bucket; wide card side-by-side ring/list, narrow card stacked without clipping. Calm uses subtle one-shot animation, vivid slightly richer glow. Use frontend-design skill to polish within these constraints, no image generation/remote assets required.
+
+- [ ] Write focused model/interaction tests before implementations; run `pnpm --filter @shopmate/web exec vitest run src/app/dashboard-chart-model.test.ts src/app/dashboard-insight-components.test.tsx src/app/sales-trend.test.tsx` to confirm RED.
+- [ ] Implement model then SVG interactions then shared wrapper using public interfaces above.
+- [ ] Run focused tests for GREEN and `pnpm --filter @shopmate/web test:unit` once; report any temporary Task3 discriminated-union errors separately.
+- [ ] Stage only owned files and commit `feat: add unified interactive business charts`.
+
 ## Task 3: Integrate AI recommendation and saved view
 
 Own frontend `dashboard-insight-api.ts`, `dashboard-insight-card.tsx`, `dashboard-ai-assistant.tsx`, `dashboard-widget-gallery.tsx`, `dashboard-layout-editor.tsx`, `dashboard-layout-state.ts`, intent helper(s) and tests. Build on previous exported interfaces/components.
 
 AI chart generation defaults auto, offer explicit compatible options and report. Single generate request; show chosen presentation/reason using deterministic safe query metadata, no second LLM call. Route series/category/report through unified components in gallery/chat/dashboard. View switches do not change query identity or call execute/generate. Saved-card changes enter/modify layout draft, explicit save persists config.view; cancel discards; re-open shows saved view. Legacy layouts render. Unsupported options disabled/absent with clear explanation. Loading/error/retry do not duplicate requests automatically. Preserve preview-confirm-add behavior.
+
+Consume Task2 public controlled component interfaces above and Task1 `getDashboardInsightViews(query)`. Add a shared `dashboard-insight-presentation.tsx` to select result component and render recommendation, and optional `dashboard-insight-intent.ts` to recognize chart requests (including line/area/bar and natural date/store comparisons) while leaving normal chat alone. Map every nonreport result to pieChart layout component. Preview selection must be carried into added config.view, not mutated query.visualization. Gallery switching categories must not show/add stale mismatched previews. Display safe Chinese400 compatibility reason; never expose raw server/provider errors. Main controller provides browser fixtures in output/playwright/chart-system-setup.js; do not invoke a real provider during QA.
+
+- [ ] Write failing tests for auto request, series render, view switch no fetch and explicit-save/discard before implementation.
+- [ ] Run focused Vitest tests, implement minimal wiring, re-run to GREEN.
+- [ ] Run `pnpm --filter @shopmate/web test:unit`, targeted ESLint/Prettier and web typecheck/build with isolated NEXT_DIST_DIR; controller handles browser QA and whole-repo gates.
+- [ ] Commit `feat: connect automatic chart choice and saved presentation`.
 
 TDD integration includes generated series, view switch no requests, dirty/save/discard, old layout fallback. Run all unit/type/lint/build checks and mocked browser at375/768/1440 both modes. No actual AI or DB. Record results in `.superpowers/sdd/charts-task-3-report.md`. Commit owned changes. Final whole-branch review and resolve findings before claiming completion.
