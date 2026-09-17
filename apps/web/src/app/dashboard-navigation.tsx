@@ -16,63 +16,65 @@ export function DashboardNavigation({ onAssistant, onMonitoring }: Props) {
   };
   return (
     <aside className="workspace-sidebar" data-collapsed={collapsed} data-mobile-open={mobileOpen}>
-      <div className="workspace-brand">
-        <span>S</span>
-        <strong>ShopMate AI</strong>
-      </div>
-      <button
-        className="workspace-mobile-toggle focus-ring"
-        aria-label={mobileOpen ? "关闭导航菜单" : "打开导航菜单"}
-        aria-controls={menuId}
-        aria-expanded={mobileOpen}
-        onClick={() => setMobileOpen(!mobileOpen)}
-      >
-        ☰ <span>导航菜单</span>
-      </button>
-      <div id={menuId} className="workspace-menu">
-        <p className="workspace-nav-label">经营工作台</p>
-        <nav aria-label="工作台主导航">
-          <a
-            href="#main-content"
-            aria-current="page"
-            title="经营看板"
-            onClick={() => setMobileOpen(false)}
-          >
-            <NavIcon kind="overview" />
-            <span>经营看板</span>
-          </a>
-          <button
-            type="button"
-            title="AI 助手"
-            aria-haspopup="dialog"
-            onClick={() => open(onAssistant)}
-          >
-            <NavIcon kind="ai" />
-            <span>AI 助手</span>
-          </button>
-          <button
-            type="button"
-            title="经营监听"
-            aria-haspopup="dialog"
-            onClick={() => open(onMonitoring)}
-          >
-            <NavIcon kind="monitor" />
-            <span>经营监听</span>
-          </button>
-        </nav>
-        <div className="workspace-settings">
-          <ThemeSettings />
-          <LogoutButton />
+      <div className="workspace-sidebar-inner">
+        <div className="workspace-brand">
+          <span>S</span>
+          <strong>ShopMate AI</strong>
         </div>
         <button
-          className="workspace-collapse focus-ring"
-          aria-expanded={!collapsed}
-          title={collapsed ? "展开侧栏" : "收起侧栏"}
-          onClick={() => setCollapsed(!collapsed)}
+          className="workspace-mobile-toggle focus-ring"
+          aria-label={mobileOpen ? "关闭导航菜单" : "打开导航菜单"}
+          aria-controls={menuId}
+          aria-expanded={mobileOpen}
+          onClick={() => setMobileOpen(!mobileOpen)}
         >
-          {collapsed ? "→" : "←"}
-          <span>{collapsed ? "展开侧栏" : "收起侧栏"}</span>
+          ☰ <span>导航菜单</span>
         </button>
+        <div id={menuId} className="workspace-menu">
+          <p className="workspace-nav-label">经营工作台</p>
+          <nav aria-label="工作台主导航">
+            <a
+              href="#main-content"
+              aria-current="page"
+              title="经营看板"
+              onClick={() => setMobileOpen(false)}
+            >
+              <NavIcon kind="overview" />
+              <span>经营看板</span>
+            </a>
+            <button
+              type="button"
+              title="AI 助手"
+              aria-haspopup="dialog"
+              onClick={() => open(onAssistant)}
+            >
+              <NavIcon kind="ai" />
+              <span>AI 助手</span>
+            </button>
+            <button
+              type="button"
+              title="经营监听"
+              aria-haspopup="dialog"
+              onClick={() => open(onMonitoring)}
+            >
+              <NavIcon kind="monitor" />
+              <span>经营监听</span>
+            </button>
+          </nav>
+          <div className="workspace-settings">
+            <ThemeSettings />
+            <LogoutButton />
+          </div>
+          <button
+            className="workspace-collapse focus-ring"
+            aria-expanded={!collapsed}
+            title={collapsed ? "展开侧栏" : "收起侧栏"}
+            onClick={() => setCollapsed(!collapsed)}
+          >
+            {collapsed ? "→" : "←"}
+            <span>{collapsed ? "展开侧栏" : "收起侧栏"}</span>
+          </button>
+        </div>
       </div>
     </aside>
   );
