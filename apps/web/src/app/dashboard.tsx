@@ -8,6 +8,8 @@ import { MetricGrid } from "./metric-card";
 import { DashboardNavigation } from "./dashboard-navigation";
 import { MonitoringRuleManager } from "./monitoring-rule-manager";
 import { NotificationCenter } from "./notification-center";
+import { AppearanceProvider } from "./appearance-provider";
+import { AppearanceAmbient, AppearanceControls } from "./appearance-controls";
 
 export type DashboardState = "ready" | "loading" | "empty" | "error";
 
@@ -21,7 +23,15 @@ interface DashboardProps {
   readonly periodLabel?: string;
 }
 
-export function Dashboard({
+export function Dashboard(props: DashboardProps) {
+  return (
+    <AppearanceProvider>
+      <DashboardWorkspace {...props} />
+    </AppearanceProvider>
+  );
+}
+
+function DashboardWorkspace({
   state = "loading",
   data,
   onRetry,
@@ -35,6 +45,7 @@ export function Dashboard({
   const [monitoringOpen, setMonitoringOpen] = useState(false);
   return (
     <main className="workspace-layout min-h-dvh bg-app-bg text-app-text">
+      <AppearanceAmbient />
       <DashboardNavigation
         onAssistant={() => setAssistantOpen(true)}
         onMonitoring={() => setMonitoringOpen(true)}
@@ -84,10 +95,11 @@ export function Dashboard({
 
 function DashboardHeader({ ready }: { ready: boolean }) {
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-app-line pb-3">
+    <header className="workspace-topbar flex items-center justify-between gap-3 border-b border-app-line pb-3">
       <a className="workspace-breadcrumb focus-ring" href="#main-content">
         工作台 <span aria-hidden="true">/</span> 经营分析
       </a>
+      <AppearanceControls />
       <div className="flex items-center gap-4 text-right">
         <div className="hidden sm:block">
           <p className="text-sm font-semibold">商家经营看板</p>
