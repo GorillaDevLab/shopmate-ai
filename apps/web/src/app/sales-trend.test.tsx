@@ -14,8 +14,22 @@ describe("销售趋势图", () => {
     fireEvent.change(slider, { target: { value: "9" } });
     expect(screen.getByRole("status")).toHaveTextContent("8月11日");
     expect(screen.getByRole("status")).toHaveTextContent("¥9.00");
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "折线图" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "所选时段销售趋势图" })).toBeInTheDocument();
+  });
+
+  it("switches line and area presentation without changing data", () => {
+    const changes: string[] = [];
+    render(
+      <SalesTrend
+        points={[{ date: "2026-08-31", revenueMinor: 12345 }]}
+        view="line"
+        onViewChange={(view) => changes.push(view)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "面积图" }));
+    expect(changes).toEqual(["area"]);
+    expect(screen.getByText("¥123.45")).toBeInTheDocument();
   });
   it("展示 API 原始日期与人民币金额", () => {
     render(
@@ -69,7 +83,7 @@ describe("销售趋势图", () => {
     const { rerender } = render(
       <SalesTrend points={[{ date: "2026-08-30", revenueMinor: 12345 }]} />,
     );
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: "8月30日，销售额 ¥123.45" }));
     rerender(<SalesTrend points={[{ date: "2026-08-31", revenueMinor: 67890 }]} />);
     expect(screen.getByRole("status")).toHaveTextContent("8月31日");
     expect(screen.getByRole("status")).toHaveTextContent("¥678.90");

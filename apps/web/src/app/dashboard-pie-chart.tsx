@@ -1,85 +1,115 @@
+"use client";
 import type { DashboardInsightResult } from "@shopmate/contracts";
-import type { CSSProperties } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  buildPieSlices,
+  chartColor,
+  formatChartShare,
+  formatChartValue,
+} from "./dashboard-chart-model";
+type Result = Extract<DashboardInsightResult, { kind: "pie" }>;
 
-type PieResult = Extract<DashboardInsightResult, { kind: "pie" }>;
-const colors = ["#6550d9", "#9988ef", "#3c8f88", "#d99a43", "#6384b9", "#b6708e"];
-
-export function DashboardPieChart({ result }: { result: PieResult }) {
+export function DashboardPieChart({ result }: { result: Result }) {
+  const [expanded, setExpanded] = useState(false);
+  const [pinned, setPinned] = useState<string>();
+  const [hovered, setHovered] = useState<string>();
+  const slices = buildPieSlices(result.slices, expanded);
   const total = result.slices.reduce((sum, slice) => sum + slice.value, 0);
-  if (total === 0) return <InsightEmpty title={result.title} summary={result.summary} />;
-  const segments = createSegments(
-    result.slices.map((slice) => slice.value),
-    total,
-  );
-  const description = result.slices
-    .map((slice) => `${slice.label} ${formatPercent(slice.value, total)}`)
-    .join("，");
+  useEffect(() => {
+    if (pinned && !slices.some(({ key }) => key === pinned)) setPinned(undefined);
+  }, [pinned, slices]);
+  if (!result.slices.length || total === 0)
+    return (
+      <ChartShell result={result}>
+        <p>所选范围暂无可展示数据</p>
+      </ChartShell>
+    );
+  const active = slices.find(({ key }) => key === (hovered ?? pinned));
+  let cursor = 0;
   return (
-    <section className="dashboard-insight dashboard-pie-card">
-      <InsightHeader title={result.title} summary={result.summary} />
+    <ChartShell result={result}>
       <div className="dashboard-pie-content">
-        <div
-          className="dashboard-pie-visual"
-          role="img"
-          aria-label={`${result.title}：${description}`}
-          style={{ "--pie-segments": segments } as CSSProperties}
-        />
+        <div className="dashboard-donut-wrap">
+          <svg
+            className="dashboard-donut"
+            viewBox="0 0 120 120"
+            role="img"
+            aria-label={`${result.title}：${slices.map((s) => `${s.label} ${formatChartShare(s.value, total)}`).join("，")}`}
+          >
+            {slices.map((slice) => {
+              const length = (slice.value / total) * 100;
+              const offset = -cursor;
+              cursor += length;
+              return (
+                <circle
+                  key={slice.key}
+                  cx="60"
+                  cy="60"
+                  r="46"
+                  pathLength="100"
+                  fill="none"
+                  stroke={chartColor(slice.key)}
+                  strokeWidth="16"
+                  strokeDasharray={`${length} ${100 - length}`}
+                  strokeDashoffset={offset}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`图形：${slice.label} ${formatChartShare(slice.value, total)}`}
+                  aria-pressed={pinned === slice.key}
+                  onMouseEnter={() => setHovered(slice.key)}
+                  onMouseLeave={() => setHovered(undefined)}
+                  onFocus={() => setHovered(slice.key)}
+                  onBlur={() => setHovered(undefined)}
+                  onClick={() => setPinned(pinned === slice.key ? undefined : slice.key)}
+                />
+              );
+            })}
+          </svg>
+          <div className="dashboard-donut-center" data-testid="chart-center-detail">
+            <span>{active?.label ?? "当前展示合计"}</span>
+            <strong>{formatChartValue(active?.value ?? total, result.unit)}</strong>
+          </div>
+        </div>
         <ul className="dashboard-pie-legend">
-          {result.slices.map((slice, index) => (
+          {slices.map((slice) => (
             <li key={slice.key}>
-              <span
-                className="dashboard-pie-dot"
-                style={{ background: colors[index % colors.length] }}
-              />
-              <span>{slice.label}</span>
-              <strong>{formatValue(slice.value, result.unit)}</strong>
-              <small>{formatPercent(slice.value, total)}</small>
+              <button
+                type="button"
+                aria-pressed={pinned === slice.key}
+                onClick={() => setPinned(pinned === slice.key ? undefined : slice.key)}
+                onMouseEnter={() => setHovered(slice.key)}
+                onMouseLeave={() => setHovered(undefined)}
+                onFocus={() => setHovered(slice.key)}
+                onBlur={() => setHovered(undefined)}
+              >
+                <i style={{ background: chartColor(slice.key) }} />
+                <span>{slice.label}</span>
+                <strong>{formatChartValue(slice.value, result.unit)}</strong>
+                <small>{formatChartShare(slice.value, total)}</small>
+              </button>
             </li>
           ))}
         </ul>
       </div>
+      {result.slices.length > 5 && (
+        <button className="chart-expand" type="button" onClick={() => setExpanded(!expanded)}>
+          {expanded ? "收起" : `展开全部 ${result.slices.length} 项`}
+        </button>
+      )}
+    </ChartShell>
+  );
+}
+function ChartShell({ result, children }: { result: Result; children: ReactNode }) {
+  return (
+    <section className="dashboard-insight dashboard-pie-card">
+      <header className="dashboard-insight-header">
+        <div>
+          <h3>{result.title}</h3>
+          <p>{result.summary}</p>
+        </div>
+        <span>AI 分析</span>
+      </header>
+      {children}
     </section>
   );
-}
-
-function InsightHeader({ title, summary }: { title: string; summary: string }) {
-  return (
-    <header className="dashboard-insight-header">
-      <div>
-        <h3>{title}</h3>
-        <p>{summary}</p>
-      </div>
-      <span>AI 分析</span>
-    </header>
-  );
-}
-
-function InsightEmpty({ title, summary }: { title: string; summary: string }) {
-  return (
-    <section className="dashboard-insight dashboard-insight-empty">
-      <InsightHeader title={title} summary={summary} />
-      <p>所选范围暂无可展示数据</p>
-    </section>
-  );
-}
-
-function createSegments(values: readonly number[], total: number): string {
-  let cursor = 0;
-  return values
-    .map((value, index) => {
-      const start = cursor;
-      cursor += (value / total) * 100;
-      return `${colors[index % colors.length]} ${start}% ${cursor}%`;
-    })
-    .join(", ");
-}
-
-function formatValue(value: number, unit: PieResult["unit"]): string {
-  if (unit === "currencyMinor") return `¥${(value / 100).toFixed(2)}`;
-  if (unit === "ratio") return `${(value * 100).toFixed(1)}%`;
-  return value.toLocaleString("zh-CN");
-}
-
-function formatPercent(value: number, total: number): string {
-  return `${((value / total) * 100).toFixed(0)}%`;
 }

@@ -55,4 +55,51 @@ describe("经营对比图", () => {
     );
     expect(screen.getByText("所选范围暂无可展示数据")).toBeInTheDocument();
   });
+
+  it("hover leave restores pinned detail and missing key resets selection", () => {
+    const result = {
+      kind: "pie" as const,
+      title: "门店销售额",
+      summary: "近 30 天",
+      unit: "count" as const,
+      slices: [
+        { key: "a", label: "朝阳店", value: 6 },
+        { key: "b", label: "海淀店", value: 4 },
+      ],
+    };
+    const { rerender } = render(<DashboardComparisonChart initialView="donut" result={result} />);
+    fireEvent.click(screen.getByRole("button", { name: /^朝阳店/ }));
+    fireEvent.mouseEnter(screen.getByRole("button", { name: /^海淀店/ }));
+    expect(screen.getByTestId("chart-center-detail")).toHaveTextContent("海淀店");
+    fireEvent.mouseLeave(screen.getByRole("button", { name: /^海淀店/ }));
+    expect(screen.getByTestId("chart-center-detail")).toHaveTextContent("朝阳店");
+    rerender(
+      <DashboardComparisonChart
+        initialView="donut"
+        result={{ ...result, slices: [result.slices[1]!] }}
+      />,
+    );
+    expect(screen.getByTestId("chart-center-detail")).toHaveTextContent("当前展示合计");
+  });
+
+  it("supports controlled presentation without mutating the result", () => {
+    const changes: string[] = [];
+    const result = {
+      kind: "pie" as const,
+      title: "门店销售额",
+      summary: "近 30 天",
+      unit: "count" as const,
+      slices: [{ key: "a", label: "朝阳店", value: 6 }],
+    };
+    render(
+      <DashboardComparisonChart
+        result={result}
+        view="bar"
+        onViewChange={(view) => changes.push(view)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "环形图" }));
+    expect(changes).toEqual(["pie"]);
+    expect(result.slices).toEqual([{ key: "a", label: "朝阳店", value: 6 }]);
+  });
 });
