@@ -104,6 +104,53 @@ describe("受限经营查询执行器", () => {
     });
   });
 
+  it("日期查询保留全部 30 个真实日期并按日期升序返回序列", async () => {
+    const dailyTrend = Array.from({ length: 30 }, (_, index) => ({
+      date: `2026-08-${String(30 - index).padStart(2, "0")}`,
+      revenueCents: 30 - index,
+    }));
+    const dashboard = stubDashboard();
+    dashboard.summarize.mockResolvedValue({
+      recent: {
+        metrics: { revenueCents: 0, orderCount: 0, unitsSold: 0, averageOrderValueCents: 0 },
+        dailyTrend,
+      },
+    });
+    const executor = new DashboardInsightExecutor(dashboard, stubPerformance(), stubInventory());
+    const result = await executor.execute(context, {
+      ...productQuery,
+      groupBy: "date",
+      order: "desc",
+      visualization: "line",
+    });
+    expect(result).toMatchObject({ kind: "series" });
+    if (result.kind !== "series") throw new Error("expected series");
+    expect(result.points).toHaveLength(30);
+    expect(result.points[0]?.date).toBe("2026-08-01");
+    expect(result.points[29]?.date).toBe("2026-08-30");
+  });
+
+  it("带商品筛选的日期销售查询不忽略筛选并走受限读取器", async () => {
+    const stores = {
+      catalog: vi.fn(),
+      read: vi.fn().mockResolvedValue([{ key: "2026-08-01", label: "2026-08-01", value: 100 }]),
+    };
+    const executor = new DashboardInsightExecutor(
+      stubDashboard(),
+      stubPerformance(),
+      stubInventory(),
+      stores,
+    );
+    const filtered = {
+      ...productQuery,
+      groupBy: "date",
+      visualization: "line",
+      filters: [{ field: "product", operator: "equals", values: ["p-1"] }],
+    } as const;
+    await expect(executor.execute(context, filtered)).resolves.toMatchObject({ kind: "series" });
+    expect(stores.read).toHaveBeenCalledWith(context, filtered);
+  });
+
   it("根据销售摘要生成纯结构化报告", async () => {
     const executor = new DashboardInsightExecutor(
       stubDashboard(),

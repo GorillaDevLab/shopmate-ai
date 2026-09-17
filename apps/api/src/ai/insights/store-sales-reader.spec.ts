@@ -45,6 +45,7 @@ describe("store sales analytics", () => {
           ...query,
           metric: "averageOrderValue",
           aggregation: "average",
+          visualization: "bar",
         }),
       ),
     ).resolves.toEqual([{ key: "unassigned", label: "未分配门店", value: 5500 }]);
@@ -88,6 +89,7 @@ describe("store sales analytics", () => {
           ...query,
           metric: "averageOrderValue",
           aggregation: "average",
+          visualization: "bar",
         }),
       ),
     ).resolves.toEqual([{ key: "unassigned", label: "未分配门店", value: 2468 }]);

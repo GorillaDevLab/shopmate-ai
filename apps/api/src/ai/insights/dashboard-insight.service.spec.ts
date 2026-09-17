@@ -22,6 +22,65 @@ const query = {
 } as const;
 
 describe("AI 看板组件生成服务", () => {
+  it("auto 只调用一次模型并按日期形状确定为折线图", async () => {
+    const dateQuery = { ...query, groupBy: "date", visualization: "line" } as const;
+    const provider = scriptedProvider(dateQuery);
+    const executor = {
+      execute: vi.fn().mockResolvedValue({
+        kind: "series",
+        title: "每日销售额",
+        summary: "近 30 天",
+        unit: "currencyMinor",
+        points: [],
+      }),
+    };
+    await expect(
+      new DashboardInsightService(provider, executor).preview(context, {
+        question: "最近每天销售额趋势",
+        kind: "auto",
+      }),
+    ).resolves.toMatchObject({ query: dateQuery, result: { kind: "series" } });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto 类目构成意图确定为饼图，普通类目确定为柱状图", async () => {
+    for (const [question, visualization] of [
+      ["各商品销售额占比构成", "pie"],
+      ["各商品销售额对比", "bar"],
+    ] as const) {
+      const planned = { ...query, visualization };
+      const provider = scriptedProvider(planned);
+      const executor = {
+        execute: vi.fn().mockResolvedValue({
+          kind: "pie",
+          title: "商品销售额",
+          summary: "近 30 天",
+          unit: "currencyMinor",
+          slices: [],
+        }),
+      };
+      await new DashboardInsightService(provider, executor).preview(context, {
+        question,
+        kind: "auto",
+      });
+      expect(executor.execute).toHaveBeenCalledWith(context, planned);
+    }
+  });
+
+  it("显式不兼容图表给出清晰中文 400", async () => {
+    const provider = scriptedProvider({ ...query, visualization: "line" });
+    const service = new DashboardInsightService(provider, { execute: vi.fn() });
+    await expect(
+      service.preview(context, { question: "商品销售额", kind: "line" }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        message: expect.stringContaining("请选择兼容视图"),
+        allowedViews: ["pie", "bar"],
+      },
+    });
+  });
   it("模型工具声明门店、渠道分组和筛选结构，并传入当前商家目录", async () => {
     const storeQuery = { ...query, groupBy: "store" };
     const provider = scriptedProvider(storeQuery);

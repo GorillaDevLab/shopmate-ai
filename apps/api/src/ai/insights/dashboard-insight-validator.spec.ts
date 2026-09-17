@@ -30,4 +30,31 @@ describe("AI 查询语义校验", () => {
   ])("拒绝未注册的组合或尚未接入的数据源 %#", (input) => {
     expect(() => validateDashboardInsightQuery(input)).toThrow();
   });
+
+  it("拒绝超过 366 天、平均值饼图和不兼容的显式图表", () => {
+    expect(() =>
+      validateDashboardInsightQuery({
+        ...query,
+        dateRange: { start: "2025-01-01", end: "2026-01-02" },
+      }),
+    ).toThrow("366");
+    expect(() =>
+      validateDashboardInsightQuery({
+        ...query,
+        metric: "averageOrderValue",
+        aggregation: "average",
+        groupBy: "store",
+        visualization: "pie",
+      }),
+    ).toThrow("平均值");
+    expect(() => validateDashboardInsightQuery({ ...query, visualization: "line" })).toThrow(
+      "日期",
+    );
+  });
+
+  it("保留旧版按日期饼图读取兼容性", () => {
+    expect(
+      validateDashboardInsightQuery({ ...query, groupBy: "date", visualization: "pie" }),
+    ).toMatchObject({ groupBy: "date", visualization: "pie" });
+  });
 });

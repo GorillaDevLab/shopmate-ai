@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { DashboardInsightQuerySchema } from "../ai/dashboard-insight.schema.js";
+import {
+  DashboardChartViewSchema,
+  DashboardInsightQuerySchema,
+  getDashboardInsightViews,
+} from "../ai/dashboard-insight.schema.js";
 
 export const DashboardLayoutVersionSchema = z.literal(3, {
   error: "不支持的看板布局版本",
@@ -32,7 +36,7 @@ export const DASHBOARD_COMPONENT_REGISTRY = {
   inventoryAlerts: { label: "库存提醒", defaultSize: "2x1", allowedSizes: ["2x1", "2x2"] },
   hotProducts: { label: "热销商品", defaultSize: "2x1", allowedSizes: ["2x1", "2x2"] },
   pieChart: {
-    label: "AI 饼图",
+    label: "AI 图表",
     defaultSize: "1x1",
     allowedSizes: ["1x1", "2x1", "2x2"],
   },
@@ -51,6 +55,7 @@ const metricConfigSchema = z.strictObject({
 });
 const salesTrendConfigSchema = z.strictObject({
   range: z.enum(["7d", "30d", "custom"]),
+  view: z.enum(["line", "area"]).optional(),
 });
 const inventoryAlertsConfigSchema = z.strictObject({
   limit: z.number().int().min(1).max(10),
@@ -59,10 +64,17 @@ const hotProductsConfigSchema = z.strictObject({
   limit: z.number().int().min(1).max(10),
 });
 const insightTitleSchema = z.string().trim().min(1).max(120);
-const pieChartConfigSchema = z.strictObject({
-  title: insightTitleSchema,
-  query: DashboardInsightQuerySchema.refine((query) => query.visualization === "pie"),
-});
+const pieChartConfigSchema = z
+  .strictObject({
+    title: insightTitleSchema,
+    query: DashboardInsightQuerySchema.refine((query) => query.visualization !== "report"),
+    view: DashboardChartViewSchema.exclude(["report"]).optional(),
+  })
+  .superRefine(({ query, view }, context) => {
+    if (view && !getDashboardInsightViews(query).some((candidate) => candidate === view)) {
+      context.addIssue({ code: "custom", path: ["view"], message: "图表视图与查询不兼容" });
+    }
+  });
 const reportConfigSchema = z.strictObject({
   title: insightTitleSchema,
   query: DashboardInsightQuerySchema.refine((query) => query.visualization === "report"),

@@ -121,12 +121,17 @@ export {
   DashboardInsightExecuteRequestSchema,
   DashboardInsightExecuteResponseSchema,
   DashboardInsightGenerateRequestSchema,
+  DashboardInsightKindSchema,
   DashboardInsightMetricSchema,
   DashboardInsightPreviewResponseSchema,
   DashboardInsightQuerySchema,
   DashboardInsightResultSchema,
+  DashboardChartViewSchema,
+  getDashboardInsightViews,
 } from "./ai/dashboard-insight.schema.js";
 export type {
+  DashboardChartView,
+  DashboardInsightKind,
   DashboardInsightGenerateRequest,
   DashboardInsightExecuteRequest,
   DashboardInsightExecuteResponse,

@@ -10,7 +10,10 @@ import {
   DashboardInsightExecuteResponseSchema,
   DashboardInsightPreviewResponseSchema,
   DashboardInsightQuerySchema,
+  getDashboardInsightViews,
+  type DashboardInsightKind,
   type DashboardInsightPreviewResponse,
+  type DashboardInsightQuery,
   type DashboardInsightResult,
   type JsonObject,
   type LLMProvider,
@@ -62,7 +65,11 @@ export class DashboardInsightService {
         temperature: 0,
         maxOutputTokens: 1000,
       });
-      const query = readQuery(generation.message.toolCalls, request.data.kind);
+      const query = readQuery(
+        generation.message.toolCalls,
+        request.data.kind,
+        request.data.question,
+      );
       const result = await this.executor.execute(context, query);
       return DashboardInsightPreviewResponseSchema.parse({ query, result });
     } catch (error: unknown) {
@@ -90,7 +97,7 @@ const DASHBOARD_INSIGHT_TOOL: LLMToolDefinition = {
   inputSchema: queryJsonSchema(),
 };
 
-function prompt(question: string, kind: "pie" | "report"): string {
+function prompt(question: string, kind: DashboardInsightKind): string {
   return `当前上海日期：${shanghaiToday()}\n目标组件：${kind}\n经营问题：${question}`;
 }
 
@@ -108,12 +115,30 @@ function shanghaiToday(now = new Date()): string {
 
 function readQuery(
   calls: readonly { readonly name: string; readonly arguments: JsonObject }[] | undefined,
-  kind: "pie" | "report",
+  kind: DashboardInsightKind,
+  question = "",
 ) {
   const candidate = calls?.find((call) => call.name === TOOL_NAME)?.arguments;
-  const query = validateDashboardInsightQuery(DashboardInsightQuerySchema.parse(candidate));
-  if (query.visualization !== kind) throw new Error("组件类型与查询不一致");
+  const parsed = DashboardInsightQuerySchema.parse(candidate);
+  const visualization = kind === "auto" ? resolveAutoVisualization(parsed, question) : kind;
+  if (
+    kind !== "auto" &&
+    !getDashboardInsightViews({ ...parsed, visualization }).some((view) => view === kind)
+  ) {
+    throwIncompatibleChart(kind, { ...parsed, visualization });
+  }
+  const query = validateDashboardInsightQuery({ ...parsed, visualization });
   return query;
+}
+
+function resolveAutoVisualization(
+  query: DashboardInsightQuery,
+  question: string,
+): Exclude<DashboardInsightKind, "auto"> {
+  if (query.groupBy === null) return "report";
+  if (query.groupBy === "date") return "line";
+  if (query.aggregation === "average") return "bar";
+  return /占比|构成|份额/u.test(question) ? "pie" : "bar";
 }
 
 function queryJsonSchema(): JsonObject {
@@ -158,7 +183,7 @@ function queryJsonSchema(): JsonObject {
       filters: { type: "array", maxItems: 8, items: filterJsonSchema() },
       order: { type: "string", enum: ["asc", "desc"] },
       limit: { type: "integer", minimum: 1, maximum: 12 },
-      visualization: { type: "string", enum: ["pie", "report"] },
+      visualization: { type: "string", enum: ["pie", "bar", "line", "area", "report"] },
     },
   };
 }
@@ -181,6 +206,18 @@ function throwInvalidRequest(): never {
     statusCode: 400,
     code: "INVALID_DASHBOARD_INSIGHT_REQUEST",
     message: "AI 看板请求格式无效",
+    retryable: false,
+  });
+}
+
+function throwIncompatibleChart(kind: string, query: DashboardInsightQuery): never {
+  const allowedViews = getDashboardInsightViews(query);
+  const guidance = `请选择兼容视图：${allowedViews.join("、")}`;
+  throw new BadRequestException({
+    statusCode: 400,
+    code: "INSIGHT_VIEW_INCOMPATIBLE",
+    message: `${kind} 与当前查询不兼容：${guidance}`,
+    allowedViews,
     retryable: false,
   });
 }

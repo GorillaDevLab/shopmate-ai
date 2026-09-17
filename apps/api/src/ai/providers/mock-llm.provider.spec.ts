@@ -193,6 +193,28 @@ describe("MockLLMProvider", () => {
     });
   });
 
+  it("为 Demo 的 auto 日期与分类问题生成对应查询形状", async () => {
+    const provider = new MockLLMProvider();
+    const date = await provider.generate({
+      messages: [
+        { role: "system", content: "只能调用 propose_dashboard_insight。" },
+        { role: "user", content: "目标组件：auto\n经营问题：最近每天销售额趋势" },
+      ],
+    });
+    expect(date.message.toolCalls?.[0]).toMatchObject({
+      arguments: { groupBy: "date", visualization: "line" },
+    });
+    const category = await provider.generate({
+      messages: [
+        { role: "system", content: "只能调用 propose_dashboard_insight。" },
+        { role: "user", content: "目标组件：bar\n经营问题：各商品销售额对比" },
+      ],
+    });
+    expect(category.message.toolCalls?.[0]).toMatchObject({
+      arguments: { groupBy: "product", visualization: "bar" },
+    });
+  });
+
   it("没有 user message 时安全返回固定兜底回答", async () => {
     const provider = new MockLLMProvider();
 
