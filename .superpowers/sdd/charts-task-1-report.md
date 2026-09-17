@@ -62,3 +62,16 @@ GREEN / final verification commands/results:
 - `pnpm --filter @shopmate/contracts typecheck` and `pnpm --filter @shopmate/api typecheck` → passed.
 - `pnpm --filter @shopmate/api test:unit` → 47 passed, 1 skipped; 332 passed, 1 skipped.
 - `pnpm --filter @shopmate/contracts lint` and `pnpm --filter @shopmate/api lint` → passed.
+
+## Final consistency fix (2026-09-18)
+
+- Grouped `products/productCount` queries now have no compatible presentation views (`[]`); ungrouped products queries still expose `report`.
+- Auto and explicit grouped-products report requests both stop before execution with `INSIGHT_VIEW_INCOMPATIBLE`, `allowedViews: []`, and the fixed safe message `商品计数目前仅支持不分组的报告，请取消分组后生成报告`.
+
+TDD and verification:
+
+- RED `pnpm --filter @shopmate/contracts exec vitest run src/ai/dashboard-insight.spec.ts` → 1 expected helper failure; 19 passed.
+- RED `pnpm --filter @shopmate/api exec vitest run src/ai/insights/dashboard-insight.service.spec.ts` → 2 expected failures (auto advertised report; explicit report became 503); 8 passed.
+- GREEN contracts focused → 1 file, 20 passed.
+- The first API GREEN invocation still loaded the pre-build workspace contract output. After `pnpm --filter @shopmate/contracts typecheck` rebuilt contracts, the identical API focused command passed: 1 file, 10 passed.
+- Contracts/API typecheck passed; contracts/API lint passed.

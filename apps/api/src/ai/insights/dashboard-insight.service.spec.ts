@@ -100,9 +100,39 @@ describe("AI 看板组件生成服务", () => {
       }),
     ).rejects.toMatchObject({
       status: 400,
-      response: { code: "INSIGHT_VIEW_INCOMPATIBLE", allowedViews: ["report"] },
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        message: "商品计数目前仅支持不分组的报告，请取消分组后生成报告",
+        allowedViews: [],
+      },
     });
     expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("显式 report 的 products 分组查询返回同一安全 400", async () => {
+    const planned = {
+      ...query,
+      dataset: "products",
+      metric: "productCount",
+      aggregation: "count",
+      groupBy: "product",
+      visualization: "report",
+    } as const;
+    const executor = { execute: vi.fn() };
+    await expect(
+      new DashboardInsightService(scriptedProvider(planned), executor).preview(context, {
+        question: "按商品统计商品数报告",
+        kind: "report",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        message: "商品计数目前仅支持不分组的报告，请取消分组后生成报告",
+        allowedViews: [],
+      },
+    });
     expect(executor.execute).not.toHaveBeenCalled();
   });
 

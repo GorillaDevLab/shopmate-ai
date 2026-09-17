@@ -210,11 +210,14 @@ function throwInvalidRequest(): never {
 
 function throwIncompatibleChart(kind: string, query: DashboardInsightQuery): never {
   const allowedViews = getDashboardInsightViews(query);
-  const guidance = `请选择兼容视图：${allowedViews.join("、")}`;
+  const message =
+    query.dataset === "products" && query.groupBy !== null
+      ? "商品计数目前仅支持不分组的报告，请取消分组后生成报告"
+      : `${kind} 与当前查询不兼容：请选择兼容视图：${allowedViews.join("、")}`;
   throw new BadRequestException({
     statusCode: 400,
     code: "INSIGHT_VIEW_INCOMPATIBLE",
-    message: `${kind} 与当前查询不兼容：${guidance}`,
+    message,
     allowedViews,
     retryable: false,
   });

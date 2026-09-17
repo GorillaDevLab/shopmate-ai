@@ -98,7 +98,7 @@ describe("AI 经营查询 DSL", () => {
         aggregation: "count",
         visualization: "bar",
       }),
-    ).toEqual(["report"]);
+    ).toEqual([]);
   });
 
   it("饼图与报告结果只能携带受限结构化内容", () => {
