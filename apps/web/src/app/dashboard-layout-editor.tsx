@@ -47,6 +47,8 @@ import {
 } from "./dashboard-layout-resize";
 import { DashboardWidgetGallery } from "./dashboard-widget-gallery";
 import { DashboardInsightCard } from "./dashboard-insight-card";
+import { useAppearance } from "./appearance-provider";
+import { materialVariables } from "./appearance-model";
 import { DashboardAiAssistant } from "./dashboard-ai-assistant";
 import { HotProductsPanel } from "./hot-products-panel";
 import { LowInventoryPanel } from "./low-inventory-panel";
@@ -107,6 +109,11 @@ function ReadyLayoutEditor({
 }: EditorProps & { persistence: Persistence }) {
   const { state, dispatch } = persistence;
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const { setCards } = useAppearance();
+  useEffect(() => {
+    setCards(state.draft.cards.map((card) => ({ id: card.id, title: cardTitle(card) })));
+    return () => setCards([]);
+  }, [state.draft.cards, setCards]);
   const [initialResults, setInitialResults] = useState<Record<string, DashboardInsightResult>>({});
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const gridRef = useRef<HTMLElement>(null);
@@ -618,21 +625,24 @@ type DashboardCardProps = {
 };
 
 function DashboardCard(props: DashboardCardProps) {
+  const { settings } = useAppearance();
   const { card, isEditing, isDragging, isResizing, previewSize, children } = props;
   const title = cardTitle(card);
   const currentSize = previewSize ?? card.size;
   const footprint = footprintForSize(currentSize);
   const style = {
+    ...materialVariables(settings.cards[card.id] ?? settings.widgets),
     "--widget-columns": footprint.columns,
     "--widget-rows": footprint.rows,
   } as CSSProperties;
   return (
     <div
       data-dashboard-card-id={card.id}
+      data-component={card.component}
       data-size={card.size}
       data-preview-size={previewSize}
       style={style}
-      className={`dashboard-layout-card min-w-0 ${isEditing ? "is-editing" : ""} ${isDragging ? "is-dragging" : ""} ${isResizing ? "is-resizing has-size-preview" : ""}`}
+      className={`dashboard-layout-card appearance-surface min-w-0 ${isEditing ? "is-editing" : ""} ${isDragging ? "is-dragging" : ""} ${isResizing ? "is-resizing has-size-preview" : ""}`}
       onDragOver={(event) => isEditing && event.preventDefault()}
       onDragEnter={() => handleDragEnter(props)}
       onDrop={(event) => {

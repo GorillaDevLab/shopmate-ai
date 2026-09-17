@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { applyTheme, themeValue, THEME_STORAGE_ERROR, type Theme } from "./theme";
+import { useAppearance } from "./appearance-provider";
 
 export function ThemeSettings() {
   const [open, setOpen] = useState(false);
@@ -48,6 +49,7 @@ function SettingsIcon() {
 }
 
 function AppearanceDialog({ onClose }: { onClose: () => void }) {
+  const appearance = useAppearance();
   const dialog = useRef<HTMLDialogElement>(null);
   const [theme, setTheme] = useState(() => themeValue(document.documentElement.dataset.theme));
   const [error, setError] = useState(() =>
@@ -70,6 +72,19 @@ function AppearanceDialog({ onClose }: { onClose: () => void }) {
     >
       <AppearanceHeading onClose={() => dialog.current?.close()} />
       <AppearanceChoices theme={theme} onChange={choose} error={error} />
+      {appearance.settings.mode === "vivid" && (
+        <button
+          type="button"
+          className="appearance-studio-trigger"
+          onClick={() => {
+            dialog.current?.close();
+            onClose();
+            appearance.openStudio();
+          }}
+        >
+          打开灵动装饰面板 ↗
+        </button>
+      )}
     </dialog>
   );
 }
