@@ -90,6 +90,15 @@ describe("AI 经营查询 DSL", () => {
     expect(getDashboardInsightViews({ ...query, groupBy: null, visualization: "report" })).toEqual([
       "report",
     ]);
+    expect(
+      getDashboardInsightViews({
+        ...query,
+        dataset: "products",
+        metric: "productCount",
+        aggregation: "count",
+        visualization: "bar",
+      }),
+    ).toEqual(["report"]);
   });
 
   it("饼图与报告结果只能携带受限结构化内容", () => {
@@ -136,6 +145,27 @@ describe("AI 经营查询 DSL", () => {
         summary: "错误顺序",
         unit: "currencyMinor",
         points: [points[1], points[0]],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("拒绝 367 个序列点和重复日期", () => {
+    const points = Array.from({ length: 367 }, (_, index) => ({
+      date: new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10),
+      value: index,
+    }));
+    const result = {
+      kind: "series",
+      title: "每日销售额",
+      summary: "边界校验",
+      unit: "currencyMinor",
+      points,
+    } as const;
+    expect(DashboardInsightResultSchema.safeParse(result).success).toBe(false);
+    expect(
+      DashboardInsightResultSchema.safeParse({
+        ...result,
+        points: [points[0], points[0]],
       }).success,
     ).toBe(false);
   });

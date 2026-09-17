@@ -4,6 +4,7 @@ import { getInsightDimension, getInsightMetric } from "./dashboard-insight-regis
 
 interface ValidationOptions {
   readonly allowLegacyAveragePie?: boolean;
+  readonly allowLegacyGroupedReport?: boolean;
 }
 
 export function validateDashboardInsightQuery(
@@ -32,7 +33,11 @@ export function validateDashboardInsightQuery(
   ) {
     throw new Error("折线图和面积图必须按日期分组");
   }
-  if (query.visualization === "report" && query.groupBy !== null) {
+  if (
+    query.visualization === "report" &&
+    query.groupBy !== null &&
+    !options.allowLegacyGroupedReport
+  ) {
     throw new Error("报告查询不能包含分组维度");
   }
   if (query.visualization !== "report" && query.groupBy === null) {

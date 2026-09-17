@@ -83,9 +83,12 @@ export class DashboardInsightExecutor {
     context: ToolInvocationContext,
     rawQuery: unknown,
   ): Promise<DashboardInsightResult> {
-    // Saved v3 layouts may contain average pie queries. They remain executable and
-    // return the category slice shape so the client can present them as bars.
-    const query = validateDashboardInsightQuery(rawQuery, { allowLegacyAveragePie: true });
+    // Saved v3 layouts may contain average pies or grouped reports. They remain
+    // executable; planning never receives these compatibility exceptions.
+    const query = validateDashboardInsightQuery(rawQuery, {
+      allowLegacyAveragePie: true,
+      allowLegacyGroupedReport: true,
+    });
     assertReadPermissions(context, query);
     if (
       query.dataset === "sales" &&

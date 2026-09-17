@@ -43,3 +43,22 @@ GREEN / verification:
 - No missing dates, zero values, averages, or shares are fabricated.
 - Existing unrelated/untracked output and the concurrently modified plan document were left unstaged.
 - Source unit suites only were run; no real integration suites or controller dev server were touched.
+
+## Review fixes (2026-09-18)
+
+- Added `allowLegacyGroupedReport` as an explicit validator compatibility option and enabled it only in the saved-query executor. New planning still rejects grouped reports; legacy store/platform reports continue through the scoped reader.
+- `getDashboardInsightViews` now returns only `report` for the unsupported `products` dataset chart shape. Auto planning detects that mismatch before execution and returns the stable `INSIGHT_VIEW_INCOMPATIBLE` 400 with `allowedViews: ["report"]`; it does not invent product catalog aggregation semantics.
+- Added explicit contract regressions for 367 points and duplicate dates. Both boundary assertions passed immediately because the existing series schema already enforced max 366 and strict ascending uniqueness.
+
+TDD RED commands/results:
+
+- `pnpm --filter @shopmate/contracts exec vitest run src/ai/dashboard-insight.spec.ts` → 1 expected failure: products helper advertised `pie,bar` instead of `report`; 19 passed.
+- `pnpm --filter @shopmate/api exec vitest run src/ai/insights/dashboard-insight-validator.spec.ts src/ai/insights/dashboard-insight-executor.spec.ts src/ai/insights/dashboard-insight.service.spec.ts` → 3 expected failures: missing grouped-report option, legacy grouped report rejected, auto products returned 503; 24 passed.
+
+GREEN / final verification commands/results:
+
+- `pnpm --filter @shopmate/contracts test:unit -- src/ai/dashboard-insight.spec.ts` → 17 files, 207 passed.
+- API focused command above → 3 files, 27 passed.
+- `pnpm --filter @shopmate/contracts typecheck` and `pnpm --filter @shopmate/api typecheck` → passed.
+- `pnpm --filter @shopmate/api test:unit` → 47 passed, 1 skipped; 332 passed, 1 skipped.
+- `pnpm --filter @shopmate/contracts lint` and `pnpm --filter @shopmate/api lint` → passed.

@@ -81,6 +81,43 @@ describe("AI 看板组件生成服务", () => {
       },
     });
   });
+
+  it("auto 不为尚无安全执行器的 products 分类查询广告图表", async () => {
+    const planned = {
+      ...query,
+      dataset: "products",
+      metric: "productCount",
+      aggregation: "count",
+      groupBy: "product",
+      visualization: "bar",
+    } as const;
+    const provider = scriptedProvider(planned);
+    const executor = { execute: vi.fn() };
+    await expect(
+      new DashboardInsightService(provider, executor).preview(context, {
+        question: "按商品统计商品数",
+        kind: "auto",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: { code: "INSIGHT_VIEW_INCOMPATIBLE", allowedViews: ["report"] },
+    });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("新规划的分组报告保持受限并返回兼容视图指引", async () => {
+    const provider = scriptedProvider({ ...query, groupBy: "store", visualization: "report" });
+    await expect(
+      new DashboardInsightService(provider, { execute: vi.fn() }).preview(context, {
+        question: "按门店生成报告",
+        kind: "report",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: { code: "INSIGHT_VIEW_INCOMPATIBLE", allowedViews: ["pie", "bar"] },
+    });
+  });
   it("模型工具声明门店、渠道分组和筛选结构，并传入当前商家目录", async () => {
     const storeQuery = { ...query, groupBy: "store" };
     const provider = scriptedProvider(storeQuery);

@@ -70,6 +70,24 @@ describe("受限经营查询执行器", () => {
     });
     expect(stores.read).toHaveBeenCalledWith(context, query);
   });
+  it("旧版已保存的门店分组报告仍可执行", async () => {
+    const stores = {
+      catalog: vi.fn(),
+      read: vi.fn().mockResolvedValue([{ key: "s", label: "演示门店", value: 1234 }]),
+    };
+    const executor = new DashboardInsightExecutor(
+      stubDashboard(),
+      stubPerformance(),
+      stubInventory(),
+      stores,
+    );
+    const legacy = { ...productQuery, groupBy: "store", visualization: "report" } as const;
+    await expect(executor.execute(context, legacy)).resolves.toMatchObject({
+      kind: "report",
+      metrics: [{ label: "演示门店", value: "¥12.34" }],
+    });
+    expect(stores.read).toHaveBeenCalledWith(context, legacy);
+  });
   it("在当前 Merchant Scope 内生成商品销售额饼图", async () => {
     const performance = {
       analyze: vi.fn().mockResolvedValue({

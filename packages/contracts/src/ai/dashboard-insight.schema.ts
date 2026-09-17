@@ -152,6 +152,7 @@ export type DashboardInsightExecuteResponse = z.infer<typeof DashboardInsightExe
 export function getDashboardInsightViews(
   query: DashboardInsightQuery,
 ): readonly DashboardChartView[] {
+  if (query.dataset === "products") return ["report"];
   if (query.groupBy === null) return ["report"];
   if (query.groupBy === "date") return ["line", "area", "bar"];
   if (query.aggregation === "average") return ["bar"];

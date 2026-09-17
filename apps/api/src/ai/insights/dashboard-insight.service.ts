@@ -121,13 +121,11 @@ function readQuery(
   const candidate = calls?.find((call) => call.name === TOOL_NAME)?.arguments;
   const parsed = DashboardInsightQuerySchema.parse(candidate);
   const visualization = kind === "auto" ? resolveAutoVisualization(parsed, question) : kind;
-  if (
-    kind !== "auto" &&
-    !getDashboardInsightViews({ ...parsed, visualization }).some((view) => view === kind)
-  ) {
-    throwIncompatibleChart(kind, { ...parsed, visualization });
+  const plannedQuery = { ...parsed, visualization };
+  if (!getDashboardInsightViews(plannedQuery).some((view) => view === visualization)) {
+    throwIncompatibleChart(kind, plannedQuery);
   }
-  const query = validateDashboardInsightQuery({ ...parsed, visualization });
+  const query = validateDashboardInsightQuery(plannedQuery);
   return query;
 }
 

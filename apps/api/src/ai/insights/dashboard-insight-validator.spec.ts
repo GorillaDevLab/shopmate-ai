@@ -57,4 +57,12 @@ describe("AI 查询语义校验", () => {
       validateDashboardInsightQuery({ ...query, groupBy: "date", visualization: "pie" }),
     ).toMatchObject({ groupBy: "date", visualization: "pie" });
   });
+
+  it("仅在显式兼容选项下接受旧版分组报告", () => {
+    const groupedReport = { ...query, groupBy: "store", visualization: "report" } as const;
+    expect(() => validateDashboardInsightQuery(groupedReport)).toThrow("报告");
+    expect(
+      validateDashboardInsightQuery(groupedReport, { allowLegacyGroupedReport: true }),
+    ).toEqual(groupedReport);
+  });
 });
