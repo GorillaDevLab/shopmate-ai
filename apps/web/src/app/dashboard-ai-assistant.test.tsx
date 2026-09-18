@@ -19,6 +19,49 @@ function AssistantHarness() {
 describe("看板悬浮 AI 助手", () => {
   beforeEach(() => vi.resetAllMocks());
 
+  it("短句切换复用上一张图并保留加入看板的视图，不重复请求", async () => {
+    const preview = {
+      query: { visualization: "bar", metric: "revenue" },
+      result: {
+        kind: "pie",
+        title: "门店销售额",
+        summary: "近30天",
+        unit: "currencyMinor",
+        slices: [{ key: "store-1", label: "朝阳店", value: 10000 }],
+      },
+    };
+    insightApi.generateDashboardInsight.mockResolvedValue(preview);
+    const onAdd = vi.fn();
+    render(<DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onAdd} />);
+    const send = (value: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: "消息" }), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    };
+    send("近30天各门店销售额");
+    await screen.findByRole("heading", { name: "门店销售额" });
+    send("我要饼图");
+    await screen.findByText("已将上一张图切换为环形图（饼图），沿用原来的数据和时间范围。");
+    expect(screen.getByRole("button", { name: "环形图" })).toHaveAttribute("aria-pressed", "true");
+    send("换成折线图");
+    await screen.findByText(/上一张图是分类对比数据/);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "加入看板并查看" }));
+    expect(onAdd).toHaveBeenCalledWith(preview, "pie");
+    expect(insightApi.generateDashboardInsight).toHaveBeenCalledTimes(1);
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("没有上一张图时短句会提示补充范围而不调用 AI", async () => {
+    render(<DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={vi.fn()} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+      target: { value: "我要饼图" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText(/请先说明要分析的指标和时间范围/);
+    expect(insightApi.generateDashboardInsight).not.toHaveBeenCalled();
+    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("从胶囊展开、聚焦输入并可关闭后恢复焦点", async () => {
     render(<AssistantHarness />);
     const trigger = screen.getByRole("button", { name: "Ask AI" });

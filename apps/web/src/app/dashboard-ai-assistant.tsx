@@ -15,6 +15,7 @@ import {
 
 import { type ChatMessage, useChatSession } from "./chat-session";
 import { generateDashboardInsight } from "./dashboard-insight-api";
+import { chartFollowupMessage, chartFollowupView } from "./chart-followup";
 import type { DashboardChartView, DashboardInsightPreviewResponse } from "@shopmate/contracts";
 import {
   DashboardInsightPresentation,
@@ -46,11 +47,25 @@ export function DashboardAiAssistant({
   isInsightAdded,
 }: AssistantProps) {
   const [added, setAdded] = useState(() => new Set<DashboardInsightPreviewResponse>());
+  const latestPreview = useRef<DashboardInsightPreviewResponse | undefined>(undefined);
+  const [views, setViews] = useState(
+    () => new Map<DashboardInsightPreviewResponse, DashboardChartView>(),
+  );
+  const changeView = (preview: DashboardInsightPreviewResponse, view: DashboardChartView) =>
+    setViews((current) => new Map(current).set(preview, view));
   const chat = useChatSession({
     resolveMessage: async (prompt) => {
+      const followup = chartFollowupView(prompt);
+      if (followup && onInsightCreated) {
+        const response = chartFollowupMessage(latestPreview.current, followup);
+        if (response.compatible && latestPreview.current)
+          changeView(latestPreview.current, followup);
+        return { role: "assistant", content: response.content };
+      }
       const kind = insightKind(prompt);
       if (!kind || !onInsightCreated) return undefined;
       const preview = await generateDashboardInsight(prompt, kind);
+      latestPreview.current = preview;
       return {
         role: "assistant",
         content: "分析已完成。可以先查看结果，再决定是否加入看板。",
@@ -100,6 +115,8 @@ export function DashboardAiAssistant({
               messages={chat.messages}
               isSending={chat.isSending}
               added={added}
+              views={views}
+              onViewChange={changeView}
               onAdd={onInsightCreated}
               onRememberAdded={(preview) => {
                 setAdded((current) => {
@@ -139,6 +156,8 @@ function AssistantHeader({ onClose }: { onClose: () => void }) {
 }
 
 function Conversation({
+  views,
+  onViewChange,
   messages,
   isSending,
   added,
@@ -146,6 +165,8 @@ function Conversation({
   onRememberAdded,
   isInsightAdded,
 }: {
+  views: ReadonlyMap<DashboardInsightPreviewResponse, DashboardChartView>;
+  onViewChange: (preview: DashboardInsightPreviewResponse, view: DashboardChartView) => void;
   messages: ChatMessage[];
   isSending: boolean;
   added: ReadonlySet<DashboardInsightPreviewResponse>;
@@ -165,6 +186,14 @@ function Conversation({
           {message.insightPreview && onAdd && (
             <InsightPreview
               preview={message.insightPreview}
+              view={
+                views.get(message.insightPreview) ??
+                recommendInsightView(
+                  message.insightPreview.result,
+                  message.insightPreview.query.visualization,
+                ).view
+              }
+              onViewChange={(view) => onViewChange(message.insightPreview!, view)}
               added={added}
               onAdd={onAdd}
               onRememberAdded={onRememberAdded}
@@ -179,12 +208,16 @@ function Conversation({
 }
 
 function InsightPreview({
+  view,
+  onViewChange,
   preview,
   added,
   onAdd,
   onRememberAdded,
   currentlyAdded,
 }: {
+  view: DashboardChartView;
+  onViewChange: (view: DashboardChartView) => void;
   preview: DashboardInsightPreviewResponse;
   added: ReadonlySet<DashboardInsightPreviewResponse>;
   onAdd: (preview: DashboardInsightPreviewResponse, view?: DashboardChartView) => void;
@@ -192,9 +225,6 @@ function InsightPreview({
   currentlyAdded?: boolean;
 }) {
   const [isAdded, setIsAdded] = useState(added.has(preview));
-  const [view, setView] = useState<DashboardChartView>(
-    () => recommendInsightView(preview.result, preview.query.visualization).view,
-  );
   const [error, setError] = useState("");
   const disabled = currentlyAdded ?? isAdded;
   const empty =
@@ -212,7 +242,12 @@ function InsightPreview({
   };
   return (
     <section className="ai-insight-preview" aria-label="分析结果预览">
-      <DashboardInsightPresentation result={preview.result} view={view} onViewChange={setView} />
+      <DashboardInsightPresentation
+        result={preview.result}
+        view={view}
+        onViewChange={onViewChange}
+        allowDonut={preview.query.metric !== "averageOrderValue"}
+      />
       {!empty && (
         <button type="button" disabled={disabled} onClick={add}>
           {disabled ? "已加入看板草稿" : "加入看板并查看"}
