@@ -235,14 +235,17 @@ function ReadyLayoutEditor({
           isInsightAdded={(preview) =>
             state.draft.cards.some((card) => initialResults[card.id] === preview.result)
           }
-          onInsightCreated={(preview) => {
+          onInsightCreated={(preview, view) => {
             if (state.draft.cards.length >= 24) throw new Error("看板最多包含 24 张卡片");
             const component = preview.result.kind === "report" ? "report" : "pieChart";
+            const savedView = component === "pieChart" && view !== "report" ? view : undefined;
             const card = createInsightDashboardCard(
               component,
               preview.result.title,
               preview.query,
               state.draft.cards,
+              undefined,
+              savedView,
             );
             setInitialResults((results) => ({ ...results, [card.id]: preview.result }));
             dispatch({ type: "modeChanged", mode: "edit" });

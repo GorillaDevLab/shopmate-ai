@@ -138,6 +138,10 @@ describe("看板悬浮 AI 助手", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
     fireEvent.click(await screen.findByRole("button", { name: "加入看板并查看" }));
     expect(screen.getByRole("alert")).toHaveTextContent("24 张卡片");
+    expect(onInsightCreated).toHaveBeenLastCalledWith(
+      expect.objectContaining({ result: expect.objectContaining({ kind: "pie" }) }),
+      "pie",
+    );
     expect(screen.getByRole("heading", { name: "销售占比" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "加入看板并查看" }));
     view.rerender(

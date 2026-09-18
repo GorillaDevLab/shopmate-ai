@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   DashboardChartViewSchema,
   DashboardInsightQuerySchema,
-  getDashboardInsightViews,
+  getDashboardInsightLayoutViews,
 } from "../ai/dashboard-insight.schema.js";
 
 export const DashboardLayoutVersionSchema = z.literal(3, {
@@ -71,7 +71,7 @@ const pieChartConfigSchema = z
     view: DashboardChartViewSchema.exclude(["report"]).optional(),
   })
   .superRefine(({ query, view }, context) => {
-    if (view && !getDashboardInsightViews(query).some((candidate) => candidate === view)) {
+    if (view && !getDashboardInsightLayoutViews(query).some((candidate) => candidate === view)) {
       context.addIssue({ code: "custom", path: ["view"], message: "图表视图与查询不兼容" });
     }
   });

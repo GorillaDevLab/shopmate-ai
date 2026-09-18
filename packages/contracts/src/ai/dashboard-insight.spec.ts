@@ -87,6 +87,11 @@ describe("AI 经营查询 DSL", () => {
       "area",
       "bar",
     ]);
+    expect(getDashboardInsightViews({ ...query, groupBy: "date", visualization: "pie" })).toEqual([
+      "line",
+      "area",
+      "bar",
+    ]);
     expect(getDashboardInsightViews({ ...query, groupBy: null, visualization: "report" })).toEqual([
       "report",
     ]);

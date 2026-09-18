@@ -134,7 +134,10 @@ export function DashboardWidgetGallery({
                     const nextPreview = await generateDashboardInsight(question, generationKind);
                     if (requestId !== generationRef.current) return;
                     setPreview(nextPreview);
-                    setPreviewView(recommendInsightView(nextPreview.result, generationKind).view);
+                    setPreviewView(
+                      recommendInsightView(nextPreview.result, nextPreview.query.visualization)
+                        .view,
+                    );
                   } catch (error: unknown) {
                     if (requestId !== generationRef.current) return;
                     setGenerationError(error instanceof Error ? error.message : "生成失败，请重试");

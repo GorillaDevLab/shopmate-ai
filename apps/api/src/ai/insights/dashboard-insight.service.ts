@@ -119,7 +119,11 @@ function readQuery(
   question = "",
 ) {
   const candidate = calls?.find((call) => call.name === TOOL_NAME)?.arguments;
-  const parsed = DashboardInsightQuerySchema.parse(candidate);
+  const parseVisualization = kind === "report" ? "report" : "bar";
+  const parseCandidate = isObject(candidate)
+    ? { ...candidate, visualization: parseVisualization }
+    : candidate;
+  const parsed = DashboardInsightQuerySchema.parse(parseCandidate);
   const visualization = kind === "auto" ? resolveAutoVisualization(parsed, question) : kind;
   const plannedQuery = { ...parsed, visualization };
   if (!getDashboardInsightViews(plannedQuery).some((view) => view === visualization)) {
@@ -127,6 +131,10 @@ function readQuery(
   }
   const query = validateDashboardInsightQuery(plannedQuery);
   return query;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function resolveAutoVisualization(

@@ -158,3 +158,14 @@ export function getDashboardInsightViews(
   if (query.aggregation === "average") return ["bar"];
   return ["pie", "bar"];
 }
+
+export function getDashboardInsightLayoutViews(
+  query: DashboardInsightQuery,
+): readonly DashboardChartView[] {
+  if (isLegacyDatePie(query)) return ["pie", "bar"];
+  return getDashboardInsightViews(query);
+}
+
+function isLegacyDatePie(query: DashboardInsightQuery): boolean {
+  return query.dataset === "sales" && query.groupBy === "date" && query.visualization === "pie";
+}

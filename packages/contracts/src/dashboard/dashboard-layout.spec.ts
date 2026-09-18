@@ -142,6 +142,33 @@ describe("用户看板布局契约", () => {
     ).toBe(false);
   });
 
+  it("旧版按日期饼图仍可保存为环形图", () => {
+    const legacyDatePie = {
+      dataset: "sales",
+      metric: "revenue",
+      aggregation: "sum",
+      groupBy: "date",
+      dateRange: { start: "2026-08-01", end: "2026-08-31" },
+      filters: [],
+      order: "asc",
+      limit: 12,
+      visualization: "pie",
+    } as const;
+    expect(
+      DashboardLayoutSchema.safeParse({
+        version: 3,
+        cards: [
+          {
+            id: "legacy-date-pie",
+            component: "pieChart",
+            size: "2x1",
+            config: { title: "每日销售额占比", query: legacyDatePie, view: "pie" },
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
   it("迁移 version 1 和 version 2 布局并保留卡片内容与顺序", () => {
     expect(parseDashboardLayout({ version: 1, cards: [] })).toEqual({ version: 3, cards: [] });
     expect(

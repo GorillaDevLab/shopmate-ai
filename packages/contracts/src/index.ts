@@ -127,6 +127,7 @@ export {
   DashboardInsightQuerySchema,
   DashboardInsightResultSchema,
   DashboardChartViewSchema,
+  getDashboardInsightLayoutViews,
   getDashboardInsightViews,
 } from "./ai/dashboard-insight.schema.js";
 export type {

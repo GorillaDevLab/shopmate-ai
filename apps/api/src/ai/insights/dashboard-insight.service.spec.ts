@@ -82,6 +82,24 @@ describe("AI 看板组件生成服务", () => {
     });
   });
 
+  it("新生成的按日期饼图保持不兼容，不会执行旧版饼图路径", async () => {
+    const planned = { ...query, groupBy: "date", visualization: "pie" } as const;
+    const executor = { execute: vi.fn() };
+    await expect(
+      new DashboardInsightService(scriptedProvider(planned), executor).preview(context, {
+        question: "每日销售额饼图",
+        kind: "pie",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        allowedViews: ["line", "area", "bar"],
+      },
+    });
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
   it("auto 不为尚无安全执行器的 products 分类查询广告图表", async () => {
     const planned = {
       ...query,
@@ -148,6 +166,32 @@ describe("AI 看板组件生成服务", () => {
       response: { code: "INSIGHT_VIEW_INCOMPATIBLE", allowedViews: ["pie", "bar"] },
     });
   });
+
+  it("显式报告会覆盖模型遗留的饼图字段并执行报告查询", async () => {
+    const planned = { ...query, groupBy: null, visualization: "pie" } as const;
+    const executor = {
+      execute: vi.fn().mockResolvedValue({
+        kind: "report",
+        title: "经营报告",
+        summary: "近 30 天",
+        highlights: ["销售额保持稳定"],
+        metrics: [{ label: "销售额", value: "¥1,000" }],
+      }),
+    };
+    const service = new DashboardInsightService(scriptedProvider(planned), executor);
+
+    await expect(
+      service.preview(context, { question: "最近经营情况", kind: "report" }),
+    ).resolves.toMatchObject({
+      query: { ...planned, visualization: "report" },
+      result: { kind: "report" },
+    });
+    expect(executor.execute).toHaveBeenCalledWith(context, {
+      ...planned,
+      visualization: "report",
+    });
+  });
+
   it("模型工具声明门店、渠道分组和筛选结构，并传入当前商家目录", async () => {
     const storeQuery = { ...query, groupBy: "store" };
     const provider = scriptedProvider(storeQuery);

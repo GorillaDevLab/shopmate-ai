@@ -91,6 +91,6 @@ describe("DashboardWidgetGallery", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成预览" }));
     expect(await screen.findByText("所选范围暂无可展示数据")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "添加到看板" }));
-    expect(onAddInsight).toHaveBeenCalledWith("pieChart", preview, "bar");
+    expect(onAddInsight).toHaveBeenCalledWith("pieChart", preview, "pie");
   });
 });

@@ -15,8 +15,11 @@ import {
 
 import { type ChatMessage, useChatSession } from "./chat-session";
 import { generateDashboardInsight } from "./dashboard-insight-api";
-import type { DashboardInsightPreviewResponse } from "@shopmate/contracts";
-import { DashboardInsightPresentation } from "./dashboard-insight-presentation";
+import type { DashboardChartView, DashboardInsightPreviewResponse } from "@shopmate/contracts";
+import {
+  DashboardInsightPresentation,
+  recommendInsightView,
+} from "./dashboard-insight-presentation";
 import type { DashboardInsightKind } from "@shopmate/contracts";
 
 const suggestions = [
@@ -29,7 +32,10 @@ const suggestions = [
 type AssistantProps = {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onInsightCreated?: (preview: DashboardInsightPreviewResponse) => void;
+  readonly onInsightCreated?: (
+    preview: DashboardInsightPreviewResponse,
+    view?: DashboardChartView,
+  ) => void;
   readonly isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
 };
 
@@ -143,7 +149,7 @@ function Conversation({
   messages: ChatMessage[];
   isSending: boolean;
   added: ReadonlySet<DashboardInsightPreviewResponse>;
-  onAdd?: (preview: DashboardInsightPreviewResponse) => void;
+  onAdd?: (preview: DashboardInsightPreviewResponse, view?: DashboardChartView) => void;
   onRememberAdded: (preview: DashboardInsightPreviewResponse) => void;
   isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
 }) {
@@ -181,11 +187,14 @@ function InsightPreview({
 }: {
   preview: DashboardInsightPreviewResponse;
   added: ReadonlySet<DashboardInsightPreviewResponse>;
-  onAdd: (preview: DashboardInsightPreviewResponse) => void;
+  onAdd: (preview: DashboardInsightPreviewResponse, view?: DashboardChartView) => void;
   onRememberAdded: (preview: DashboardInsightPreviewResponse) => void;
   currentlyAdded?: boolean;
 }) {
   const [isAdded, setIsAdded] = useState(added.has(preview));
+  const [view, setView] = useState<DashboardChartView>(
+    () => recommendInsightView(preview.result, preview.query.visualization).view,
+  );
   const [error, setError] = useState("");
   const disabled = currentlyAdded ?? isAdded;
   const empty =
@@ -193,7 +202,7 @@ function InsightPreview({
   const add = () => {
     if (disabled) return;
     try {
-      onAdd(preview);
+      onAdd(preview, view);
       onRememberAdded(preview);
       setIsAdded(true);
       setError("");
@@ -203,7 +212,7 @@ function InsightPreview({
   };
   return (
     <section className="ai-insight-preview" aria-label="分析结果预览">
-      <DashboardInsightPresentation result={preview.result} />
+      <DashboardInsightPresentation result={preview.result} view={view} onViewChange={setView} />
       {!empty && (
         <button type="button" disabled={disabled} onClick={add}>
           {disabled ? "已加入看板草稿" : "加入看板并查看"}
