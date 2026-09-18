@@ -217,7 +217,7 @@ function ChartHeader({ result }: { result: Result }) {
   return (
     <header className="dashboard-insight-header">
       <div>
-        <h3>{result.title.replace(/占比$/, "对比")}</h3>
+        <h3>{result.title}</h3>
         <p>{result.summary}</p>
       </div>
       <span>AI 分析</span>

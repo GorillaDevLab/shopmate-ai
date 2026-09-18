@@ -69,6 +69,43 @@ describe("Dashboard Insight API", () => {
     );
   });
 
+  it("默认只发送一次自动选图请求", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ query, result }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await generateDashboardInsight("我想看最近门店销售额");
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body as string)).toMatchObject({
+      question: "我想看最近门店销售额",
+      kind: "auto",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("只展示受限视图错误，不泄露服务端原始内容", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: "INSIGHT_VIEW_INCOMPATIBLE",
+            message: "商品计数目前仅支持不分组的报告",
+            allowedViews: [],
+            retryable: false,
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    await expect(generateDashboardInsight("按商品统计商品数量", "pie")).rejects.toMatchObject({
+      status: 400,
+      message: "商品计数目前仅支持不分组的报告",
+    });
+  });
+
   it("重新执行已保存的受限查询", async () => {
     vi.stubGlobal(
       "fetch",

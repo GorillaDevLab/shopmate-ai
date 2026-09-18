@@ -51,7 +51,7 @@ describe("DashboardWidgetGallery", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("AI 饼图必须先生成预览再加入看板", async () => {
+  it("AI 图表必须先生成预览再加入看板", async () => {
     const onAddInsight = vi.fn();
     const preview = {
       query: {
@@ -83,7 +83,7 @@ describe("DashboardWidgetGallery", () => {
         onClose={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "AI 饼图" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 图表" }));
     expect(screen.getByRole("button", { name: "添加到看板" })).toBeDisabled();
     fireEvent.change(screen.getByRole("textbox", { name: "想分析什么？" }), {
       target: { value: "按商品生成销售额占比" },
@@ -91,6 +91,6 @@ describe("DashboardWidgetGallery", () => {
     fireEvent.click(screen.getByRole("button", { name: "生成预览" }));
     expect(await screen.findByText("所选范围暂无可展示数据")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "添加到看板" }));
-    expect(onAddInsight).toHaveBeenCalledWith("pieChart", preview);
+    expect(onAddInsight).toHaveBeenCalledWith("pieChart", preview, "bar");
   });
 });
