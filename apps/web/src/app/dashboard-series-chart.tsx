@@ -16,16 +16,17 @@ type Props = {
   pointLabel?: string;
 };
 
-export function DashboardSeriesChart({
-  result,
-  view,
-  onViewChange,
-  views = ["line", "area", "bar"],
-  heading,
-  periodLabel,
-  chartLabel,
-  pointLabel,
-}: Props) {
+export function DashboardSeriesChart(props: Props) {
+  const {
+    result,
+    view,
+    onViewChange,
+    views = ["line", "area", "bar"],
+    heading,
+    periodLabel,
+    chartLabel,
+    pointLabel,
+  } = props;
   const [localView, setLocalView] = useState<SeriesView>(view ?? "area");
   const gradientId = useId();
   const points = createSeriesPoints(result.points);
@@ -37,24 +38,66 @@ export function DashboardSeriesChart({
     onViewChange?.(next);
   };
   return (
+    <SeriesPresentation
+      title={title}
+      summary={periodLabel ?? result.summary}
+      result={result}
+      points={points}
+      selected={selected}
+      views={views}
+      view={view ?? localView}
+      changeView={changeView}
+      gradientId={gradientId}
+      selection={selection}
+      chartLabel={chartLabel ?? `${title}图`}
+      pointLabel={pointLabel ?? title}
+    />
+  );
+}
+
+type PresentationProps = {
+  title: string;
+  summary: string;
+  result: Result;
+  points: ReturnType<typeof createSeriesPoints>;
+  selected?: ReturnType<typeof createSeriesPoints>[number];
+  views: readonly SeriesView[];
+  view: SeriesView;
+  changeView: (view: SeriesView) => void;
+  gradientId: string;
+  selection: ReturnType<typeof useChartSelection>;
+  chartLabel: string;
+  pointLabel: string;
+};
+function SeriesPresentation(props: PresentationProps) {
+  const {
+    title,
+    summary,
+    result,
+    points,
+    selected,
+    views,
+    view,
+    changeView,
+    gradientId,
+    selection,
+    chartLabel,
+    pointLabel,
+  } = props;
+  return (
     <section aria-label={title} className="dashboard-panel dashboard-series">
-      <SeriesHeading
-        title={title}
-        summary={periodLabel ?? result.summary}
-        selected={selected}
-        unit={result.unit}
-      />
-      <SeriesControls views={views} view={view ?? localView} onChange={changeView} />
+      <SeriesHeading title={title} summary={summary} selected={selected} unit={result.unit} />
+      <SeriesControls views={views} view={view} onChange={changeView} />
       {points.length ? (
         <SeriesDrawing
           points={points}
           result={result}
-          view={view ?? localView}
+          view={view}
           gradientId={gradientId}
           selected={selected}
           selection={selection}
-          chartLabel={chartLabel ?? `${periodLabel ?? result.summary}销售趋势图`}
-          pointLabel={pointLabel ?? title}
+          chartLabel={chartLabel}
+          pointLabel={pointLabel}
         />
       ) : (
         <p className="chart-empty">所选范围暂无可展示数据</p>

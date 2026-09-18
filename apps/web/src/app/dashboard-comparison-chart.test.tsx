@@ -156,4 +156,27 @@ describe("经营对比图", () => {
     expect(legend).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector("circle[tabindex]")).toBeNull();
   });
+
+  it("does not resurrect a category pin after remove and re-add", () => {
+    const base = {
+      kind: "pie" as const,
+      title: "销售额",
+      summary: "今天",
+      unit: "count" as const,
+      slices: [
+        { key: "a", label: "A店", value: 2 },
+        { key: "b", label: "B店", value: 1 },
+      ],
+    };
+    const { rerender } = render(<DashboardComparisonChart initialView="donut" result={base} />);
+    fireEvent.click(screen.getByRole("button", { name: /^A店/ }));
+    rerender(
+      <DashboardComparisonChart
+        initialView="donut"
+        result={{ ...base, slices: base.slices.slice(1) }}
+      />,
+    );
+    rerender(<DashboardComparisonChart initialView="donut" result={base} />);
+    expect(screen.getByTestId("chart-center-detail")).toHaveTextContent("当前展示合计");
+  });
 });

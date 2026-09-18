@@ -2,6 +2,8 @@ export type ChartUnit = "currencyMinor" | "count" | "ratio";
 export type ChartSlice = { key: string; label: string; value: number };
 export type SeriesDatum = { date: string; value: number };
 export type PositionedSeriesDatum = SeriesDatum & { x: number; y: number };
+export const PLOT_TOP = 10;
+export const PLOT_BASELINE = 90;
 
 const palette = ["#6250d8", "#168477", "#c27a24", "#8b65c9", "#3979a8", "#c35f78"];
 
@@ -63,6 +65,6 @@ export function createSeriesPoints(points: readonly SeriesDatum[]): PositionedSe
   return sorted.map((point, index) => ({
     ...point,
     x: span ? 4 + ((times[index]! - start) / span) * 92 : 50,
-    y: 94 - (point.value / maximum) * 84,
+    y: PLOT_BASELINE - (point.value / maximum) * (PLOT_BASELINE - PLOT_TOP),
   }));
 }

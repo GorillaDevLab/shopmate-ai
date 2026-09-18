@@ -1,21 +1,12 @@
 import type { DashboardInsightResult } from "@shopmate/contracts";
 import type { PositionedSeriesDatum } from "./dashboard-chart-model";
-import { formatChartValue } from "./dashboard-chart-model";
+import { formatChartValue, PLOT_BASELINE, PLOT_TOP } from "./dashboard-chart-model";
 import type { useChartSelection } from "./dashboard-chart-selection";
 type Result = Extract<DashboardInsightResult, { kind: "series" }>;
 export type SeriesView = "line" | "area" | "bar";
 type Selection = ReturnType<typeof useChartSelection>;
 
-export function SeriesDrawing({
-  points,
-  result,
-  view,
-  gradientId,
-  selected,
-  selection,
-  chartLabel,
-  pointLabel,
-}: {
+type DrawingProps = {
   points: PositionedSeriesDatum[];
   result: Result;
   view: SeriesView;
@@ -24,7 +15,9 @@ export function SeriesDrawing({
   selection: Selection;
   chartLabel: string;
   pointLabel: string;
-}) {
+};
+export function SeriesDrawing(props: DrawingProps) {
+  const { points, result, view, gradientId, selected, selection, chartLabel, pointLabel } = props;
   const maximum = Math.max(0, ...points.map(({ value }) => value));
   return (
     <>
@@ -61,19 +54,15 @@ export function SeriesDrawing({
   );
 }
 
-function ChartSvg({
-  points,
-  view,
-  gradientId,
-  selected,
-  label,
-}: {
+type ChartSvgProps = {
   points: PositionedSeriesDatum[];
   view: SeriesView;
   gradientId: string;
   selected?: PositionedSeriesDatum;
   label: string;
-}) {
+};
+function ChartSvg(props: ChartSvgProps) {
+  const { points, view, gradientId, selected, label } = props;
   return (
     <svg viewBox="0 0 1000 180" preserveAspectRatio="none" role="img" aria-label={label}>
       <defs>
@@ -82,8 +71,20 @@ function ChartSvg({
           <stop offset="100%" stopColor="var(--brand)" stopOpacity=".02" />
         </linearGradient>
       </defs>
-      {[18, 68, 118, 168].map((y) => (
-        <line key={y} x1="40" x2="960" y1={y} y2={y} className="series-grid" />
+      {[
+        PLOT_TOP,
+        PLOT_TOP + (PLOT_BASELINE - PLOT_TOP) / 3,
+        PLOT_TOP + (2 * (PLOT_BASELINE - PLOT_TOP)) / 3,
+        PLOT_BASELINE,
+      ].map((percent) => (
+        <line
+          key={percent}
+          x1="40"
+          x2="960"
+          y1={percent * 1.8}
+          y2={percent * 1.8}
+          className="series-grid"
+        />
       ))}
       <SeriesMarks points={points} view={view} gradientId={gradientId} />
       {selected && (
@@ -139,22 +140,27 @@ function DenseSelector({
   selection: Selection;
 }) {
   return (
-    <input
-      type="range"
-      min="0"
-      max={points.length - 1}
-      value={Math.max(
-        0,
-        points.findIndex(({ date }) => date === selected?.date),
-      )}
-      aria-label="选择趋势日期"
-      aria-valuetext={
-        selected
-          ? `${formatDate(selected.date)}，${formatChartValue(selected.value, unit)}`
-          : "暂无数据"
-      }
-      onChange={(event) => selection.select(points[Number(event.target.value)]?.date)}
-    />
+    <div className="series-dense-selector">
+      <input
+        type="range"
+        min="0"
+        max={points.length - 1}
+        value={Math.max(
+          0,
+          points.findIndex(({ date }) => date === selected?.date),
+        )}
+        aria-label="选择趋势日期"
+        aria-valuetext={
+          selected
+            ? `${formatDate(selected.date)}，${formatChartValue(selected.value, unit)}`
+            : "暂无数据"
+        }
+        onChange={(event) => selection.select(points[Number(event.target.value)]?.date)}
+      />
+      <button type="button" onClick={() => selection.select(undefined)}>
+        重置为最新日期
+      </button>
+    </div>
   );
 }
 
@@ -167,17 +173,18 @@ function SeriesMarks({
   view: SeriesView;
   gradientId: string;
 }) {
-  const line = points.map(({ x, y }) => `${x * 10},${y * 1.7}`).join(" ");
+  const line = points.map(({ x, y }) => `${x * 10},${y * 1.8}`).join(" ");
   if (view === "bar")
     return (
       <>
         {points.map((point) => (
           <rect
             key={point.date}
+            data-date={point.date}
             x={point.x * 10 - 8}
-            y={point.y * 1.7}
+            y={point.y * 1.8}
             width="16"
-            height={168 - point.y * 1.7}
+            height={(PLOT_BASELINE - point.y) * 1.8}
             rx="4"
             className="series-bar"
           />
@@ -188,7 +195,7 @@ function SeriesMarks({
     <>
       {view === "area" && (
         <polygon
-          points={`${points[0]!.x * 10},168 ${line} ${points.at(-1)!.x * 10},168`}
+          points={`${points[0]!.x * 10},${PLOT_BASELINE * 1.8} ${line} ${points.at(-1)!.x * 10},${PLOT_BASELINE * 1.8}`}
           fill={`url(#${gradientId})`}
         />
       )}
@@ -201,7 +208,10 @@ function ValueAxis({ maximum, unit }: { maximum: number; unit: Result["unit"] })
   return (
     <div className="series-value-axis" aria-label={`${unitLabel(unit)}纵轴`}>
       {[1, 2 / 3, 1 / 3, 0].map((ratio) => (
-        <span key={ratio} style={{ top: `${6 + (1 - ratio) * 88}%` }}>
+        <span
+          key={ratio}
+          style={{ top: `${PLOT_TOP + (1 - ratio) * (PLOT_BASELINE - PLOT_TOP)}%` }}
+        >
           {formatChartValue(maximum * ratio, unit)}
         </span>
       ))}

@@ -34,4 +34,50 @@ describe("generic series chart", () => {
     expect(screen.getByLabelText("数量纵轴")).toHaveTextContent("6");
     expect(screen.queryByText(/¥/)).not.toBeInTheDocument();
   });
+
+  it("renders zero bars at the shared baseline with zero height", () => {
+    const { container } = render(
+      <DashboardSeriesChart
+        view="bar"
+        result={{
+          ...result,
+          points: [
+            { date: "2026-09-01", value: 0 },
+            { date: "2026-09-02", value: 6 },
+          ],
+        }}
+      />,
+    );
+    const zeroBar = container.querySelector('rect[data-date="2026-09-01"]');
+    expect(zeroBar).toHaveAttribute("y", "162");
+    expect(zeroBar).toHaveAttribute("height", "0");
+    expect(screen.getByLabelText("数量纵轴").querySelector("span:last-child")).toHaveStyle({
+      top: "90%",
+    });
+  });
+
+  it("physically clears removed selection and does not resurrect it", () => {
+    const { rerender } = render(<DashboardSeriesChart result={result} />);
+    fireEvent.click(screen.getByRole("button", { name: /9月1日/ }));
+    rerender(<DashboardSeriesChart result={{ ...result, points: result.points.slice(1) }} />);
+    rerender(<DashboardSeriesChart result={result} />);
+    expect(screen.getByRole("status")).toHaveTextContent("9月3日");
+  });
+
+  it("dense selection offers reset to latest date", () => {
+    const points = Array.from({ length: 30 }, (_, index) => ({
+      date: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      value: index,
+    }));
+    render(<DashboardSeriesChart result={{ ...result, points }} />);
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "3" } });
+    expect(screen.getByRole("status")).toHaveTextContent("8月4日");
+    fireEvent.click(screen.getByRole("button", { name: "重置为最新日期" }));
+    expect(screen.getByRole("status")).toHaveTextContent("8月30日");
+  });
+
+  it("uses the result title in generic chart image aria", () => {
+    render(<DashboardSeriesChart result={result} />);
+    expect(screen.getByRole("img", { name: "订单趋势图" })).toBeInTheDocument();
+  });
 });

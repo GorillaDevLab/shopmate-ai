@@ -201,12 +201,13 @@
 .series-stage {
   position: relative;
   height: 180px;
-  margin-top: 12px;
+  margin-top: 0;
 }
 .series-chart-grid {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
   gap: 8px;
+  margin-top: 12px;
 }
 .series-value-axis {
   position: relative;
@@ -264,6 +265,19 @@
   width: 92%;
   opacity: 0;
   cursor: crosshair;
+}
+.series-dense-selector button {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 2;
+  border-radius: 8px;
+  background: var(--app-surface);
+  padding: 5px 8px;
+  color: var(--brand-strong);
+  font-size: 11px;
+  font-weight: 700;
+  box-shadow: 0 1px 5px #30294b18;
 }
 .series-point {
   position: absolute;

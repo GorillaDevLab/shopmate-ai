@@ -1,19 +1,28 @@
 "use client";
 import { useState } from "react";
+type SelectionState = { signature: string; pinned?: string; transient?: string };
 
 export function useChartSelection(keys: readonly string[]) {
-  const [pinned, setPinned] = useState<string>();
-  const [transient, setTransient] = useState<string>();
-  const validPinned = pinned && keys.includes(pinned) ? pinned : undefined;
+  const signature = JSON.stringify(keys);
+  const [stored, setStored] = useState<SelectionState>({ signature });
+  let state = stored;
+  if (stored.signature !== signature) {
+    state = {
+      signature,
+      pinned: stored.pinned && keys.includes(stored.pinned) ? stored.pinned : undefined,
+      transient: stored.transient && keys.includes(stored.transient) ? stored.transient : undefined,
+    };
+    setStored(state);
+  }
+  const update = (next: Partial<SelectionState>) =>
+    setStored((current) => ({ ...current, signature, ...next }));
   return {
-    active: transient ?? validPinned,
-    pinned: validPinned,
-    preview: setTransient,
-    clearPreview: () => setTransient(undefined),
-    toggle: (key: string) => {
-      setTransient(undefined);
-      setPinned((current) => (current === key ? undefined : key));
-    },
-    select: setPinned,
+    active: state.transient ?? state.pinned,
+    pinned: state.pinned,
+    preview: (key: string) => update({ transient: key }),
+    clearPreview: () => update({ transient: undefined }),
+    toggle: (key: string) =>
+      update({ transient: undefined, pinned: state.pinned === key ? undefined : key }),
+    select: (key?: string) => update({ transient: undefined, pinned: key }),
   };
 }

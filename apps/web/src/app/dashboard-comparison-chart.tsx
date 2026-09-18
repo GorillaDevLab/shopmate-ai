@@ -52,7 +52,8 @@ function ViewSwitch({ view, onChange }: { view: View; onChange: (view: View) => 
   );
 }
 
-function ComparisonBars({ result, additive }: { result: Result; additive: boolean }) {
+function ComparisonBars(props: { result: Result; additive: boolean }) {
+  const { result, additive } = props;
   const [expanded, setExpanded] = useState(false);
   const sorted = [...result.slices].sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
   const selection = useChartSelection(sorted.map(({ key }) => key));
@@ -61,39 +62,80 @@ function ComparisonBars({ result, additive }: { result: Result; additive: boolea
   const maximum = Math.max(0, ...sorted.map(({ value }) => value));
   const shown = expanded ? sorted : sorted.slice(0, 5);
   return (
+    <ComparisonBarsView
+      result={result}
+      additive={additive}
+      expanded={expanded}
+      setExpanded={setExpanded}
+      sorted={sorted}
+      shown={shown}
+      active={active}
+      total={total}
+      maximum={maximum}
+      selection={selection}
+    />
+  );
+}
+
+type BarsViewProps = {
+  result: Result;
+  additive: boolean;
+  expanded: boolean;
+  setExpanded: (value: boolean) => void;
+  sorted: Result["slices"];
+  shown: Result["slices"];
+  active?: Result["slices"][number];
+  total: number;
+  maximum: number;
+  selection: Selection;
+};
+function ComparisonBarsView(props: BarsViewProps) {
+  return (
     <section className="dashboard-insight comparison-bars">
-      <ChartHeader result={result} />
-      {sorted.length ? (
-        <>
-          <BarDetail result={result} active={active} total={total} additive={additive} />
-          <ul>
-            {shown.map((slice, index) => (
-              <BarRow
-                key={slice.key}
-                slice={slice}
-                rank={index + 1}
-                maximum={maximum}
-                total={total}
-                additive={additive}
-                unit={result.unit}
-                selection={selection}
-              />
-            ))}
-          </ul>
-        </>
-      ) : (
-        <p>所选范围暂无可展示数据</p>
-      )}
-      {sorted.length > 5 && (
-        <button className="chart-expand" type="button" onClick={() => setExpanded(!expanded)}>
-          {expanded ? "收起" : `展开全部 ${sorted.length} 项`}
+      <ChartHeader result={props.result} />
+      <BarList {...props} />
+      {props.sorted.length > 5 && (
+        <button
+          className="chart-expand"
+          type="button"
+          onClick={() => props.setExpanded(!props.expanded)}
+        >
+          {props.expanded ? "收起" : `展开全部 ${props.sorted.length} 项`}
         </button>
       )}
       <p className="comparison-footnote">
-        {result.unit === "currencyMinor" ? "金额单位：人民币元" : "数值以当前查询口径为准"} ·
-        当前展示 {shown.length} 个分组
+        {props.result.unit === "currencyMinor" ? "金额单位：人民币元" : "数值以当前查询口径为准"} ·
+        当前展示 {props.shown.length} 个分组
       </p>
     </section>
+  );
+}
+
+function BarList(props: BarsViewProps) {
+  if (!props.sorted.length) return <p>所选范围暂无可展示数据</p>;
+  return (
+    <>
+      <BarDetail
+        result={props.result}
+        active={props.active}
+        total={props.total}
+        additive={props.additive}
+      />
+      <ul>
+        {props.shown.map((slice, index) => (
+          <BarRow
+            key={slice.key}
+            slice={slice}
+            rank={index + 1}
+            maximum={props.maximum}
+            total={props.total}
+            additive={props.additive}
+            unit={props.result.unit}
+            selection={props.selection}
+          />
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -123,15 +165,7 @@ function BarDetail({
 }
 
 type Selection = ReturnType<typeof useChartSelection>;
-function BarRow({
-  slice,
-  rank,
-  maximum,
-  total,
-  additive,
-  unit,
-  selection,
-}: {
+type BarRowProps = {
   slice: Result["slices"][number];
   rank: number;
   maximum: number;
@@ -139,7 +173,9 @@ function BarRow({
   additive: boolean;
   unit: Result["unit"];
   selection: Selection;
-}) {
+};
+function BarRow(props: BarRowProps) {
+  const { slice, rank, maximum, total, additive, unit, selection } = props;
   return (
     <li>
       <button

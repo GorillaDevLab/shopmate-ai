@@ -74,6 +74,15 @@ describe("dashboard chart model", () => {
     expect(points[1]!.x).toBeCloseTo(13.2, 1);
   });
 
+  it("uses one honest plot baseline for zero, maximum, and all-zero series", () => {
+    const points = createSeriesPoints([
+      { date: "2026-09-01", value: 0 },
+      { date: "2026-09-02", value: 10 },
+    ]);
+    expect(points.map(({ y }) => y)).toEqual([90, 10]);
+    expect(createSeriesPoints([{ date: "2026-09-01", value: 0 }])[0]!.y).toBe(90);
+  });
+
   it("keeps thirty points in chronological render order", () => {
     const points = Array.from({ length: 30 }, (_, index) => ({
       date: `2026-08-${String(31 - index).padStart(2, "0")}`,
