@@ -5,6 +5,7 @@ import type {
   DashboardLayoutCard,
   DashboardLayoutSize,
   DashboardInsightResult,
+  DashboardChartView,
 } from "@shopmate/contracts";
 import { DASHBOARD_COMPONENT_REGISTRY } from "@shopmate/contracts";
 import {
@@ -184,6 +185,7 @@ function ReadyLayoutEditor({
           state={state}
           gridRef={gridRef}
           interactions={interactions}
+          dispatch={dispatch}
         />
       </div>
       <DashboardWidgetGallery
@@ -199,13 +201,16 @@ function ReadyLayoutEditor({
           setGalleryOpen(false);
           interactions.announce("组件已添加到看板末尾");
         }}
-        onAddInsight={(component, preview) => {
+        onAddInsight={(component, preview, view) => {
           interactions.prepareAnimation();
+          const savedView = component === "pieChart" && view !== "report" ? view : undefined;
           const card = createInsightDashboardCard(
             component,
             preview.result.title,
             preview.query,
             state.draft.cards,
+            undefined,
+            savedView,
           );
           setInitialResults((results) => ({ ...results, [card.id]: preview.result }));
           dispatch({
@@ -230,14 +235,17 @@ function ReadyLayoutEditor({
           isInsightAdded={(preview) =>
             state.draft.cards.some((card) => initialResults[card.id] === preview.result)
           }
-          onInsightCreated={(preview) => {
+          onInsightCreated={(preview, view) => {
             if (state.draft.cards.length >= 24) throw new Error("看板最多包含 24 张卡片");
-            const component = preview.result.kind === "pie" ? "pieChart" : "report";
+            const component = preview.result.kind === "report" ? "report" : "pieChart";
+            const savedView = component === "pieChart" && view !== "report" ? view : undefined;
             const card = createInsightDashboardCard(
               component,
               preview.result.title,
               preview.query,
               state.draft.cards,
+              undefined,
+              savedView,
             );
             setInitialResults((results) => ({ ...results, [card.id]: preview.result }));
             dispatch({ type: "modeChanged", mode: "edit" });
@@ -266,6 +274,7 @@ function DashboardGrid({
   state,
   gridRef,
   interactions,
+  dispatch,
 }: {
   initialResults: Record<string, DashboardInsightResult>;
   data: AnalyticsDashboardResponse;
@@ -273,6 +282,7 @@ function DashboardGrid({
   state: LayoutEditorState;
   gridRef: MutableRefObject<HTMLElement | null>;
   interactions: ReturnType<typeof useCardInteractions>;
+  dispatch: Dispatch<LayoutEditorAction>;
 }) {
   const isEditing = state.mode === "edit";
   useLayoutEffect(() => {
@@ -301,7 +311,9 @@ function DashboardGrid({
           }
           interactions={interactions}
         >
-          {renderCard(card, data, periodLabel, initialResults[card.id])}
+          {renderCard(card, data, periodLabel, initialResults[card.id], (view) =>
+            dispatch({ type: "insightViewChanged", cardId: card.id, view }),
+          )}
         </DashboardCard>
       ))}
     </section>
@@ -977,6 +989,7 @@ function renderCard(
   data: AnalyticsDashboardResponse,
   periodLabel: string,
   initialResult?: DashboardInsightResult,
+  onViewChange?: (view: DashboardChartView) => void,
 ): ReactNode {
   if (card.component === "metric") {
     const metric = data.metrics.find((candidate) => candidate.key === card.config.metric) ?? {
@@ -987,7 +1000,14 @@ function renderCard(
     return <MetricCard metric={metric} periodLabel={periodLabel} />;
   }
   if (card.component === "salesTrend") {
-    return <SalesTrend points={data.trend} periodLabel={periodLabel} />;
+    return (
+      <SalesTrend
+        points={data.trend}
+        periodLabel={periodLabel}
+        view={card.config.view}
+        onViewChange={onViewChange as ((view: "line" | "area") => void) | undefined}
+      />
+    );
   }
   if (card.component === "inventoryAlerts") {
     return (
@@ -998,7 +1018,14 @@ function renderCard(
     );
   }
   if (card.component === "pieChart" || card.component === "report") {
-    return <DashboardInsightCard query={card.config.query} initialResult={initialResult} />;
+    return (
+      <DashboardInsightCard
+        query={card.config.query}
+        initialResult={initialResult}
+        view={card.component === "pieChart" ? card.config.view : undefined}
+        onViewChange={onViewChange}
+      />
+    );
   }
   return <HotProductsPanel items={data.products.slice(0, card.config.limit)} />;
 }

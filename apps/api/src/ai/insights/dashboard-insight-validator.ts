@@ -2,7 +2,15 @@ import { DashboardInsightQuerySchema, type DashboardInsightQuery } from "@shopma
 
 import { getInsightDimension, getInsightMetric } from "./dashboard-insight-registry.js";
 
-export function validateDashboardInsightQuery(raw: unknown): DashboardInsightQuery {
+interface ValidationOptions {
+  readonly allowLegacyAveragePie?: boolean;
+  readonly allowLegacyGroupedReport?: boolean;
+}
+
+export function validateDashboardInsightQuery(
+  raw: unknown,
+  options: ValidationOptions = {},
+): DashboardInsightQuery {
   const query = DashboardInsightQuerySchema.parse(raw);
   if (Date.parse(query.dateRange.end) - Date.parse(query.dateRange.start) > 365 * 86400000)
     throw new Error("分析范围最多 366 天");
@@ -11,6 +19,29 @@ export function validateDashboardInsightQuery(raw: unknown): DashboardInsightQue
   if (metric.aggregation !== query.aggregation) throw new Error("该指标不支持所选聚合方式");
   if (query.groupBy && !metric.dimensions.includes(query.groupBy)) {
     throw new Error("该指标不支持所选分组维度");
+  }
+  if (
+    query.visualization === "pie" &&
+    query.aggregation === "average" &&
+    !options.allowLegacyAveragePie
+  ) {
+    throw new Error("平均值不适合饼图，请改用柱状图");
+  }
+  if (
+    (query.visualization === "line" || query.visualization === "area") &&
+    query.groupBy !== "date"
+  ) {
+    throw new Error("折线图和面积图必须按日期分组");
+  }
+  if (
+    query.visualization === "report" &&
+    query.groupBy !== null &&
+    !options.allowLegacyGroupedReport
+  ) {
+    throw new Error("报告查询不能包含分组维度");
+  }
+  if (query.visualization !== "report" && query.groupBy === null) {
+    throw new Error("图表查询必须包含分组维度");
   }
   for (const filter of query.filters) validateFilter(query.dataset, filter.field);
   for (const filter of query.filters) {

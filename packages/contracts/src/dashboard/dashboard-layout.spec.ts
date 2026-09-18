@@ -101,6 +101,74 @@ describe("用户看板布局契约", () => {
     ).toBe(false);
   });
 
+  it("AI 图表保留 pieChart key 并校验可切换视图兼容性", () => {
+    expect(DASHBOARD_COMPONENT_REGISTRY.pieChart.label).toBe("AI 图表");
+    const dateQuery = {
+      dataset: "sales",
+      metric: "revenue",
+      aggregation: "sum",
+      groupBy: "date",
+      dateRange: { start: "2026-08-01", end: "2026-08-31" },
+      filters: [],
+      order: "asc",
+      limit: 12,
+      visualization: "line",
+    } as const;
+    expect(
+      DashboardLayoutSchema.safeParse({
+        version: 3,
+        cards: [
+          {
+            id: "date-chart",
+            component: "pieChart",
+            size: "2x1",
+            config: { title: "销售趋势", query: dateQuery, view: "area" },
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      DashboardLayoutSchema.safeParse({
+        version: 3,
+        cards: [
+          {
+            id: "bad-date-chart",
+            component: "pieChart",
+            size: "2x1",
+            config: { title: "销售趋势", query: dateQuery, view: "pie" },
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("旧版按日期饼图仍可保存为环形图", () => {
+    const legacyDatePie = {
+      dataset: "sales",
+      metric: "revenue",
+      aggregation: "sum",
+      groupBy: "date",
+      dateRange: { start: "2026-08-01", end: "2026-08-31" },
+      filters: [],
+      order: "asc",
+      limit: 12,
+      visualization: "pie",
+    } as const;
+    expect(
+      DashboardLayoutSchema.safeParse({
+        version: 3,
+        cards: [
+          {
+            id: "legacy-date-pie",
+            component: "pieChart",
+            size: "2x1",
+            config: { title: "每日销售额占比", query: legacyDatePie, view: "pie" },
+          },
+        ],
+      }).success,
+    ).toBe(true);
+  });
+
   it("迁移 version 1 和 version 2 布局并保留卡片内容与顺序", () => {
     expect(parseDashboardLayout({ version: 1, cards: [] })).toEqual({ version: 3, cards: [] });
     expect(

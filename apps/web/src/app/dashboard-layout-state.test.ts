@@ -210,6 +210,38 @@ describe("dashboard layout state", () => {
     expect(card.size).toBe("1x1");
     expect(undone.draft.cards).toEqual(DEFAULT_DASHBOARD_LAYOUT.cards);
   });
+
+  it("保存图表视图偏好并在切换时进入编辑草稿", () => {
+    const query = {
+      dataset: "sales",
+      metric: "revenue",
+      aggregation: "sum",
+      groupBy: "product",
+      dateRange: { start: "2026-08-01", end: "2026-08-31" },
+      filters: [],
+      order: "desc",
+      limit: 8,
+      visualization: "pie",
+    } as DashboardInsightQuery;
+    const card = createInsightDashboardCard(
+      "pieChart",
+      "商品销售占比",
+      query,
+      [],
+      () => "view",
+      "bar",
+    );
+    const state = readyState();
+    const changed = layoutEditorReducer(state, { type: "cardAdded", card });
+    const switched = layoutEditorReducer(changed, {
+      type: "insightViewChanged",
+      cardId: card.id,
+      view: "pie",
+    });
+    expect(switched.draft.cards.at(-1)).toMatchObject({ config: { view: "pie" } });
+    expect(isLayoutDirty(switched)).toBe(true);
+    expect(switched.mode).toBe("edit");
+  });
 });
 
 function readyState() {

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./dashboard-charts.css";
 
 :root {
   color-scheme: light;

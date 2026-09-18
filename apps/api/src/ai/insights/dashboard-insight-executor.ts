@@ -83,35 +83,55 @@ export class DashboardInsightExecutor {
     context: ToolInvocationContext,
     rawQuery: unknown,
   ): Promise<DashboardInsightResult> {
-    const query = validateDashboardInsightQuery(rawQuery);
+    // Saved v3 layouts may contain average pies or grouped reports. They remain
+    // executable; planning never receives these compatibility exceptions.
+    const query = validateDashboardInsightQuery(rawQuery, {
+      allowLegacyAveragePie: true,
+      allowLegacyGroupedReport: true,
+    });
     assertReadPermissions(context, query);
     if (
       query.dataset === "sales" &&
       (query.groupBy === "store" ||
         query.groupBy === "platform" ||
-        query.filters.some((filter) => filter.field === "store" || filter.field === "platform"))
+        query.filters.some(
+          (filter) =>
+            filter.field === "store" ||
+            filter.field === "platform" ||
+            (query.groupBy === "date" && filter.field === "product"),
+        ))
     ) {
-      const result = pieResult(query, await this.stores.read(context, query));
+      const rows = await this.stores.read(context, query);
+      const result =
+        query.groupBy === "date" && query.visualization !== "pie"
+          ? seriesResult(query, rows)
+          : pieResult(query, rows);
       return DashboardInsightResultSchema.parse(
-        query.visualization === "pie"
+        query.visualization !== "report"
           ? result
           : {
               kind: "report",
               title: "门店渠道经营报告",
               summary: result.summary,
               highlights: ["仅统计已支付订单；未分配门店的数据单独列示。"],
-              metrics: result.slices.slice(0, 8).map((slice) => ({
-                label: slice.label,
-                value:
-                  result.unit === "currencyMinor" ? formatCurrency(slice.value) : `${slice.value}`,
-              })),
+              metrics: (result.kind === "pie" ? result.slices : result.points)
+                .slice(0, 8)
+                .map((slice) => ({
+                  label: "label" in slice ? slice.label : slice.date,
+                  value:
+                    result.unit === "currencyMinor"
+                      ? formatCurrency(slice.value)
+                      : `${slice.value}`,
+                })),
             },
       );
     }
     const result =
       query.visualization === "report"
         ? await this.report(context, query)
-        : await this.pie(context, query);
+        : query.groupBy === "date" && query.visualization !== "pie"
+          ? await this.series(context, query)
+          : await this.pie(context, query);
     return DashboardInsightResultSchema.parse(result);
   }
 
@@ -150,6 +170,25 @@ export class DashboardInsightExecutor {
       query.dateRange.start,
     );
     return pieResult(
+      query,
+      data.recent.dailyTrend.map((item) => ({
+        key: item.date,
+        label: item.date,
+        value: item.revenueCents,
+      })),
+    );
+  }
+
+  private async series(context: ToolInvocationContext, query: DashboardInsightQuery) {
+    if (query.dataset !== "sales" || query.groupBy !== "date") {
+      throw new Error("当前查询暂不支持序列图");
+    }
+    const data = await this.dashboard.summarize(
+      context,
+      query.dateRange.end,
+      query.dateRange.start,
+    );
+    return seriesResult(
       query,
       data.recent.dailyTrend.map((item) => ({
         key: item.date,
@@ -237,6 +276,20 @@ function pieResult(query: DashboardInsightQuery, rawSlices: readonly PieSlice[])
     summary: `${query.dateRange.start} 至 ${query.dateRange.end}`,
     unit: getInsightMetric(query.metric).unit,
     slices,
+  };
+}
+
+function seriesResult(query: DashboardInsightQuery, rows: readonly PieSlice[]) {
+  const points = [...rows]
+    .filter((row) => Number.isFinite(row.value) && row.value >= 0)
+    .sort((left, right) => left.key.localeCompare(right.key))
+    .map((row) => ({ date: row.key, value: row.value }));
+  return {
+    kind: "series" as const,
+    title: insightTitle(query),
+    summary: `${query.dateRange.start} 至 ${query.dateRange.end}`,
+    unit: getInsightMetric(query.metric).unit,
+    points,
   };
 }
 

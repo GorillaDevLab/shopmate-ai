@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { DashboardInsightQuery, DashboardInsightResult } from "@shopmate/contracts";
 import { DashboardInsightCard } from "./dashboard-insight-card";
@@ -30,6 +30,14 @@ it("复用预览且相同查询对象重建不重复请求", () => {
   const view = render(<DashboardInsightCard query={query} initialResult={result} />);
   view.rerender(<DashboardInsightCard query={{ ...query }} initialResult={result} />);
   expect(screen.getByRole("heading", { name: "销售占比" })).toBeInTheDocument();
+  expect(executeDashboardInsight).not.toHaveBeenCalled();
+});
+
+it("切换展示方式只更新本地视图，不重新执行查询", () => {
+  render(<DashboardInsightCard query={query} initialResult={result} />);
+  expect(screen.getByRole("button", { name: "柱状图" })).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByRole("button", { name: "环形图" }));
+  expect(screen.getByRole("button", { name: "环形图" })).toHaveAttribute("aria-pressed", "true");
   expect(executeDashboardInsight).not.toHaveBeenCalled();
 });
 

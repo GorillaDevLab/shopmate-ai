@@ -14,8 +14,22 @@ describe("销售趋势图", () => {
     fireEvent.change(slider, { target: { value: "9" } });
     expect(screen.getByRole("status")).toHaveTextContent("8月11日");
     expect(screen.getByRole("status")).toHaveTextContent("¥9.00");
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "折线图" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "所选时段销售趋势图" })).toBeInTheDocument();
+  });
+
+  it("switches line and area presentation without changing data", () => {
+    const changes: string[] = [];
+    render(
+      <SalesTrend
+        points={[{ date: "2026-08-31", revenueMinor: 12345 }]}
+        view="line"
+        onViewChange={(view) => changes.push(view)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "面积图" }));
+    expect(changes).toEqual(["area"]);
+    expect(screen.getByRole("status")).toHaveTextContent("¥123.45");
   });
   it("展示 API 原始日期与人民币金额", () => {
     render(
@@ -28,25 +42,26 @@ describe("销售趋势图", () => {
     );
 
     expect(screen.getByRole("img", { name: "近 2 天销售趋势图" })).toBeInTheDocument();
-    expect(screen.getByText("¥1,268.00")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("¥1,268.00");
     const previousDay = screen.getByRole("button", { name: "8月30日，销售额 ¥1,100.00" });
     fireEvent.mouseEnter(previousDay);
     expect(screen.getByRole("status")).toHaveTextContent("8月30日");
     expect(screen.getByRole("status")).toHaveTextContent("¥1,100.00");
-    expect(previousDay).toHaveAttribute("aria-pressed", "true");
+    expect(previousDay).toHaveAttribute("aria-pressed", "false");
   });
 
   it("全零数据仍生成有限坐标，不出现 NaN 或 Infinity", () => {
     const { container } = render(<SalesTrend points={[{ date: "2026-08-31", revenueMinor: 0 }]} />);
 
     expect(container.innerHTML).not.toMatch(/NaN|Infinity/u);
-    expect(screen.getByText("¥0.00")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("¥0.00");
   });
 
   it("超大安全整数金额在手机明细单元内允许断行", () => {
     render(<SalesTrend points={[{ date: "2026-08-31", revenueMinor: Number.MAX_SAFE_INTEGER }]} />);
 
-    expect(screen.getByText("¥90,071,992,547,409.91")).toHaveClass("break-all");
+    expect(screen.getByRole("status").querySelector("strong")).toHaveClass("break-all");
+    expect(screen.getByRole("status")).toHaveTextContent("¥90,071,992,547,409.91");
   });
 
   it("支持键盘聚焦和点击选择，不改动 API 金额", () => {
@@ -69,7 +84,7 @@ describe("销售趋势图", () => {
     const { rerender } = render(
       <SalesTrend points={[{ date: "2026-08-30", revenueMinor: 12345 }]} />,
     );
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(screen.getByRole("button", { name: "8月30日，销售额 ¥123.45" }));
     rerender(<SalesTrend points={[{ date: "2026-08-31", revenueMinor: 67890 }]} />);
     expect(screen.getByRole("status")).toHaveTextContent("8月31日");
     expect(screen.getByRole("status")).toHaveTextContent("¥678.90");
