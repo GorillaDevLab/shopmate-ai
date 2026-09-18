@@ -28,8 +28,9 @@ export function buildPieSlices(slices: readonly ChartSlice[], expanded = false):
 }
 
 export function formatChartValue(value: number, unit: ChartUnit): string {
+  if (!Number.isFinite(value)) return "—";
   if (unit === "currencyMinor") {
-    const minor = BigInt(value);
+    const minor = BigInt(Math.round(value));
     const currency = new Intl.NumberFormat("zh-CN", {
       style: "currency",
       currency: "CNY",

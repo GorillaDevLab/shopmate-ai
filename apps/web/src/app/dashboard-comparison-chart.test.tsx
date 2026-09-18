@@ -18,7 +18,7 @@ describe("经营对比图", () => {
       />,
     );
     expect(screen.queryByRole("button", { name: "环形图" })).not.toBeInTheDocument();
-    expect(screen.getByText("¥123.45")).toBeInTheDocument();
+    expect(screen.getAllByText("¥123.45").length).toBeGreaterThan(0);
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
   it("显示真实金额并允许在柱状图与环形图之间切换", () => {
@@ -36,7 +36,7 @@ describe("经营对比图", () => {
         }}
       />,
     );
-    expect(screen.getByText("¥123.45")).toBeInTheDocument();
+    expect(screen.getAllByText("¥123.45").length).toBeGreaterThan(0);
     expect(screen.getByText("海淀店")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "环形图" }));
     expect(screen.getByRole("img", { name: /门店销售额/ })).toBeInTheDocument();
@@ -101,5 +101,59 @@ describe("经营对比图", () => {
     fireEvent.click(screen.getByRole("button", { name: "环形图" }));
     expect(changes).toEqual(["pie"]);
     expect(result.slices).toEqual([{ key: "a", label: "朝阳店", value: 6 }]);
+  });
+
+  it("bars show top five ranks and preserve pinned detail across hover", () => {
+    const slices = Array.from({ length: 7 }, (_, index) => ({
+      key: `s${index}`,
+      label: `门店${index + 1}`,
+      value: 70 - index * 10,
+    }));
+    const { rerender } = render(
+      <DashboardComparisonChart
+        result={{ kind: "pie", title: "门店销售额", summary: "近 30 天", unit: "count", slices }}
+      />,
+    );
+    expect(screen.getAllByRole("button", { name: /第 \d 名/ })).toHaveLength(5);
+    fireEvent.click(screen.getByRole("button", { name: /第 1 名/ }));
+    fireEvent.mouseEnter(screen.getByRole("button", { name: /第 2 名/ }));
+    expect(screen.getByTestId("bar-detail")).toHaveTextContent("门店2");
+    fireEvent.mouseLeave(screen.getByRole("button", { name: /第 2 名/ }));
+    expect(screen.getByTestId("bar-detail")).toHaveTextContent("门店1");
+    fireEvent.click(screen.getByRole("button", { name: "展开全部 7 项" }));
+    expect(screen.getAllByRole("button", { name: /第 \d 名/ })).toHaveLength(7);
+    rerender(
+      <DashboardComparisonChart
+        result={{
+          kind: "pie",
+          title: "门店销售额",
+          summary: "近 30 天",
+          unit: "count",
+          slices: slices.slice(1),
+        }}
+      />,
+    );
+    expect(screen.getByTestId("bar-detail")).toHaveTextContent("当前展示合计");
+  });
+
+  it("donut exposes only legend buttons and supports keyboard pin toggle", () => {
+    render(
+      <DashboardComparisonChart
+        initialView="donut"
+        result={{
+          kind: "pie",
+          title: "销售额",
+          summary: "今天",
+          unit: "count",
+          slices: [{ key: "a", label: "A店", value: 2 }],
+        }}
+      />,
+    );
+    const legend = screen.getByRole("button", { name: /^A店/ });
+    fireEvent.click(legend);
+    expect(legend).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(legend);
+    expect(legend).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector("circle[tabindex]")).toBeNull();
   });
 });

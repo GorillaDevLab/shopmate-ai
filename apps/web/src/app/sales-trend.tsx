@@ -27,6 +27,7 @@ export function SalesTrend({
       heading="销售趋势"
       periodLabel={label}
       chartLabel={`${periodLabel ?? `近 ${points.length} 天`}销售趋势图`}
+      pointLabel="销售额"
       view={view}
       views={["line", "area"]}
       onViewChange={(next) => {

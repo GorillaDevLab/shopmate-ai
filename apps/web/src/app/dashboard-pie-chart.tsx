@@ -1,6 +1,6 @@
 "use client";
 import type { DashboardInsightResult } from "@shopmate/contracts";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   buildPieSlices,
   chartColor,
@@ -15,17 +15,14 @@ export function DashboardPieChart({ result }: { result: Result }) {
   const [hovered, setHovered] = useState<string>();
   const slices = buildPieSlices(result.slices, expanded);
   const total = result.slices.reduce((sum, slice) => sum + slice.value, 0);
-  useEffect(() => {
-    if (pinned && !slices.some(({ key }) => key === pinned)) setPinned(undefined);
-  }, [pinned, slices]);
+  const validPinned = pinned && slices.some(({ key }) => key === pinned) ? pinned : undefined;
   if (!result.slices.length || total === 0)
     return (
       <ChartShell result={result}>
         <p>所选范围暂无可展示数据</p>
       </ChartShell>
     );
-  const active = slices.find(({ key }) => key === (hovered ?? pinned));
-  let cursor = 0;
+  const active = slices.find(({ key }) => key === (hovered ?? validPinned));
   return (
     <ChartShell result={result}>
       <div className="dashboard-pie-content">
@@ -36,10 +33,11 @@ export function DashboardPieChart({ result }: { result: Result }) {
             role="img"
             aria-label={`${result.title}：${slices.map((s) => `${s.label} ${formatChartShare(s.value, total)}`).join("，")}`}
           >
-            {slices.map((slice) => {
+            {slices.map((slice, index) => {
               const length = (slice.value / total) * 100;
-              const offset = -cursor;
-              cursor += length;
+              const offset = -slices
+                .slice(0, index)
+                .reduce((sum, item) => sum + (item.value / total) * 100, 0);
               return (
                 <circle
                   key={slice.key}
@@ -52,14 +50,8 @@ export function DashboardPieChart({ result }: { result: Result }) {
                   strokeWidth="16"
                   strokeDasharray={`${length} ${100 - length}`}
                   strokeDashoffset={offset}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`图形：${slice.label} ${formatChartShare(slice.value, total)}`}
-                  aria-pressed={pinned === slice.key}
                   onMouseEnter={() => setHovered(slice.key)}
                   onMouseLeave={() => setHovered(undefined)}
-                  onFocus={() => setHovered(slice.key)}
-                  onBlur={() => setHovered(undefined)}
                   onClick={() => setPinned(pinned === slice.key ? undefined : slice.key)}
                 />
               );
@@ -75,7 +67,7 @@ export function DashboardPieChart({ result }: { result: Result }) {
             <li key={slice.key}>
               <button
                 type="button"
-                aria-pressed={pinned === slice.key}
+                aria-pressed={validPinned === slice.key}
                 onClick={() => setPinned(pinned === slice.key ? undefined : slice.key)}
                 onMouseEnter={() => setHovered(slice.key)}
                 onMouseLeave={() => setHovered(undefined)}

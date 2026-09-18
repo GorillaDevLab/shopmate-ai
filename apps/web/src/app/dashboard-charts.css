@@ -102,6 +102,39 @@
   display: grid;
   gap: 13px;
 }
+.comparison-bars li > button {
+  width: 100%;
+  border-radius: 10px;
+  padding: 5px;
+  text-align: left;
+}
+.comparison-bars li > button:hover,
+.comparison-bars li > button:focus-visible,
+.comparison-bars li > button[aria-pressed="true"] {
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 2px var(--brand-ring);
+}
+.comparison-detail {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: var(--app-muted);
+  font-size: 12px;
+}
+.comparison-detail strong {
+  color: var(--app-text);
+  font-variant-numeric: tabular-nums;
+}
+.comparison-bar-label b {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  margin-right: 7px;
+  color: var(--app-muted);
+  font-size: 10px;
+}
 .comparison-bar-label {
   display: flex;
   justify-content: space-between;
@@ -170,6 +203,33 @@
   height: 180px;
   margin-top: 12px;
 }
+.series-chart-grid {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+}
+.series-value-axis {
+  position: relative;
+  height: 180px;
+  color: var(--app-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.series-value-axis span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+.series-axis {
+  margin-left: 56px;
+}
+.series-unit {
+  margin: 3px 0 0 56px;
+  color: var(--app-muted);
+  font-size: 11px;
+}
 .series-stage svg {
   width: 100%;
   height: 100%;
@@ -223,6 +283,9 @@
 .series-point[aria-pressed="true"] i {
   width: 10px;
   height: 10px;
+  box-shadow:
+    0 0 0 3px var(--app-surface),
+    0 0 0 6px var(--brand-ring);
 }
 .series-axis {
   position: relative;
@@ -280,4 +343,13 @@
   .dashboard-donut circle {
     transition: none;
   }
+}
+:root[data-appearance="vivid"] .series-point[aria-pressed="true"] i,
+:root[data-appearance="vivid"] .comparison-bars li > button[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 3px var(--app-surface),
+    0 0 14px color-mix(in srgb, var(--brand) 55%, transparent);
+}
+:root[data-appearance="vivid"] .dashboard-donut circle {
+  filter: drop-shadow(0 1px 3px color-mix(in srgb, var(--brand) 28%, transparent));
 }

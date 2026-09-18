@@ -4,6 +4,7 @@ import {
   chartColor,
   createSeriesPoints,
   formatChartShare,
+  formatChartValue,
 } from "./dashboard-chart-model";
 
 describe("dashboard chart model", () => {
@@ -53,6 +54,14 @@ describe("dashboard chart model", () => {
   it("does not describe non-additive values as percentages", () => {
     expect(formatChartShare(5, 10, false)).toBeNull();
     expect(formatChartShare(5, 10, true)).toBe("50%");
+  });
+
+  it("rounds fractional minor currency and preserves large integer cents", () => {
+    expect(formatChartValue(100.6, "currencyMinor")).toBe("¥1.01");
+    expect(formatChartValue(Number.MAX_SAFE_INTEGER, "currencyMinor")).toBe(
+      "¥90,071,992,547,409.91",
+    );
+    expect(formatChartValue(Number.POSITIVE_INFINITY, "count")).toBe("—");
   });
 
   it("sorts series chronologically and positions points by actual date gaps", () => {
