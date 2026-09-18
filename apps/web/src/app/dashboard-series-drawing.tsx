@@ -88,7 +88,13 @@ function ChartSvg(props: ChartSvgProps) {
       ))}
       <SeriesMarks points={points} view={view} gradientId={gradientId} />
       {selected && (
-        <line x1={selected.x * 10} x2={selected.x * 10} y1="10" y2="168" className="series-guide" />
+        <line
+          x1={selected.x * 10}
+          x2={selected.x * 10}
+          y1={PLOT_TOP * 1.8}
+          y2={PLOT_BASELINE * 1.8}
+          className="series-guide"
+        />
       )}
     </svg>
   );
