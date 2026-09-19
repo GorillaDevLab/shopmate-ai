@@ -2,11 +2,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { mobileDebugScript } from "./mobile-debug-script";
 
 const originalFetch = window.fetch;
-// eslint-disable-next-line no-console -- Restore the console wrapper after diagnostics testing.
 const originalConsole = console.error;
 afterEach(() => {
   window.fetch = originalFetch;
-  // eslint-disable-next-line no-console -- Restore the original console method after each test.
   console.error = originalConsole;
   window.localStorage.removeItem("shopmate_debug_enabled");
   vi.unstubAllEnvs();
