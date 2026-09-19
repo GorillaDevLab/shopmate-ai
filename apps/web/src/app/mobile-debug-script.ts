@@ -1,4 +1,3 @@
-/* eslint-disable no-console -- Opt-in diagnostics wraps and preserves the original console.error; it emits no application logs. */
 import { sanitizeDebugData } from "@shopmate/contracts";
 
 export function mobileDebugScript() {
@@ -15,6 +14,7 @@ function installMobileDebug(sanitize: (value: unknown) => unknown, app: Record<s
   type Log = { time: string; type: string; detail: string };
   const logs: Log[] = [];
   const originalFetch = window.fetch;
+  // eslint-disable-next-line no-console -- Capture the original console method for diagnostic wrapping.
   const originalConsole = console.error;
   function record(type: string, value: unknown) {
     try {
@@ -62,6 +62,7 @@ function installMobileDebug(sanitize: (value: unknown) => unknown, app: Record<s
   window.addEventListener("securitypolicyviolation", (event) =>
     record("security", { directive: event.violatedDirective, blocked: safeUrl(event.blockedURI) }),
   );
+  // eslint-disable-next-line no-console -- Diagnostics intentionally wrap console.error without emitting logs.
   console.error = function (...args: unknown[]) {
     record("console", args.slice(0, 5).map(errorData));
     originalConsole.apply(console, args);
