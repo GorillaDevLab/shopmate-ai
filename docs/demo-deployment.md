@@ -21,6 +21,7 @@
 - `API_BASE_URL`：Next.js 到 API 的服务端代理地址
 - `DEMO_AUTH_*`：Demo 登录配置
 - `DEMO_SESSION_SECRET`：服务端会话 Secret
+- `DEMO_AUTH_SECURE_COOKIE`：会话 Cookie 安全开关；HTTPS/生产默认 `true`，仅临时 HTTP IP 演示可显式设为 `false`
 - `DEEPSEEK_*`：AI Provider 配置
 - `DEMO_WEB_URL`：部署后的 Web 健康检查地址
 - `DEMO_API_URL`：部署后的 API 地址
@@ -51,6 +52,9 @@ Seed 使用固定 Demo 数据，可重复执行。
     pnpm dev
 
 部署平台应分别启动 Web 与 API，并正确配置 `API_BASE_URL`。
+
+正式部署必须使用 HTTPS。若当前只是通过 HTTP IP 做临时演示，需要在 API 环境显式设置
+`DEMO_AUTH_SECURE_COOKIE=false`，否则浏览器会拒绝发送生产环境的 Secure Cookie，登录后指标接口会返回 401。演示结束后应恢复为 `true` 并切换 HTTPS。
 
 ## 5. 健康检查
 

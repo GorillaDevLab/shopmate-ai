@@ -27,6 +27,20 @@ describe("Demo 登录配置", () => {
     expect(readDemoAuthConfig({})).toBeNull();
   });
 
+  it("允许临时 HTTP 演示环境显式关闭 Secure Cookie", () => {
+    expect(
+      readDemoAuthConfig({
+        NODE_ENV: "production",
+        DEMO_AUTH_EMAIL: "owner@shopmate.co.nz",
+        DEMO_AUTH_PASSWORD: "demo-pass-2026",
+        DEMO_AUTH_USER_ID: "demo-user",
+        DEMO_AUTH_MERCHANT_ID: "demo-merchant",
+        DEMO_SESSION_SECRET: "test-session-secret-with-at-least-32-characters",
+        DEMO_AUTH_SECURE_COOKIE: "false",
+      })?.secureCookie,
+    ).toBe(false);
+  });
+
   it("保留密码和会话密钥中的有效空格", () => {
     const config = readDemoAuthConfig({
       DEMO_AUTH_EMAIL: "owner@shopmate.co.nz",
