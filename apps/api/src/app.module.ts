@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { DebugReportModule } from "./debug-report/debug-report.module.js";
 
 import { AnalyticsModule } from "./analytics/analytics.module.js";
 import { DemoAuthModule } from "./auth/demo-auth.module.js";
@@ -10,6 +11,7 @@ import { MonitoringModule } from "./monitoring/monitoring.module.js";
 
 @Module({
   imports: [
+    DebugReportModule,
     HealthModule,
     DemoAuthModule,
     ProductModule,
