@@ -246,3 +246,4 @@ export type {
   ProductCopyRequest,
   ProductCopyType,
 } from "./ai/product-copy.schema.js";
+export { sanitizeDebugData, DebugReportSchema } from "./debug-report.js";
