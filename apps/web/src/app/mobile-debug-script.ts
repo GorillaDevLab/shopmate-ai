@@ -170,6 +170,13 @@ function installMobileDebug(sanitize: (value: unknown) => unknown, app: Record<s
     return report;
   }
   function mount() {
+    let enabled = true;
+    try {
+      enabled = window.localStorage.getItem("shopmate_debug_enabled") !== "false";
+    } catch {
+      enabled = true;
+    }
+    if (!enabled) return;
     const host = document.createElement("div");
     host.id = "mobile-debug-report";
     const root = host.attachShadow ? host.attachShadow({ mode: "open" }) : host;
@@ -177,24 +184,53 @@ function installMobileDebug(sanitize: (value: unknown) => unknown, app: Record<s
       :host{position:fixed;right:12px;bottom:calc(88px + env(safe-area-inset-bottom,0px));z-index:2147483646;font:14px system-ui;color:#202033}
       button{font:inherit;min-height:44px;border:1px solid #666;border-radius:12px;background:#fff;color:#202033;padding:8px 14px;touch-action:manipulation}
       #panel{position:fixed;inset:auto 12px calc(144px + env(safe-area-inset-bottom,0px));max-height:65vh;overflow:auto;background:#fff;border:1px solid #aaa;border-radius:16px;padding:16px;box-shadow:0 8px 32px #0004}
-      textarea{box-sizing:border-box;width:100%;font:16px system-ui;min-height:80px;margin:10px 0}p{line-height:1.5}button:disabled{opacity:.6}
+      #details{white-space:pre-wrap;word-break:break-word;max-height:38vh;overflow:auto;background:#f5f5f8;border-radius:10px;padding:10px;font:12px ui-monospace,monospace;line-height:1.45}
+      p{line-height:1.5}button:disabled{opacity:.6}
       @media(min-width:1025px) and (hover:hover) and (pointer:fine){:host{display:none}}
-    </style><button id="open" type="button">Report Error</button>
-    <section id="panel" hidden role="dialog" aria-label="Send Debug Info"><label for="description">What happened? (optional)</label>
-    <textarea id="description" maxlength="1000"></textarea><p>Send device and sanitized error details to the developer. Do not include passwords or personal information.</p>
-    <button id="send" type="button">Send Debug Report</button> <button id="close" type="button">Close</button><p id="status" role="status" aria-live="polite"></p></section>`;
+    </style><button id="open" type="button" aria-label="打开页面诊断">诊断</button>
+    <section id="panel" hidden role="dialog" aria-label="页面诊断"><h2>页面诊断</h2>
+    <p>请截图或复制下面的信息发给开发者。不会发送邮箱，也不会读取密码或业务数据。</p>
+    <pre id="details"></pre><button id="copy" type="button">复制诊断信息</button>
+    <button id="disable" type="button">关闭诊断入口</button> <button id="close" type="button">关闭</button><p id="status" role="status" aria-live="polite"></p></section>`;
     const panel = root.querySelector<HTMLElement>("#panel")!;
-    const description = root.querySelector<HTMLTextAreaElement>("#description")!;
+    const details = root.querySelector<HTMLElement>("#details")!;
     const open = root.querySelector<HTMLButtonElement>("#open")!;
-    const send = root.querySelector<HTMLButtonElement>("#send")!;
+    const copy = root.querySelector<HTMLButtonElement>("#copy")!;
+    const disable = root.querySelector<HTMLButtonElement>("#disable")!;
     const status = root.querySelector<HTMLElement>("#status")!;
+    function render() {
+      details.textContent = JSON.stringify(snapshot(""), null, 2);
+    }
     open.onclick = () => {
       panel.hidden = false;
-      description.focus();
+      render();
+      copy.focus();
     };
     root.querySelector<HTMLButtonElement>("#close")!.onclick = () => {
       panel.hidden = true;
       open.focus();
+    };
+    copy.onclick = () => {
+      const text = details.textContent ?? "";
+      const clipboard = navigator.clipboard;
+      if (!clipboard?.writeText) {
+        status.textContent = "请直接截图发送给开发者";
+        return;
+      }
+      void clipboard.writeText(text).then(
+        () => (status.textContent = "已复制诊断信息，请发送给开发者"),
+        () => (status.textContent = "请直接截图发送给开发者"),
+      );
+    };
+    disable.onclick = () => {
+      try {
+        window.localStorage.setItem("shopmate_debug_enabled", "false");
+      } catch {
+        /* A storage failure must not block the temporary diagnostic panel. */
+      }
+      panel.hidden = true;
+      open.hidden = true;
+      status.textContent = "诊断入口已关闭，刷新页面后生效";
     };
     panel.onkeydown = (event) => {
       if (event.key === "Escape") {
@@ -202,41 +238,11 @@ function installMobileDebug(sanitize: (value: unknown) => unknown, app: Record<s
         open.focus();
       }
     };
-    send.onclick = () => {
-      void submit();
-    };
-    async function submit() {
-      if (send.disabled) return;
-      send.disabled = true;
-      status.textContent = "Sending debug report...";
-      const controller = typeof AbortController === "function" ? new AbortController() : undefined;
-      const timer = setTimeout(() => controller?.abort(), 15000);
-      try {
-        const response = await originalFetch.call(window, "/api/v1/debug-report", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(snapshot(description.value)),
-          signal: controller?.signal,
-        });
-        status.textContent = response.ok
-          ? "Debug report sent successfully."
-          : response.status === 401
-            ? "Failed to send debug report. Please sign in first."
-            : response.status === 429
-              ? "Failed to send debug report. Please wait one minute."
-              : "Failed to send debug report.";
-      } catch {
-        status.textContent = "Failed to send debug report.";
-      } finally {
-        clearTimeout(timer);
-        send.disabled = false;
-      }
-    }
     document.body.appendChild(host);
     // Native dialogs live above every z-index; keep reporting reachable inside them.
     if (typeof MutationObserver === "function") {
       const observer = new MutationObserver(() => {
+        if (typeof document === "undefined") return;
         const dialogs = document.querySelectorAll("dialog[open]");
         const parent = dialogs.length ? dialogs[dialogs.length - 1]! : document.body;
         if (host.parentElement !== parent) parent.appendChild(host);

@@ -7,12 +7,13 @@ const originalConsole = console.error;
 afterEach(() => {
   window.fetch = originalFetch;
   console.error = originalConsole;
+  window.localStorage.removeItem("shopmate_debug_enabled");
   vi.unstubAllEnvs();
 });
-it("works before hydration, preserves fetch response, and sends sanitized bounded diagnostics", async () => {
+it("shows sanitized diagnostics locally before hydration without making a report request", async () => {
   vi.stubEnv("NEXT_PUBLIC_APP_BUILD", "test-build");
   const response = new Response("private customer body", { status: 500 });
-  const fetch = vi.fn().mockResolvedValueOnce(response).mockResolvedValue({ ok: true });
+  const fetch = vi.fn().mockResolvedValue(response);
   window.fetch = fetch;
   const script = mobileDebugScript();
   window.eval(script);
@@ -29,16 +30,14 @@ it("works before hydration, preserves fetch response, and sends sanitized bounde
   const host = document.querySelector("#mobile-debug-report")!;
   const root = host.shadowRoot!;
   root.querySelector<HTMLButtonElement>("#open")!.click();
-  root.querySelector<HTMLButtonElement>("#send")!.click();
-  await vi.waitFor(() =>
-    expect(root.querySelector("#status")!.textContent).toBe("Debug report sent successfully."),
-  );
-  const payload = JSON.parse(fetch.mock.calls[1]![1].body);
-  expect(payload.logs.some((entry: { type: string }) => entry.type === "error")).toBe(true);
-  expect(payload.logs.some((entry: { type: string }) => entry.type === "network")).toBe(true);
-  expect(JSON.stringify(payload)).not.toContain("private-value");
-  expect(JSON.stringify(payload)).not.toContain("private customer body");
-  expect(payload.info.build).toBe("test-build");
+  expect(root.querySelector("h2")!.textContent).toBe("页面诊断");
+  expect(root.querySelector("#details")!.textContent).not.toContain("private-value");
+  expect(root.querySelector("#details")!.textContent).not.toContain("private customer body");
+  root.querySelector<HTMLButtonElement>("#copy")!.click();
+  expect(root.querySelector("#status")!.textContent).toBe("请直接截图发送给开发者");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  root.querySelector<HTMLButtonElement>("#disable")!.click();
+  expect(root.querySelector<HTMLButtonElement>("#open")!.hidden).toBe(true);
   window.dispatchEvent(new Event("pagehide"));
   host.remove();
 });
