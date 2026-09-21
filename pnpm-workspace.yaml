@@ -12,3 +12,6 @@ allowBuilds:
 
   # ESLint 的 TypeScript 导入解析器需要安装其平台原生绑定。
   unrs-resolver: true
+
+patchedDependencies:
+  mdast-util-gfm-autolink-literal@2.0.1: patches/mdast-util-gfm-autolink-literal@2.0.1.patch

@@ -4,6 +4,22 @@ import { describe, expect, it } from "vitest";
 import { AssistantMarkdown } from "./assistant-markdown";
 
 describe("助手 Markdown", () => {
+  it("保留邮件自动链接、标点和连续地址", () => {
+    const { container } = render(
+      <AssistantMarkdown
+        content={"联系：(sales@example.com)，help@example.org next@example.net"}
+      />,
+    );
+    expect(container.textContent).toBe(
+      "联系：(sales@example.com)，help@example.org next@example.net",
+    );
+    expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "mailto:sales@example.com",
+      "mailto:help@example.org",
+      "mailto:next@example.net",
+    ]);
+  });
+
   it("将库存回复渲染为标题、强调和可访问的表格", () => {
     render(
       <AssistantMarkdown

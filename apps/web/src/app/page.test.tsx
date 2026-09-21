@@ -18,7 +18,7 @@ vi.mock("./dashboard-layout-api", async () => {
 });
 
 import RootLayout, { metadata } from "./layout";
-import { Dashboard } from "./page";
+import { Dashboard } from "./dashboard";
 import { dashboardResponsePreview } from "./dashboard-data";
 
 const readyDashboard = <Dashboard state="ready" data={dashboardResponsePreview} />;
