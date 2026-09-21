@@ -1,5 +1,9 @@
 import { sanitizeDebugData } from "@shopmate/contracts";
 
+export function isMobileDebugEnabled(value: string | undefined) {
+  return value !== "false";
+}
+
 export function mobileDebugScript() {
   const app = {
     version: "0.1.0",

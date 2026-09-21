@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { mobileDebugScript } from "./mobile-debug-script";
+import { isMobileDebugEnabled, mobileDebugScript } from "./mobile-debug-script";
 
 const originalFetch = window.fetch;
 const originalConsole = console.error;
@@ -9,6 +9,13 @@ afterEach(() => {
   window.localStorage.removeItem("shopmate_debug_enabled");
   vi.unstubAllEnvs();
 });
+
+it("keeps temporary diagnostics enabled unless deployment explicitly disables them", () => {
+  expect(isMobileDebugEnabled(undefined)).toBe(true);
+  expect(isMobileDebugEnabled("true")).toBe(true);
+  expect(isMobileDebugEnabled("false")).toBe(false);
+});
+
 it("shows sanitized diagnostics locally before hydration without making a report request", async () => {
   vi.stubEnv("NEXT_PUBLIC_APP_BUILD", "test-build");
   const response = new Response("private customer body", { status: 500 });
