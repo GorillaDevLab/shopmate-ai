@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ChatHistorySchema } from "./chat-history.schema.js";
 
 const titleSchema = z.string().trim().min(1).max(120);
 const summarySchema = z.string().trim().min(1).max(1200);
@@ -62,6 +63,8 @@ export const DashboardInsightQuerySchema = z
 export const DashboardInsightGenerateRequestSchema = z.strictObject({
   question: z.string().trim().min(1).max(2000),
   kind: DashboardInsightKindSchema,
+  history: ChatHistorySchema.optional(),
+  previousQuery: DashboardInsightQuerySchema.optional(),
 });
 
 const pieResultSchema = z.strictObject({

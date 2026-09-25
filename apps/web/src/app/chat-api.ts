@@ -21,6 +21,7 @@ export async function sendChatMessage(
   signal?: AbortSignal,
   productCopy?: ProductCopyRequest,
   history?: AiChatRequest["history"],
+  insightQuery?: AiChatRequest["insightQuery"],
 ): Promise<AiChatResponse["message"]> {
   const message = content.trim();
   if (!message) throw new ChatApiError("请输入想了解的经营问题", 400);
@@ -36,6 +37,7 @@ export async function sendChatMessage(
         message: { role: "user", content: message },
         ...(productCopy ? { productCopy } : {}),
         ...(history?.length ? { history } : {}),
+        ...(insightQuery ? { insightQuery } : {}),
       }),
       signal,
     });

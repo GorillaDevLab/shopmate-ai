@@ -22,6 +22,30 @@ const query = {
 } as const;
 
 describe("AI 看板组件生成服务", () => {
+  it("图表追问传递已校验的历史及上一查询，仍使用当前身份执行", async () => {
+    const provider = scriptedProvider(query);
+    const execute = vi.fn().mockResolvedValue({
+      kind: "pie",
+      title: "销售",
+      summary: "本期",
+      unit: "currencyMinor",
+      slices: [],
+    });
+    const history = [
+      { role: "user", content: "看各商品销售额" },
+      { role: "assistant", content: "已生成。" },
+    ];
+    await new DashboardInsightService(provider, { execute }).preview(context, {
+      question: "只看上个月",
+      kind: "pie",
+      history,
+      previousQuery: query,
+    });
+    const request = provider.generate.mock.calls[0]?.[0];
+    expect(request?.messages).toEqual(expect.arrayContaining(history));
+    expect(request?.messages.at(-1)?.content).toContain(JSON.stringify(query));
+    expect(execute).toHaveBeenCalledWith(context, query);
+  });
   it("auto 只调用一次模型并按日期形状确定为折线图", async () => {
     const dateQuery = { ...query, groupBy: "date", visualization: "line" } as const;
     const provider = scriptedProvider(dateQuery);

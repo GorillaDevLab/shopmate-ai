@@ -19,6 +19,67 @@ function AssistantHarness() {
 describe("看板悬浮 AI 助手", () => {
   beforeEach(() => vi.resetAllMocks());
 
+  it("图表后的解释追问传递查询条件，不再次生成图表", async () => {
+    const query = {
+      dataset: "sales",
+      metric: "revenue",
+      aggregation: "sum",
+      groupBy: "store",
+      dateRange: { start: "2026-09-01", end: "2026-09-25" },
+      filters: [],
+      order: "desc",
+      limit: 8,
+      visualization: "bar",
+    };
+    insightApi.generateDashboardInsight.mockResolvedValue({
+      query,
+      result: {
+        kind: "pie",
+        title: "门店销售额",
+        summary: "已查询",
+        unit: "currencyMinor",
+        slices: [{ key: "s1", label: "朝阳店", value: 12000 }],
+      },
+    });
+    api.sendChatMessage.mockResolvedValue({
+      role: "assistant",
+      content: "这是查询时的数据库快照，外部平台同步状态需要另行核实。",
+    });
+    render(<DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={vi.fn()} />);
+    const send = (value: string) => {
+      fireEvent.change(screen.getByRole("textbox", { name: "消息" }), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    };
+    send("近30天各门店销售额");
+    await screen.findByRole("heading", { name: "门店销售额" });
+    send("销量是实时的吗");
+    await screen.findByText(/这是查询时的数据库快照/);
+    expect(insightApi.generateDashboardInsight).toHaveBeenCalledTimes(1);
+    expect(api.sendChatMessage).toHaveBeenCalledWith(
+      "销量是实时的吗",
+      undefined,
+      undefined,
+      expect.arrayContaining([expect.objectContaining({ content: "近30天各门店销售额" })]),
+      query,
+    );
+  });
+
+  it("收起重开后保留对话，并可加宽右侧面板", async () => {
+    api.sendChatMessage.mockResolvedValue({ role: "assistant", content: "可以继续追问。" });
+    render(<AssistantHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+      target: { value: "我有几个店铺" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    await screen.findByText("可以继续追问。");
+    fireEvent.click(screen.getByRole("button", { name: "加宽聊天面板" }));
+    expect(screen.getByRole("dialog")).toHaveClass("is-expanded");
+    fireEvent.click(screen.getByRole("button", { name: "关闭 AI 助手" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
+    expect(screen.getByText("可以继续追问。")).toBeInTheDocument();
+  });
+
   it("短句切换复用上一张图并保留加入看板的视图，不重复请求", async () => {
     const preview = {
       query: { visualization: "bar", metric: "revenue" },

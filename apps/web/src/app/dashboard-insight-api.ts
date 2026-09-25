@@ -7,6 +7,7 @@ import {
   type DashboardChartView,
   type DashboardInsightQuery,
   type DashboardInsightResult,
+  type DashboardInsightGenerateRequest,
 } from "@shopmate/contracts";
 
 export class DashboardInsightApiError extends Error {
@@ -24,8 +25,13 @@ export class DashboardInsightApiError extends Error {
 export async function generateDashboardInsight(
   question: string,
   kind: DashboardInsightKind = "auto",
+  context: Pick<DashboardInsightGenerateRequest, "history" | "previousQuery"> = {},
 ): Promise<DashboardInsightPreviewResponse> {
-  const parsedRequest = DashboardInsightGenerateRequestSchema.safeParse({ question, kind });
+  const parsedRequest = DashboardInsightGenerateRequestSchema.safeParse({
+    question,
+    kind,
+    ...context,
+  });
   if (!parsedRequest.success) {
     throw new DashboardInsightApiError("请输入有效的经营问题后再生成组件", 400, false);
   }
@@ -36,10 +42,7 @@ export async function generateDashboardInsight(
   return parsed.data;
 }
 
-async function requestPreview(body: {
-  question: string;
-  kind: DashboardInsightKind;
-}): Promise<unknown> {
+async function requestPreview(body: DashboardInsightGenerateRequest): Promise<unknown> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {

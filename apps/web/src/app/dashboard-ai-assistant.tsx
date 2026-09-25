@@ -16,12 +16,12 @@ import {
 import { type ChatMessage, useChatSession } from "./chat-session";
 import { generateDashboardInsight } from "./dashboard-insight-api";
 import { chartFollowupMessage, chartFollowupView } from "./chart-followup";
+import { insightKind } from "./assistant-intent";
 import type { DashboardChartView, DashboardInsightPreviewResponse } from "@shopmate/contracts";
 import {
   DashboardInsightPresentation,
   recommendInsightView,
 } from "./dashboard-insight-presentation";
-import type { DashboardInsightKind } from "@shopmate/contracts";
 
 const suggestions = [
   { label: "查看低库存", prompt: "最近哪些商品值得补货？" },
@@ -54,7 +54,7 @@ export function DashboardAiAssistant({
   const changeView = (preview: DashboardInsightPreviewResponse, view: DashboardChartView) =>
     setViews((current) => new Map(current).set(preview, view));
   const chat = useChatSession({
-    resolveMessage: async (prompt) => {
+    resolveMessage: async (prompt, history) => {
       const followup = chartFollowupView(prompt);
       if (followup && onInsightCreated) {
         const response = chartFollowupMessage(latestPreview.current, followup);
@@ -62,9 +62,12 @@ export function DashboardAiAssistant({
           changeView(latestPreview.current, followup);
         return { role: "assistant", content: response.content };
       }
-      const kind = insightKind(prompt);
+      const kind = insightKind(prompt, latestPreview.current?.query);
       if (!kind || !onInsightCreated) return undefined;
-      const preview = await generateDashboardInsight(prompt, kind);
+      const preview = await generateDashboardInsight(prompt, kind, {
+        history,
+        previousQuery: latestPreview.current?.query,
+      });
       latestPreview.current = preview;
       return {
         role: "assistant",
@@ -78,6 +81,7 @@ export function DashboardAiAssistant({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const conversation = chat.messages.length > 0 || chat.isSending || Boolean(chat.error);
+  const [expanded, setExpanded] = useState(false);
 
   useAssistantDialog(open, dialogRef, inputRef, openerRef);
 
@@ -101,7 +105,7 @@ export function DashboardAiAssistant({
       {open && (
         <dialog
           ref={dialogRef}
-          className={`ai-assistant-dialog ${conversation ? "has-conversation" : ""}`}
+          className={`ai-assistant-dialog ${expanded ? "is-expanded" : ""} ${conversation ? "has-conversation" : ""}`}
           aria-labelledby="ai-assistant-title"
           onCancel={(event) => {
             event.preventDefault();
@@ -109,7 +113,17 @@ export function DashboardAiAssistant({
           }}
           onKeyDown={(event) => closeOnEscape(event, onOpenChange)}
         >
-          <AssistantHeader onClose={() => onOpenChange(false)} />
+          <AssistantHeader
+            expanded={expanded}
+            onExpand={() => setExpanded((value) => !value)}
+            onClose={() => onOpenChange(false)}
+          />
+          {!conversation && (
+            <div className="ai-assistant-empty">
+              <h3>从一个经营问题开始</h3>
+              <p>问问店铺数量、销售变化，或让助手画一张图。可以接着追问，不用重复说明。</p>
+            </div>
+          )}
           {conversation && (
             <Conversation
               messages={chat.messages}
@@ -135,11 +149,28 @@ export function DashboardAiAssistant({
   );
 }
 
-function AssistantHeader({ onClose }: { onClose: () => void }) {
+function AssistantHeader({
+  onClose,
+  expanded,
+  onExpand,
+}: {
+  onClose: () => void;
+  expanded: boolean;
+  onExpand: () => void;
+}) {
   return (
     <header className="ai-assistant-header">
       <span className="ai-assistant-orb" aria-hidden="true" />
       <h2 id="ai-assistant-title">AI 经营助手</h2>
+      <button
+        type="button"
+        className="ai-assistant-icon-button"
+        onClick={onExpand}
+        aria-label={expanded ? "恢复面板宽度" : "加宽聊天面板"}
+        aria-pressed={expanded}
+      >
+        ↔
+      </button>
       <Link className="ai-assistant-icon-button" href="/chat" aria-label="打开完整聊天">
         ↗
       </Link>
@@ -149,7 +180,7 @@ function AssistantHeader({ onClose }: { onClose: () => void }) {
         aria-label="关闭 AI 助手"
         onClick={onClose}
       >
-        ×
+        ›
       </button>
     </header>
   );
@@ -174,8 +205,22 @@ function Conversation({
   onRememberAdded: (preview: DashboardInsightPreviewResponse) => void;
   isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const followBottom = useRef(true);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (element && (followBottom.current || isSending)) element.scrollTop = element.scrollHeight;
+  }, [messages, isSending]);
   return (
-    <div className="ai-assistant-conversation" aria-live="polite">
+    <div
+      ref={scrollRef}
+      className="ai-assistant-conversation"
+      aria-live="polite"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        followBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
+      }}
+    >
       {messages.map((message, index) => (
         <div key={`${message.role}-${index}`} className={`ai-message is-${message.role}`}>
           {message.role === "assistant" ? (
@@ -309,7 +354,7 @@ function AssistantComposer({
           id="dashboard-ai-message"
           value={chat.input}
           onChange={(event) => chat.setInput(event.target.value)}
-          placeholder="询问库存、热销商品或销售趋势…"
+          placeholder="问经营问题，或接着上一个回答追问…"
           disabled={chat.isSending}
           rows={2}
         />
@@ -339,7 +384,7 @@ function useAssistantDialog(
     }
     const dialog = dialogRef.current;
     if (!dialog) return;
-    if (typeof dialog.showModal === "function") dialog.showModal();
+    if (typeof dialog.show === "function") dialog.show();
     else dialog.setAttribute("open", "");
     inputRef.current?.focus();
     return () => {
@@ -357,14 +402,4 @@ function closeOnEscape(
   if (event.key !== "Escape") return;
   event.preventDefault();
   onOpenChange(false);
-}
-
-function insightKind(prompt: string): DashboardInsightKind | undefined {
-  if (/饼图|环形图|占比图|圆饼/u.test(prompt)) return "pie";
-  if (/面积图/u.test(prompt)) return "area";
-  if (/柱状图|条形图/u.test(prompt)) return "bar";
-  if (/折线图|趋势图/u.test(prompt)) return "line";
-  if (/生成.{0,8}报告|报告卡/u.test(prompt)) return "report";
-  if (/销售额|销量|销售趋势|门店/u.test(prompt)) return "auto";
-  return undefined;
 }

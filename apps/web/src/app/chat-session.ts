@@ -24,13 +24,17 @@ type ChatFailure = {
 };
 
 type ChatSessionOptions = {
-  readonly resolveMessage?: (prompt: string) => Promise<ChatMessage | undefined>;
+  readonly resolveMessage?: (
+    prompt: string,
+    history: ChatMessage[],
+  ) => Promise<ChatMessage | undefined>;
 };
 
 export function useChatSession(options: ChatSessionOptions = {}) {
   const inFlight = useRef(false);
   // Only completed turns enter context; failed requests and retries cannot duplicate it.
   const completed = useRef<ChatMessage[]>([]);
+  const latestQuery = useRef<DashboardInsightPreviewResponse["query"] | undefined>(undefined);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -54,13 +58,16 @@ export function useChatSession(options: ChatSessionOptions = {}) {
     setIsSending(true);
 
     try {
-      const reply = productCopy
+      const reply: ChatMessage = productCopy
         ? await sendChatMessage(prompt, undefined, productCopy)
-        : ((await options.resolveMessage?.(prompt)) ??
-          (await (completed.current.length
-            ? sendChatMessage(prompt, undefined, undefined, completed.current)
-            : sendChatMessage(prompt))));
+        : ((await options.resolveMessage?.(prompt, completed.current)) ??
+          (await (latestQuery.current
+            ? sendChatMessage(prompt, undefined, undefined, completed.current, latestQuery.current)
+            : completed.current.length
+              ? sendChatMessage(prompt, undefined, undefined, completed.current)
+              : sendChatMessage(prompt))));
 
+      if (reply.insightPreview) latestQuery.current = reply.insightPreview.query;
       completed.current = boundedHistory([
         ...completed.current,
         { role: "user", content: prompt },

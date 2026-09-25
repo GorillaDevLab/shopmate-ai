@@ -4,6 +4,11 @@ import type { DashboardInsightQuery } from "@shopmate/contracts";
 import { AuthPermission, type AuthContext } from "../../auth/contracts/index.js";
 
 export class StoreSalesReader {
+  async count(context: AuthContext) {
+    requireOrders(context);
+    return getPrismaClient().store.count({ where: { merchantId: context.merchantId } });
+  }
+
   async catalog(context: AuthContext) {
     if (!context.permissions.includes(AuthPermission.OrdersRead)) return [];
     return getPrismaClient().store.findMany({
