@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-const database = vi.hoisted(() => ({ order: { findMany: vi.fn() }, store: { findMany: vi.fn() } }));
+const database = vi.hoisted(() => ({
+  order: { findMany: vi.fn() },
+  store: { findMany: vi.fn(), count: vi.fn() },
+}));
 vi.mock("@shopmate/database", () => ({ getPrismaClient: () => database }));
 import { StoreSalesReader } from "./store-sales-reader.js";
 import { validateDashboardInsightQuery } from "./dashboard-insight-validator.js";
@@ -19,6 +22,13 @@ const query = {
 };
 
 describe("store sales analytics", () => {
+  it("counts only the authenticated merchant's stores and denies missing permission", async () => {
+    database.store.count.mockResolvedValue(150);
+    await expect(new StoreSalesReader().count(context)).resolves.toBe(150);
+    expect(database.store.count).toHaveBeenCalledWith({ where: { merchantId: "m" } });
+    await expect(new StoreSalesReader().count({ ...context, permissions: [] })).rejects.toThrow();
+    expect(database.store.count).toHaveBeenCalledTimes(1);
+  });
   it("uses order totals for store revenue and counts orders without items", async () => {
     database.order.findMany.mockResolvedValue([
       {

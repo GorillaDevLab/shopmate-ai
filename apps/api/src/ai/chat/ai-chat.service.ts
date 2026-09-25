@@ -28,6 +28,7 @@ export interface BusinessAgentRunner {
   run(input: {
     readonly question: string;
     readonly history?: AiChatRequest["history"];
+    readonly insightQuery?: AiChatRequest["insightQuery"];
     readonly context: ReturnType<typeof createToolInvocationContext>;
   }): Promise<BusinessAgentResult>;
 }
@@ -55,6 +56,7 @@ export class AiChatService {
       const result = await this.agent.run({
         question: request.data.message.content,
         ...(request.data.history ? { history: request.data.history } : {}),
+        ...(request.data.insightQuery ? { insightQuery: request.data.insightQuery } : {}),
         context: createToolInvocationContext(context),
       });
 

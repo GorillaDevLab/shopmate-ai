@@ -144,14 +144,20 @@ export class ToolRegistry {
     this.tools.set(tool.name, storedTool);
   }
 
-  listDefinitions(): readonly LLMToolDefinition[] {
-    const definitions = [...this.tools.values()].map((tool) =>
-      Object.freeze({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.input.jsonSchema,
-      }),
-    );
+  listDefinitions(context?: Readonly<ToolInvocationContext>): readonly LLMToolDefinition[] {
+    const definitions = [...this.tools.values()]
+      .filter(
+        (tool) =>
+          !context ||
+          tool.requiredPermissions.every((permission) => context.permissions.includes(permission)),
+      )
+      .map((tool) =>
+        Object.freeze({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.input.jsonSchema,
+        }),
+      );
 
     return Object.freeze(definitions);
   }

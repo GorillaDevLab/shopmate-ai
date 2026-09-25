@@ -342,7 +342,7 @@ button:focus-visible {
   .ai-assistant-pill,
   .ai-assistant-pill:hover,
   .ai-assistant-pill.is-hidden {
-    transform: translateX(-50%);
+    transform: none;
   }
 }
 
@@ -481,7 +481,7 @@ button:focus-visible {
 
 .ai-assistant-pill {
   position: fixed;
-  left: 50%;
+  right: 24px;
   bottom: max(22px, calc(env(safe-area-inset-bottom) + 14px));
   z-index: 40;
   display: inline-flex;
@@ -499,7 +499,7 @@ button:focus-visible {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transform: translateX(-50%);
+  transform: translateY(0);
   backdrop-filter: blur(18px) saturate(1.18);
   transition:
     opacity 150ms ease,
@@ -510,12 +510,12 @@ button:focus-visible {
   box-shadow:
     0 18px 46px #28272422,
     inset 0 1px #ffffffd4;
-  transform: translateX(-50%) translateY(-2px);
+  transform: translateY(-2px);
 }
 .ai-assistant-pill.is-hidden {
   pointer-events: none;
   opacity: 0;
-  transform: translateX(-50%) translateY(10px) scale(0.82);
+  transform: translateY(10px) scale(0.82);
 }
 .ai-assistant-orb {
   display: block;
@@ -533,11 +533,13 @@ button:focus-visible {
 }
 .ai-assistant-dialog {
   position: fixed;
-  inset: auto 0 max(22px, calc(env(safe-area-inset-bottom) + 14px));
-  width: min(620px, calc(100vw - 32px));
+  inset: 12px 12px 12px auto;
+  z-index: 100;
+  width: min(520px, calc(100vw - 24px));
   max-width: none;
-  max-height: min(78dvh, 720px);
-  margin: 0 auto;
+  height: calc(100dvh - 24px);
+  max-height: none;
+  margin: 0;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--app-text) 12%, var(--app-line));
   border-radius: 22px;
@@ -558,7 +560,29 @@ button:focus-visible {
     transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .ai-assistant-dialog.has-conversation {
-  width: min(680px, calc(100vw - 32px));
+  width: min(520px, calc(100vw - 24px));
+}
+.ai-assistant-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.ai-assistant-dialog.is-expanded {
+  width: min(820px, calc(100vw - 24px));
+}
+.ai-assistant-empty {
+  flex: 1;
+  padding: 36px 24px;
+  color: var(--app-muted);
+  line-height: 1.8;
+}
+.ai-assistant-empty h3 {
+  color: var(--app-text);
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+.ai-assistant-header,
+.ai-assistant-compose-area {
+  flex-shrink: 0;
 }
 .ai-assistant-dialog::backdrop {
   background: color-mix(in srgb, var(--app-text) 20%, transparent);
@@ -566,7 +590,7 @@ button:focus-visible {
 }
 .ai-assistant-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   min-height: 62px;
   align-items: center;
   gap: 10px;
@@ -597,7 +621,9 @@ button:focus-visible {
 }
 .ai-assistant-conversation {
   display: flex;
-  max-height: min(42dvh, 360px);
+  flex: 1;
+  min-height: 0;
+  max-height: none;
   flex-direction: column;
   gap: 14px;
   overflow-y: auto;
@@ -884,16 +910,19 @@ button:focus-visible {
     bottom: max(16px, calc(env(safe-area-inset-bottom) + 10px));
   }
   .ai-assistant-dialog,
-  .ai-assistant-dialog.has-conversation {
-    inset: auto 0 0;
+  .ai-assistant-dialog.has-conversation,
+  .ai-assistant-dialog.is-expanded {
+    inset: 0;
     width: 100%;
-    max-height: min(88dvh, 760px);
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: 100dvh;
     border-width: 1px 0 0;
-    border-radius: 24px 24px 0 0;
+    border-radius: 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
   .ai-assistant-conversation {
-    max-height: 48dvh;
+    max-height: none;
   }
   .ai-assistant-compose-area {
     padding-right: 12px;

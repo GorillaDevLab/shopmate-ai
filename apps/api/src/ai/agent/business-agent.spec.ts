@@ -104,6 +104,22 @@ type InventoryRisksOutput = ReturnType<typeof GetInventoryRisksTool.output.parse
 type SalesSummaryOutput = ReturnType<typeof GetSalesSummaryTool.output.parse>;
 
 describe("BusinessAgent", () => {
+  it("解释性追问可以直接回答，不需要再次生成图表", async () => {
+    const provider = scriptedProvider([
+      finalResult("这是数据库查询快照，并非自动实时更新；外部渠道同步状态需要另外确认。"),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "销量是实时的吗",
+      context,
+      history: [
+        { role: "user", content: "查询销量" },
+        { role: "assistant", content: "分析已完成。" },
+      ],
+    });
+    expect(result.status).toBe("completed");
+    expect(result.usedTools).toEqual([]);
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+  });
   it("历史中的数字不成为本轮经营证据", async () => {
     const provider = scriptedProvider([
       finalResult("销售额为 999 元。"),
