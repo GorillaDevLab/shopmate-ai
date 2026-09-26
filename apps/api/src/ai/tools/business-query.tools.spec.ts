@@ -27,27 +27,23 @@ const query = {
 
 describe("自然语言经营查询工具", () => {
   it("图表使用同一轮已验证工具结果，不再请求模型改写", async () => {
-    const execute = vi
-      .fn()
-      .mockResolvedValue({
-        kind: "pie",
-        title: "门店销售额",
-        summary: "本期",
-        unit: "currencyMinor",
-        slices: [{ key: "s1", label: "朝阳店", value: 12345 }],
-      });
+    const execute = vi.fn().mockResolvedValue({
+      kind: "pie",
+      title: "门店销售额",
+      summary: "本期",
+      unit: "currencyMinor",
+      slices: [{ key: "s1", label: "朝阳店", value: 12345 }],
+    });
     const registry = new ToolRegistry({ allowedToolNames: ["create_business_chart"] });
     registry.register(createBusinessChartTool({ execute }));
-    const generate = vi
-      .fn()
-      .mockResolvedValue({
-        message: {
-          role: "assistant",
-          content: null,
-          toolCalls: [{ id: "chart", name: "create_business_chart", arguments: query }],
-        },
-        finishReason: "tool_calls",
-      });
+    const generate = vi.fn().mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: null,
+        toolCalls: [{ id: "chart", name: "create_business_chart", arguments: query }],
+      },
+      finishReason: "tool_calls",
+    });
     const progress = vi.fn();
     const result = await new BusinessAgent({ name: "offline", generate }, registry).run({
       question: "画门店销售额",
