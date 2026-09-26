@@ -1,4 +1,6 @@
-import { Body, Controller, HttpCode, Post, Res } from "@nestjs/common";
+import { Body, Controller, HttpCode, Post, Res, Get, Header } from "@nestjs/common";
+import { MerchantContext } from "./access/merchant-context.decorator.js";
+import type { AuthContext } from "./contracts/index.js";
 
 import { LoginInputDto } from "./contracts/index.js";
 import { DemoAuthService } from "./demo-auth.service.js";
@@ -26,6 +28,12 @@ interface CookieResponse {
 @Controller({ path: "auth", version: "1" })
 export class DemoAuthController {
   constructor(private readonly authService: DemoAuthService) {}
+
+  @Get("me")
+  @Header("Cache-Control", "no-store")
+  me(@MerchantContext() context: AuthContext) {
+    return { userId: context.userId, merchantId: context.merchantId };
+  }
 
   @Post("login")
   @HttpCode(200)
