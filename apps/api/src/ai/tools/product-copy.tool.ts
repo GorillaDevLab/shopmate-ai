@@ -42,7 +42,12 @@ export class ProductCopyService {
       productId: input.productId,
     });
 
-    const result = await this.provider.generate(createGenerationRequest(product, input.copyType));
+    context.signal?.throwIfAborted();
+    const result = await this.provider.generate({
+      ...createGenerationRequest(product, input.copyType),
+      ...(context.signal ? { signal: context.signal } : {}),
+    });
+    context.signal?.throwIfAborted();
 
     const rawContent = result.message.content?.trim();
 

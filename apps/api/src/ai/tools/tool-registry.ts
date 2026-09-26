@@ -9,6 +9,7 @@ export interface ToolSchema<T> {
 }
 
 export interface ToolInvocationContext {
+  readonly signal?: AbortSignal;
   readonly userId: string;
   readonly merchantId: string;
   readonly permissions: readonly AuthPermission[];
