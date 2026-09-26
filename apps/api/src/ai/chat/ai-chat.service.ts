@@ -14,10 +14,16 @@ import {
   type LLMProvider,
   type ProductCopyOutput,
   type ProductCopyRequest,
+  DashboardInsightPreviewResponseSchema,
+  DashboardInsightQuerySchema,
 } from "@shopmate/contracts";
 
 import type { AuthContext } from "../../auth/contracts/index.js";
-import { BusinessAgent, type BusinessAgentResult } from "../agent/business-agent.js";
+import {
+  BusinessAgent,
+  type BusinessAgentResult,
+  type BusinessAgentRunInput,
+} from "../agent/business-agent.js";
 import {
   createToolInvocationContext,
   ToolRegistry,
@@ -26,6 +32,8 @@ import {
 
 export interface BusinessAgentRunner {
   run(input: {
+    readonly signal?: AbortSignal;
+    readonly onProgress?: BusinessAgentRunInput["onProgress"];
     readonly question: string;
     readonly history?: AiChatRequest["history"];
     readonly insightQuery?: AiChatRequest["insightQuery"];
@@ -46,14 +54,25 @@ export class AiChatService {
       : new BusinessAgent(agentOrProvider, registry ?? new ToolRegistry({ allowedToolNames: [] }));
   }
 
-  async chat(context: AuthContext, rawRequest: unknown): Promise<AiChatResponse> {
+  async chat(
+    context: AuthContext,
+    rawRequest: unknown,
+    control: Pick<BusinessAgentRunInput, "signal" | "onProgress"> = {},
+  ): Promise<AiChatResponse> {
     const request = AiChatRequestSchema.safeParse(rawRequest);
     if (!request.success) throwInvalidChatMessage();
 
     try {
-      if (request.data.productCopy)
-        return await this.generateCopy(context, request.data.productCopy);
+      if (request.data.productCopy) {
+        control.signal?.throwIfAborted();
+        control.onProgress?.("tool-started","正在读取商品并生成文案");
+        const reply=await this.generateCopy(context, request.data.productCopy, control.signal);
+        control.signal?.throwIfAborted();
+        control.onProgress?.("tool-completed","商品文案已生成");
+        return reply;
+      }
       const result = await this.agent.run({
+        ...control,
         question: request.data.message.content,
         ...(request.data.history ? { history: request.data.history } : {}),
         ...(request.data.insightQuery ? { insightQuery: request.data.insightQuery } : {}),
@@ -72,6 +91,7 @@ export class AiChatService {
 
       return formatReply(result);
     } catch (error: unknown) {
+      control.signal?.throwIfAborted();
       throwKnownFailure(error);
       if (error instanceof BadRequestException || error instanceof ServiceUnavailableException) {
         throw error;
@@ -83,6 +103,7 @@ export class AiChatService {
   private async generateCopy(
     context: AuthContext,
     input: ProductCopyRequest,
+    signal?: AbortSignal,
   ): Promise<AiChatResponse> {
     if (!this.registry)
       throw new LLMProviderError({
@@ -91,11 +112,10 @@ export class AiChatService {
         retryable: false,
       });
     const productCopy = ProductCopyOutputSchema.parse(
-      await this.registry.invoke(
-        "generate_product_copy",
-        input,
-        createToolInvocationContext(context),
-      ),
+      await this.registry.invoke("generate_product_copy", input, {
+        ...createToolInvocationContext(context),
+        ...(signal ? { signal } : {}),
+      }),
     );
     return {
       message: {
@@ -109,13 +129,48 @@ export class AiChatService {
 
 function formatReply(result: BusinessAgentResult): AiChatResponse {
   const productCopy = findLatestProductCopy(result);
+  const artifact = result.toolOutputs?.findLast((item) => item.name === "create_business_chart");
+  const output = artifact?.output as { query?: unknown; data?: unknown } | undefined;
+  const preview = DashboardInsightPreviewResponseSchema.safeParse({
+    query: output?.query,
+    result: output?.data,
+  });
+  const query = latestQuery(result);
   return AiChatResponseSchema.parse({
     message: {
       role: "assistant",
       content: result.answer,
       ...(productCopy ? { productCopy } : {}),
+      ...(preview.success ? { insightPreview: preview.data } : {}),
+      ...(query.success ? { insightQuery: query.data } : {}),
     },
   });
+}
+
+function latestQuery(result: BusinessAgentResult) {
+  const item = result.toolOutputs?.findLast((item) =>
+    ["query_business_data", "create_business_chart", "get_sales_summary"].includes(item.name),
+  );
+  const output = item?.output as
+    | { query?: unknown; data?: { period?: { startDate?: unknown; endDate?: unknown } } }
+    | undefined;
+  const period = output?.data?.period;
+  // Store only a validated query context, never treat prior response numbers as new evidence.
+  return DashboardInsightQuerySchema.safeParse(
+    item?.name === "get_sales_summary"
+      ? {
+          dataset: "sales",
+          metric: "revenue",
+          aggregation: "sum",
+          groupBy: null,
+          dateRange: { start: period?.startDate, end: period?.endDate },
+          filters: [],
+          order: "desc",
+          limit: 8,
+          visualization: "report",
+        }
+      : output?.query,
+  );
 }
 
 function throwKnownFailure(error: unknown): void {
