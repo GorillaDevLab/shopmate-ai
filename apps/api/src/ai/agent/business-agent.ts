@@ -16,6 +16,7 @@ import {
   ToolRegistryError,
   type ToolInvocationContext,
 } from "../tools/tool-registry.js";
+import { protectNumberPresentations } from "./number-presentation.js";
 
 const DEFAULT_LIMITS = {
   maxToolRounds: 3,
@@ -362,14 +363,24 @@ function finalResult(state: AgentState, generation: LLMGenerationResult): Busine
   if (!containsChinese(content)) {
     return limitedResult(state, CHINESE_REQUIRED_ANSWER);
   }
-  const normalizedContent = normalizeChineseBusinessNumbers(content, state.numericEvidence);
-  if (normalizedContent === null || !hasValidNumericEvidence(normalizedContent, state)) {
+  const presentation = protectNumberPresentations(
+    content,
+    [...state.invocationCache.values()].map((invocation) => invocation.output),
+  );
+  const normalizedContent = presentation
+    ? normalizeChineseBusinessNumbers(presentation.masked, state.numericEvidence)
+    : null;
+  if (
+    !presentation ||
+    normalizedContent === null ||
+    !hasValidNumericEvidence(normalizedContent, state)
+  ) {
     logValidationTokenDiagnostics(content, state);
     return { ...limitedResult(state, SAFE_FAILURE_ANSWER), failureCode: "AI_RESPONSE_REJECTED" };
   }
   return {
     status: "completed",
-    answer: normalizedContent,
+    answer: presentation.restore(normalizedContent),
     usedTools: [...state.usedTools],
     rounds: state.rounds,
 
