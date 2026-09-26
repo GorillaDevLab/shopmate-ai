@@ -19,12 +19,10 @@ describe("agent execution control", () => {
     const signal = new AbortController().signal;
     const provider = {
       name: "fake",
-      generate: vi
-        .fn()
-        .mockResolvedValue({
-          message: { role: "assistant", content: "可以帮你分析经营数据。" },
-          finishReason: "stop",
-        }),
+      generate: vi.fn().mockResolvedValue({
+        message: { role: "assistant", content: "可以帮你分析经营数据。" },
+        finishReason: "stop",
+      }),
     };
     const onProgress = vi.fn();
     await new BusinessAgent(provider, new ToolRegistry({ allowedToolNames: [] })).run({

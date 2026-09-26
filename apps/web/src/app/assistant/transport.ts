@@ -72,7 +72,10 @@ export async function runAssistant(
   }
 }
 
-function parseEvent(line:string):AssistantRunEvent {
-  try {return AssistantRunEventSchema.parse(JSON.parse(line));}
-  catch {throw new AssistantTransportError("回复格式校验失败，未自动重试。请检查前后端部署版本。");}
+function parseEvent(line: string): AssistantRunEvent {
+  try {
+    return AssistantRunEventSchema.parse(JSON.parse(line));
+  } catch {
+    throw new AssistantTransportError("回复格式校验失败，未自动重试。请检查前后端部署版本。");
+  }
 }

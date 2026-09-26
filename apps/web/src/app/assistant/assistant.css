@@ -578,8 +578,14 @@
   }
 }
 @media (max-width: 639px) {
-  .assistant-page {height:var(--assistant-viewport-height,100dvh);}
-  .assistant-drawer {top:var(--assistant-viewport-top,0px);height:var(--assistant-viewport-height,100dvh);max-height:var(--assistant-viewport-height,100dvh);}
+  .assistant-page {
+    height: var(--assistant-viewport-height, 100dvh);
+  }
+  .assistant-drawer {
+    top: var(--assistant-viewport-top, 0px);
+    height: var(--assistant-viewport-height, 100dvh);
+    max-height: var(--assistant-viewport-height, 100dvh);
+  }
   .assistant-page-header {
     min-height: 64px;
     gap: 8px;

@@ -10,7 +10,7 @@ import {
 import { usePathname } from "next/navigation";
 import { AssistantIdentitySchema } from "@shopmate/contracts";
 import { AssistantStore, INITIAL_STATE } from "./store";
-import {useAssistantViewport} from "./viewport";
+import { useAssistantViewport } from "./viewport";
 
 const Context = createContext<AssistantStore | null>(null);
 export function AssistantStoreProvider({
@@ -58,20 +58,21 @@ export function AssistantWorkspaceProvider({ children }: { children: ReactNode }
       generation++;
       store.clear();
     };
-    const storageChanged=(event:StorageEvent)=>{
-      if(event.newValue===null&&(event.key===null||store.ownsStorageKey(event.key)))clear();
+    const storageChanged = (event: StorageEvent) => {
+      if (event.newValue === null && (event.key === null || store.ownsStorageKey(event.key)))
+        clear();
     };
     void authenticate();
     window.addEventListener("focus", authenticate);
     window.addEventListener("shopmate:logout", clear);
     window.addEventListener("pagehide", store.flush);
-    window.addEventListener("storage",storageChanged);
+    window.addEventListener("storage", storageChanged);
     return () => {
       alive = false;
       window.removeEventListener("focus", authenticate);
       window.removeEventListener("shopmate:logout", clear);
       window.removeEventListener("pagehide", store.flush);
-      window.removeEventListener("storage",storageChanged);
+      window.removeEventListener("storage", storageChanged);
       store.flush();
     };
   }, [store, pathname]);

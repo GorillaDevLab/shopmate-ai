@@ -65,10 +65,10 @@ export class AiChatService {
     try {
       if (request.data.productCopy) {
         control.signal?.throwIfAborted();
-        control.onProgress?.("tool-started","正在读取商品并生成文案");
-        const reply=await this.generateCopy(context, request.data.productCopy, control.signal);
+        control.onProgress?.("tool-started", "正在读取商品并生成文案");
+        const reply = await this.generateCopy(context, request.data.productCopy, control.signal);
         control.signal?.throwIfAborted();
-        control.onProgress?.("tool-completed","商品文案已生成");
+        control.onProgress?.("tool-completed", "商品文案已生成");
         return reply;
       }
       const result = await this.agent.run({

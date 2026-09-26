@@ -20,14 +20,15 @@ export function AssistantConversation({
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [current?.id]);
   useEffect(() => {
-    const viewport=ref.current;
-    if(!viewport||!follow.current)return;
-    const last=current?.messages.at(-1);
-    const message=viewport.querySelector<HTMLElement>(".assistant-message:last-child");
+    const viewport = ref.current;
+    if (!viewport || !follow.current) return;
+    const last = current?.messages.at(-1);
+    const message = viewport.querySelector<HTMLElement>(".assistant-message:last-child");
     // A completed reply arrives as one record: reveal its beginning, not just its chart footer.
-    if(last?.role==="assistant"&&message) {
-      viewport.scrollTop+=message.getBoundingClientRect().top-viewport.getBoundingClientRect().top;
-    } else viewport.scrollTop=viewport.scrollHeight;
+    if (last?.role === "assistant" && message) {
+      viewport.scrollTop +=
+        message.getBoundingClientRect().top - viewport.getBoundingClientRect().top;
+    } else viewport.scrollTop = viewport.scrollHeight;
   }, [current?.messages, state.progress]);
   if (!state.ready)
     return (

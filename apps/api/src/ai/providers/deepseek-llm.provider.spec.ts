@@ -8,14 +8,24 @@ import {
 } from "./deepseek-llm.provider.js";
 
 describe("DeepSeekLLMProvider", () => {
-  it("把取消信号传给 SDK，不增加重试",async()=>{
-    const create=vi.fn<DeepSeekChatCompletionsClient["create"]>().mockResolvedValue(textResponse("已完成。"));
-    const provider=new DeepSeekLLMProvider({env:{},client:{create}});
-    const controller=new AbortController();
-    await provider.generate({messages:[{role:"user",content:"你好"}],signal:controller.signal});
+  it("把取消信号传给 SDK，不增加重试", async () => {
+    const create = vi
+      .fn<DeepSeekChatCompletionsClient["create"]>()
+      .mockResolvedValue(textResponse("已完成。"));
+    const provider = new DeepSeekLLMProvider({ env: {}, client: { create } });
+    const controller = new AbortController();
+    await provider.generate({
+      messages: [{ role: "user", content: "你好" }],
+      signal: controller.signal,
+    });
     expect(create.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
     controller.abort();
-    await expect(provider.generate({messages:[{role:"user",content:"你好"}],signal:controller.signal})).rejects.toBeDefined();
+    await expect(
+      provider.generate({
+        messages: [{ role: "user", content: "你好" }],
+        signal: controller.signal,
+      }),
+    ).rejects.toBeDefined();
     expect(create).toHaveBeenCalledTimes(1);
   });
   it("缺少 API Key 时给出清晰配置错误", () => {

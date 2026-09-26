@@ -20,13 +20,23 @@ function mockStream(chunks: string[]) {
   );
 }
 describe("assistant transport", () => {
-  it("不展示损坏响应的底层解析错误",async()=>{
+  it("不展示损坏响应的底层解析错误", async () => {
     mockStream(["not-json\n"]);
-    await expect(runAssistant(request,new AbortController().signal,vi.fn())).rejects.toThrow("回复格式校验失败");
+    await expect(runAssistant(request, new AbortController().signal, vi.fn())).rejects.toThrow(
+      "回复格式校验失败",
+    );
   });
-  it("拒绝串入其他请求的结果",async()=>{
-    mockStream([JSON.stringify({type:"completed",requestId:"another",reply:{role:"assistant",content:"其他会话"}})+"\n"]);
-    await expect(runAssistant(request,new AbortController().signal,vi.fn())).rejects.toThrow("回复与当前请求不匹配");
+  it("拒绝串入其他请求的结果", async () => {
+    mockStream([
+      JSON.stringify({
+        type: "completed",
+        requestId: "another",
+        reply: { role: "assistant", content: "其他会话" },
+      }) + "\n",
+    ]);
+    await expect(runAssistant(request, new AbortController().signal, vi.fn())).rejects.toThrow(
+      "回复与当前请求不匹配",
+    );
   });
   it("parses split records and emits real progress", async () => {
     mockStream([

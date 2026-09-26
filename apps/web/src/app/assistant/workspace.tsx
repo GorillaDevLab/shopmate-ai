@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { AssistantHistory } from "./history";
-import {HistoryOverlay} from "./history-overlay";
+import { HistoryOverlay } from "./history-overlay";
 import { AssistantConversation } from "./conversation";
 import { AssistantComposer } from "./composer";
 import { CopyWorkflow } from "./copy-workflow";
@@ -26,7 +26,7 @@ export function AssistantWorkspace({
           <AssistantHistory />
         </div>
       )}
-      {history && <HistoryOverlay onClose={()=>setHistory(false)}/>}
+      {history && <HistoryOverlay onClose={() => setHistory(false)} />}
       <section className="assistant-main" aria-label="经营助手对话">
         <div className="assistant-toolbar">
           <button type="button" aria-label="打开历史会话" onClick={() => setHistory(true)}>

@@ -47,7 +47,7 @@ export class AssistantStore {
     private readonly run = runAssistant,
   ) {}
   getSnapshot = () => this.state;
-  ownsStorageKey=(key:string|null)=>Boolean(this.key)&&key===this.key;
+  ownsStorageKey = (key: string | null) => Boolean(this.key) && key === this.key;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -128,7 +128,9 @@ export class AssistantStore {
   unavailable(message: string) {
     this.publish({ ready: false, error: message });
   }
-  reportError(message:string){this.publish({error:message});}
+  reportError(message: string) {
+    this.publish({ error: message });
+  }
   clear = () => {
     this.controller?.abort();
     this.controller = null;
@@ -251,27 +253,39 @@ export class AssistantStore {
   async submit(content?: string, productCopy?: ProductCopyRequest) {
     if (!this.state.ready || this.state.runningId) return;
     if (!this.state.currentId) this.create();
-    const session = this.state.sessions.find(s => s.id === this.state.currentId);
+    const session = this.state.sessions.find((s) => s.id === this.state.currentId);
     const prompt = (content ?? session?.draft ?? "").trim();
     if (!session || !prompt || !this.canSubmit(session, prompt)) return;
     if (!productCopy && this.localChartFollowup(session, prompt)) return;
     const controller = this.beginRun(session, prompt);
     const timer = setTimeout(() => this.expireRun(session.id, prompt, controller), 190000);
     try {
-      const reply = await this.run({
-        requestId: newId(), message: {role: "user", content: prompt},
-        history: historyFor(session.messages),
-        ...(session.query ? {insightQuery: session.query} : {}),
-        ...(productCopy ? {productCopy} : {}),
-      }, controller.signal, event => {
-        if (this.controller === controller && "label" in event) this.publish({progress: event.label});
-      });
+      const reply = await this.run(
+        {
+          requestId: newId(),
+          message: { role: "user", content: prompt },
+          history: historyFor(session.messages),
+          ...(session.query ? { insightQuery: session.query } : {}),
+          ...(productCopy ? { productCopy } : {}),
+        },
+        controller.signal,
+        (event) => {
+          if (this.controller === controller && "label" in event)
+            this.publish({ progress: event.label });
+        },
+      );
       if (this.controller !== controller || controller.signal.aborted) return;
-      this.append(session.id, {...reply, id: newId(), status: "complete", createdAt: new Date().toISOString()});
+      this.append(session.id, {
+        ...reply,
+        id: newId(),
+        status: "complete",
+        createdAt: new Date().toISOString(),
+      });
       const query = reply.insightQuery ?? reply.insightPreview?.query;
-      if (query) this.updateSession(session.id, s => ({...s, query}));
+      if (query) this.updateSession(session.id, (s) => ({ ...s, query }));
     } catch (error) {
-      if (this.controller === controller && !controller.signal.aborted) this.failRun(session.id, prompt, error);
+      if (this.controller === controller && !controller.signal.aborted)
+        this.failRun(session.id, prompt, error);
     } finally {
       clearTimeout(timer);
       if (this.controller === controller) this.finishRun();
@@ -280,34 +294,62 @@ export class AssistantStore {
 
   private canSubmit(session: WorkspaceSession, prompt: string): boolean {
     if (prompt.length > 2000 || session.messages.length > 98) {
-      this.publish({error: "消息或会话过长，请缩短内容或新建对话。"});
+      this.publish({ error: "消息或会话过长，请缩短内容或新建对话。" });
       return false;
     }
-    try { writeWorkspace(this.snapshot()); return true; }
-    catch { this.publish({error: "历史已达到存储上限，请先删除旧会话。"}); return false; }
+    try {
+      writeWorkspace(this.snapshot());
+      return true;
+    } catch {
+      this.publish({ error: "历史已达到存储上限，请先删除旧会话。" });
+      return false;
+    }
   }
   private beginRun(session: WorkspaceSession, prompt: string): AbortController {
     const controller = new AbortController();
     this.controller = controller;
-    this.updateSession(session.id, s => ({...s, draft: "", title: s.messages.length ? s.title : prompt.slice(0, 32)}));
-    this.append(session.id, {id: newId(), role: "user", content: prompt, status: "complete", createdAt: new Date().toISOString()});
-    this.publish({runningId: session.id, progress: "正在连接助手", error: ""});
+    this.updateSession(session.id, (s) => ({
+      ...s,
+      draft: "",
+      title: s.messages.length ? s.title : prompt.slice(0, 32),
+    }));
+    this.append(session.id, {
+      id: newId(),
+      role: "user",
+      content: prompt,
+      status: "complete",
+      createdAt: new Date().toISOString(),
+    });
+    this.publish({ runningId: session.id, progress: "正在连接助手", error: "" });
     return controller;
   }
   private failRun(id: string, prompt: string, error: unknown) {
-    if (error instanceof AssistantTransportError && error.status === 401) {this.clear(); return;}
-    this.append(id, {id: newId(), role: "assistant", status: "failed", createdAt: new Date().toISOString(), content: error instanceof Error ? error.message : "连接中断，未自动重试。"});
-    this.updateSession(id, s => ({...s, draft: s.draft || prompt}));
+    if (error instanceof AssistantTransportError && error.status === 401) {
+      this.clear();
+      return;
+    }
+    this.append(id, {
+      id: newId(),
+      role: "assistant",
+      status: "failed",
+      createdAt: new Date().toISOString(),
+      content: error instanceof Error ? error.message : "连接中断，未自动重试。",
+    });
+    this.updateSession(id, (s) => ({ ...s, draft: s.draft || prompt }));
   }
   private expireRun(id: string, prompt: string, controller: AbortController) {
     if (this.controller !== controller) return;
     controller.abort();
-    this.failRun(id, prompt, new Error("连接等待超时，未自动重发。已发送的模型调用可能已产生费用。"));
+    this.failRun(
+      id,
+      prompt,
+      new Error("连接等待超时，未自动重发。已发送的模型调用可能已产生费用。"),
+    );
     this.finishRun();
   }
   private finishRun() {
     this.controller = null;
-    this.publish({runningId: "", progress: ""});
+    this.publish({ runningId: "", progress: "" });
     this.flush();
   }
 }

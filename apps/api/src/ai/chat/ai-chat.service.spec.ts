@@ -20,23 +20,21 @@ const authContext = createAuthContext({
 describe("AiChatService", () => {
   it("保留汇总工具核实的周期供下一轮追问，不伪造图表", async () => {
     const service = new AiChatService({
-      run: vi
-        .fn()
-        .mockResolvedValue({
-          status: "completed",
-          answer: "已核实销售汇总。",
-          usedTools: ["get_sales_summary"],
-          rounds: 2,
-          toolOutputs: [
-            {
-              name: "get_sales_summary",
-              output: {
-                status: "ok",
-                data: { period: { startDate: "2026-09-01", endDate: "2026-09-25" } },
-              },
+      run: vi.fn().mockResolvedValue({
+        status: "completed",
+        answer: "已核实销售汇总。",
+        usedTools: ["get_sales_summary"],
+        rounds: 2,
+        toolOutputs: [
+          {
+            name: "get_sales_summary",
+            output: {
+              status: "ok",
+              data: { period: { startDate: "2026-09-01", endDate: "2026-09-25" } },
             },
-          ],
-        }),
+          },
+        ],
+      }),
     });
     const reply = await service.chat(authContext, {
       message: { role: "user", content: "经营怎么样" },

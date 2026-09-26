@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
-import { createBusinessQueryTool, createBusinessChartTool, createStoreCatalogTool } from "./business-query.tools.js";
+import {
+  createBusinessQueryTool,
+  createBusinessChartTool,
+  createStoreCatalogTool,
+} from "./business-query.tools.js";
 import { ToolRegistry } from "./tool-registry.js";
 import { BusinessAgent } from "../agent/business-agent.js";
 
@@ -22,24 +26,77 @@ const query = {
 };
 
 describe("自然语言经营查询工具", () => {
-  it("图表使用同一轮已验证工具结果，不再请求模型改写",async()=>{
-    const execute=vi.fn().mockResolvedValue({kind:"pie",title:"门店销售额",summary:"本期",unit:"currencyMinor",slices:[{key:"s1",label:"朝阳店",value:12345}]});
-    const registry=new ToolRegistry({allowedToolNames:["create_business_chart"]});
-    registry.register(createBusinessChartTool({execute}));
-    const generate=vi.fn().mockResolvedValue({message:{role:"assistant",content:null,toolCalls:[{id:"chart",name:"create_business_chart",arguments:query}]},finishReason:"tool_calls"});
-    const progress=vi.fn();
-    const result=await new BusinessAgent({name:"offline",generate},registry).run({question:"画门店销售额",context,onProgress:progress});
-    expect(result.status).toBe("completed");expect(result.toolOutputs?.[0]).toMatchObject({name:"create_business_chart",output:{query}});
-    expect(execute).toHaveBeenCalledWith(context,query);expect(generate).toHaveBeenCalledTimes(1);
-    expect(progress).toHaveBeenCalledWith("tool-started","正在查询数据并生成图表");
+  it("图表使用同一轮已验证工具结果，不再请求模型改写", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValue({
+        kind: "pie",
+        title: "门店销售额",
+        summary: "本期",
+        unit: "currencyMinor",
+        slices: [{ key: "s1", label: "朝阳店", value: 12345 }],
+      });
+    const registry = new ToolRegistry({ allowedToolNames: ["create_business_chart"] });
+    registry.register(createBusinessChartTool({ execute }));
+    const generate = vi
+      .fn()
+      .mockResolvedValue({
+        message: {
+          role: "assistant",
+          content: null,
+          toolCalls: [{ id: "chart", name: "create_business_chart", arguments: query }],
+        },
+        finishReason: "tool_calls",
+      });
+    const progress = vi.fn();
+    const result = await new BusinessAgent({ name: "offline", generate }, registry).run({
+      question: "画门店销售额",
+      context,
+      onProgress: progress,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.toolOutputs?.[0]).toMatchObject({
+      name: "create_business_chart",
+      output: { query },
+    });
+    expect(execute).toHaveBeenCalledWith(context, query);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledWith("tool-started", "正在查询数据并生成图表");
   });
-  it("取消后不进入下一次工具调用",async()=>{
-    const abort=new AbortController();
-    const execute=vi.fn(async()=>{abort.abort();return {kind:"pie",title:"门店销售额",summary:"本期",unit:"currencyMinor",slices:[]};});
-    const registry=new ToolRegistry({allowedToolNames:["create_business_chart"]});registry.register(createBusinessChartTool({execute}));
-    const generate=vi.fn().mockResolvedValue({message:{role:"assistant",content:null,toolCalls:[{id:"first",name:"create_business_chart",arguments:query},{id:"second",name:"create_business_chart",arguments:{...query,limit:3}}]},finishReason:"tool_calls"});
-    await expect(new BusinessAgent({name:"offline",generate},registry).run({question:"画图",context,signal:abort.signal})).rejects.toMatchObject({name:"AbortError"});
-    expect(execute).toHaveBeenCalledTimes(1);expect(generate).toHaveBeenCalledTimes(1);
+  it("取消后不进入下一次工具调用", async () => {
+    const abort = new AbortController();
+    const execute = vi.fn(async () => {
+      abort.abort();
+      return {
+        kind: "pie",
+        title: "门店销售额",
+        summary: "本期",
+        unit: "currencyMinor",
+        slices: [],
+      };
+    });
+    const registry = new ToolRegistry({ allowedToolNames: ["create_business_chart"] });
+    registry.register(createBusinessChartTool({ execute }));
+    const generate = vi.fn().mockResolvedValue({
+      message: {
+        role: "assistant",
+        content: null,
+        toolCalls: [
+          { id: "first", name: "create_business_chart", arguments: query },
+          { id: "second", name: "create_business_chart", arguments: { ...query, limit: 3 } },
+        ],
+      },
+      finishReason: "tool_calls",
+    });
+    await expect(
+      new BusinessAgent({ name: "offline", generate }, registry).run({
+        question: "画图",
+        context,
+        signal: abort.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(generate).toHaveBeenCalledTimes(1);
   });
   it("完整 Agent 能通过门店工具回答数量，且只使用查询结果", async () => {
     const registry = new ToolRegistry({ allowedToolNames: ["get_store_catalog"] });

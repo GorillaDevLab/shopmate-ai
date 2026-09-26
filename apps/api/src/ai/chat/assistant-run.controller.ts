@@ -44,11 +44,18 @@ export class AssistantRunController {
     const { requestId, ...body } = parsed.data;
     const identity = JSON.stringify([context.merchantId, context.userId]);
     this.reserve(identity, requestId);
-    try {await this.stream(context,{requestId,...body},response);}
-    finally {this.active.delete(identity);}
+    try {
+      await this.stream(context, { requestId, ...body }, response);
+    } finally {
+      this.active.delete(identity);
+    }
   }
 
-  private async stream(context:AuthContext,{requestId,...body}:AssistantRunRequest,response:StreamResponse) {
+  private async stream(
+    context: AuthContext,
+    { requestId, ...body }: AssistantRunRequest,
+    response: StreamResponse,
+  ) {
     const controller = new AbortController();
     const close = () => controller.abort();
     response.once("close", close);
@@ -56,17 +63,27 @@ export class AssistantRunController {
       if (!controller.signal.aborted && !response.writableEnded)
         response.write(JSON.stringify(AssistantRunEventSchema.parse(event)) + "\n");
     };
-    let timer:ReturnType<typeof setTimeout>|undefined;
-    let started=false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let started = false;
     try {
       response.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
       response.setHeader("Cache-Control", "no-store");
       response.setHeader("X-Accel-Buffering", "no");
-      response.flushHeaders();started=true;
-      timer=setTimeout(()=>{
-        try {emit({type:"failed",requestId,code:"AI_TIMEOUT",message:"处理超时，未自动重试。"});}
-        finally {controller.abort();if(!response.writableEnded)response.end();}
-      },180000);
+      response.flushHeaders();
+      started = true;
+      timer = setTimeout(() => {
+        try {
+          emit({
+            type: "failed",
+            requestId,
+            code: "AI_TIMEOUT",
+            message: "处理超时，未自动重试。",
+          });
+        } finally {
+          controller.abort();
+          if (!response.writableEnded) response.end();
+        }
+      }, 180000);
       emit({ type: "accepted", requestId, label: "请求已接收" });
       const reply = await this.chatService.chat(context, body, {
         signal: controller.signal,
@@ -74,7 +91,7 @@ export class AssistantRunController {
       });
       emit({ type: "completed", requestId, reply: reply.message });
     } catch (error) {
-      if(!started)throw error;
+      if (!started) throw error;
       emit({ type: "failed", requestId, ...safeFailure(error) });
     } finally {
       clearTimeout(timer);
