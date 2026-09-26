@@ -18,6 +18,7 @@ export function LogoutButton() {
         headers: { Accept: "application/json" },
       });
       if (!response.ok) throw new Error("logout failed");
+      window.dispatchEvent(new Event("shopmate:logout"));
       router.replace("/login");
       router.refresh();
     } catch {
