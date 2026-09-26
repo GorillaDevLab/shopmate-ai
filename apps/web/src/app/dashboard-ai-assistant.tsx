@@ -1,405 +1,131 @@
 "use client";
-
 import Link from "next/link";
-import { AssistantMarkdown } from "./assistant-markdown";
-import { ChatPending } from "./chat-pending";
-import {
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MutableRefObject,
-  type RefObject,
-} from "react";
-
-import { type ChatMessage, useChatSession } from "./chat-session";
-import { generateDashboardInsight } from "./dashboard-insight-api";
-import { chartFollowupMessage, chartFollowupView } from "./chart-followup";
-import { insightKind } from "./assistant-intent";
-import type { DashboardChartView, DashboardInsightPreviewResponse } from "@shopmate/contracts";
-import {
-  DashboardInsightPresentation,
-  recommendInsightView,
-} from "./dashboard-insight-presentation";
-
-const suggestions = [
-  { label: "查看低库存", prompt: "最近哪些商品值得补货？" },
-  { label: "分析热销商品", prompt: "请分析最近的热销商品" },
-  { label: "总结销售趋势", prompt: "请总结最近的销售趋势" },
-  { label: "生成销售饼图", prompt: "生成近 30 天各商品销售额占比饼图" },
-] as const;
-
-type AssistantProps = {
-  readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-  readonly onInsightCreated?: (
-    preview: DashboardInsightPreviewResponse,
-    view?: DashboardChartView,
-  ) => void;
-  readonly isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { DashboardInsightPreviewResponse } from "@shopmate/contracts";
+import { AssistantWorkspace } from "./assistant/workspace";
+import { useAssistantWorkspace } from "./assistant/provider";
+import type { AddInsight } from "./assistant/artifact";
+type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onInsightCreated?: AddInsight;
+  isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
 };
-
 export function DashboardAiAssistant({
   open,
   onOpenChange,
   onInsightCreated,
   isInsightAdded,
-}: AssistantProps) {
-  const [added, setAdded] = useState(() => new Set<DashboardInsightPreviewResponse>());
-  const latestPreview = useRef<DashboardInsightPreviewResponse | undefined>(undefined);
-  const [views, setViews] = useState(
-    () => new Map<DashboardInsightPreviewResponse, DashboardChartView>(),
-  );
-  const changeView = (preview: DashboardInsightPreviewResponse, view: DashboardChartView) =>
-    setViews((current) => new Map(current).set(preview, view));
-  const chat = useChatSession({
-    resolveMessage: async (prompt, history) => {
-      const followup = chartFollowupView(prompt);
-      if (followup && onInsightCreated) {
-        const response = chartFollowupMessage(latestPreview.current, followup);
-        if (response.compatible && latestPreview.current)
-          changeView(latestPreview.current, followup);
-        return { role: "assistant", content: response.content };
-      }
-      const kind = insightKind(prompt, latestPreview.current?.query);
-      if (!kind || !onInsightCreated) return undefined;
-      const preview = await generateDashboardInsight(prompt, kind, {
-        history,
-        previousQuery: latestPreview.current?.query,
-      });
-      latestPreview.current = preview;
-      return {
-        role: "assistant",
-        content: "分析已完成。可以先查看结果，再决定是否加入看板。",
-        insightPreview: preview,
-      };
-    },
-  });
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDialogElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const openerRef = useRef<HTMLElement | null>(null);
-  const conversation = chat.messages.length > 0 || chat.isSending || Boolean(chat.error);
-  const [expanded, setExpanded] = useState(false);
-
-  useAssistantDialog(open, dialogRef, inputRef, openerRef);
-
+}: Props) {
+  const { store, state } = useAssistantWorkspace();
+  const [width, setWidth] = useState(520);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const consumed = useRef<unknown>(null);
+  useEffect(() => {
+    const artifact = state.pendingArtifact;
+    if (!artifact || !onInsightCreated || consumed.current === artifact) return;
+    consumed.current = artifact;
+    try {
+      onInsightCreated(artifact.preview, artifact.view);
+      store.markArtifactAdded(artifact.preview);
+      store.clearArtifact();
+    } catch (cause) {
+      store.reportError(cause instanceof Error ? cause.message : "无法加入看板");
+      onOpenChange(true);
+      store.clearArtifact();
+    }
+  }, [state.pendingArtifact, onInsightCreated, store, onOpenChange]);
+  useEffect(() => {
+    if (!open) return;
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const element = dialog.current;
+    if (typeof element?.show === "function") element.show();
+    else element?.setAttribute("open", "");
+    element?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+    return () => {
+      element?.close?.();
+      opener.current?.focus();
+    };
+  }, [open]);
   return (
     <>
       <button
-        ref={triggerRef}
-        type="button"
         className={`ai-assistant-pill ${open ? "is-hidden" : ""}`}
         aria-label="Ask AI"
         aria-hidden={open}
         tabIndex={open ? -1 : 0}
-        onClick={(event) => {
-          openerRef.current = event.currentTarget;
-          onOpenChange(true);
-        }}
+        onClick={() => onOpenChange(true)}
       >
         <span className="ai-assistant-orb" aria-hidden="true" />
-        <span>Ask AI</span>
+        Ask AI
       </button>
       {open && (
         <dialog
-          ref={dialogRef}
-          className={`ai-assistant-dialog ${expanded ? "is-expanded" : ""} ${conversation ? "has-conversation" : ""}`}
-          aria-labelledby="ai-assistant-title"
-          onCancel={(event) => {
-            event.preventDefault();
+          ref={dialog}
+          className="assistant-drawer"
+          style={{ "--assistant-width": `${width}px` } as CSSProperties}
+          aria-labelledby="assistant-drawer-title"
+          onCancel={(e) => {
+            e.preventDefault();
             onOpenChange(false);
           }}
-          onKeyDown={(event) => closeOnEscape(event, onOpenChange)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onOpenChange(false);
+            }
+          }}
         >
-          <AssistantHeader
-            expanded={expanded}
-            onExpand={() => setExpanded((value) => !value)}
-            onClose={() => onOpenChange(false)}
+          <div
+            role="separator"
+            aria-label="调整助手宽度"
+            aria-orientation="vertical"
+            aria-valuemin={380}
+            aria-valuemax={900}
+            aria-valuenow={width}
+            tabIndex={0}
+            className="assistant-resize"
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                e.preventDefault();
+                setWidth((w) =>
+                  Math.max(380, Math.min(900, w + (e.key === "ArrowLeft" ? 40 : -40))),
+                );
+              }
+            }}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              e.preventDefault();
+            }}
+            onPointerMove={(e) => {
+              if (e.currentTarget.hasPointerCapture(e.pointerId))
+                setWidth(Math.max(380, Math.min(900, window.innerWidth - e.clientX - 12)));
+            }}
+            onPointerUp={(e) => {
+              if (e.currentTarget.hasPointerCapture(e.pointerId))
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            }}
           />
-          {!conversation && (
-            <div className="ai-assistant-empty">
-              <h3>从一个经营问题开始</h3>
-              <p>问问店铺数量、销售变化，或让助手画一张图。可以接着追问，不用重复说明。</p>
-            </div>
-          )}
-          {conversation && (
-            <Conversation
-              messages={chat.messages}
-              isSending={chat.isSending}
-              added={added}
-              views={views}
-              onViewChange={changeView}
-              onAdd={onInsightCreated}
-              onRememberAdded={(preview) => {
-                setAdded((current) => {
-                  const next = new Set(current);
-                  next.add(preview);
-                  return next;
-                });
-              }}
-              isInsightAdded={isInsightAdded}
-            />
-          )}
-          <AssistantComposer chat={chat} inputRef={inputRef} />
+          <header className="assistant-drawer-header">
+            <span className="ai-assistant-orb" aria-hidden="true" />
+            <h2 id="assistant-drawer-title">AI 经营助手</h2>
+            <button
+              aria-label={width > 520 ? "恢复面板宽度" : "加宽聊天面板"}
+              onClick={() => setWidth((w) => (w > 520 ? 520 : 820))}
+            >
+              ↔
+            </button>
+            <Link href="/chat" aria-label="打开完整聊天">
+              ↗
+            </Link>
+            <button aria-label="关闭 AI 助手" onClick={() => onOpenChange(false)}>
+              ›
+            </button>
+          </header>
+          <AssistantWorkspace compact onAdd={onInsightCreated} isAdded={isInsightAdded} />
         </dialog>
       )}
     </>
   );
-}
-
-function AssistantHeader({
-  onClose,
-  expanded,
-  onExpand,
-}: {
-  onClose: () => void;
-  expanded: boolean;
-  onExpand: () => void;
-}) {
-  return (
-    <header className="ai-assistant-header">
-      <span className="ai-assistant-orb" aria-hidden="true" />
-      <h2 id="ai-assistant-title">AI 经营助手</h2>
-      <button
-        type="button"
-        className="ai-assistant-icon-button"
-        onClick={onExpand}
-        aria-label={expanded ? "恢复面板宽度" : "加宽聊天面板"}
-        aria-pressed={expanded}
-      >
-        ↔
-      </button>
-      <Link className="ai-assistant-icon-button" href="/chat" aria-label="打开完整聊天">
-        ↗
-      </Link>
-      <button
-        type="button"
-        className="ai-assistant-icon-button"
-        aria-label="关闭 AI 助手"
-        onClick={onClose}
-      >
-        ›
-      </button>
-    </header>
-  );
-}
-
-function Conversation({
-  views,
-  onViewChange,
-  messages,
-  isSending,
-  added,
-  onAdd,
-  onRememberAdded,
-  isInsightAdded,
-}: {
-  views: ReadonlyMap<DashboardInsightPreviewResponse, DashboardChartView>;
-  onViewChange: (preview: DashboardInsightPreviewResponse, view: DashboardChartView) => void;
-  messages: ChatMessage[];
-  isSending: boolean;
-  added: ReadonlySet<DashboardInsightPreviewResponse>;
-  onAdd?: (preview: DashboardInsightPreviewResponse, view?: DashboardChartView) => void;
-  onRememberAdded: (preview: DashboardInsightPreviewResponse) => void;
-  isInsightAdded?: (preview: DashboardInsightPreviewResponse) => boolean;
-}) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const followBottom = useRef(true);
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (element && (followBottom.current || isSending)) element.scrollTop = element.scrollHeight;
-  }, [messages, isSending]);
-  return (
-    <div
-      ref={scrollRef}
-      className="ai-assistant-conversation"
-      aria-live="polite"
-      onScroll={(event) => {
-        const element = event.currentTarget;
-        followBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 64;
-      }}
-    >
-      {messages.map((message, index) => (
-        <div key={`${message.role}-${index}`} className={`ai-message is-${message.role}`}>
-          {message.role === "assistant" ? (
-            <AssistantMarkdown content={message.content} />
-          ) : (
-            message.content
-          )}
-          {message.insightPreview && onAdd && (
-            <InsightPreview
-              preview={message.insightPreview}
-              view={
-                views.get(message.insightPreview) ??
-                recommendInsightView(
-                  message.insightPreview.result,
-                  message.insightPreview.query.visualization,
-                ).view
-              }
-              onViewChange={(view) => onViewChange(message.insightPreview!, view)}
-              added={added}
-              onAdd={onAdd}
-              onRememberAdded={onRememberAdded}
-              currentlyAdded={isInsightAdded?.(message.insightPreview)}
-            />
-          )}
-        </div>
-      ))}
-      {isSending && <ChatPending />}
-    </div>
-  );
-}
-
-function InsightPreview({
-  view,
-  onViewChange,
-  preview,
-  added,
-  onAdd,
-  onRememberAdded,
-  currentlyAdded,
-}: {
-  view: DashboardChartView;
-  onViewChange: (view: DashboardChartView) => void;
-  preview: DashboardInsightPreviewResponse;
-  added: ReadonlySet<DashboardInsightPreviewResponse>;
-  onAdd: (preview: DashboardInsightPreviewResponse, view?: DashboardChartView) => void;
-  onRememberAdded: (preview: DashboardInsightPreviewResponse) => void;
-  currentlyAdded?: boolean;
-}) {
-  const [isAdded, setIsAdded] = useState(added.has(preview));
-  const [error, setError] = useState("");
-  const disabled = currentlyAdded ?? isAdded;
-  const empty =
-    preview.result.kind === "pie" && !preview.result.slices.some((slice) => slice.value > 0);
-  const add = () => {
-    if (disabled) return;
-    try {
-      onAdd(preview, view);
-      onRememberAdded(preview);
-      setIsAdded(true);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时无法加入看板，分析结果已保留。");
-    }
-  };
-  return (
-    <section className="ai-insight-preview" aria-label="分析结果预览">
-      <DashboardInsightPresentation
-        result={preview.result}
-        view={view}
-        onViewChange={onViewChange}
-        allowDonut={preview.query.metric !== "averageOrderValue"}
-      />
-      {!empty && (
-        <button type="button" disabled={disabled} onClick={add}>
-          {disabled ? "已加入看板草稿" : "加入看板并查看"}
-        </button>
-      )}
-      <p>
-        {empty
-          ? "请调整日期或筛选条件，当前结果不生成空白组件。"
-          : "加入后可撤销或删除；点击看板上的“完成并保存”后才会保存。"}
-      </p>
-      {error && <p role="alert">{error}</p>}
-    </section>
-  );
-}
-
-type ChatSession = ReturnType<typeof useChatSession>;
-
-function AssistantComposer({
-  chat,
-  inputRef,
-}: {
-  chat: ChatSession;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
-}) {
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    void chat.submit();
-  };
-  return (
-    <div className="ai-assistant-compose-area">
-      <div className="ai-assistant-suggestions" aria-label="经营问题建议">
-        {suggestions.map((suggestion) => (
-          <button
-            key={suggestion.label}
-            type="button"
-            disabled={chat.isSending}
-            onClick={() => chat.setInput(suggestion.prompt)}
-          >
-            {suggestion.label}
-          </button>
-        ))}
-      </div>
-      {chat.error && (
-        <div className="ai-assistant-error" role="alert">
-          <span>{chat.error}</span>
-          {chat.retryable && (
-            <button type="button" onClick={() => void chat.retry()}>
-              重试
-            </button>
-          )}
-        </div>
-      )}
-      <form className="ai-assistant-composer" onSubmit={submit}>
-        <label className="sr-only" htmlFor="dashboard-ai-message">
-          消息
-        </label>
-        <textarea
-          ref={inputRef}
-          id="dashboard-ai-message"
-          value={chat.input}
-          onChange={(event) => chat.setInput(event.target.value)}
-          placeholder="问经营问题，或接着上一个回答追问…"
-          disabled={chat.isSending}
-          rows={2}
-        />
-        <button
-          type="submit"
-          className="ai-assistant-send"
-          aria-label="发送消息"
-          disabled={chat.isSending || !chat.input.trim()}
-        >
-          ↑
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function useAssistantDialog(
-  open: boolean,
-  dialogRef: RefObject<HTMLDialogElement | null>,
-  inputRef: RefObject<HTMLTextAreaElement | null>,
-  openerRef: MutableRefObject<HTMLElement | null>,
-) {
-  useEffect(() => {
-    if (!open) return;
-    if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) {
-      openerRef.current = document.activeElement;
-    }
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (typeof dialog.show === "function") dialog.show();
-    else dialog.setAttribute("open", "");
-    inputRef.current?.focus();
-    return () => {
-      if (typeof dialog.close === "function" && dialog.open) dialog.close();
-      else dialog.removeAttribute("open");
-      openerRef.current?.focus();
-    };
-  }, [dialogRef, inputRef, open, openerRef]);
-}
-
-function closeOnEscape(
-  event: ReactKeyboardEvent<HTMLDialogElement>,
-  onOpenChange: (open: boolean) => void,
-) {
-  if (event.key !== "Escape") return;
-  event.preventDefault();
-  onOpenChange(false);
 }

@@ -1,276 +1,139 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const api = vi.hoisted(() => ({ sendChatMessage: vi.fn() }));
-vi.mock("./chat-api", () => ({ sendChatMessage: api.sendChatMessage }));
-const insightApi = vi.hoisted(() => ({ generateDashboardInsight: vi.fn() }));
-vi.mock("./dashboard-insight-api", () => ({
-  generateDashboardInsight: insightApi.generateDashboardInsight,
-}));
-
+import { AssistantStore } from "./assistant/store";
+import { AssistantStoreProvider } from "./assistant/provider";
 import { DashboardAiAssistant } from "./dashboard-ai-assistant";
-
-function AssistantHarness() {
-  const [open, setOpen] = useState(false);
-  return <DashboardAiAssistant open={open} onOpenChange={setOpen} />;
+import type { DashboardInsightPreviewResponse } from "@shopmate/contracts";
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const preview: DashboardInsightPreviewResponse = {
+  query: {
+    dataset: "sales",
+    metric: "revenue",
+    aggregation: "sum",
+    groupBy: "store",
+    dateRange: { start: "2026-09-01", end: "2026-09-25" },
+    filters: [],
+    order: "desc",
+    limit: 8,
+    visualization: "bar",
+  },
+  result: {
+    kind: "pie",
+    title: "门店销售额",
+    summary: "已查询",
+    unit: "currencyMinor",
+    slices: [{ key: "s1", label: "朝阳店", value: 12000 }],
+  },
+};
+const run = vi.fn();
+function setup(onAdd = vi.fn(), initialOpen = true) {
+  const store = new AssistantStore(undefined, run);
+  store.activate({ userId: "u", merchantId: "m" });
+  function Harness() {
+    const [open, setOpen] = useState(initialOpen);
+    return <DashboardAiAssistant open={open} onOpenChange={setOpen} onInsightCreated={onAdd} />;
+  }
+  render(
+    <AssistantStoreProvider store={store}>
+      <Harness />
+    </AssistantStoreProvider>,
+  );
+  return store;
 }
-
-describe("看板悬浮 AI 助手", () => {
-  beforeEach(() => vi.resetAllMocks());
-
-  it("图表后的解释追问传递查询条件，不再次生成图表", async () => {
-    const query = {
-      dataset: "sales",
-      metric: "revenue",
-      aggregation: "sum",
-      groupBy: "store",
-      dateRange: { start: "2026-09-01", end: "2026-09-25" },
-      filters: [],
-      order: "desc",
-      limit: 8,
-      visualization: "bar",
+function send(content: string) {
+  fireEvent.change(screen.getByRole("textbox", { name: "消息" }), { target: { value: content } });
+  fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+}
+describe("共享看板助手", () => {
+  beforeEach(() => {
+    run.mockReset();
+    HTMLDialogElement.prototype.show = function () {
+      this.setAttribute("open", "");
     };
-    insightApi.generateDashboardInsight.mockResolvedValue({
-      query,
-      result: {
-        kind: "pie",
-        title: "门店销售额",
-        summary: "已查询",
-        unit: "currencyMinor",
-        slices: [{ key: "s1", label: "朝阳店", value: 12000 }],
-      },
-    });
-    api.sendChatMessage.mockResolvedValue({
-      role: "assistant",
-      content: "这是查询时的数据库快照，外部平台同步状态需要另行核实。",
-    });
-    render(<DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={vi.fn()} />);
-    const send = (value: string) => {
-      fireEvent.change(screen.getByRole("textbox", { name: "消息" }), { target: { value } });
-      fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    HTMLDialogElement.prototype.close = function () {
+      this.removeAttribute("open");
     };
+  });
+  it("图表后普通追问传递历史和查询范围", async () => {
+    run
+      .mockResolvedValueOnce({ role: "assistant", content: "分析完成", insightPreview: preview })
+      .mockResolvedValueOnce({ role: "assistant", content: "这是查询时的快照。" });
+    setup();
     send("近30天各门店销售额");
     await screen.findByRole("heading", { name: "门店销售额" });
     send("销量是实时的吗");
-    await screen.findByText(/这是查询时的数据库快照/);
-    expect(insightApi.generateDashboardInsight).toHaveBeenCalledTimes(1);
-    expect(api.sendChatMessage).toHaveBeenCalledWith(
-      "销量是实时的吗",
-      undefined,
-      undefined,
-      expect.arrayContaining([expect.objectContaining({ content: "近30天各门店销售额" })]),
-      query,
-    );
-  });
-
-  it("收起重开后保留对话，并可加宽右侧面板", async () => {
-    api.sendChatMessage.mockResolvedValue({ role: "assistant", content: "可以继续追问。" });
-    render(<AssistantHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
-      target: { value: "我有几个店铺" },
+    await screen.findByText("这是查询时的快照。");
+    expect(run.mock.calls[1][0]).toMatchObject({
+      message: { content: "销量是实时的吗" },
+      insightQuery: preview.query,
+      history: expect.arrayContaining([expect.objectContaining({ content: "近30天各门店销售额" })]),
     });
-    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+  });
+  it("收起重开保留消息、草稿和面板宽度", async () => {
+    run.mockResolvedValue({ role: "assistant", content: "可以继续追问。" });
+    setup(vi.fn(), false);
+    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
+    send("我有几个店铺");
     await screen.findByText("可以继续追问。");
+    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
+      target: { value: "下一问" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "加宽聊天面板" }));
-    expect(screen.getByRole("dialog")).toHaveClass("is-expanded");
+    expect(screen.getByRole("dialog").style.getPropertyValue("--assistant-width")).toBe("820px");
     fireEvent.click(screen.getByRole("button", { name: "关闭 AI 助手" }));
     fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
     expect(screen.getByText("可以继续追问。")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("下一问");
   });
-
-  it("短句切换复用上一张图并保留加入看板的视图，不重复请求", async () => {
-    const preview = {
-      query: { visualization: "bar", metric: "revenue" },
-      result: {
-        kind: "pie",
-        title: "门店销售额",
-        summary: "近30天",
-        unit: "currencyMinor",
-        slices: [{ key: "store-1", label: "朝阳店", value: 10000 }],
-      },
-    };
-    insightApi.generateDashboardInsight.mockResolvedValue(preview);
-    const onAdd = vi.fn();
-    render(<DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onAdd} />);
-    const send = (value: string) => {
-      fireEvent.change(screen.getByRole("textbox", { name: "消息" }), { target: { value } });
-      fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-    };
-    send("近30天各门店销售额");
+  it("短句换图复用数据，不再调用模型", async () => {
+    const add = vi.fn();
+    run.mockResolvedValue({ role: "assistant", content: "分析完成", insightPreview: preview });
+    setup(add);
+    send("生成门店销售图");
     await screen.findByRole("heading", { name: "门店销售额" });
     send("我要饼图");
-    await screen.findByText("已将上一张图切换为环形图（饼图），沿用原来的数据和时间范围。");
-    expect(screen.getByRole("button", { name: "环形图" })).toHaveAttribute("aria-pressed", "true");
-    send("换成折线图");
-    await screen.findByText(/上一张图是分类对比数据/);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await screen.findByText(/已将上一张图切换/);
     fireEvent.click(screen.getByRole("button", { name: "加入看板并查看" }));
-    expect(onAdd).toHaveBeenCalledWith(preview, "pie");
-    expect(insightApi.generateDashboardInsight).toHaveBeenCalledTimes(1);
-    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    expect(add).toHaveBeenCalledWith(preview, "pie");
+    expect(run).toHaveBeenCalledTimes(1);
   });
-
-  it("没有上一张图时短句会提示补充范围而不调用 AI", async () => {
-    render(<DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={vi.fn()} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
-      target: { value: "我要饼图" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-    await screen.findByText(/请先说明要分析的指标和时间范围/);
-    expect(insightApi.generateDashboardInsight).not.toHaveBeenCalled();
-    expect(api.sendChatMessage).not.toHaveBeenCalled();
+  it("没有前一张图时说明缺少范围，不调用模型", async () => {
+    setup();
+    send("我要饼图");
+    await screen.findByText(/请先说明要分析的指标/);
+    expect(run).not.toHaveBeenCalled();
   });
-
-  it("从胶囊展开、聚焦输入并可关闭后恢复焦点", async () => {
-    render(<AssistantHarness />);
-    const trigger = screen.getByRole("button", { name: "Ask AI" });
-
-    fireEvent.click(trigger);
-
-    expect(screen.getByRole("dialog", { name: "AI 经营助手" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "消息" })).toHaveFocus());
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(trigger).toHaveFocus();
+  it("错误保留输入，不偷偷重发", async () => {
+    run.mockRejectedValue(new Error("服务暂时不可用，未自动重试。"));
+    setup();
+    send("经营怎么样");
+    await screen.findByText("服务暂时不可用，未自动重试。");
+    expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("经营怎么样");
+    expect(run).toHaveBeenCalledTimes(1);
   });
-
-  it("使用经营建议发起对话并提供完整页面入口", async () => {
-    api.sendChatMessage.mockResolvedValue({
+  it("空图不能加入看板", async () => {
+    run.mockResolvedValue({
       role: "assistant",
-      content:
-        "## 库存风险\n\n建议优先补货无线蓝牙耳机。\n\n| 商品 | 库存 |\n| --- | --- |\n| 耳机 | 5 |",
+      content: "没有数据",
+      insightPreview: { ...preview, result: { ...preview.result, slices: [] } },
     });
-    render(<AssistantHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
-    fireEvent.click(screen.getByRole("button", { name: "查看低库存" }));
-    expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("最近哪些商品值得补货？");
-
-    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-
-    expect(await screen.findByText(/建议优先补货无线蓝牙耳机/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "库存风险" })).toBeInTheDocument();
-    expect(screen.getByRole("table")).toHaveTextContent("耳机");
-    expect(screen.getByRole("link", { name: "打开完整聊天" })).toHaveAttribute("href", "/chat");
-    expect(api.sendChatMessage).toHaveBeenCalledWith("最近哪些商品值得补货？");
-  });
-
-  it("失败时显示具体错误并可重试", async () => {
-    api.sendChatMessage
-      .mockRejectedValueOnce(
-        Object.assign(new Error("AI 服务暂时不可用，请稍后重试"), {
-          retryable: true,
-        }),
-      )
-      .mockResolvedValueOnce({ role: "assistant", content: "已恢复，可以继续查询。" });
-    render(<AssistantHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
-      target: { value: "总结销售趋势" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("暂时不可用");
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-
-    expect(await screen.findByText("已恢复，可以继续查询。")).toBeInTheDocument();
-    expect(api.sendChatMessage).toHaveBeenCalledTimes(2);
-  });
-
-  it("不可重试错误只显示提示，不显示重试按钮", async () => {
-    api.sendChatMessage.mockRejectedValueOnce(
-      Object.assign(new Error("回答未通过数据校验，请缩小查询范围"), {
-        retryable: false,
-      }),
-    );
-
-    render(<AssistantHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Ask AI" }));
-
-    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
-      target: { value: "分析全部销售数据" },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("缩小查询范围");
-    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
-  });
-
-  it("无数据时展示空态，不创建空白组件", async () => {
-    const onInsightCreated = vi.fn();
-    insightApi.generateDashboardInsight.mockResolvedValue({
-      query: { visualization: "pie" },
-      result: { kind: "pie", title: "商品销售占比", slices: [] },
-    });
-    render(
-      <DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onInsightCreated} />,
-    );
-    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
-      target: { value: "生成商品销售额饼图" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-
-    expect(await screen.findByText("所选范围暂无可展示数据")).toBeInTheDocument();
+    setup();
+    send("画门店销售额");
+    await screen.findByText(/当前没有可展示数据/);
     expect(screen.queryByRole("button", { name: "加入看板并查看" })).not.toBeInTheDocument();
-    expect(onInsightCreated).not.toHaveBeenCalled();
-    expect(api.sendChatMessage).not.toHaveBeenCalled();
   });
-
-  it("加入失败保留预览；成功后重新打开也不能重复加入", async () => {
-    const onInsightCreated = vi.fn().mockImplementationOnce(() => {
-      throw new Error("看板最多包含 24 张卡片");
+  it("加入失败保留预览并允许重新加入", async () => {
+    const add = vi.fn().mockImplementationOnce(() => {
+      throw new Error("布局尚未就绪");
     });
-    insightApi.generateDashboardInsight.mockResolvedValue({
-      query: { visualization: "pie" },
-      result: {
-        kind: "pie",
-        title: "销售占比",
-        summary: "近30天",
-        unit: "currencyMinor",
-        slices: [{ key: "p", label: "商品", value: 100 }],
-      },
-    });
-    const view = render(
-      <DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onInsightCreated} />,
-    );
-    fireEvent.change(screen.getByRole("textbox", { name: "消息" }), {
-      target: { value: "生成饼图" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
-    fireEvent.click(await screen.findByRole("button", { name: "加入看板并查看" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("24 张卡片");
-    expect(onInsightCreated).toHaveBeenLastCalledWith(
-      expect.objectContaining({ result: expect.objectContaining({ kind: "pie" }) }),
-      "pie",
-    );
-    expect(screen.getByRole("heading", { name: "销售占比" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "加入看板并查看" }));
-    view.rerender(
-      <DashboardAiAssistant
-        open={false}
-        onOpenChange={vi.fn()}
-        onInsightCreated={onInsightCreated}
-      />,
-    );
-    view.rerender(
-      <DashboardAiAssistant open onOpenChange={vi.fn()} onInsightCreated={onInsightCreated} />,
-    );
-    expect(screen.getByRole("button", { name: "已加入看板草稿" })).toBeDisabled();
-    expect(onInsightCreated).toHaveBeenCalledTimes(2);
-    view.rerender(
-      <DashboardAiAssistant
-        open
-        onOpenChange={vi.fn()}
-        onInsightCreated={onInsightCreated}
-        isInsightAdded={() => false}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "加入看板并查看" }));
-    expect(onInsightCreated).toHaveBeenCalledTimes(3);
-    expect(insightApi.generateDashboardInsight).toHaveBeenCalledTimes(1);
-    expect(api.sendChatMessage).not.toHaveBeenCalled();
+    run.mockResolvedValue({ role: "assistant", content: "完成", insightPreview: preview });
+    setup(add);
+    send("画门店销售额");
+    const button = await screen.findByRole("button", { name: "加入看板并查看" });
+    fireEvent.click(button);
+    expect(screen.getByRole("alert")).toHaveTextContent("布局尚未就绪");
+    fireEvent.click(button);
+    expect(add).toHaveBeenCalledTimes(2);
   });
 });

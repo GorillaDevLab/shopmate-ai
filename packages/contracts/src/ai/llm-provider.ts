@@ -61,6 +61,7 @@ export interface LLMTokenUsage {
 }
 
 export interface LLMGenerationRequest {
+  readonly signal?: AbortSignal;
   readonly messages: readonly LLMMessage[];
   readonly tools?: readonly LLMToolDefinition[];
 

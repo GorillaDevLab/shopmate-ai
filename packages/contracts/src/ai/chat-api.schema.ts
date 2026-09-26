@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { ChatHistorySchema } from "./chat-history.schema.js";
-import { DashboardInsightQuerySchema } from "./dashboard-insight.schema.js";
+import {
+  DashboardInsightQuerySchema,
+  DashboardInsightPreviewResponseSchema,
+} from "./dashboard-insight.schema.js";
 
 import { ProductCopyOutputSchema, ProductCopyRequestSchema } from "./product-copy.schema.js";
 
@@ -14,6 +17,8 @@ const assistantMessageSchema = z.strictObject({
   content: z.string().trim().min(1).max(8000),
 
   productCopy: ProductCopyOutputSchema.optional(),
+  insightPreview: DashboardInsightPreviewResponseSchema.optional(),
+  insightQuery: DashboardInsightQuerySchema.optional(),
 });
 
 export const AiChatRequestSchema = z.strictObject({

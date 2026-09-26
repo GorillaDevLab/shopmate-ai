@@ -209,6 +209,9 @@ describe("BusinessAgent", () => {
       answer: "销售额为 1,742 元，共 5 单。",
       usedTools: ["get_sales_summary"],
       rounds: 2,
+      toolOutputs: [
+        { name: "get_sales_summary", output: expect.objectContaining({ status: "ok" }) },
+      ],
     });
     expect(handler).toHaveBeenCalledOnce();
 
@@ -576,6 +579,9 @@ describe("BusinessAgent", () => {
       answer: "销售额为 1,742 元，共 5 单。",
       usedTools: ["get_sales_summary"],
       rounds: 3,
+      toolOutputs: [
+        { name: "get_sales_summary", output: expect.objectContaining({ status: "ok" }) },
+      ],
     });
     expect(handler).toHaveBeenCalledOnce();
     expect(provider.generate).toHaveBeenCalledTimes(3);
@@ -663,6 +669,9 @@ describe("BusinessAgent", () => {
       answer: "订单数为5单。",
       usedTools: ["get_sales_summary"],
       rounds: 2,
+      toolOutputs: [
+        { name: "get_sales_summary", output: expect.objectContaining({ status: "ok" }) },
+      ],
     });
   });
 

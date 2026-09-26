@@ -18,6 +18,33 @@ const authContext = createAuthContext({
 });
 
 describe("AiChatService", () => {
+  it("保留汇总工具核实的周期供下一轮追问，不伪造图表", async () => {
+    const service = new AiChatService({
+      run: vi.fn().mockResolvedValue({
+        status: "completed",
+        answer: "已核实销售汇总。",
+        usedTools: ["get_sales_summary"],
+        rounds: 2,
+        toolOutputs: [
+          {
+            name: "get_sales_summary",
+            output: {
+              status: "ok",
+              data: { period: { startDate: "2026-09-01", endDate: "2026-09-25" } },
+            },
+          },
+        ],
+      }),
+    });
+    const reply = await service.chat(authContext, {
+      message: { role: "user", content: "经营怎么样" },
+    });
+    expect(reply.message.insightQuery?.dateRange).toEqual({
+      start: "2026-09-01",
+      end: "2026-09-25",
+    });
+    expect(reply.message.insightPreview).toBeUndefined();
+  });
   it("只转发校验后的历史，身份始终来自当前认证上下文", async () => {
     const run = vi.fn(async () => ({
       status: "completed" as const,

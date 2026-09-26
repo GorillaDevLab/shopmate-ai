@@ -53,6 +53,7 @@ export function createBusinessQueryTool(executor: Pick<DashboardInsightExecutor,
       z.strictObject({
         status: z.literal("ok"),
         data: DashboardInsightResultSchema,
+        query: DashboardInsightQuerySchema,
         period: z.strictObject({ startDate: z.iso.date(), endDate: z.iso.date() }),
       }),
     ),
@@ -62,7 +63,17 @@ export function createBusinessQueryTool(executor: Pick<DashboardInsightExecutor,
     ) => ({
       status: "ok" as const,
       data: await executor.execute(context, query),
+      query,
       period: { startDate: query.dateRange.start, endDate: query.dateRange.end },
     }),
+  };
+}
+
+export function createBusinessChartTool(executor: Pick<DashboardInsightExecutor, "execute">) {
+  return {
+    ...createBusinessQueryTool(executor),
+    name: "create_business_chart",
+    description:
+      "用户要求画图、报告或更改图表筛选时使用。沿用对话日期与指标，除非用户明确改变。使用结构化查询生成可预览的图表；不会保存到看板。名称筛选先查门店目录；歧义先澄清，不猜 ID。",
   };
 }
