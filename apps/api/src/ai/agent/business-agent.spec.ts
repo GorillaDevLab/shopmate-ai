@@ -104,6 +104,37 @@ type InventoryRisksOutput = ReturnType<typeof GetInventoryRisksTool.output.parse
 type SalesSummaryOutput = ReturnType<typeof GetSalesSummaryTool.output.parse>;
 
 describe("BusinessAgent", () => {
+  it.each(["销售额约 1742 元，客单价约 348 元。", "销售额约 0.17 万元。"])(
+    "接受本轮金额的明确约数而不触发付费修正：%s",
+    async (answer) => {
+      const provider = scriptedProvider([
+        toolCallResult("sales", "get_sales_summary", period),
+        finalResult(answer),
+      ]);
+      const result = await new BusinessAgent(provider, salesRegistry()).run({
+        question: "经营情况怎么样",
+        context,
+      });
+      expect(result.status).toBe("completed");
+      expect(result.answer).toBe(answer);
+      expect(provider.generate).toHaveBeenCalledTimes(2);
+    },
+  );
+  it.each(["销售额约 9999 元。", "销售额 0.17 万元。", "订单约 348 单。"])(
+    "仍拒绝错误约数、未声明的精度损失及跨单位数字：%s",
+    async (answer) => {
+      const provider = scriptedProvider([
+        toolCallResult("sales", "get_sales_summary", period),
+        finalResult(answer),
+        finalResult(answer),
+      ]);
+      const result = await new BusinessAgent(provider, salesRegistry()).run({
+        question: "经营情况怎么样",
+        context,
+      });
+      expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    },
+  );
   it("解释性追问可以直接回答，不需要再次生成图表", async () => {
     const provider = scriptedProvider([
       finalResult("这是数据库查询快照，并非自动实时更新；外部渠道同步状态需要另外确认。"),
