@@ -14,6 +14,15 @@ function response() {
 const context = { userId: "u", merchantId: "m", permissions: [] };
 const body = { requestId: "r", message: { role: "user", content: "经营怎么样" } };
 describe("assistant run transport", () => {
+  it("响应头写入失败后释放执行锁，不调用模型",async()=>{
+    const chat=vi.fn().mockResolvedValue({message:{role:"assistant",content:"完成"}});
+    const controller=new AssistantRunController({chat} as unknown as AiChatService);
+    const broken=response();broken.flushHeaders.mockImplementation(()=>{throw new Error("closed socket");});
+    await expect(controller.run(context,body,broken)).rejects.toThrow("closed socket");
+    expect(chat).not.toHaveBeenCalled();
+    await controller.run(context,{...body,requestId:"next"},response());
+    expect(chat).toHaveBeenCalledOnce();
+  });
   it("emits verified completion and rejects duplicate execution", async () => {
     const chat = vi.fn().mockResolvedValue({ message: { role: "assistant", content: "查询完成" } });
     const controller = new AssistantRunController({ chat } as unknown as AiChatService);
