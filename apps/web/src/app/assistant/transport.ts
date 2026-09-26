@@ -55,7 +55,7 @@ export async function runAssistant(
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (line.trim()) {
-          const event = AssistantRunEventSchema.parse(JSON.parse(line));
+          const event = parseEvent(line);
           if (event.requestId !== request.requestId)
             throw new AssistantTransportError("回复与当前请求不匹配。");
           onEvent(event);
@@ -70,4 +70,9 @@ export async function runAssistant(
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
+}
+
+function parseEvent(line:string):AssistantRunEvent {
+  try {return AssistantRunEventSchema.parse(JSON.parse(line));}
+  catch {throw new AssistantTransportError("回复格式校验失败，未自动重试。请检查前后端部署版本。");}
 }
