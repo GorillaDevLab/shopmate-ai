@@ -68,10 +68,10 @@ describe("自然语言经营查询工具", () => {
     const execute = vi.fn(async () => {
       abort.abort();
       return {
-        kind: "pie",
+        kind: "pie" as const,
         title: "门店销售额",
         summary: "本期",
-        unit: "currencyMinor",
+        unit: "currencyMinor" as const,
         slices: [],
       };
     });
