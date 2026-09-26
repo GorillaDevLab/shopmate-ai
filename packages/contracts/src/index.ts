@@ -247,3 +247,24 @@ export type {
   ProductCopyType,
 } from "./ai/product-copy.schema.js";
 export { sanitizeDebugData, DebugReportSchema } from "./debug-report.js";
+export {
+  AssistantRunRequestSchema,
+  AssistantRunEventSchema,
+  AssistantReplySchema,
+} from "./ai/assistant-run.schema.js";
+export type {
+  AssistantRunRequest,
+  AssistantRunEvent,
+  AssistantReply,
+  AssistantProgress,
+} from "./ai/assistant-run.schema.js";
+export {
+  AssistantIdentitySchema,
+  WorkspaceSnapshotSchema,
+} from "./ai/assistant-workspace.schema.js";
+export type {
+  AssistantIdentity,
+  WorkspaceSnapshot,
+  WorkspaceSession,
+  WorkspaceMessage,
+} from "./ai/assistant-workspace.schema.js";
