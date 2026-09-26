@@ -1,11 +1,18 @@
 import { DEFAULT_DASHBOARD_LAYOUT } from "@shopmate/contracts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { render } from "../test/assistant-render";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./dashboard-layout-api";
 import { dashboardResponsePreview } from "./dashboard-data";
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
 import { useState } from "react";
+import * as assistantTransport from "./assistant/transport";
+vi.mock("./assistant/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./assistant/transport")>()),
+  runAssistant: vi.fn(),
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 import * as insights from "./dashboard-insight-api";
 vi.mock("./dashboard-insight-api", () => ({
   generateDashboardInsight: vi.fn(),
@@ -59,6 +66,11 @@ describe("DashboardLayoutEditor", () => {
       visualization: "pie" as const,
     };
     vi.mocked(insights.generateDashboardInsight).mockResolvedValue({ query, result });
+    vi.mocked(assistantTransport.runAssistant).mockResolvedValue({
+      role: "assistant",
+      content: "分析完成",
+      insightPreview: { query, result },
+    });
     vi.mocked(insights.executeDashboardInsight).mockResolvedValue(result);
     function Harness() {
       const [open, setOpen] = useState(true);
