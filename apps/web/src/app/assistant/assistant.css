@@ -660,3 +660,107 @@
     animation: none;
   }
 }
+
+/* AI 提出、用户确认的操作卡片 */
+.assistant-action-card {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, var(--app-line));
+  border-radius: 14px;
+  background: var(--app-surface);
+}
+.assistant-action-card[data-status="done"] {
+  border-color: #9fd8bf;
+}
+.assistant-action-card[data-status="failed"],
+.assistant-action-card[data-status="expired"],
+.assistant-action-card[data-status="cancelled"] {
+  border-color: var(--app-line);
+}
+.assistant-action-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.assistant-action-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.assistant-action-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.assistant-action-card[data-status="done"] .assistant-action-badge {
+  background: #e3f5ec;
+  color: #0b5d3b;
+}
+.assistant-action-card[data-status="failed"] .assistant-action-badge,
+.assistant-action-card[data-status="expired"] .assistant-action-badge,
+.assistant-action-card[data-status="cancelled"] .assistant-action-badge {
+  background: var(--app-bg);
+  color: var(--app-muted);
+}
+.assistant-action-card > p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.assistant-action-card dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.assistant-action-card dl div {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--app-bg);
+}
+.assistant-action-card dt {
+  font-size: 11px;
+  color: var(--app-muted);
+}
+.assistant-action-card dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.assistant-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.assistant-action-buttons button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.assistant-action-buttons .assistant-action-confirm {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: #ffffff;
+  font-weight: 600;
+}
+.assistant-action-buttons button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.assistant-action-card .assistant-action-result {
+  color: var(--app-muted);
+}
+.assistant-action-result a {
+  color: var(--brand-strong);
+}

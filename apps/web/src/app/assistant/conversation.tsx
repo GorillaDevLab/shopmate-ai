@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceMessage } from "@shopmate/contracts";
 import { AssistantMarkdown } from "../assistant-markdown";
+import { ActionProposalCard } from "./action-card";
 import { AssistantArtifact, ProductCopyCard, type AddInsight } from "./artifact";
 import { useAssistantWorkspace } from "./provider";
 export function AssistantConversation({
@@ -133,6 +134,14 @@ function Message({
         />
       )}
       {message.productCopy && <ProductCopyCard copy={message.productCopy} />}
+      {message.actionProposals?.map((proposal) => (
+        <ActionProposalCard
+          key={proposal.token}
+          proposal={proposal}
+          outcome={message.actionOutcomes?.[proposal.token]}
+          onOutcome={(outcome) => store.setActionOutcome(message.id, proposal.token, outcome)}
+        />
+      ))}
       {message.role === "assistant" && (
         <footer>
           <time dateTime={message.createdAt}>

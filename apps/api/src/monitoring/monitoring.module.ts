@@ -43,5 +43,6 @@ import { MonitoringService } from "./monitoring.service.js";
       inject: [AI_LLM_PROVIDER, MonitoringEvaluator],
     },
   ],
+  exports: [MonitoringService],
 })
 export class MonitoringModule {}

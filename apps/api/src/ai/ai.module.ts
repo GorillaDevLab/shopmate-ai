@@ -45,7 +45,17 @@ import {
   createBusinessOverviewTool,
 } from "./tools/business-overview.tool.js";
 
+import { AgentActionStore } from "./actions/agent-action-store.js";
+import {
+  PROPOSE_ACTION_TOOL_NAMES,
+  createProposeInventoryThresholdTool,
+  createProposeMonitoringRuleTool,
+  createProposeSaveChartTool,
+} from "./actions/propose-action.tools.js";
+import { PrismaInventoryAlertUpdateRepository } from "./tools/inventory-alert-update.repository.js";
+
 export const AI_LLM_PROVIDER = Symbol("AI_LLM_PROVIDER");
+export const AI_ACTION_STORE = Symbol("AI_ACTION_STORE");
 export const AI_TOOL_REGISTRY = Symbol("AI_TOOL_REGISTRY");
 export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
 
@@ -53,6 +63,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
   imports: [AnalyticsModule, ProductModule],
   controllers: [AiChatController, DashboardInsightController, AssistantRunController],
   providers: [
+    { provide: AI_ACTION_STORE, useFactory: () => new AgentActionStore() },
     {
       provide: AI_LLM_PROVIDER,
       useFactory: () => {
@@ -70,6 +81,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         provider: DeepSeekLLMProvider | MockLLMProvider,
         insightExecutor: DashboardInsightExecutor,
         overviewService: AnalyticsOverviewService,
+        actionStore: AgentActionStore,
       ) => {
         const registry = new ToolRegistry({
           allowedToolNames: [
@@ -79,6 +91,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
             "query_business_data",
             "create_business_chart",
             BUSINESS_OVERVIEW_TOOL_NAME,
+            ...PROPOSE_ACTION_TOOL_NAMES,
           ],
         });
         registry.register(createProductDetailsToolRegistration(productService));
@@ -91,6 +104,14 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         registry.register(createBusinessQueryTool(insightExecutor));
         registry.register(createBusinessChartTool(insightExecutor));
         registry.register(createBusinessOverviewTool(overviewService));
+        registry.register(
+          createProposeInventoryThresholdTool(
+            actionStore,
+            new PrismaInventoryAlertUpdateRepository(),
+          ),
+        );
+        registry.register(createProposeMonitoringRuleTool(actionStore));
+        registry.register(createProposeSaveChartTool(actionStore));
 
         const productCopyService = new ProductCopyService(productService, provider);
         registry.register(createGenerateProductCopyToolRegistration(productCopyService));
@@ -105,6 +126,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         AI_LLM_PROVIDER,
         DashboardInsightExecutor,
         AnalyticsOverviewService,
+        AI_ACTION_STORE,
       ],
     },
     {
@@ -137,6 +159,6 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
       inject: [AI_LLM_PROVIDER, DashboardInsightExecutor],
     },
   ],
-  exports: [AiChatService, AI_LLM_PROVIDER],
+  exports: [AiChatService, AI_LLM_PROVIDER, AI_ACTION_STORE],
 })
 export class AiModule {}

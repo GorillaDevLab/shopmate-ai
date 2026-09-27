@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AssistantReplySchema } from "./assistant-run.schema.js";
 import { DashboardInsightQuerySchema } from "./dashboard-insight.schema.js";
 import { DashboardChartViewSchema } from "./dashboard-insight.schema.js";
+import { AgentActionOutcomeSchema, AgentActionTokenSchema } from "./agent-actions.schema.js";
 
 export const AssistantIdentitySchema = z.strictObject({
   userId: z.string().min(1).max(200),
@@ -13,6 +14,7 @@ export const WorkspaceMessageSchema = AssistantReplySchema.extend({
   createdAt: z.string().datetime(),
   status: z.enum(["complete", "failed", "stopped"]),
   chartView: DashboardChartViewSchema.optional(),
+  actionOutcomes: z.record(AgentActionTokenSchema, AgentActionOutcomeSchema).optional(),
 });
 export const WorkspaceSessionSchema = z.strictObject({
   id: z.string().min(1).max(128),

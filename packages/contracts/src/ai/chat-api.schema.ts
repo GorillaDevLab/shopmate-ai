@@ -6,6 +6,7 @@ import {
 } from "./dashboard-insight.schema.js";
 
 import { ProductCopyOutputSchema, ProductCopyRequestSchema } from "./product-copy.schema.js";
+import { AGENT_ACTION_MAX_PER_REPLY, AgentActionProposalSchema } from "./agent-actions.schema.js";
 
 const userMessageSchema = z.strictObject({
   role: z.literal("user"),
@@ -19,6 +20,7 @@ const assistantMessageSchema = z.strictObject({
   productCopy: ProductCopyOutputSchema.optional(),
   insightPreview: DashboardInsightPreviewResponseSchema.optional(),
   insightQuery: DashboardInsightQuerySchema.optional(),
+  actionProposals: z.array(AgentActionProposalSchema).max(AGENT_ACTION_MAX_PER_REPLY).optional(),
 });
 
 export const AiChatRequestSchema = z.strictObject({
