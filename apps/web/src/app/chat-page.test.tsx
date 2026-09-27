@@ -9,6 +9,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./chat-api", () => ({
   sendChatMessage: mocks.sendChatMessage,
 }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
+// 普通函数而非 vi.fn：beforeEach 的 resetAllMocks 不会清掉这些桩实现。
+vi.mock("./monitoring-api", () => ({
+  getMonitoringUnreadCount: async () => ({ count: 0 }),
+  listMonitoringNotifications: async () => ({ items: [] }),
+  syncMonitoring: async () => ({ evaluatedRules: 0, createdNotifications: 0, failedRules: 0 }),
+}));
 
 import ChatPage from "./chat/page";
 
@@ -75,6 +82,20 @@ describe("中文聊天页", () => {
     expect(await screen.findByText("当前库存还有 5 件。")).toBeInTheDocument();
 
     expect(mocks.sendChatMessage).toHaveBeenCalledWith("请查询当前库存");
+  });
+
+  it("顶部搜索跳转带来的 q 参数只预填输入框，不自动发送", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/chat?q=%20%E6%9C%80%E8%BF%91%E5%93%AA%E6%AC%BE%E5%95%86%E5%93%81%E5%8D%96%E5%BE%97%E5%A5%BD%20",
+    );
+
+    render(<ChatPage />);
+
+    expect(screen.getByRole("textbox", { name: "消息" })).toHaveValue("最近哪款商品卖得好");
+    expect(mocks.sendChatMessage).not.toHaveBeenCalled();
+    window.history.replaceState(null, "", "/");
   });
 
   it.each(copyCases)("%s 可以生成结构化商品文案", async (label, copyType) => {

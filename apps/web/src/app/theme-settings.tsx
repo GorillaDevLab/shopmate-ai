@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { applyTheme, themeValue, THEME_STORAGE_ERROR, type Theme } from "./theme";
 
-export function ThemeSettings() {
+export function ThemeSettings({ variant = "default" }: { variant?: "default" | "sidebar" }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const close = () => {
@@ -15,7 +15,9 @@ export function ThemeSettings() {
       <button
         ref={trigger}
         type="button"
-        className="appearance-trigger focus-ring"
+        className={
+          variant === "sidebar" ? "sidebar-action focus-ring" : "appearance-trigger focus-ring"
+        }
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}

@@ -1,10 +1,13 @@
 "use client";
 
 import type { ProductCopyOutput, ProductCopyType } from "@shopmate/contracts";
-import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
-import { useChatSession } from "../chat-session";
+import { AppShell } from "../app-shell";
+import { type ChatMessage, useChatSession } from "../chat-session";
+
+// 与聊天接口 schema 的 content 上限一致，防止从 URL 预填超长内容。
+const MESSAGE_MAX_LENGTH = 2000;
 
 const examples = [
   {
@@ -55,6 +58,12 @@ export default function ChatPage() {
   const [productId, setProductId] = useState("");
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
+  // 顶部搜索以 GET /chat?q= 跳转过来：只预填输入框，不自动发送，由商家确认后再提交。
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search).get("q")?.trim();
+    if (query) setInput(query.slice(0, MESSAGE_MAX_LENGTH));
+  }, [setInput]);
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void submit();
@@ -83,175 +92,204 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-8">
-      <div className="mx-auto w-full max-w-3xl">
-        <header className="flex items-center justify-between border-b border-app-line pb-4">
-          <Link
-            className="inline-flex min-h-11 items-center gap-3 rounded-full focus-ring"
-            href="/"
-          >
-            <span className="grid size-9 place-items-center rounded-xl bg-brand text-lg font-bold text-white">
-              S
-            </span>
+    <AppShell active="chat" title="AI 对话">
+      <div className="mx-auto w-full max-w-6xl">
+        <div className="mb-4 md:mb-6">
+          <h1 className="text-xl font-semibold tracking-tight md:text-2xl">AI 经营助手</h1>
 
-            <span className="text-base font-bold tracking-tight">ShopMate AI</span>
-          </Link>
-
-          <Link
-            className="min-h-11 rounded-xl px-3 py-2 text-sm font-semibold text-brand hover:bg-brand-soft"
-            href="/"
-          >
-            返回看板
-          </Link>
-        </header>
-
-        <section className="mt-8">
-          <p className="text-xs font-semibold tracking-[0.12em] text-app-muted">中文经营助手</p>
-
-          <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">AI 经营助手</h1>
-
-          <p className="mt-3 max-w-xl text-sm leading-6 text-app-muted">
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-app-muted">
             查询库存、热销和销售趋势，也可以根据真实商品信息生成五类中文营销文案。
           </p>
-        </section>
+        </div>
 
-        <section className="dashboard-panel mt-6 p-4 sm:p-5" aria-label="商品文案生成">
-          <h2 className="text-base font-bold">商品营销文案</h2>
-
-          <p className="mt-1 text-sm leading-6 text-app-muted">
-            输入当前商家下真实存在的商品 ID，再选择需要生成的文案类型。
-          </p>
-
-          <div className="mt-4">
-            <label className="text-sm font-semibold" htmlFor="copy-product-id">
-              商品 ID
-            </label>
-
-            <input
-              id="copy-product-id"
-              className="mt-2 min-h-11 w-full rounded-xl border border-app-line bg-app-bg px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-              value={productId}
-              onChange={(event) => setProductId(event.target.value)}
-              placeholder="例如：product-001"
-              disabled={isSending}
-            />
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {copyOptions.map((option) => (
-              <button
-                key={option.type}
-                type="button"
-                className="min-h-10 rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:border-brand hover:bg-brand-soft disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isSending || !productId.trim()}
-                onClick={() => requestProductCopy(option)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="dashboard-panel mt-6 min-h-[420px] p-4 sm:p-6" aria-label="聊天记录">
-          <div className="flex flex-wrap gap-2 border-b border-app-line pb-4">
-            {examples.map((example) => (
-              <button
-                key={example.label}
-                type="button"
-                className="min-h-10 rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:border-brand hover:bg-brand-soft"
-                onClick={() => setInput(example.prompt)}
-              >
-                {example.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-4 py-5" aria-live="polite">
-            {messages.length === 0 && (
-              <p className="py-16 text-center text-sm text-app-muted">
-                可以查询经营数据，也可以从上方选择一种商品营销文案。
-              </p>
-            )}
-
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                {message.role === "assistant" ? (
-                  <div className="max-w-[85%] space-y-3">
-                    <p className="whitespace-pre-wrap rounded-2xl bg-brand-soft px-4 py-3 text-sm leading-6 text-app-text">
-                      {message.content}
-                    </p>
-
-                    {message.productCopy && (
-                      <ProductCopyCard
-                        copy={message.productCopy}
-                        onCopy={() => void copyProductCopy(message.productCopy!)}
-                      />
-                    )}
-                  </div>
-                ) : (
-                  <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-brand px-4 py-3 text-sm leading-6 text-white">
-                    {message.content}
-                  </p>
-                )}
-              </div>
-            ))}
-
-            {isSending && (
-              <p className="text-sm text-app-muted" role="status">
-                正在整理经营数据…
-              </p>
-            )}
-
-            {copyFeedback && (
-              <p className="text-sm font-semibold text-brand" role="status">
-                {copyFeedback}
-              </p>
-            )}
-
-            {error && (
-              <div className="flex items-center gap-3" role="alert">
-                <p className="text-sm text-danger">{error}</p>
-
+        <div className="grid grid-cols-1 items-start gap-4 md:gap-6 xl:grid-cols-3">
+          <section
+            className="dashboard-panel flex min-h-[520px] flex-col p-4 md:p-6 xl:col-span-2"
+            aria-label="聊天记录"
+          >
+            <div className="flex flex-wrap gap-2 border-b border-app-line pb-4">
+              {examples.map((example) => (
                 <button
+                  key={example.label}
                   type="button"
-                  className="min-h-10 rounded-xl border border-app-line px-3 text-sm font-semibold hover:bg-brand-soft"
-                  onClick={() => void retry()}
+                  className="btn-secondary min-h-10 px-3"
+                  onClick={() => setInput(example.prompt)}
                 >
-                  重试
+                  {example.label}
                 </button>
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
 
-          <form className="flex gap-2 border-t border-app-line pt-4" onSubmit={handleSubmit}>
-            <label className="sr-only" htmlFor="chat-message">
-              消息
-            </label>
-
-            <input
-              id="chat-message"
-              className="min-h-11 min-w-0 flex-1 rounded-xl border border-app-line bg-app-bg px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="例如：最近哪款商品卖得最好？"
-              disabled={isSending}
+            <ChatMessages
+              messages={messages}
+              isSending={isSending}
+              copyFeedback={copyFeedback}
+              error={error}
+              onRetry={() => void retry()}
+              onCopy={(copy) => void copyProductCopy(copy)}
             />
 
-            <button
-              className="min-h-11 rounded-xl bg-brand px-4 text-sm font-bold text-white hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-60"
-              type="submit"
-              disabled={isSending || !input.trim()}
-              aria-busy={isSending}
-            >
-              发送消息
-            </button>
-          </form>
-        </section>
+            <ChatComposer
+              input={input}
+              isSending={isSending}
+              onInput={setInput}
+              onSubmit={handleSubmit}
+            />
+          </section>
+
+          <section className="dashboard-panel p-4 md:p-6" aria-label="商品文案生成">
+            <h2 className="text-sm font-semibold tracking-tight md:text-base">商品营销文案</h2>
+
+            <p className="mt-1 text-sm leading-6 text-app-muted">
+              输入当前商家下真实存在的商品 ID，再选择需要生成的文案类型。
+            </p>
+
+            <div className="mt-4">
+              <label className="text-sm font-medium" htmlFor="copy-product-id">
+                商品 ID
+              </label>
+
+              <input
+                id="copy-product-id"
+                className="app-input mt-2 min-h-11 w-full px-3"
+                value={productId}
+                onChange={(event) => setProductId(event.target.value)}
+                placeholder="例如：product-001"
+                maxLength={128}
+                disabled={isSending}
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {copyOptions.map((option) => (
+                <button
+                  key={option.type}
+                  type="button"
+                  className="btn-secondary min-h-10 px-3"
+                  disabled={isSending || !productId.trim()}
+                  onClick={() => requestProductCopy(option)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
       </div>
-    </main>
+    </AppShell>
+  );
+}
+
+function ChatMessages({
+  messages,
+  isSending,
+  copyFeedback,
+  error,
+  onRetry,
+  onCopy,
+}: {
+  readonly messages: readonly ChatMessage[];
+  readonly isSending: boolean;
+  readonly copyFeedback: string | null;
+  readonly error: string | null;
+  readonly onRetry: () => void;
+  readonly onCopy: (copy: ProductCopyOutput) => void;
+}) {
+  return (
+    <div className="space-y-4 py-5" aria-live="polite">
+      {messages.length === 0 && (
+        <p className="py-16 text-center text-sm text-app-muted">
+          可以查询经营数据，也可以在文案面板选择一种商品营销文案。
+        </p>
+      )}
+
+      {messages.map((message, index) => (
+        <div
+          key={`${message.role}-${index}`}
+          className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
+        >
+          {message.role === "assistant" ? (
+            <div className="max-w-[85%] space-y-3">
+              <p className="whitespace-pre-wrap rounded-xl bg-gray-100 px-4 py-3 text-sm leading-6 text-app-text">
+                {message.content}
+              </p>
+
+              {message.productCopy && (
+                <ProductCopyCard
+                  copy={message.productCopy}
+                  onCopy={() => onCopy(message.productCopy!)}
+                />
+              )}
+            </div>
+          ) : (
+            <p className="max-w-[85%] whitespace-pre-wrap rounded-xl bg-brand px-4 py-3 text-sm leading-6 text-white">
+              {message.content}
+            </p>
+          )}
+        </div>
+      ))}
+
+      {isSending && (
+        <p className="text-sm text-app-muted" role="status">
+          正在整理经营数据…
+        </p>
+      )}
+
+      {copyFeedback && (
+        <p className="text-sm font-medium text-brand" role="status">
+          {copyFeedback}
+        </p>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-3" role="alert">
+          <p className="text-sm text-danger">{error}</p>
+
+          <button type="button" className="btn-secondary min-h-10 px-3" onClick={onRetry}>
+            重试
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatComposer({
+  input,
+  isSending,
+  onInput,
+  onSubmit,
+}: {
+  readonly input: string;
+  readonly isSending: boolean;
+  readonly onInput: (value: string) => void;
+  readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form className="mt-auto flex gap-2 border-t border-app-line pt-4" onSubmit={onSubmit}>
+      <label className="sr-only" htmlFor="chat-message">
+        消息
+      </label>
+
+      <input
+        id="chat-message"
+        className="app-input min-h-11 min-w-0 flex-1 px-3"
+        value={input}
+        onChange={(event) => onInput(event.target.value)}
+        placeholder="例如：最近哪款商品卖得最好？"
+        maxLength={MESSAGE_MAX_LENGTH}
+        disabled={isSending}
+      />
+
+      <button
+        className="btn-primary min-h-11 px-4"
+        type="submit"
+        disabled={isSending || !input.trim()}
+        aria-busy={isSending}
+      >
+        发送消息
+      </button>
+    </form>
   );
 }
 
@@ -263,10 +301,10 @@ function ProductCopyCard({
   readonly onCopy: () => void;
 }) {
   return (
-    <article className="rounded-2xl border border-app-line bg-app-surface p-4">
-      <p className="text-xs font-semibold tracking-[0.1em] text-app-muted">生成结果</p>
+    <article className="rounded-xl border border-app-line bg-app-surface p-4">
+      <p className="text-xs font-medium text-app-muted">生成结果</p>
 
-      <h3 className="mt-2 text-lg font-bold">{copy.title}</h3>
+      <h3 className="mt-2 text-base font-semibold tracking-tight">{copy.title}</h3>
 
       <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{copy.body}</p>
 
@@ -275,7 +313,7 @@ function ProductCopyCard({
           {copy.tags.map((tag) => (
             <span
               key={tag}
-              className="rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand"
+              className="rounded-md bg-brand-soft px-2 py-1 text-xs font-medium text-brand"
             >
               #{tag}
             </span>
@@ -283,11 +321,7 @@ function ProductCopyCard({
         </div>
       )}
 
-      <button
-        type="button"
-        className="mt-4 min-h-10 rounded-xl border border-app-line px-3 text-sm font-semibold hover:border-brand hover:bg-brand-soft"
-        onClick={onCopy}
-      >
+      <button type="button" className="btn-secondary mt-4 min-h-10 px-3" onClick={onCopy}>
         复制文案
       </button>
     </article>

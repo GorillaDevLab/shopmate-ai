@@ -4,11 +4,9 @@ import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
 import { useState, type ReactNode } from "react";
 
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
+import { AppShell } from "./app-shell";
 import { MetricGrid } from "./metric-card";
-import { ThemeSettings } from "./theme-settings";
-import { LogoutButton } from "./logout-button";
 import { MonitoringRuleManager } from "./monitoring-rule-manager";
-import { NotificationCenter } from "./notification-center";
 
 export type DashboardState = "ready" | "loading" | "empty" | "error";
 
@@ -35,21 +33,31 @@ export function Dashboard({
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [monitoringOpen, setMonitoringOpen] = useState(false);
   return (
-    <main className="min-h-dvh bg-app-bg px-4 py-5 text-app-text sm:px-8 lg:py-3">
-      <div className="mx-auto w-full max-w-[1440px]">
-        <DashboardHeader
-          ready={visibleState === "ready"}
+    <AppShell
+      active="dashboard"
+      title="经营总览"
+      notificationsEnabled={visibleState === "ready"}
+      actions={
+        <DashboardActions
           assistantOpen={assistantOpen}
           onOpenAssistant={() => setAssistantOpen(true)}
           monitoringOpen={monitoringOpen}
           onOpenMonitoring={() => setMonitoringOpen(true)}
         />
+      }
+    >
+      <div className="mx-auto w-full max-w-[1440px]">
         <section
-          id="main-content"
-          className={`mt-8 lg:mt-4 ${isRefreshing ? "dashboard-refreshing" : ""}`}
+          aria-label="经营数据"
+          className={isRefreshing ? "dashboard-refreshing" : undefined}
           aria-busy={isRefreshing}
         >
-          <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
+          <DashboardIntro
+            ready={visibleState === "ready"}
+            data={data}
+            controls={controls}
+            periodLabel={periodLabel}
+          />
           {visibleState === "ready" && data ? (
             <DashboardLayoutEditor
               data={data}
@@ -76,100 +84,90 @@ export function Dashboard({
             </>
           )}
         </section>
-        <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted lg:mt-4">
+        <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted">
           中文界面 · 移动端优先 · 隐私友好
         </footer>
         <MonitoringRuleManager open={monitoringOpen} onOpenChange={setMonitoringOpen} />
       </div>
-    </main>
+    </AppShell>
   );
 }
 
-function DashboardHeader({
-  ready,
+function DashboardActions({
   assistantOpen,
   onOpenAssistant,
   monitoringOpen,
   onOpenMonitoring,
 }: {
-  ready: boolean;
   assistantOpen: boolean;
   onOpenAssistant: () => void;
   monitoringOpen: boolean;
   onOpenMonitoring: () => void;
 }) {
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-app-line pb-3">
-      <a
-        className="inline-flex min-h-11 items-center gap-3 rounded-full focus-ring"
-        href="#main-content"
+    <>
+      <button
+        type="button"
+        className="toolbar-button"
+        aria-haspopup="dialog"
+        aria-expanded={monitoringOpen}
+        aria-label="经营监听"
+        onClick={onOpenMonitoring}
       >
-        <span className="grid size-9 place-items-center rounded-xl bg-brand text-lg font-bold text-white">
-          S
-        </span>
-        <span className="text-base font-bold tracking-tight">ShopMate AI</span>
-      </a>
-      <div className="flex items-center gap-4 text-right">
-        <div className="hidden sm:block">
-          <p className="text-sm font-semibold">商家经营看板</p>
-          <p className="text-xs text-app-muted">
-            {ready ? "数据来自 Analytics API" : "正在连接经营分析服务"}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <NotificationCenter enabled={ready} />
-          <button
-            type="button"
-            className="inline-flex min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-2 text-sm font-semibold hover:bg-brand-soft sm:px-3"
-            aria-haspopup="dialog"
-            aria-expanded={monitoringOpen}
-            aria-label="经营监听"
-            onClick={onOpenMonitoring}
-          >
-            <span aria-hidden="true" className="sm:hidden">
-              ◎
-            </span>
-            <span className="hidden sm:inline">经营监听</span>
-          </button>
-          <button
-            type="button"
-            className="hidden min-h-11 items-center rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold hover:bg-brand-soft sm:inline-flex"
-            aria-haspopup="dialog"
-            aria-expanded={assistantOpen}
-            onClick={onOpenAssistant}
-          >
-            AI 助手
-          </button>
-          <LogoutButton />
-          <ThemeSettings />
-        </div>
-      </div>
-    </header>
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          className="size-5 sm:hidden"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        >
+          <circle cx="12" cy="12" r="2" />
+          <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14" />
+        </svg>
+        <span className="hidden sm:inline">经营监听</span>
+      </button>
+      <button
+        type="button"
+        className="toolbar-button is-primary hidden sm:inline-flex"
+        aria-haspopup="dialog"
+        aria-expanded={assistantOpen}
+        onClick={onOpenAssistant}
+      >
+        AI 助手
+      </button>
+    </>
   );
 }
 
 function DashboardIntro({
+  ready,
   data,
   controls,
   periodLabel,
 }: {
+  ready: boolean;
   data?: AnalyticsDashboardResponse;
   controls?: ReactNode;
   periodLabel: string;
 }) {
   return (
-    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between lg:mb-4">
-      <div>
-        <p className="mb-1 text-xs font-semibold tracking-[0.12em] text-app-muted">经营总览</p>
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-[28px]">
+    <div className="mb-4 flex flex-col gap-3 md:mb-6 md:flex-row md:items-end md:justify-between">
+      <div className="min-w-0">
+        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
           {periodLabel}经营，一眼看清
         </h1>
+        <p className="mt-1 text-sm text-app-muted">
+          <span>{ready ? "数据来自 Analytics API" : "正在连接经营分析服务"}</span>
+          {data && (
+            <span className="ml-2 border-l border-app-line pl-2">
+              统计截至 {formatChineseDate(data.asOfDate)}
+            </span>
+          )}
+        </p>
       </div>
-      {controls ?? (
-        <span className="w-fit rounded-full border border-app-line bg-app-surface px-3 py-1.5 text-xs font-semibold text-app-muted">
-          {data ? `统计截至 ${formatChineseDate(data.asOfDate)}` : "正在获取最新数据"}
-        </span>
-      )}
+      {controls}
     </div>
   );
 }
@@ -190,29 +188,29 @@ function StatePanel({
   }[state];
   const isAuthError = state === "error" && authRequired;
   return (
-    <div className="dashboard-panel mt-5 px-6 py-20 text-center" role="status" aria-live="polite">
-      <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-brand-soft text-xl text-brand">
-        ✦
+    <div
+      className="dashboard-panel mt-4 px-6 py-16 text-center md:mt-6 md:py-20"
+      role="status"
+      aria-live="polite"
+    >
+      <div
+        aria-hidden="true"
+        className="mx-auto grid size-12 place-items-center rounded-xl bg-brand-soft text-xl text-brand"
+      >
+        {state === "error" ? "!" : state === "loading" ? "…" : "∅"}
       </div>
-      <h2 className="mt-5 text-xl font-black">{copy[0]}</h2>
+      <h2 className="mt-5 text-lg font-semibold tracking-tight md:text-xl">{copy[0]}</h2>
       <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-app-muted">
         {isAuthError ? "请先登录后再查看商家经营数据。" : copy[1]}
       </p>
       {state === "error" && (
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           {isAuthError && (
-            <a
-              className="inline-flex min-h-11 items-center rounded-2xl bg-brand px-5 text-sm font-bold text-white transition hover:bg-brand-strong"
-              href="/login"
-            >
+            <a className="btn-primary min-h-11 px-5" href="/login">
               重新登录
             </a>
           )}
-          <button
-            type="button"
-            onClick={onRetry}
-            className="min-h-11 rounded-2xl border border-app-line bg-app-surface px-5 text-sm font-bold text-app-text transition hover:bg-brand-soft"
-          >
+          <button type="button" onClick={onRetry} className="btn-secondary min-h-11 px-5">
             重新加载
           </button>
         </div>

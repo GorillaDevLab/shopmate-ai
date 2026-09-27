@@ -74,7 +74,7 @@ function TrendHeading({
         <p className="text-xs text-app-muted">
           {selected ? formatDate(selected.date) : "暂无数据"}
         </p>
-        <strong className="mt-1 block break-all text-lg font-bold tabular-nums text-app-text">
+        <strong className="mt-1 block break-all text-lg font-semibold tabular-nums text-app-text">
           {selected ? formatMoneyMinor(selected.revenueMinor) : "—"}
         </strong>
       </div>
