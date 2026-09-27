@@ -48,11 +48,11 @@ export function LoginForm() {
   return (
     <form className="mt-6 space-y-4" onSubmit={handleSubmit} noValidate>
       <div>
-        <label className="text-sm font-medium" htmlFor="login-email">
+        <label className="text-sm font-semibold" htmlFor="login-email">
           邮箱
         </label>
         <input
-          className="app-input mt-2 min-h-11 w-full px-3"
+          className="mt-2 min-h-11 w-full rounded-xl border border-app-line bg-app-bg px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
           id="login-email"
           name="email"
           type="email"
@@ -69,11 +69,11 @@ export function LoginForm() {
         )}
       </div>
       <div>
-        <label className="text-sm font-medium" htmlFor="login-password">
+        <label className="text-sm font-semibold" htmlFor="login-password">
           密码
         </label>
         <input
-          className="app-input mt-2 min-h-11 w-full px-3"
+          className="mt-2 min-h-11 w-full rounded-xl border border-app-line bg-app-bg px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
           id="login-password"
           name="password"
           type="password"
@@ -90,15 +90,12 @@ export function LoginForm() {
         )}
       </div>
       {requestError && (
-        <p
-          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-danger"
-          role="alert"
-        >
+        <p className="rounded-xl bg-brand-soft px-3 py-2 text-sm text-danger" role="alert">
           {requestError}
         </p>
       )}
       <button
-        className="btn-primary min-h-11 w-full px-4"
+        className="min-h-11 w-full rounded-xl bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-strong disabled:cursor-not-allowed disabled:opacity-60"
         type="submit"
         disabled={isSubmitting}
         aria-busy={isSubmitting}

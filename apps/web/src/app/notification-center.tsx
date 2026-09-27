@@ -92,9 +92,7 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
         aria-label={count ? `通知，${count} 条未读` : "通知"}
         onClick={() => void openCenter()}
       >
-        <svg aria-hidden="true" viewBox="0 0 24 24" className="size-5">
-          <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" />
-        </svg>
+        <span aria-hidden="true">◔</span>
         {count > 0 && <span className="notification-badge">{count > 99 ? "99+" : count}</span>}
       </button>
       {open && (

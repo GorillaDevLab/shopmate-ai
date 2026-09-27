@@ -29,7 +29,7 @@ function HotProductItem({ item }: { item: DashboardHotProduct }) {
         第 {item.rank} 名
       </span>
       <div className="min-w-0 break-words [overflow-wrap:anywhere] lg:flex lg:flex-wrap lg:items-baseline lg:gap-x-4">
-        <h3 className="text-sm font-semibold">{item.name}</h3>
+        <h3 className="text-sm font-bold">{item.name}</h3>
         <p className="mt-1 text-xs text-app-muted lg:mt-0">SKU：{item.skuCodes.join("、")}</p>
       </div>
       <dl className="product-values">

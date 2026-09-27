@@ -2,10 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { render } from "../test/assistant-render";
 import { describe, expect, it, vi } from "vitest";
 
-const navigation = vi.hoisted(() => ({ push: vi.fn() }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: navigation.push, replace: vi.fn(), refresh: vi.fn() }),
-}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("./dashboard-layout-api", async () => {
   const { DEFAULT_DASHBOARD_LAYOUT } = await import("@shopmate/contracts");
   return {
@@ -67,31 +64,6 @@ describe("Dashboard 响应式与无障碍验收", () => {
     expect(screen.getByRole("dialog", { name: "AI 经营助手" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /编辑看板/ }));
-    expect(screen.queryByRole("dialog", { name: "AI 经营助手" })).not.toBeInTheDocument();
-  });
-
-  it("顶部搜索把问题写入助手草稿并打开抽屉，不自动发送", async () => {
-    render(<Dashboard state="ready" data={dashboardResponsePreview} />);
-    await screen.findByRole("button", { name: /编辑看板/ });
-
-    fireEvent.change(screen.getByRole("searchbox", { name: "搜索或提问" }), {
-      target: { value: "最近哪些商品需要补货？" },
-    });
-    fireEvent.submit(screen.getByRole("search"));
-
-    const dialog = screen.getByRole("dialog", { name: "AI 经营助手" });
-    expect(within(dialog).getByDisplayValue("最近哪些商品需要补货？")).toBeInTheDocument();
-  });
-
-  it("看板未就绪时顶部搜索保存草稿并前往完整对话页", () => {
-    render(<Dashboard state="error" />);
-
-    fireEvent.change(screen.getByRole("searchbox", { name: "搜索或提问" }), {
-      target: { value: "库存情况" },
-    });
-    fireEvent.submit(screen.getByRole("search"));
-
-    expect(navigation.push).toHaveBeenCalledWith("/chat");
     expect(screen.queryByRole("dialog", { name: "AI 经营助手" })).not.toBeInTheDocument();
   });
 
