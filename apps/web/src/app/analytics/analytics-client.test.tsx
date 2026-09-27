@@ -13,6 +13,12 @@ vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => 
 const api = vi.hoisted(() => ({ fetchAnalyticsOverview: vi.fn() }));
 vi.mock("./analytics-api", () => api);
 
+const insightApi = vi.hoisted(() => ({ executeDashboardInsight: vi.fn() }));
+vi.mock("../dashboard-insight-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../dashboard-insight-api")>()),
+  ...insightApi,
+}));
+
 const layoutApi = vi.hoisted(() => ({
   fetchAnalyticsLayout: vi.fn(),
   saveAnalyticsLayout: vi.fn(),
@@ -198,5 +204,61 @@ describe("AnalyticsClient", () => {
     fireEvent.click(screen.getByRole("button", { name: "编辑看板" }));
     expect(await screen.findByRole("region", { name: "编辑看板" })).toBeInTheDocument();
     expect(layoutApi.fetchAnalyticsLayout).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders saved AI charts for the page period and deletes them only after confirmation", async () => {
+    const overview = overviewFixture();
+    api.fetchAnalyticsOverview.mockResolvedValue(overview);
+    const aiCard = {
+      id: "ai-0123456789abcdef01234567",
+      kind: "aiChart" as const,
+      span: 1 as const,
+      title: "各门店客单价",
+      query: {
+        dataset: "sales" as const,
+        metric: "averageOrderValue" as const,
+        aggregation: "average" as const,
+        groupBy: "store" as const,
+        dateRange: { start: "2026-01-01", end: "2026-01-31" },
+        filters: [],
+        order: "desc" as const,
+        limit: 8,
+        visualization: "bar" as const,
+      },
+    };
+    layoutApi.fetchAnalyticsLayout.mockResolvedValue({
+      layout: { version: 1, cards: [...DEFAULT_ANALYTICS_LAYOUT.cards, aiCard] },
+      revision: 4,
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    });
+    insightApi.executeDashboardInsight.mockResolvedValue({
+      kind: "pie",
+      title: "各门店客单价",
+      summary: "s",
+      unit: "currencyMinor",
+      slices: [{ key: "s1", label: "北京朝阳店", value: 98000 }],
+    });
+    renderClient();
+    const card = await screen.findByRole("article", { name: "各门店客单价" });
+    expect(await within(card).findByText("北京朝阳店")).toBeInTheDocument();
+    expect(insightApi.executeDashboardInsight).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dateRange: { start: overview.period.startDate, end: overview.period.endDate },
+      }),
+      expect.any(AbortSignal),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑看板" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除各门店客单价" }));
+    const confirm = screen.getByRole("dialog", { name: "删除「各门店客单价」？" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "取消" }));
+    expect(screen.getByRole("article", { name: "各门店客单价" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除各门店客单价" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "删除「各门店客单价」？" })).getByRole("button", {
+        name: "删除",
+      }),
+    );
+    expect(screen.queryByRole("article", { name: "各门店客单价" })).not.toBeInTheDocument();
   });
 });

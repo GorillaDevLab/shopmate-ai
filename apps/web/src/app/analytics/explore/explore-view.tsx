@@ -5,7 +5,7 @@ import { useId, useState, type FormEvent } from "react";
 
 import { AppShell } from "../../app-shell";
 import { SparkIcon } from "../analytics-panels";
-import type { ExploreState } from "./explore-client";
+import type { ExploreState, SaveState } from "./explore-client";
 import { ExploreChart } from "./explore-chart";
 import { ConfigPanel } from "./explore-config";
 import {
@@ -21,11 +21,13 @@ const QUESTION_MAX_LENGTH = 2000;
 
 type Props = {
   readonly state: ExploreState;
+  readonly save: SaveState;
+  readonly onSave: () => void;
   readonly onGenerate: (question: string) => void;
   readonly onConfigChange: (patch: ConfigPatch) => void;
 };
 
-export function ExploreView({ state, onGenerate, onConfigChange }: Props) {
+export function ExploreView({ state, save, onGenerate, onConfigChange, onSave }: Props) {
   return (
     <AppShell active="analytics">
       <div className="analytics-page explore-page" id="main-content">
@@ -52,7 +54,9 @@ export function ExploreView({ state, onGenerate, onConfigChange }: Props) {
         {state.status === "error" && (
           <GenerateError state={state} onRetry={() => onGenerate(state.question)} />
         )}
-        {state.status === "ready" && <ReadyState state={state} onConfigChange={onConfigChange} />}
+        {state.status === "ready" && (
+          <ReadyState state={state} save={save} onConfigChange={onConfigChange} onSave={onSave} />
+        )}
       </div>
     </AppShell>
   );
@@ -96,7 +100,7 @@ function IdleState({ onPick }: { onPick: (question: string) => void }) {
   return (
     <section className="analytics-state explore-idle" aria-label="示例问题">
       <h2>用一句话描述你想看的数据</h2>
-      <p>AI 会选好指标、分组和图表类型，你可以再调整图表配置。</p>
+      <p>AI 会选好指标、分组和图表类型，你可以再调整图表配置，满意后保存到经营分析。</p>
       <div className="explore-examples">
         {EXAMPLE_PROMPTS.map((prompt) => (
           <button
@@ -143,10 +147,14 @@ type Ready = Extract<ExploreState, { status: "ready" }>;
 
 function ReadyState({
   state,
+  save,
   onConfigChange,
+  onSave,
 }: {
   state: Ready;
+  save: SaveState;
   onConfigChange: (patch: ConfigPatch) => void;
+  onSave: () => void;
 }) {
   const { result, query } = state;
   const empty = isEmptyResult(result);
@@ -164,6 +172,7 @@ function ReadyState({
               <p className="muted">{result.summary}</p>
               <p className="explore-question">问题：{state.question}</p>
             </div>
+            <SaveButton save={save} disabled={state.updating || empty} onClick={onSave} />
           </div>
           {state.updateError && (
             <p className="explore-inline-error" role="alert">
@@ -179,6 +188,35 @@ function ReadyState({
         {!empty && <ResultTable state={state} />}
       </div>
       <ConfigPanel query={query} onChange={onConfigChange} />
+    </div>
+  );
+}
+
+function SaveButton({
+  save,
+  disabled,
+  onClick,
+}: {
+  save: SaveState;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const label =
+    save.status === "saving" ? "正在保存…" : save.status === "saved" ? "已保存" : "保存到经营分析";
+  return (
+    <div className="explore-save">
+      <button
+        type="button"
+        className="btn-primary"
+        disabled={disabled || save.status === "saving" || save.status === "saved"}
+        onClick={onClick}
+      >
+        {label}
+      </button>
+      <p className="explore-save-status" role="status" aria-live="polite">
+        {save.status === "saved" && <Link href="/">去经营分析查看</Link>}
+        {save.status === "error" && <span className="explore-inline-error">{save.message}</span>}
+      </p>
     </div>
   );
 }

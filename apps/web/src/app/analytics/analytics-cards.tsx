@@ -1,9 +1,11 @@
 "use client";
 
-import type {
-  AnalyticsCardId,
-  AnalyticsChannel,
-  AnalyticsOverviewResponse,
+import {
+  isAnalyticsAiCard,
+  type AnalyticsCardId,
+  type AnalyticsChannel,
+  type AnalyticsLayoutCard,
+  type AnalyticsOverviewResponse,
 } from "@shopmate/contracts";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -14,6 +16,7 @@ import {
   StackedAreaChart,
   WeeklyBarChart,
 } from "./analytics-charts";
+import { AiChartCard } from "./analytics-ai-card";
 import { buildInsights } from "./analytics-insights";
 import { CHANNEL_CARDS } from "./analytics-layout";
 import {
@@ -48,8 +51,11 @@ export type CardContext = {
 };
 
 /** 返回 null 表示这张卡在当前数据下没有内容（编辑模式会显示占位）。 */
-export function renderCard(id: AnalyticsCardId, context: CardContext): ReactNode {
+export function renderCard(card: AnalyticsLayoutCard, context: CardContext): ReactNode {
   const { data, onAsk } = context;
+  if (isAnalyticsAiCard(card))
+    return <AiChartCard card={card} period={data.period} onAsk={onAsk} />;
+  const { id } = card;
   if (context.noChannelsNoteAt !== null && CHANNEL_CARDS.includes(id)) {
     return id === context.noChannelsNoteAt ? <NoChannelsCard /> : null;
   }

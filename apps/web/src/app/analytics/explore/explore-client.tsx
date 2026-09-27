@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { executeDashboardInsight, generateDashboardInsight } from "../../dashboard-insight-api";
 import { isAbortError } from "../../dashboard-api";
 import { applyConfig, type ConfigPatch } from "./explore-model";
+import { saveChartToAnalytics } from "./explore-save";
 import { ExploreView } from "./explore-view";
 
 export type ExploreState =
@@ -27,11 +28,41 @@ export type ExploreState =
       readonly authRequired: boolean;
     };
 
+export type SaveState =
+  | { readonly status: "idle" | "saving" | "saved" }
+  | { readonly status: "error"; readonly message: string };
+
 export function ExploreClient() {
   const [state, setState] = useState<ExploreState>({ status: "idle" });
-  const generate = useGenerate(setState);
-  const reconfigure = useReconfigure(state, setState);
-  return <ExploreView state={state} onGenerate={generate} onConfigChange={reconfigure} />;
+  const [save, setSave] = useState<SaveState>({ status: "idle" });
+  // 图表换了（重新生成或改配置）就可以再次保存。
+  const track = (update: ExploreState | ((current: ExploreState) => ExploreState)) => {
+    setSave({ status: "idle" });
+    setState(update);
+  };
+  const generate = useGenerate(track);
+  const reconfigure = useReconfigure(state, track);
+
+  const saveToAnalytics = async () => {
+    if (state.status !== "ready" || state.updating || save.status === "saving") return;
+    setSave({ status: "saving" });
+    try {
+      await saveChartToAnalytics(state.query, state.result);
+      setSave({ status: "saved" });
+    } catch (error: unknown) {
+      setSave({ status: "error", message: errorMessage(error, "保存失败，请稍后重试") });
+    }
+  };
+
+  return (
+    <ExploreView
+      state={state}
+      save={save}
+      onGenerate={generate}
+      onConfigChange={reconfigure}
+      onSave={saveToAnalytics}
+    />
+  );
 }
 
 type SetState = (update: ExploreState | ((state: ExploreState) => ExploreState)) => void;

@@ -119,17 +119,17 @@ function Overview({
   const noChannelsNoteAt =
     data.channels.length > 0
       ? null
-      : (cards.find((card) => CHANNEL_CARDS.includes(card.id))?.id ?? null);
+      : (CHANNEL_CARDS.find((id) => cards.some((card) => card.id === id)) ?? null);
   const context: CardContext = { data, onAsk, noChannelsNoteAt };
   return (
     <section className="analytics-grid" aria-label="经营图表">
       {cards.map((card, index) => {
-        const content = renderCard(card.id, context);
+        const content = renderCard(card, context);
         if (editor.editing) {
           return (
             <EditableSlot
               key={card.id}
-              {...card}
+              card={card}
               index={index}
               count={cards.length}
               editor={editor}

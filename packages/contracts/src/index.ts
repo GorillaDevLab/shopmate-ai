@@ -59,7 +59,10 @@ export type {
   AnalyticsProduct,
 } from "./analytics/analytics-overview.schema.js";
 export {
+  ANALYTICS_MAX_AI_CARDS,
+  AnalyticsAiCardSchema,
   AnalyticsCardIdSchema,
+  isAnalyticsAiCard,
   AnalyticsCardSpanSchema,
   AnalyticsLayoutReadResponseSchema,
   AnalyticsLayoutSaveRequestSchema,
@@ -67,6 +70,9 @@ export {
   DEFAULT_ANALYTICS_LAYOUT,
 } from "./analytics/analytics-layout.schema.js";
 export type {
+  AnalyticsAiCard,
+  AnalyticsBuiltinCard,
+  AnalyticsLayoutCard,
   AnalyticsCardId,
   AnalyticsCardSpan,
   AnalyticsLayout,

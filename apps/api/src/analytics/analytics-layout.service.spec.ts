@@ -52,6 +52,40 @@ describe("AnalyticsLayoutService", () => {
     expect(repository.save).toHaveBeenCalledWith(context, custom, 1);
   });
 
+  it("accepts saved AI chart cards and rejects ones with unsafe ids", async () => {
+    const aiCard = {
+      id: "ai-0123456789abcdef01234567",
+      kind: "aiChart",
+      span: 2,
+      title: "每日销售额",
+      query: {
+        dataset: "sales",
+        metric: "revenue",
+        aggregation: "sum",
+        groupBy: "date",
+        dateRange: { start: "2026-08-02", end: "2026-08-31" },
+        filters: [],
+        order: "asc",
+        limit: 12,
+        visualization: "line",
+      },
+    };
+    const layout = { version: 1, cards: [aiCard] };
+    repository.save.mockResolvedValue({
+      kind: "saved",
+      record: { layout, revision: 1, updatedAt },
+    });
+    await expect(service.save(context, { layout, expectedRevision: 0 })).resolves.toMatchObject({
+      layout,
+    });
+    await expect(
+      service.save(context, {
+        layout: { version: 1, cards: [{ ...aiCard, id: "ai-../../x" }] },
+        expectedRevision: 0,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it("rejects invalid bodies without touching storage", async () => {
     await expect(
       service.save(context, {

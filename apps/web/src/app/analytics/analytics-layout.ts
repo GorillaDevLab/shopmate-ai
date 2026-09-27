@@ -1,9 +1,13 @@
 import {
+  ANALYTICS_MAX_AI_CARDS,
   AnalyticsCardIdSchema,
   DEFAULT_ANALYTICS_LAYOUT,
+  isAnalyticsAiCard,
+  type AnalyticsAiCard,
   type AnalyticsCardId,
   type AnalyticsCardSpan,
   type AnalyticsLayout,
+  type AnalyticsLayoutCard,
 } from "@shopmate/contracts";
 
 export const CARD_LABELS: Record<AnalyticsCardId, string> = {
@@ -26,11 +30,11 @@ export const CHANNEL_CARDS: readonly AnalyticsCardId[] = [
   "channelSplit",
 ];
 
-export function moveCard(
-  layout: AnalyticsLayout,
-  id: AnalyticsCardId,
-  offset: number,
-): AnalyticsLayout {
+export function cardLabel(card: AnalyticsLayoutCard): string {
+  return isAnalyticsAiCard(card) ? card.title : CARD_LABELS[card.id];
+}
+
+export function moveCard(layout: AnalyticsLayout, id: string, offset: number): AnalyticsLayout {
   const from = layout.cards.findIndex((card) => card.id === id);
   const to = from + offset;
   if (from < 0 || to < 0 || to >= layout.cards.length) return layout;
@@ -41,11 +45,7 @@ export function moveCard(
 }
 
 /** 拖放：把 id 放到 target 当前的位置上（target 顺延）。 */
-export function dropCard(
-  layout: AnalyticsLayout,
-  id: AnalyticsCardId,
-  target: AnalyticsCardId,
-): AnalyticsLayout {
+export function dropCard(layout: AnalyticsLayout, id: string, target: string): AnalyticsLayout {
   const from = layout.cards.findIndex((card) => card.id === id);
   const to = layout.cards.findIndex((card) => card.id === target);
   if (from < 0 || to < 0 || from === to) return layout;
@@ -54,7 +54,7 @@ export function dropCard(
 
 export function setSpan(
   layout: AnalyticsLayout,
-  id: AnalyticsCardId,
+  id: string,
   span: AnalyticsCardSpan,
 ): AnalyticsLayout {
   return {
@@ -63,7 +63,8 @@ export function setSpan(
   };
 }
 
-export function hideCard(layout: AnalyticsLayout, id: AnalyticsCardId): AnalyticsLayout {
+/** 内置卡片移出后可在“已隐藏”里加回；AI 图表移出即删除。 */
+export function removeCard(layout: AnalyticsLayout, id: string): AnalyticsLayout {
   return { ...layout, cards: layout.cards.filter((card) => card.id !== id) };
 }
 
@@ -74,11 +75,35 @@ export function showCard(layout: AnalyticsLayout, id: AnalyticsCardId): Analytic
   return { ...layout, cards: [...layout.cards, { id, span }] };
 }
 
+/** 内置卡片回到默认布局，已保存的 AI 图表按原顺序保留在末尾。 */
+export function resetLayout(layout: AnalyticsLayout): AnalyticsLayout {
+  return {
+    ...DEFAULT_ANALYTICS_LAYOUT,
+    cards: [...DEFAULT_ANALYTICS_LAYOUT.cards, ...layout.cards.filter(isAnalyticsAiCard)],
+  };
+}
+
 export function hiddenCards(layout: AnalyticsLayout): AnalyticsCardId[] {
-  const visible = new Set(layout.cards.map((card) => card.id));
+  const visible = new Set<string>(layout.cards.map((card) => card.id));
   return AnalyticsCardIdSchema.options.filter((id) => !visible.has(id));
 }
 
-export function sameLayout(a: AnalyticsLayout, b: AnalyticsLayout): boolean {
-  return JSON.stringify(a.cards) === JSON.stringify(b.cards);
+export class AiCardLimitError extends Error {
+  constructor() {
+    super(`经营分析最多保存 ${ANALYTICS_MAX_AI_CARDS} 张 AI 图表，请先在编辑看板里删除一些`);
+    this.name = "AiCardLimitError";
+  }
+}
+
+export function addAiCard(layout: AnalyticsLayout, card: AnalyticsAiCard): AnalyticsLayout {
+  if (layout.cards.filter(isAnalyticsAiCard).length >= ANALYTICS_MAX_AI_CARDS) {
+    throw new AiCardLimitError();
+  }
+  return { ...layout, cards: [...layout.cards, card] };
+}
+
+/** 卡片 id 只用于区分卡片，不是安全凭证；HTTP 访问时没有 randomUUID，退回 getRandomValues。 */
+export function createAiCardId(): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  return `ai-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
