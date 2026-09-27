@@ -43,6 +43,12 @@ import { SalesQueryService } from "./sales-query.service.js";
     ProductPerformanceService,
   ],
 
-  exports: [SalesQueryService, LowStockService, DashboardService, ProductPerformanceService],
+  exports: [
+    SalesQueryService,
+    LowStockService,
+    DashboardService,
+    ProductPerformanceService,
+    AnalyticsOverviewService,
+  ],
 })
 export class AnalyticsModule {}

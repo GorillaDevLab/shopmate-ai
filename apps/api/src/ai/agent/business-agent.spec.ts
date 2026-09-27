@@ -1,6 +1,7 @@
 import {
   GetInventoryRisksTool,
   GetSalesSummaryTool,
+  type JsonObject,
   type LLMGenerationRequest,
   type LLMGenerationResult,
   type LLMProvider,
@@ -9,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
 import { ToolRegistry, type ToolInvocationContext } from "../tools/tool-registry.js";
+import { CALCULATE_TOOL_DEFINITION } from "./calculate-tool.js";
 import { BusinessAgent, BusinessAgentError } from "./business-agent.js";
 
 const context: ToolInvocationContext = {
@@ -217,7 +219,7 @@ describe("BusinessAgent", () => {
 
     const firstRequest = provider.requests[0];
     const secondRequest = provider.requests[1];
-    expect(firstRequest?.tools).toEqual(registry.listDefinitions());
+    expect(firstRequest?.tools).toEqual([...registry.listDefinitions(), CALCULATE_TOOL_DEFINITION]);
     expect(firstRequest?.messages[0]).toMatchObject({ role: "system" });
     expect(firstRequest?.messages[1]).toEqual({
       role: "user",
@@ -586,11 +588,12 @@ describe("BusinessAgent", () => {
     expect(handler).toHaveBeenCalledOnce();
     expect(provider.generate).toHaveBeenCalledTimes(3);
 
+    // 修正轮仍可调用工具（如 calculate），并明确告知哪些数字无法核实。
     const repairRequest = provider.requests[2];
-    expect(repairRequest?.tools).toEqual([]);
-    expect(repairRequest?.messages.at(-1)).toMatchObject({
-      role: "user",
-    });
+    expect(repairRequest?.tools?.map((tool) => tool.name)).toContain("calculate");
+    expect(repairRequest?.messages.at(-2)).toMatchObject({ role: "assistant" });
+    expect(repairRequest?.messages.at(-1)).toMatchObject({ role: "user" });
+    expect(repairRequest?.messages.at(-1)?.content).toContain("999");
   });
 
   it("自动 repair 后仍包含来源不明数字时保持拒绝", async () => {
@@ -613,7 +616,6 @@ describe("BusinessAgent", () => {
     expect(result.answer).not.toContain("888");
     expect(handler).toHaveBeenCalledOnce();
     expect(provider.generate).toHaveBeenCalledTimes(3);
-    expect(provider.requests[2]?.tools).toEqual([]);
   });
 
   it("默认最近周期允许引用工具输出中的实际日期范围", async () => {
@@ -789,17 +791,63 @@ describe("BusinessAgent", () => {
     expect(provider.generate).toHaveBeenCalledTimes(2);
   });
 
+  it("用 calculate 算出的环比可以直接写进回答", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      toolCallResult("call-calc", "calculate", { operation: "share", values: [1742, 1742] }),
+      finalResult("销售额 1,742 元，占本期全部销售额的 100.0%。"),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "销售额占比多少",
+      context,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.usedTools).toContain("calculate");
+  });
+
+  it("calculate 拒绝不在工具结果中的输入，防止把编造的数字洗成证据", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      toolCallResult("call-calc", "calculate", { operation: "sum", values: [1742, 9999] }),
+      finalResult("销售额为 1,742 元。"),
+    ]);
+    await new BusinessAgent(provider, salesRegistry()).run({ question: "合计", context });
+    const calcMessage = provider.requests[2]?.messages.at(-1);
+    expect(calcMessage).toMatchObject({ role: "tool", name: "calculate" });
+    expect(calcMessage?.content).toContain("UNGROUNDED_INPUT");
+    expect(calcMessage?.content).toContain("9999");
+  });
+
+  it("被拦下的回答可以在修正轮调用 calculate 后通过核实", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额 1,742 元，每件均价 64.52 元。"),
+      toolCallResult("call-calc", "calculate", { operation: "ratio", values: [1742, 27] }),
+      finalResult("销售额 1,742 元，每件均价 64.52 元。"),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "每件均价多少",
+      context,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.answer).toContain("64.52");
+    expect(provider.generate).toHaveBeenCalledTimes(4);
+  });
+
   it("拒绝越界的循环配置", () => {
     const provider = scriptedProvider([]);
     const registry = salesRegistry();
 
+    expect(() => new BusinessAgent(provider, registry, { maxToolRounds: 9 })).toThrowError(
+      expect.objectContaining({ code: "INVALID_OPTIONS" }),
+    );
     expect(() => new BusinessAgent(provider, registry, { maxToolRounds: 0 })).toThrowError(
       expect.objectContaining({ code: "INVALID_OPTIONS" }),
     );
     expect(() => new BusinessAgent(provider, registry, { maxCallsPerRound: 5 })).toThrowError(
       expect.objectContaining({ code: "INVALID_OPTIONS" }),
     );
-    expect(() => new BusinessAgent(provider, registry, { maxTotalCalls: 9 })).toThrowError(
+    expect(() => new BusinessAgent(provider, registry, { maxTotalCalls: 21 })).toThrowError(
       expect.objectContaining({ code: "INVALID_OPTIONS" }),
     );
   });
@@ -841,11 +889,7 @@ function salesRegistry(handler: () => SalesSummaryOutput = vi.fn(() => salesResu
   return registry;
 }
 
-function toolCallResult(
-  id: string,
-  name: string,
-  argumentsValue: Record<string, string>,
-): LLMGenerationResult {
+function toolCallResult(id: string, name: string, argumentsValue: JsonObject): LLMGenerationResult {
   return {
     message: {
       role: "assistant",
