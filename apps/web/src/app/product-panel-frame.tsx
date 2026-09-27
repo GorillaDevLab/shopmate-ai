@@ -48,7 +48,7 @@ function ProductPanelFeedback({
       {state === "loading" && (
         <div aria-hidden="true" className="mt-4 space-y-3 motion-safe:animate-pulse">
           {[1, 2, 3].map((key) => (
-            <div key={key} className="h-12 rounded-lg bg-app-line" />
+            <div key={key} className="h-12 rounded-xl bg-app-line" />
           ))}
         </div>
       )}

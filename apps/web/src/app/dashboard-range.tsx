@@ -89,7 +89,7 @@ function RangeDialog({
       ref={dialog}
       onClose={onClose}
       aria-labelledby="range-title"
-      className="fixed inset-0 m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-xl border border-app-line bg-app-surface p-4 md:p-6 text-left text-app-text shadow-md backdrop:bg-black/30"
+      className="fixed inset-0 m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-3xl border border-app-line bg-app-surface p-6 text-left text-app-text shadow-xl backdrop:bg-black/30"
     >
       <RangeForm
         initial={{
@@ -150,7 +150,7 @@ type FieldsProps = {
 function RangeFormHeading() {
   return (
     <>
-      <h2 id="range-title" className="text-lg font-semibold tracking-tight md:text-xl">
+      <h2 id="range-title" className="text-xl font-bold">
         自选统计时段
       </h2>
       <p className="mt-2 text-sm text-app-muted">
@@ -171,7 +171,7 @@ function RangeFields({ dates, latestDate, invalid, onChange }: FieldsProps) {
         value={dates[field]}
         aria-invalid={invalid}
         aria-describedby={invalid ? "range-error" : undefined}
-        className="app-input mt-2 min-h-11 w-full min-w-0 px-3"
+        className="mt-2 min-h-11 w-full min-w-0 rounded-xl border border-app-line bg-app-bg px-3 text-app-text focus-ring"
         onChange={(event) => onChange({ ...dates, [field]: event.target.value })}
       />
     </label>
@@ -181,10 +181,17 @@ function RangeFields({ dates, latestDate, invalid, onChange }: FieldsProps) {
 function RangeActions({ onCancel }: { onCancel: () => void }) {
   return (
     <div className="mt-6 flex justify-end gap-2">
-      <button type="button" className="btn-secondary min-h-11 px-4" onClick={onCancel}>
+      <button
+        type="button"
+        className="min-h-11 rounded-xl px-4 text-sm focus-ring"
+        onClick={onCancel}
+      >
         取消
       </button>
-      <button type="submit" className="btn-primary min-h-11 px-4">
+      <button
+        type="submit"
+        className="min-h-11 rounded-xl bg-brand px-4 text-sm font-bold text-white focus-ring"
+      >
         应用时段
       </button>
     </div>

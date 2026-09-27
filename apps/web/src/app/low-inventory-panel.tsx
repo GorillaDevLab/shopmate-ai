@@ -40,7 +40,7 @@ function InventoryItem({
   return (
     <li className="inventory-row">
       <div className="min-w-0 break-words [overflow-wrap:anywhere] xl:flex xl:flex-wrap xl:items-baseline xl:gap-x-3">
-        <h3 className="text-sm font-semibold">{item.name}</h3>
+        <h3 className="text-sm font-bold">{item.name}</h3>
         <p className="mt-1 text-xs text-app-muted xl:mt-0">SKU：{item.sku}</p>
       </div>
       <div className="inventory-stock break-all text-xs tabular-nums">
