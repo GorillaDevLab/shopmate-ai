@@ -822,7 +822,9 @@ describe("BusinessAgent", () => {
     const result = await agent.run({ question: "查询销售额", context });
 
     expect(result.status).toBe("completed");
-    expect(result.answer).toBe("销售额 0.174 万元，共 5 单，有一个方向值得关注，一两天内可以复查。");
+    expect(result.answer).toBe(
+      "销售额 0.174 万元，共 5 单，有一个方向值得关注，一两天内可以复查。",
+    );
   });
 
   it("用 calculate 算出的环比可以直接写进回答", async () => {
