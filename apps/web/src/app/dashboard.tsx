@@ -5,9 +5,7 @@ import { useState, type ReactNode } from "react";
 
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
 import { MetricGrid } from "./metric-card";
-import { DashboardNavigation } from "./dashboard-navigation";
-import { MonitoringRuleManager } from "./monitoring-rule-manager";
-import { NotificationCenter } from "./notification-center";
+import { AppShell } from "./app-shell";
 import { AppearanceProvider } from "./appearance-provider";
 import { AppearanceAmbient, AppearanceControls } from "./appearance-controls";
 
@@ -42,14 +40,15 @@ function DashboardWorkspace({
 }: DashboardProps) {
   const visibleState = state === "ready" && !data ? "empty" : state;
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const [monitoringOpen, setMonitoringOpen] = useState(false);
+  // AI 抽屉只在看板数据就绪后挂载；未就绪时导航与搜索改去完整对话页。
+  const drawerAvailable = visibleState === "ready" && !authRequired;
   return (
-    <main className="workspace-layout min-h-dvh bg-app-bg text-app-text">
+    <AppShell
+      active="dashboard"
+      notificationsEnabled={visibleState === "ready"}
+      onAssistant={drawerAvailable ? () => setAssistantOpen(true) : undefined}
+    >
       <AppearanceAmbient />
-      <DashboardNavigation
-        onAssistant={() => setAssistantOpen(true)}
-        onMonitoring={() => setMonitoringOpen(true)}
-      />
       <div className="workspace-content">
         <DashboardHeader ready={visibleState === "ready"} />
         <section
@@ -87,9 +86,8 @@ function DashboardWorkspace({
         <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted lg:mt-4">
           中文界面 · 移动端优先 · 隐私友好
         </footer>
-        <MonitoringRuleManager open={monitoringOpen} onOpenChange={setMonitoringOpen} />
       </div>
-    </main>
+    </AppShell>
   );
 }
 
@@ -97,7 +95,7 @@ function DashboardHeader({ ready }: { ready: boolean }) {
   return (
     <header className="workspace-topbar flex items-center justify-between gap-3 border-b border-app-line pb-3">
       <a className="workspace-breadcrumb focus-ring" href="#main-content">
-        工作台 <span aria-hidden="true">/</span> 经营分析
+        工作台 <span aria-hidden="true">/</span> 经营看板
       </a>
       <AppearanceControls />
       <div className="flex items-center gap-4 text-right">
@@ -106,9 +104,6 @@ function DashboardHeader({ ready }: { ready: boolean }) {
           <p className="text-xs text-app-muted">
             {ready ? "数据来自 Analytics API" : "正在连接经营分析服务"}
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <NotificationCenter enabled={ready} />
         </div>
       </div>
     </header>

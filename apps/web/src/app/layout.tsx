@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import "./shell.css";
 import "./appearance.css";
 import "./assistant/assistant.css";
 import { THEME_INIT_SCRIPT } from "./theme";

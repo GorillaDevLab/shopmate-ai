@@ -1,26 +1,30 @@
 "use client";
 
-import { useId, useState } from "react";
+import Link from "next/link";
+import { useId, useState, type ReactNode } from "react";
 import { ThemeSettings } from "./theme-settings";
 import { LogoutButton } from "./logout-button";
 
-type Props = { onAssistant: () => void; onMonitoring: () => void };
+export type NavigationSection = "dashboard" | "analytics" | "assistant";
 
-export function DashboardNavigation({ onAssistant, onMonitoring }: Props) {
+type Props = {
+  readonly active?: NavigationSection;
+  /** 提供时在当前页打开 AI 抽屉，否则跳到完整对话页。 */
+  readonly onAssistant?: () => void;
+  readonly onMonitoring: () => void;
+};
+
+export function DashboardNavigation({ active = "dashboard", onAssistant, onMonitoring }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuId = useId();
-  const open = (action: () => void) => {
+  const run = (action: () => void) => {
     setMobileOpen(false);
     action();
   };
   return (
     <aside className="workspace-sidebar" data-collapsed={collapsed} data-mobile-open={mobileOpen}>
       <div className="workspace-sidebar-inner">
-        <div className="workspace-brand">
-          <span>S</span>
-          <strong>ShopMate AI</strong>
-        </div>
         <button
           className="workspace-mobile-toggle focus-ring"
           aria-label={mobileOpen ? "关闭导航菜单" : "打开导航菜单"}
@@ -28,38 +32,24 @@ export function DashboardNavigation({ onAssistant, onMonitoring }: Props) {
           aria-expanded={mobileOpen}
           onClick={() => setMobileOpen(!mobileOpen)}
         >
-          ☰ <span>导航菜单</span>
+          <NavIcon kind="menu" />
+          <span>导航菜单</span>
         </button>
         <div id={menuId} className="workspace-menu">
-          <p className="workspace-nav-label">经营工作台</p>
           <nav aria-label="工作台主导航">
-            <a
-              href="#main-content"
-              aria-current="page"
-              title="经营看板"
-              onClick={() => setMobileOpen(false)}
-            >
-              <NavIcon kind="overview" />
-              <span>经营看板</span>
-            </a>
-            <button
-              type="button"
-              title="AI 助手"
-              aria-haspopup="dialog"
-              onClick={() => open(onAssistant)}
-            >
-              <NavIcon kind="ai" />
-              <span>AI 助手</span>
-            </button>
-            <button
-              type="button"
-              title="经营监听"
-              aria-haspopup="dialog"
-              onClick={() => open(onMonitoring)}
-            >
-              <NavIcon kind="monitor" />
-              <span>经营监听</span>
-            </button>
+            <NavLink href="/" icon="overview" label="经营看板" current={active === "dashboard"} />
+            <NavLink
+              href="/analytics"
+              icon="analytics"
+              label="经营分析"
+              current={active === "analytics"}
+            />
+            {onAssistant ? (
+              <NavButton icon="ai" label="AI 助手" onClick={() => run(onAssistant)} />
+            ) : (
+              <NavLink href="/chat" icon="ai" label="AI 助手" current={active === "assistant"} />
+            )}
+            <NavButton icon="monitor" label="经营监听" onClick={() => run(onMonitoring)} />
           </nav>
           <div className="workspace-settings">
             <ThemeSettings />
@@ -71,7 +61,7 @@ export function DashboardNavigation({ onAssistant, onMonitoring }: Props) {
             title={collapsed ? "展开侧栏" : "收起侧栏"}
             onClick={() => setCollapsed(!collapsed)}
           >
-            {collapsed ? "→" : "←"}
+            <NavIcon kind={collapsed ? "expand" : "collapse"} />
             <span>{collapsed ? "展开侧栏" : "收起侧栏"}</span>
           </button>
         </div>
@@ -80,22 +70,66 @@ export function DashboardNavigation({ onAssistant, onMonitoring }: Props) {
   );
 }
 
-function NavIcon({ kind }: { kind: "overview" | "ai" | "monitor" }) {
-  const paths = {
-    overview: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
-    ai: "m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z",
-    monitor: "M3 12h4l3-7 4 14 3-7h4",
-  };
+function NavLink({
+  href,
+  icon,
+  label,
+  current,
+}: {
+  href: string;
+  icon: IconKind;
+  label: string;
+  current: boolean;
+}) {
+  return (
+    <Link href={href} aria-current={current ? "page" : undefined} title={label}>
+      <NavIcon kind={icon} />
+      <span>{label}</span>
+    </Link>
+  );
+}
+
+function NavButton({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: IconKind;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" title={label} aria-haspopup="dialog" onClick={onClick}>
+      <NavIcon kind={icon} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+type IconKind = "overview" | "analytics" | "ai" | "monitor" | "menu" | "collapse" | "expand";
+
+const ICON_PATHS: Record<IconKind, ReactNode> = {
+  overview: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
+  analytics: <path d="M4 20V11h3.5v9zm6.25 0V4h3.5v16zM16.5 20v-6H20v6z" />,
+  ai: <path d="m12 3 2.3 6.2L20.5 11.5l-6.2 2.3L12 20l-2.3-6.2-6.2-2.3 6.2-2.3Z" />,
+  monitor: <path d="M3 12h4l3-7 4 14 3-7h4" />,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+  collapse: <path d="M15 6l-6 6 6 6" />,
+  expand: <path d="m9 6 6 6-6 6" />,
+};
+
+function NavIcon({ kind }: { kind: IconKind }) {
   return (
     <svg
       aria-hidden="true"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.6"
+      strokeWidth="1.7"
       strokeLinejoin="round"
+      strokeLinecap="round"
     >
-      <path d={paths[kind]} />
+      {ICON_PATHS[kind]}
     </svg>
   );
 }
