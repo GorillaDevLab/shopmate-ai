@@ -36,12 +36,31 @@ export function LogoutButton() {
       )}
       <button
         type="button"
-        className="min-h-11 rounded-xl border border-app-line bg-app-surface px-3 text-sm font-semibold text-app-text transition hover:bg-brand-soft disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-app-line bg-app-surface px-3 text-sm font-medium text-app-text transition-colors hover:bg-app-bg active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
         onClick={logout}
         disabled={isSubmitting}
       >
+        <LogoutIcon />
         {isSubmitting ? "退出中…" : "退出登录"}
       </button>
     </div>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M9 16l-4-4 4-4M5 12h10" />
+    </svg>
   );
 }

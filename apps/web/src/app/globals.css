@@ -21,16 +21,21 @@
 }
 
 :root[data-theme="purple"] {
-  --app-bg: #f5f5fa;
-  --app-text: #262434;
-  --app-muted: #646174;
-  --app-subtle: #706b80;
-  --app-line: #e3e0ed;
-  --brand: #6250d8;
-  --brand-strong: #5542d6;
-  --brand-soft: #eeebfc;
-  --brand-ring: #6956e830;
-  --panel-shadow: 0 3px 16px #352b5004;
+  --app-bg: #f9fafb;
+  --app-text: #111827;
+  --app-muted: #6b7280;
+  --app-subtle: #6b7280;
+  --app-line: #e5e7eb;
+  /* 风格主色 #6366f1 上的白字只有 4.47:1，按钮与链接取同色相略深的 #585ce8 以满足 WCAG AA。 */
+  --brand: #585ce8;
+  --brand-strong: #4f46e5;
+  --brand-soft: #eef2ff;
+  --brand-ring: #6366f133;
+  --panel-shadow: 0 1px 2px 0 #1118270d;
+  --positive: #047857;
+  --danger: #dc2626;
+  --warning: #b45309;
+  --warning-soft: #fffbeb;
 }
 
 @theme inline {
@@ -83,8 +88,8 @@ button:focus-visible {
 
 .dashboard-panel {
   min-width: 0;
-  border: 1px solid var(--app-line);
-  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--app-line) 60%, var(--app-surface));
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 20px;
   box-shadow: var(--panel-shadow);
@@ -145,7 +150,7 @@ button:focus-visible {
 .dashboard-layout-card.is-editing {
   isolation: isolate;
   border: 1px solid color-mix(in srgb, var(--brand) 38%, var(--app-line));
-  border-radius: 20px;
+  border-radius: 12px;
   padding: 8px;
   background: color-mix(in srgb, var(--brand-soft) 68%, var(--app-surface));
   box-shadow: 0 10px 30px color-mix(in srgb, var(--brand-ring) 28%, transparent);
@@ -176,7 +181,7 @@ button:focus-visible {
   align-items: center;
   gap: 8px;
   border: 1px solid var(--app-line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--app-surface);
   padding: 0 12px;
   font-size: 13px;
@@ -215,7 +220,7 @@ button:focus-visible {
   width: 44px;
   height: 44px;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 8px;
   color: var(--app-muted);
   cursor: pointer;
   transition:
@@ -236,7 +241,7 @@ button:focus-visible {
   height: 44px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 8px;
   color: var(--app-muted);
   cursor: grab;
   touch-action: none;
@@ -251,7 +256,7 @@ button:focus-visible {
   min-width: 72px;
   margin-left: auto;
   border: 1px solid var(--app-line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--app-surface) 82%, transparent);
   padding: 6px 10px;
   color: var(--app-muted);
@@ -269,7 +274,7 @@ button:focus-visible {
   width: 44px;
   height: 44px;
   place-items: end;
-  border-radius: 0 0 19px;
+  border-radius: 0 0 11px;
   padding: 0 8px 8px 0;
   color: var(--brand);
   cursor: nwse-resize;
@@ -354,7 +359,7 @@ button:focus-visible {
   min-height: 44px;
   padding: 0 12px;
   border: 1px solid var(--app-line);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--app-surface);
   font-size: 13px;
   font-weight: 600;
@@ -378,7 +383,7 @@ button:focus-visible {
   overflow-y: auto;
   padding: 24px;
   border: 1px solid var(--app-line);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--app-surface);
   color: var(--app-text);
   box-shadow: 0 24px 80px #28272425;
@@ -405,14 +410,14 @@ button:focus-visible {
 .theme-preview {
   display: block;
   border: 1px solid var(--app-line);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 12px;
   background: #f5f3ef;
   color: #9b5039;
 }
 .theme-preview[data-preview="purple"] {
-  background: #f5f5fa;
-  color: #6250d8;
+  background: #f9fafb;
+  color: #585ce8;
 }
 .theme-option input:checked + .theme-preview {
   outline: 2px solid var(--brand);
@@ -489,7 +494,7 @@ button:focus-visible {
   align-items: center;
   gap: 9px;
   border: 1px solid color-mix(in srgb, var(--app-text) 14%, var(--app-line));
-  border-radius: 999px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--app-surface) 91%, transparent);
   padding: 0 17px 0 11px;
   color: var(--app-text);
@@ -522,14 +527,8 @@ button:focus-visible {
   width: 25px;
   height: 25px;
   flex: 0 0 auto;
-  border: 1px solid #ffffff80;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 35% 28%, #fff8e8 0 9%, transparent 28%),
-    radial-gradient(circle at 45% 42%, #eaa16f 0 16%, #b75638 54%, #75311f 100%);
-  box-shadow:
-    0 0 0 4px var(--brand-soft),
-    0 4px 12px var(--brand-ring);
+  border-radius: 6px;
+  background: var(--brand);
 }
 .ai-assistant-dialog {
   position: fixed;
@@ -542,7 +541,7 @@ button:focus-visible {
   margin: 0;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--app-text) 12%, var(--app-line));
-  border-radius: 22px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--app-surface) 97%, var(--app-bg));
   padding: 0;
   color: var(--app-text);
@@ -608,7 +607,7 @@ button:focus-visible {
   width: 44px;
   height: 44px;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 8px;
   color: var(--app-muted);
   font-size: 21px;
   font-weight: 500;
@@ -668,7 +667,7 @@ button:focus-visible {
 }
 .ai-message.is-user {
   align-self: flex-end;
-  border-radius: 17px 17px 5px;
+  border-radius: 12px 12px 4px;
   background: var(--brand-soft);
   padding: 10px 13px;
 }
@@ -813,7 +812,7 @@ button:focus-visible {
   min-height: 36px;
   flex: 0 0 auto;
   border: 1px solid var(--app-line);
-  border-radius: 999px;
+  border-radius: 8px;
   background: transparent;
   padding: 0 12px;
   color: var(--app-muted);
@@ -838,7 +837,7 @@ button:focus-visible {
 .ai-assistant-error button {
   min-height: 36px;
   flex: 0 0 auto;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 0 10px;
   font-weight: 700;
   cursor: pointer;
@@ -849,7 +848,7 @@ button:focus-visible {
   align-items: end;
   gap: 10px;
   border: 1px solid color-mix(in srgb, var(--app-text) 13%, var(--app-line));
-  border-radius: 17px;
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 10px;
   box-shadow: inset 0 1px 3px #28272408;
@@ -879,7 +878,7 @@ button:focus-visible {
   width: 44px;
   height: 44px;
   place-items: center;
-  border-radius: 50%;
+  border-radius: 8px;
   background: var(--brand);
   color: white;
   font-size: 20px;
@@ -938,7 +937,7 @@ button:focus-visible {
   min-height: 44px;
   place-items: center;
   border: 1px solid var(--app-line);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--app-surface);
   color: var(--app-text);
   font-size: 20px;
@@ -952,7 +951,7 @@ button:focus-visible {
   height: 19px;
   place-items: center;
   border: 2px solid var(--app-bg);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--danger);
   padding: 0 4px;
   color: white;
@@ -1009,7 +1008,7 @@ button:focus-visible {
   gap: 12px;
   margin-top: 24px;
   border: 1px solid var(--app-line);
-  border-radius: 18px;
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 18px;
 }
@@ -1034,7 +1033,7 @@ button:focus-visible {
   min-width: 0;
   flex: 1;
   border: 1px solid var(--app-line);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--app-bg);
   padding: 12px;
   color: var(--app-text);
@@ -1045,7 +1044,7 @@ button:focus-visible {
 .notification-toolbar button,
 .monitoring-state button {
   min-height: 42px;
-  border-radius: 11px;
+  border-radius: 8px;
   background: var(--brand);
   padding: 9px 14px;
   color: white;
@@ -1095,7 +1094,7 @@ button:focus-visible {
 }
 .monitoring-error {
   margin-top: 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #fff0f1;
   padding: 12px 14px;
   color: var(--danger);
@@ -1119,7 +1118,7 @@ button:focus-visible {
   gap: 6px;
   min-height: 150px;
   border: 1px dashed var(--app-line);
-  border-radius: 16px;
+  border-radius: 12px;
   color: var(--app-muted);
   text-align: center;
 }
@@ -1134,7 +1133,7 @@ button:focus-visible {
 .monitoring-rule-list > li,
 .notification-list > li {
   border: 1px solid var(--app-line);
-  border-radius: 16px;
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 15px;
 }
@@ -1196,7 +1195,7 @@ button:focus-visible {
 }
 .confirmation-dialog {
   width: min(100%, 400px);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 22px;
   box-shadow: 0 24px 80px rgb(20 18 17 / 25%);
@@ -1301,7 +1300,7 @@ button:focus-visible {
   padding: 4px;
   gap: 0;
   max-width: 100%;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--app-surface);
   border: 1px solid var(--app-line);
 }
@@ -1431,13 +1430,13 @@ button:focus-visible {
 }
 .layout-editor-toolbar {
   position: sticky;
-  top: 8px;
+  top: 72px;
   z-index: 20;
   width: fit-content;
   max-width: 100%;
   margin-left: auto;
   border: 1px solid color-mix(in srgb, var(--app-line) 82%, transparent);
-  border-radius: 16px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--app-surface) 88%, transparent);
   padding: 6px;
   box-shadow: 0 14px 44px color-mix(in srgb, var(--app-text) 9%, transparent);
@@ -1448,7 +1447,7 @@ button:focus-visible {
 .layout-load-error button,
 .layout-undo-toast button {
   min-height: 40px;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 0 12px;
   color: var(--app-text);
   font-size: 13px;
@@ -1486,7 +1485,7 @@ button:focus-visible {
   min-width: 172px;
   overflow: hidden;
   border: 1px solid var(--app-line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 6px;
   box-shadow: 0 18px 54px color-mix(in srgb, var(--app-text) 14%, transparent);
@@ -1502,7 +1501,7 @@ button:focus-visible {
   width: 100%;
   min-height: 40px;
   justify-content: flex-start;
-  border-radius: 9px;
+  border-radius: 8px;
   padding: 0 10px;
   text-align: left;
 }
@@ -1519,7 +1518,7 @@ button:focus-visible {
   gap: 8px;
   margin-bottom: 12px;
   border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--app-line));
-  border-radius: 14px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--danger) 6%, var(--app-surface));
   padding: 10px 12px;
   color: var(--danger);
@@ -1549,7 +1548,7 @@ button:focus-visible {
 .layout-load-error a,
 .layout-load-error button {
   min-height: 44px;
-  border-radius: 11px;
+  border-radius: 8px;
   padding: 0 14px;
   line-height: 44px;
 }
@@ -1566,7 +1565,7 @@ button:focus-visible {
   align-items: center;
   gap: 14px;
   border: 1px solid color-mix(in srgb, white 12%, transparent);
-  border-radius: 14px;
+  border-radius: 12px;
   background: color-mix(in srgb, var(--app-text) 92%, transparent);
   padding: 8px 9px 8px 14px;
   color: var(--app-surface);
@@ -1602,7 +1601,7 @@ button:focus-visible {
     justify-content: center;
   }
   .layout-editor-toolbar {
-    top: 6px;
+    top: 70px;
     width: 100%;
     overflow-x: auto;
     justify-content: flex-start;
@@ -1938,7 +1937,7 @@ button:focus-visible {
   margin: auto;
   overflow: hidden;
   border: 1px solid var(--app-line);
-  border-radius: 24px;
+  border-radius: 12px;
   background: var(--app-surface);
   color: var(--app-text);
   box-shadow: 0 28px 80px color-mix(in srgb, var(--app-text) 16%, transparent);
@@ -1973,7 +1972,7 @@ button:focus-visible {
   width: 44px;
   height: 44px;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 8px;
   color: var(--app-muted);
   font-size: 24px;
   cursor: pointer;
@@ -2005,7 +2004,7 @@ button:focus-visible {
   min-height: 48px;
   align-items: center;
   gap: 10px;
-  border-radius: 13px;
+  border-radius: 12px;
   padding: 0 11px;
   color: var(--app-muted);
   text-align: left;
@@ -2023,7 +2022,7 @@ button:focus-visible {
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-  border-radius: 9px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--app-surface) 75%, transparent);
 }
 .widget-gallery-mark svg {
@@ -2050,7 +2049,7 @@ button:focus-visible {
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--app-line);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--app-bg);
   color: var(--brand-strong);
   font-size: 15px;
@@ -2080,7 +2079,7 @@ button:focus-visible {
 }
 .widget-gallery-preview > button {
   min-height: 44px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--brand);
   padding: 0 18px;
   color: white;
@@ -2121,7 +2120,7 @@ button:focus-visible {
     width: 100%;
     margin: 0;
     border-width: 1px 0 0;
-    border-radius: 24px 24px 0 0;
+    border-radius: 12px 12px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
   .widget-gallery-body {
@@ -2179,7 +2178,7 @@ button:focus-visible {
 .dashboard-insight {
   min-width: 0;
   border: 1px solid var(--app-line);
-  border-radius: 20px;
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 20px;
 }
@@ -2202,7 +2201,7 @@ button:focus-visible {
   font-size: 12px;
 }
 .dashboard-insight-header > span {
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--brand-soft);
   color: var(--brand-strong);
   padding: 5px 9px;
@@ -2291,7 +2290,7 @@ button:focus-visible {
   gap: 10px;
 }
 .dashboard-report-metrics > div {
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--app-bg);
   padding: 12px;
 }
@@ -2334,7 +2333,7 @@ button:focus-visible {
 .dashboard-insight-error button {
   width: fit-content;
   border: 1px solid var(--app-line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 8px 12px;
   font-weight: 650;
 }
@@ -2351,7 +2350,7 @@ button:focus-visible {
   width: 100%;
   resize: vertical;
   border: 1px solid var(--app-line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--app-surface);
   padding: 11px 12px;
   color: var(--app-text);
@@ -2365,7 +2364,7 @@ button:focus-visible {
 .widget-insight-actions button {
   min-height: 40px;
   border: 1px solid var(--app-line);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 8px 14px;
   font-weight: 700;
 }
@@ -2384,5 +2383,231 @@ button:focus-visible {
   }
   .dashboard-pie-visual {
     width: min(100%, 150px);
+  }
+}
+
+/* ── Dashboard Layout controls ── */
+/* In the components layer so Tailwind utilities (hidden, lg:hidden, …) can still override display. */
+@layer components {
+  .user-avatar {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 8px;
+    background: var(--brand-soft);
+    color: var(--brand-strong);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  /* Buttons: rounded-lg · font-medium text-sm · transition-colors */
+  .btn-primary,
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+      background-color 150ms ease-out,
+      border-color 150ms ease-out,
+      color 150ms ease-out,
+      transform 150ms ease-out;
+  }
+  .btn-primary {
+    background: var(--brand);
+    color: #ffffff;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--brand-strong);
+  }
+  .btn-secondary {
+    border: 1px solid var(--app-line);
+    background: var(--app-surface);
+    color: var(--app-text);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--app-text) 20%, var(--app-line));
+    background: var(--app-bg);
+  }
+  .btn-primary:disabled,
+  .btn-secondary:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  .btn-primary:active:not(:disabled),
+  .btn-secondary:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .btn-primary:focus-visible,
+  .btn-secondary:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  /* Inputs: bg-gray-50 · border-gray-200 · rounded-lg · indigo focus ring */
+  .app-input {
+    border: 1px solid var(--app-line);
+    border-radius: 8px;
+    background: var(--app-bg);
+    color: var(--app-text);
+    font-size: 14px;
+    outline: none;
+    transition:
+      border-color 150ms ease-out,
+      box-shadow 150ms ease-out;
+  }
+  .app-input::placeholder {
+    color: var(--app-muted);
+  }
+  .app-input:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px var(--brand-ring);
+  }
+  .app-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn-primary:active,
+    .btn-secondary:active {
+      transform: none;
+      transition-duration: 0ms;
+    }
+  }
+}
+
+/* KPI cards: slight lift on hover to focus the number. */
+.metric-card {
+  transition:
+    transform 150ms ease-out,
+    box-shadow 150ms ease-out;
+}
+@media (hover: hover) and (pointer: fine) {
+  .metric-card:hover {
+    box-shadow: 0 4px 6px -1px #1118271a;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .metric-card,
+  .metric-card:hover {
+    transform: none;
+    transition-duration: 0ms;
+  }
+}
+
+/* ── Dashboard Layout shell (calm mode only; vivid keeps its own look) ── */
+/* Redefine tokens inside the sidebar so existing nav, theme and logout controls turn dark without variants. */
+:root:not([data-appearance="vivid"]) .workspace-sidebar {
+  --app-bg: #1f2937;
+  --app-surface: #111827;
+  --app-text: #ffffff;
+  --app-muted: #9ca3af;
+  --app-line: rgb(255 255 255 / 10%);
+  --brand-soft: rgb(255 255 255 / 10%);
+  --brand-strong: #ffffff;
+  --danger: #fca5a5;
+  width: 256px;
+  border-right-color: #111827;
+  background: #111827;
+  color: var(--app-text);
+}
+:root:not([data-appearance="vivid"]) .workspace-sidebar[data-collapsed="true"] {
+  width: 76px;
+}
+:root:not([data-appearance="vivid"]) .workspace-brand > span {
+  border-radius: 8px;
+  background: var(--brand);
+  font-weight: 600;
+}
+:root:not([data-appearance="vivid"]) .workspace-nav-label {
+  letter-spacing: 0;
+}
+:root:not([data-appearance="vivid"]) .workspace-menu nav > * {
+  border-radius: 8px;
+  font-weight: 500;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+:root:not([data-appearance="vivid"]) .workspace-menu nav > *:hover {
+  color: #ffffff;
+}
+:root:not([data-appearance="vivid"]) .workspace-menu nav > [aria-current] {
+  font-weight: 500;
+  box-shadow: none;
+}
+:root:not([data-appearance="vivid"]) .workspace-sidebar :focus-visible {
+  outline-color: #a5b4fc;
+}
+:root:not([data-appearance="vivid"]) .workspace-collapse:hover {
+  color: #ffffff;
+}
+
+:root:not([data-appearance="vivid"]) .workspace-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 64px;
+  margin: -20px -32px 0;
+  border-bottom-color: var(--app-line);
+  background: var(--app-surface);
+  padding: 10px 32px;
+}
+:root:not([data-appearance="vivid"]) .workspace-topbar .header-icon-button {
+  min-width: 40px;
+  min-height: 40px;
+  border-color: transparent;
+  border-radius: 8px;
+  color: var(--app-muted);
+  font-size: 18px;
+  transition: background-color 150ms ease-out;
+}
+:root:not([data-appearance="vivid"]) .workspace-topbar .header-icon-button:hover {
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+.header-icon-button svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+:root:not([data-appearance="vivid"]) .notification-badge {
+  border-color: var(--app-surface);
+  border-radius: 6px;
+}
+:root:not([data-appearance="vivid"]) .appearance-mode-switch {
+  border-radius: 8px;
+}
+:root:not([data-appearance="vivid"]) .appearance-mode-indicator {
+  border-radius: 6px;
+}
+
+@media (max-width: 767px) {
+  :root:not([data-appearance="vivid"]) .workspace-sidebar,
+  :root:not([data-appearance="vivid"]) .workspace-sidebar[data-collapsed="true"] {
+    width: 100%;
+  }
+  :root:not([data-appearance="vivid"]) .workspace-topbar {
+    position: static;
+    margin: -14px -16px 0;
+    padding: 10px 16px;
+  }
+}
+
+@media (min-width: 768px) {
+  :root:not([data-appearance="vivid"]) .workspace-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    align-self: start;
   }
 }

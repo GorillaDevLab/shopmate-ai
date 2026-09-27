@@ -20,7 +20,10 @@ export function MetricGrid({
   periodLabel?: string;
 }) {
   return (
-    <section aria-label="经营指标" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <section
+      aria-label="经营指标"
+      className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:gap-4 xl:grid-cols-4"
+    >
       {keys.map((key) => (
         <MetricCard
           key={key}
@@ -49,9 +52,9 @@ export function MetricCard({
     <article
       aria-label={accessibleLabel}
       aria-busy={state === "loading"}
-      className="dashboard-panel"
+      className="dashboard-panel metric-card group"
     >
-      <div className="flex items-center justify-between gap-2 text-sm text-app-muted">
+      <div className="flex items-center justify-between gap-2 text-sm font-medium text-app-muted">
         <h2>
           {periodLabel}
           {labels[metric.key]}
@@ -72,7 +75,7 @@ function MetricContent({ metric, state }: { metric: DashboardMetric; state: Metr
   }
   return (
     <>
-      <p className="break-all text-3xl font-semibold tracking-tight tabular-nums">
+      <p className="break-all text-2xl font-semibold tracking-tight tabular-nums transition-colors duration-150 ease-out group-hover:text-brand-strong md:text-3xl">
         {formatMetricValue(metric)}
       </p>
       <MetricChange ratio={metric.changeRatio} />
@@ -81,11 +84,18 @@ function MetricContent({ metric, state }: { metric: DashboardMetric; state: Metr
 }
 
 function MetricChange({ ratio }: { ratio: number | null }) {
+  // 绿增红减、持平用琥珀色；文案自带 ↑/↓/— 方向符号，不单靠颜色传递状态。
   const color =
-    ratio === null || ratio === 0 ? "text-app-muted" : ratio > 0 ? "text-positive" : "text-danger";
+    ratio === null
+      ? "text-app-muted"
+      : ratio === 0
+        ? "text-warning"
+        : ratio > 0
+          ? "text-positive"
+          : "text-danger";
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-      <p className={`break-all font-bold tabular-nums ${color}`}>{formatMetricChange(ratio)}</p>
+      <p className={`break-all font-semibold tabular-nums ${color}`}>{formatMetricChange(ratio)}</p>
       <p className="text-app-muted">较上一周期</p>
     </div>
   );
