@@ -250,10 +250,12 @@ export function DonutChart({
   slices,
   total,
   label,
+  centerLabel = formatYuanShort(total),
 }: {
   slices: readonly Slice[];
   total: number;
   label: string;
+  centerLabel?: string;
 }) {
   const size = 168;
   const radius = size / 2 - 18;
@@ -281,7 +283,7 @@ export function DonutChart({
         );
       })}
       <text x={size / 2} y={size / 2 + 6} textAnchor="middle" className="donut-total">
-        {formatYuanShort(total)}
+        {centerLabel}
       </text>
     </svg>
   );
