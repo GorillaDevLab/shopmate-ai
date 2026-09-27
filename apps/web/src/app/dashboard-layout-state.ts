@@ -6,6 +6,7 @@ import {
   type DashboardLayoutComponent,
   type DashboardLayoutReadResponse,
   type DashboardInsightQuery,
+  type DashboardChartView,
 } from "@shopmate/contracts";
 
 export type LayoutEditorMode = "view" | "edit" | "preview";
@@ -35,6 +36,7 @@ export type LayoutEditorAction =
   | { type: "loadFailed"; message: string }
   | { type: "modeChanged"; mode: LayoutEditorMode }
   | { type: "cardsChanged"; cards: DashboardLayoutCard[] }
+  | { type: "insightViewChanged"; cardId: string; view: DashboardChartView }
   | { type: "cardAdded"; card: DashboardLayoutCard }
   | { type: "cardRemoved"; cardId: string }
   | { type: "removeUndone" }
@@ -74,6 +76,8 @@ export function layoutEditorReducer(
   }
   if (action.type === "modeChanged") return { ...state, mode: action.mode };
   if (action.type === "cardsChanged") return withCards(state, action.cards);
+  if (action.type === "insightViewChanged")
+    return changeInsightView(state, action.cardId, action.view);
   if (action.type === "cardAdded") {
     const index = state.draft.cards.length;
     return {
@@ -101,7 +105,7 @@ export function layoutEditorReducer(
 export function createDashboardCard(
   component: Exclude<DashboardLayoutComponent, "pieChart" | "report">,
   cards: readonly DashboardLayoutCard[],
-  createSuffix = () => crypto.randomUUID(),
+  createSuffix = createCardSuffix,
 ): DashboardLayoutCard {
   const id = uniqueId(component, cards, createSuffix());
   const size = DASHBOARD_COMPONENT_REGISTRY[component].defaultSize;
@@ -122,12 +126,28 @@ export function createInsightDashboardCard(
   title: string,
   query: DashboardInsightQuery,
   cards: readonly DashboardLayoutCard[],
-  createSuffix = () => crypto.randomUUID(),
+  createSuffix = createCardSuffix,
+  view?: Exclude<DashboardChartView, "report">,
 ): DashboardLayoutCard {
   const id = uniqueId(component, cards, createSuffix());
   const size = DASHBOARD_COMPONENT_REGISTRY[component].defaultSize;
-  if (component === "pieChart") return { id, component, size, config: { title, query } };
+  if (component === "pieChart") {
+    return view
+      ? { id, component, size, config: { title, query, view } }
+      : { id, component, size, config: { title, query } };
+  }
   return { id, component, size, config: { title, query } };
+}
+
+function createCardSuffix(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  // Public HTTP origins lack randomUUID, but still expose secure random bytes.
+  // These are card identifiers, never authentication tokens.
+  if (typeof globalThis.crypto?.getRandomValues !== "function") {
+    throw new Error("当前浏览器不支持创建卡片，请升级浏览器或使用 HTTPS 访问。");
+  }
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function applyLoadedLayout(
@@ -176,6 +196,24 @@ function withCards(
     saveStatus: "idle",
     message: undefined,
   };
+}
+
+function changeInsightView(
+  state: LayoutEditorState,
+  cardId: string,
+  view: DashboardChartView,
+): LayoutEditorState {
+  const cards = state.draft.cards.map((card) => {
+    if (card.id !== cardId) return card;
+    if (card.component === "pieChart" && view !== "report") {
+      return { ...card, config: { ...card.config, view } };
+    }
+    if (card.component === "salesTrend" && (view === "line" || view === "area")) {
+      return { ...card, config: { ...card.config, view } };
+    }
+    return card;
+  });
+  return withCards({ ...state, mode: "edit" }, cards);
 }
 
 function removeCard(state: LayoutEditorState, cardId: string): LayoutEditorState {

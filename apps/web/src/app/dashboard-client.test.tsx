@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { render } from "../test/assistant-render";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
@@ -98,7 +99,7 @@ describe("DashboardClient", () => {
     await screen.findByRole("article", { name: "近 7 天销售额" });
     fireEvent.click(screen.getByRole("button", { name: "近 30 天" }));
     expect(screen.getAllByText("¥12,680.00").length).toBeGreaterThan(0);
-    expect(screen.getByRole("region", { name: "经营数据" })).toHaveAttribute("aria-busy", "true");
+    expect(document.getElementById("main-content")).toHaveAttribute("aria-busy", "true");
     pending.resolve({
       ...dashboardResponsePreview,
       period: { startDate: "2026-08-02", endDate: "2026-08-31", days: 30 },

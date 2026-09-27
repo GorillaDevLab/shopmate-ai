@@ -1,5 +1,5 @@
 import { DEFAULT_DASHBOARD_LAYOUT, type DashboardInsightQuery } from "@shopmate/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createDashboardCard,
@@ -16,6 +16,50 @@ const defaultResponse = {
 };
 
 describe("dashboard layout state", () => {
+  it("缺少随机数能力时给出可读错误", () => {
+    vi.stubGlobal("crypto", undefined);
+    try {
+      expect(() => createDashboardCard("metric", [])).toThrow("当前浏览器不支持创建卡片");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("安全环境优先使用原生 randomUUID", () => {
+    const randomUUID = vi.fn(() => "native-id");
+    vi.stubGlobal("crypto", { randomUUID });
+    try {
+      expect(createDashboardCard("metric", []).id).toBe("metric-native-id");
+      expect(randomUUID).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("HTTP 环境没有 randomUUID 也能新增卡片", () => {
+    const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+    vi.stubGlobal("crypto", { getRandomValues });
+    try {
+      const first = createDashboardCard("metric", []);
+      const second = createDashboardCard("metric", [first]);
+      expect(first.id).toMatch(/^metric-[a-f0-9-]+$/);
+      expect(second.id).not.toBe(first.id);
+      const query = {
+        dataset: "sales",
+        metric: "revenue",
+        aggregation: "sum",
+        groupBy: "product",
+        dateRange: { start: "2026-08-01", end: "2026-08-31" },
+        filters: [],
+        order: "desc",
+        limit: 8,
+        visualization: "pie",
+      } as DashboardInsightQuery;
+      expect(createInsightDashboardCard("pieChart", "销售占比", query, []).id).toMatch(
+        /^pieChart-/,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it("加载服务器基线并从布局差异推导草稿状态", () => {
     const loaded = layoutEditorReducer(initialLayoutEditorState, {
       type: "loaded",
@@ -165,6 +209,38 @@ describe("dashboard layout state", () => {
     expect(added.addedCard?.card.id).toBe("pieChart-one");
     expect(card.size).toBe("1x1");
     expect(undone.draft.cards).toEqual(DEFAULT_DASHBOARD_LAYOUT.cards);
+  });
+
+  it("保存图表视图偏好并在切换时进入编辑草稿", () => {
+    const query = {
+      dataset: "sales",
+      metric: "revenue",
+      aggregation: "sum",
+      groupBy: "product",
+      dateRange: { start: "2026-08-01", end: "2026-08-31" },
+      filters: [],
+      order: "desc",
+      limit: 8,
+      visualization: "pie",
+    } as DashboardInsightQuery;
+    const card = createInsightDashboardCard(
+      "pieChart",
+      "商品销售占比",
+      query,
+      [],
+      () => "view",
+      "bar",
+    );
+    const state = readyState();
+    const changed = layoutEditorReducer(state, { type: "cardAdded", card });
+    const switched = layoutEditorReducer(changed, {
+      type: "insightViewChanged",
+      cardId: card.id,
+      view: "pie",
+    });
+    expect(switched.draft.cards.at(-1)).toMatchObject({ config: { view: "pie" } });
+    expect(isLayoutDirty(switched)).toBe(true);
+    expect(switched.mode).toBe("edit");
   });
 });
 

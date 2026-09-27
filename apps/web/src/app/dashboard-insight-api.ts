@@ -1,9 +1,13 @@
 import {
   DashboardInsightExecuteResponseSchema,
+  DashboardInsightGenerateRequestSchema,
   DashboardInsightPreviewResponseSchema,
   type DashboardInsightPreviewResponse,
+  type DashboardInsightKind,
+  type DashboardChartView,
   type DashboardInsightQuery,
   type DashboardInsightResult,
+  type DashboardInsightGenerateRequest,
 } from "@shopmate/contracts";
 
 export class DashboardInsightApiError extends Error {
@@ -11,6 +15,7 @@ export class DashboardInsightApiError extends Error {
     message: string,
     readonly status: number,
     readonly retryable = false,
+    readonly allowedViews?: readonly DashboardChartView[],
   ) {
     super(message);
     this.name = "DashboardInsightApiError";
@@ -19,12 +24,45 @@ export class DashboardInsightApiError extends Error {
 
 export async function generateDashboardInsight(
   question: string,
-  kind: "pie" | "report",
+  kind: DashboardInsightKind = "auto",
+  context: Pick<DashboardInsightGenerateRequest, "history" | "previousQuery"> = {},
 ): Promise<DashboardInsightPreviewResponse> {
-  const payload = await postInsight("preview", { question: question.trim(), kind });
+  const parsedRequest = DashboardInsightGenerateRequestSchema.safeParse({
+    question,
+    kind,
+    ...context,
+  });
+  if (!parsedRequest.success) {
+    throw new DashboardInsightApiError("请输入有效的经营问题后再生成组件", 400, false);
+  }
+  const body = parsedRequest.data;
+  const payload = await requestPreview(body);
   const parsed = DashboardInsightPreviewResponseSchema.safeParse(payload);
   if (!parsed.success) throw invalidResponse();
   return parsed.data;
+}
+
+async function requestPreview(body: DashboardInsightGenerateRequest): Promise<unknown> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new DashboardInsightApiError(
+          "图表生成等待超时，结果尚未确认，未自动重试。再次提交可能产生费用。",
+          504,
+          false,
+        ),
+      );
+      controller.abort();
+    }, 180000);
+  });
+  try {
+    // Bound both response headers and body; late results must never add a card.
+    return await Promise.race([postInsight("preview", body, controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function executeDashboardInsight(
@@ -55,15 +93,36 @@ async function postInsight(
   } catch {
     throw new DashboardInsightApiError("无法连接 AI 分析服务，请稍后重试", 0, true);
   }
-  if (!response.ok) throw responseError(response.status);
-  return response.json().catch(() => {
+  const payload = await response.json().catch(() => undefined);
+  if (!response.ok) throw responseError(response.status, payload);
+  if (payload === undefined) {
     throw invalidResponse();
-  });
+  }
+  return payload;
 }
 
-function responseError(status: number): DashboardInsightApiError {
+function responseError(status: number, payload: unknown): DashboardInsightApiError {
+  if (status === 400 && isCompatibleViewError(payload)) {
+    return new DashboardInsightApiError(payload.message, status, false, payload.allowedViews);
+  }
   const message = status === 401 ? "登录已失效，请重新登录" : "暂时无法生成经营组件，请重试";
   return new DashboardInsightApiError(message, status, status >= 500);
+}
+
+function isCompatibleViewError(payload: unknown): payload is {
+  code: "INSIGHT_VIEW_INCOMPATIBLE";
+  message: string;
+  allowedViews: DashboardChartView[];
+} {
+  if (!payload || typeof payload !== "object") return false;
+  const body = payload as Record<string, unknown>;
+  const allowed = body.allowedViews;
+  return (
+    body.code === "INSIGHT_VIEW_INCOMPATIBLE" &&
+    typeof body.message === "string" &&
+    Array.isArray(allowed) &&
+    allowed.every((view) => ["pie", "bar", "line", "area", "report"].includes(view as string))
+  );
 }
 
 function invalidResponse(): DashboardInsightApiError {

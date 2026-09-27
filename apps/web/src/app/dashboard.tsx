@@ -1,12 +1,18 @@
 "use client";
 
 import type { AnalyticsDashboardResponse } from "@shopmate/contracts";
+import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
-import { AppShell } from "./app-shell";
 import { MetricGrid } from "./metric-card";
+import { DashboardNavigation } from "./dashboard-navigation";
 import { MonitoringRuleManager } from "./monitoring-rule-manager";
+import { NotificationCenter } from "./notification-center";
+import { AppearanceProvider } from "./appearance-provider";
+import { AppearanceAmbient, AppearanceControls } from "./appearance-controls";
+import { useAssistantWorkspace } from "./assistant/provider";
+import { ToolbarSearch, UserBadge } from "./toolbar-search";
 
 export type DashboardState = "ready" | "loading" | "empty" | "error";
 
@@ -20,7 +26,15 @@ interface DashboardProps {
   readonly periodLabel?: string;
 }
 
-export function Dashboard({
+export function Dashboard(props: DashboardProps) {
+  return (
+    <AppearanceProvider>
+      <DashboardWorkspace {...props} />
+    </AppearanceProvider>
+  );
+}
+
+function DashboardWorkspace({
   state = "loading",
   data,
   onRetry,
@@ -32,32 +46,29 @@ export function Dashboard({
   const visibleState = state === "ready" && !data ? "empty" : state;
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [monitoringOpen, setMonitoringOpen] = useState(false);
+  const { store } = useAssistantWorkspace();
+  const router = useRouter();
+  // 顶部搜索只写入助手草稿，由商家确认后再发送；看板未就绪时抽屉不挂载，改去完整对话页。
+  const searchWithAssistant = (query: string) => {
+    store.setDraft(query);
+    if (visibleState === "ready" && !authRequired) setAssistantOpen(true);
+    else router.push("/chat");
+  };
   return (
-    <AppShell
-      active="dashboard"
-      title="经营总览"
-      notificationsEnabled={visibleState === "ready"}
-      actions={
-        <DashboardActions
-          assistantOpen={assistantOpen}
-          onOpenAssistant={() => setAssistantOpen(true)}
-          monitoringOpen={monitoringOpen}
-          onOpenMonitoring={() => setMonitoringOpen(true)}
-        />
-      }
-    >
-      <div className="mx-auto w-full max-w-[1440px]">
+    <main className="workspace-layout min-h-dvh bg-app-bg text-app-text">
+      <AppearanceAmbient />
+      <DashboardNavigation
+        onAssistant={() => setAssistantOpen(true)}
+        onMonitoring={() => setMonitoringOpen(true)}
+      />
+      <div className="workspace-content">
+        <DashboardHeader ready={visibleState === "ready"} onSearch={searchWithAssistant} />
         <section
-          aria-label="经营数据"
-          className={isRefreshing ? "dashboard-refreshing" : undefined}
+          id="main-content"
+          className={`mt-8 lg:mt-4 ${isRefreshing ? "dashboard-refreshing" : ""}`}
           aria-busy={isRefreshing}
         >
-          <DashboardIntro
-            ready={visibleState === "ready"}
-            data={data}
-            controls={controls}
-            periodLabel={periodLabel}
-          />
+          <DashboardIntro data={data} controls={controls} periodLabel={periodLabel} />
           {visibleState === "ready" && data ? (
             <DashboardLayoutEditor
               data={data}
@@ -84,90 +95,67 @@ export function Dashboard({
             </>
           )}
         </section>
-        <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted">
+        <footer className="mt-6 border-t border-app-line pt-3 text-xs text-app-muted lg:mt-4">
           中文界面 · 移动端优先 · 隐私友好
         </footer>
         <MonitoringRuleManager open={monitoringOpen} onOpenChange={setMonitoringOpen} />
       </div>
-    </AppShell>
+    </main>
   );
 }
 
-function DashboardActions({
-  assistantOpen,
-  onOpenAssistant,
-  monitoringOpen,
-  onOpenMonitoring,
+function DashboardHeader({
+  ready,
+  onSearch,
 }: {
-  assistantOpen: boolean;
-  onOpenAssistant: () => void;
-  monitoringOpen: boolean;
-  onOpenMonitoring: () => void;
+  ready: boolean;
+  onSearch: (query: string) => void;
 }) {
   return (
-    <>
-      <button
-        type="button"
-        className="toolbar-button"
-        aria-haspopup="dialog"
-        aria-expanded={monitoringOpen}
-        aria-label="经营监听"
-        onClick={onOpenMonitoring}
-      >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          className="size-5 sm:hidden"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        >
-          <circle cx="12" cy="12" r="2" />
-          <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14" />
-        </svg>
-        <span className="hidden sm:inline">经营监听</span>
-      </button>
-      <button
-        type="button"
-        className="toolbar-button is-primary hidden sm:inline-flex"
-        aria-haspopup="dialog"
-        aria-expanded={assistantOpen}
-        onClick={onOpenAssistant}
-      >
-        AI 助手
-      </button>
-    </>
+    <header className="workspace-topbar flex items-center justify-between gap-3 border-b border-app-line pb-3">
+      <a className="workspace-breadcrumb focus-ring" href="#main-content">
+        工作台 <span aria-hidden="true">/</span>
+        <strong className="font-semibold">经营总览</strong>
+      </a>
+      <AppearanceControls />
+      <ToolbarSearch onSearch={onSearch} className="hidden w-full max-w-xs flex-1 lg:block" />
+      <div className="flex items-center gap-4 text-right">
+        <div className="hidden sm:block">
+          <p className="text-sm font-semibold">商家经营看板</p>
+          <p className="text-xs text-app-muted">
+            {ready ? "数据来自 Analytics API" : "正在连接经营分析服务"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <NotificationCenter enabled={ready} />
+          <UserBadge />
+        </div>
+      </div>
+    </header>
   );
 }
 
 function DashboardIntro({
-  ready,
   data,
   controls,
   periodLabel,
 }: {
-  ready: boolean;
   data?: AnalyticsDashboardResponse;
   controls?: ReactNode;
   periodLabel: string;
 }) {
   return (
-    <div className="mb-4 flex flex-col gap-3 md:mb-6 md:flex-row md:items-end md:justify-between">
-      <div className="min-w-0">
+    <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between lg:mb-4">
+      <div>
         <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
           {periodLabel}经营，一眼看清
         </h1>
-        <p className="mt-1 text-sm text-app-muted">
-          <span>{ready ? "数据来自 Analytics API" : "正在连接经营分析服务"}</span>
-          {data && (
-            <span className="ml-2 border-l border-app-line pl-2">
-              统计截至 {formatChineseDate(data.asOfDate)}
-            </span>
-          )}
-        </p>
       </div>
-      {controls}
+      {controls ?? (
+        <span className="w-fit rounded-lg border border-app-line bg-app-surface px-3 py-1.5 text-xs font-medium text-app-muted">
+          {data ? `统计截至 ${formatChineseDate(data.asOfDate)}` : "正在获取最新数据"}
+        </span>
+      )}
     </div>
   );
 }

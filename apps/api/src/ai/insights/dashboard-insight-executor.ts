@@ -9,6 +9,7 @@ import type { ToolInvocationContext } from "../tools/tool-registry.js";
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
 import { getInsightMetric } from "./dashboard-insight-registry.js";
 import { validateDashboardInsightQuery } from "./dashboard-insight-validator.js";
+import { StoreSalesReader } from "./store-sales-reader.js";
 
 interface DashboardReader {
   summarize(
@@ -71,18 +72,66 @@ export class DashboardInsightExecutor {
     private readonly dashboard: DashboardReader,
     private readonly performance: PerformanceReader,
     private readonly inventory: InventoryReader,
+    private readonly stores: Pick<StoreSalesReader, "catalog" | "read"> = new StoreSalesReader(),
   ) {}
+
+  catalog(context: ToolInvocationContext) {
+    return this.stores.catalog(context);
+  }
 
   async execute(
     context: ToolInvocationContext,
     rawQuery: unknown,
   ): Promise<DashboardInsightResult> {
-    const query = validateDashboardInsightQuery(rawQuery);
+    // Saved v3 layouts may contain average pies or grouped reports. They remain
+    // executable; planning never receives these compatibility exceptions.
+    const query = validateDashboardInsightQuery(rawQuery, {
+      allowLegacyAveragePie: true,
+      allowLegacyGroupedReport: true,
+    });
     assertReadPermissions(context, query);
+    if (
+      query.dataset === "sales" &&
+      (query.groupBy === "store" ||
+        query.groupBy === "platform" ||
+        query.filters.some(
+          (filter) =>
+            filter.field === "store" ||
+            filter.field === "platform" ||
+            (query.groupBy === "date" && filter.field === "product"),
+        ))
+    ) {
+      const rows = await this.stores.read(context, query);
+      const result =
+        query.groupBy === "date" && query.visualization !== "pie"
+          ? seriesResult(query, rows)
+          : pieResult(query, rows);
+      return DashboardInsightResultSchema.parse(
+        query.visualization !== "report"
+          ? result
+          : {
+              kind: "report",
+              title: "门店渠道经营报告",
+              summary: result.summary,
+              highlights: ["仅统计已支付订单；未分配门店的数据单独列示。"],
+              metrics: (result.kind === "pie" ? result.slices : result.points)
+                .slice(0, 8)
+                .map((slice) => ({
+                  label: "label" in slice ? slice.label : slice.date,
+                  value:
+                    result.unit === "currencyMinor"
+                      ? formatCurrency(slice.value)
+                      : `${slice.value}`,
+                })),
+            },
+      );
+    }
     const result =
       query.visualization === "report"
         ? await this.report(context, query)
-        : await this.pie(context, query);
+        : query.groupBy === "date" && query.visualization !== "pie"
+          ? await this.series(context, query)
+          : await this.pie(context, query);
     return DashboardInsightResultSchema.parse(result);
   }
 
@@ -121,6 +170,25 @@ export class DashboardInsightExecutor {
       query.dateRange.start,
     );
     return pieResult(
+      query,
+      data.recent.dailyTrend.map((item) => ({
+        key: item.date,
+        label: item.date,
+        value: item.revenueCents,
+      })),
+    );
+  }
+
+  private async series(context: ToolInvocationContext, query: DashboardInsightQuery) {
+    if (query.dataset !== "sales" || query.groupBy !== "date") {
+      throw new Error("当前查询暂不支持序列图");
+    }
+    const data = await this.dashboard.summarize(
+      context,
+      query.dateRange.end,
+      query.dateRange.start,
+    );
+    return seriesResult(
       query,
       data.recent.dailyTrend.map((item) => ({
         key: item.date,
@@ -211,6 +279,20 @@ function pieResult(query: DashboardInsightQuery, rawSlices: readonly PieSlice[])
   };
 }
 
+function seriesResult(query: DashboardInsightQuery, rows: readonly PieSlice[]) {
+  const points = [...rows]
+    .filter((row) => Number.isFinite(row.value) && row.value >= 0)
+    .sort((left, right) => left.key.localeCompare(right.key))
+    .map((row) => ({ date: row.key, value: row.value }));
+  return {
+    kind: "series" as const,
+    title: insightTitle(query),
+    summary: `${query.dateRange.start} 至 ${query.dateRange.end}`,
+    unit: getInsightMetric(query.metric).unit,
+    points,
+  };
+}
+
 interface PieSlice {
   readonly key: string;
   readonly label: string;
@@ -218,9 +300,25 @@ interface PieSlice {
 }
 
 function insightTitle(query: DashboardInsightQuery): string {
-  const metric = query.metric === "unitsSold" ? "销量" : "销售额";
-  const dimension = query.groupBy === "date" ? "日期" : query.groupBy === "sku" ? "SKU" : "商品";
-  return `${dimension}${metric}占比`;
+  const metric = {
+    revenue: "销售额",
+    unitsSold: "销量",
+    orderCount: "订单量",
+    averageOrderValue: "客单价",
+    inventory: "库存",
+    productCount: "商品数",
+  }[query.metric];
+  const dimension =
+    query.groupBy === "store"
+      ? "门店"
+      : query.groupBy === "platform"
+        ? "渠道"
+        : query.groupBy === "date"
+          ? "日期"
+          : query.groupBy === "sku"
+            ? "SKU"
+            : "商品";
+  return `${dimension}${metric}${query.metric === "averageOrderValue" ? "对比" : "占比"}`;
 }
 
 function reportMetrics(metrics: SalesMetrics) {

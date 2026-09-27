@@ -58,6 +58,7 @@ model Merchant {
   products         Product[]
   skus             Sku[]
   orders           Order[]
+  stores           Store[]
   dashboardLayouts UserDashboardLayout[]
   monitoringRules  UserMonitoringRule[]
   notifications    MonitoringNotification[]
@@ -114,9 +115,23 @@ model Sku {
   @@index([productId])
 }
 
-model Order {
-  id         String @id @default(cuid())
+model Store {
+  id         String   @id
   merchantId String
+  name       String
+  city       String
+  platform   String
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  orders     Order[]
+
+  @@unique([merchantId, id])
+  @@index([merchantId, platform])
+}
+
+model Order {
+  id         String  @id @default(cuid())
+  merchantId String
+  storeId    String?
 
   orderNo     String
   orderedAt   DateTime
@@ -124,6 +139,7 @@ model Order {
   totalAmount Decimal     @db.Decimal(12, 2)
 
   merchant Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  store    Store?      @relation(fields: [merchantId, storeId], references: [merchantId, id], onDelete: Restrict)
   items    OrderItem[]
 
   createdAt DateTime @default(now())
@@ -131,6 +147,7 @@ model Order {
 
   @@unique([merchantId, orderNo])
   @@index([merchantId, orderedAt])
+  @@index([merchantId, storeId, orderedAt])
   @@index([status])
 }
 

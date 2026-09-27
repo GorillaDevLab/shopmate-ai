@@ -17,6 +17,7 @@ export function adjacentAllowedSize(
   direction: -1 | 1,
   allowedSizes: readonly DashboardLayoutSize[],
 ): DashboardLayoutSize {
+  allowedSizes = widthSizes(allowedSizes, size);
   const currentIndex = allowedSizes.findIndex((candidate) => candidate === size);
   if (currentIndex < 0) return allowedSizes[0] ?? size;
   const nextIndex = Math.max(0, Math.min(allowedSizes.length - 1, currentIndex + direction));
@@ -26,7 +27,6 @@ export function adjacentAllowedSize(
 export function previewWidgetSize({
   startSize,
   deltaX,
-  deltaY,
   unitSize,
   allowedSizes,
 }: {
@@ -40,7 +40,6 @@ export function previewWidgetSize({
   const start = footprintForSize(startSize);
   const target = {
     columns: start.columns + deltaX / unitSize,
-    rows: start.rows + deltaY / unitSize,
   };
   return allowedSizes.reduce((closest, candidate) => {
     const closestDistance = footprintDistance(footprintForSize(closest), target);
@@ -49,9 +48,16 @@ export function previewWidgetSize({
   }, startSize);
 }
 
-function footprintDistance(
-  footprint: WidgetFootprint,
-  target: { columns: number; rows: number },
-): number {
-  return (footprint.columns - target.columns) ** 2 + (footprint.rows - target.rows) ** 2;
+function footprintDistance(footprint: WidgetFootprint, target: { columns: number }): number {
+  return (footprint.columns - target.columns) ** 2;
+}
+
+// Keep a saved legacy value when it represents the same visible width.
+export function widthSizes(allowed: readonly DashboardLayoutSize[], current: DashboardLayoutSize) {
+  const widths = new Map<number, DashboardLayoutSize>();
+  for (const size of allowed) {
+    const columns = footprintForSize(size).columns;
+    if (!widths.has(columns) || size === current) widths.set(columns, size);
+  }
+  return [...widths.entries()].sort(([a], [b]) => a - b).map(([, size]) => size);
 }

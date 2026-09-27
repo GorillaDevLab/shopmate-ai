@@ -1,41 +1,73 @@
 "use client";
 
 import type { DashboardInsightQuery, DashboardInsightResult } from "@shopmate/contracts";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { executeDashboardInsight } from "./dashboard-insight-api";
-import { DashboardPieChart } from "./dashboard-pie-chart";
-import { DashboardReportCard } from "./dashboard-report-card";
+import { DashboardInsightPresentation } from "./dashboard-insight-presentation";
+import type { DashboardChartView } from "@shopmate/contracts";
 
 type InsightState =
   | { status: "loading" }
   | { status: "ready"; result: DashboardInsightResult }
   | { status: "error"; message: string };
 
-export function DashboardInsightCard({ query }: { query: DashboardInsightQuery }) {
+export function DashboardInsightCard({
+  query,
+  initialResult,
+  view,
+  onViewChange,
+}: {
+  query: DashboardInsightQuery;
+  initialResult?: DashboardInsightResult;
+  view?: DashboardChartView;
+  onViewChange?: (view: DashboardChartView) => void;
+}) {
+  const queryKey = JSON.stringify(query);
+  const initial = useRef({ key: queryKey, result: initialResult });
   const [reloadKey, setReloadKey] = useState(0);
-  const [state, setState] = useState<InsightState>({ status: "loading" });
+  const [state, setState] = useState<InsightState>(
+    initialResult ? { status: "ready", result: initialResult } : { status: "loading" },
+  );
   const retry = useCallback(() => {
     setState({ status: "loading" });
     setReloadKey((key) => key + 1);
   }, []);
 
   useEffect(() => {
+    // Preview already executed this query; layout edits must not run it again.
+    if (reloadKey === 0 && initial.current.result && initial.current.key === queryKey) {
+      setState({ status: "ready", result: initial.current.result });
+      return;
+    }
     const controller = new AbortController();
+    setState({ status: "loading" });
     void executeDashboardInsight(query, controller.signal).then(
-      (result) => setState({ status: "ready", result }),
+      (result) => {
+        if (!controller.signal.aborted) setState({ status: "ready", result });
+      },
       (error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (
+          controller.signal.aborted ||
+          (error instanceof DOMException && error.name === "AbortError")
+        )
+          return;
         setState({ status: "error", message: safeMessage(error) });
       },
     );
     return () => controller.abort();
-  }, [query, reloadKey]);
+  }, [query, queryKey, reloadKey]);
 
   if (state.status === "loading") return <InsightLoading />;
   if (state.status === "error") return <InsightError message={state.message} onRetry={retry} />;
-  if (state.result.kind === "pie") return <DashboardPieChart result={state.result} />;
-  return <DashboardReportCard result={state.result} />;
+  return (
+    <DashboardInsightPresentation
+      result={state.result}
+      view={view}
+      onViewChange={onViewChange}
+      allowDonut={query.metric !== "averageOrderValue"}
+    />
+  );
 }
 
 function InsightLoading() {

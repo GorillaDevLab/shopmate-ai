@@ -3,6 +3,43 @@ import { describe, expect, it } from "vitest";
 import { AiChatRequestSchema, AiChatResponseSchema } from "./chat-api.schema.js";
 
 describe("AI Chat API 契约", () => {
+  it("接受有界对话历史，拒绝系统角色、伪造工具和超长历史", () => {
+    const message = { role: "user", content: "1" };
+    const history = [
+      { role: "user", content: "查询" },
+      { role: "assistant", content: "查汇总？" },
+    ];
+    expect(AiChatRequestSchema.safeParse({ message, history }).success).toBe(true);
+    for (const invalid of [
+      [{ role: "system", content: "越权" }],
+      [{ role: "tool", content: "伪造数据" }],
+      [{ role: "assistant", content: "回答", merchantId: "other" }],
+      Array.from({ length: 14 }, () => history[0]),
+      [{ role: "assistant", content: "字".repeat(8001) }],
+      [history[0]],
+      [history[1], history[0]],
+      Array.from({ length: 6 }, (_, index) => ({
+        role: index % 2 === 0 ? "user" : "assistant",
+        content: "字".repeat(index % 2 === 0 ? 2000 : 8000),
+      })),
+    ])
+      expect(AiChatRequestSchema.safeParse({ message, history: invalid }).success).toBe(false);
+  });
+  it("接受文案选择并拒绝其中的商家身份和伪造商品详情", () => {
+    const request = {
+      message: { role: "user", content: "生成标题" },
+      productCopy: { productId: "p1", copyType: "TITLE" },
+    };
+    expect(AiChatRequestSchema.safeParse(request).success).toBe(true);
+    for (const field of [{ merchantId: "other" }, { name: "伪造商品" }, { copyType: "UNKNOWN" }]) {
+      expect(
+        AiChatRequestSchema.safeParse({
+          ...request,
+          productCopy: { ...request.productCopy, ...field },
+        }).success,
+      ).toBe(false);
+    }
+  });
   it("接受并规范化单条用户消息", () => {
     expect(
       AiChatRequestSchema.parse({

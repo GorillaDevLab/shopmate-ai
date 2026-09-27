@@ -1,4 +1,5 @@
 import {
+  GetInventoryRisksTool,
   GetSalesSummaryTool,
   type LLMGenerationRequest,
   type LLMGenerationResult,
@@ -14,6 +15,12 @@ const context: ToolInvocationContext = {
   userId: "user-1",
   merchantId: "merchant-1",
   permissions: [AuthPermission.OrdersRead],
+};
+
+const inventoryContext: ToolInvocationContext = {
+  userId: "user-1",
+  merchantId: "merchant-1",
+  permissions: [AuthPermission.ProductsRead, AuthPermission.OrdersRead],
 };
 
 const period = {
@@ -34,9 +41,155 @@ const salesResult = {
   },
 };
 
+const inventoryResult = {
+  status: "ok" as const,
+  data: {
+    source: "LowStockService" as const,
+    period: { ...period, timezone: "Asia/Shanghai" as const },
+    items: [
+      {
+        productId: "product-1",
+        productName: "商品 A",
+        skuId: "sku-1",
+        skuCode: "SKU-001",
+        inventory: 3,
+        alertThreshold: 10,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+      {
+        productId: "product-2",
+        productName: "商品 B",
+        skuId: "sku-2",
+        skuCode: "SKU-002",
+        inventory: 4,
+        alertThreshold: 10,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+      {
+        productId: "product-3",
+        productName: "商品 C",
+        skuId: "sku-3",
+        skuCode: "SKU-003",
+        inventory: 6,
+        alertThreshold: 12,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+      {
+        productId: "product-4",
+        productName: "商品 D",
+        skuId: "sku-4",
+        skuCode: "SKU-004",
+        inventory: 9,
+        alertThreshold: 12,
+        soldUnits: 0,
+        averageDailyUnits: 0,
+        daysToStockout: null,
+        riskLevel: "WARNING" as const,
+      },
+    ],
+  },
+};
+
+type InventoryRisksOutput = ReturnType<typeof GetInventoryRisksTool.output.parse>;
+
 type SalesSummaryOutput = ReturnType<typeof GetSalesSummaryTool.output.parse>;
 
 describe("BusinessAgent", () => {
+  it.each(["销售额约 1742 元，客单价约 348 元。", "销售额约 0.17 万元。"])(
+    "接受本轮金额的明确约数而不触发付费修正：%s",
+    async (answer) => {
+      const provider = scriptedProvider([
+        toolCallResult("sales", "get_sales_summary", period),
+        finalResult(answer),
+      ]);
+      const result = await new BusinessAgent(provider, salesRegistry()).run({
+        question: "经营情况怎么样",
+        context,
+      });
+      expect(result.status).toBe("completed");
+      expect(result.answer).toBe(answer);
+      expect(provider.generate).toHaveBeenCalledTimes(2);
+    },
+  );
+  it.each(["销售额约 9999 元。", "销售额 0.17 万元。", "订单约 348 单。"])(
+    "仍拒绝错误约数、未声明的精度损失及跨单位数字：%s",
+    async (answer) => {
+      const provider = scriptedProvider([
+        toolCallResult("sales", "get_sales_summary", period),
+        finalResult(answer),
+        finalResult(answer),
+      ]);
+      const result = await new BusinessAgent(provider, salesRegistry()).run({
+        question: "经营情况怎么样",
+        context,
+      });
+      expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    },
+  );
+  it("解释性追问可以直接回答，不需要再次生成图表", async () => {
+    const provider = scriptedProvider([
+      finalResult("这是数据库查询快照，并非自动实时更新；外部渠道同步状态需要另外确认。"),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "销量是实时的吗",
+      context,
+      history: [
+        { role: "user", content: "查询销量" },
+        { role: "assistant", content: "分析已完成。" },
+      ],
+    });
+    expect(result.status).toBe("completed");
+    expect(result.usedTools).toEqual([]);
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+  });
+  it("历史中的数字不成为本轮经营证据", async () => {
+    const provider = scriptedProvider([
+      finalResult("销售额为 999 元。"),
+      finalResult("销售额为 999 元。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+    const result = await agent.run({
+      question: "继续",
+      context,
+      history: [
+        { role: "user", content: "销售额？" },
+        { role: "assistant", content: "销售额为 999 元。" },
+      ],
+    });
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+  });
+  it("追问保留选项上下文，并使用当前认证身份重新查询", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("follow-up", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，共 5 单。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const history = [
+      { role: "user" as const, content: "分析趋势" },
+      { role: "assistant" as const, content: "回复 1 查询销售汇总。" },
+    ];
+    const result = await new BusinessAgent(provider, salesRegistry(handler)).run({
+      question: "1",
+      context,
+      history,
+    });
+    expect(provider.requests[0]?.messages.slice(1, 4)).toEqual([
+      ...history,
+      { role: "user", content: "1" },
+    ]);
+    expect(result.status).toBe("completed");
+    expect(handler).toHaveBeenCalledOnce();
+  });
   it("把允许的工具交给 Provider，并把已验证结果注入中文回答", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-sales-1", "get_sales_summary", period),
@@ -56,6 +209,9 @@ describe("BusinessAgent", () => {
       answer: "销售额为 1,742 元，共 5 单。",
       usedTools: ["get_sales_summary"],
       rounds: 2,
+      toolOutputs: [
+        { name: "get_sales_summary", output: expect.objectContaining({ status: "ok" }) },
+      ],
     });
     expect(handler).toHaveBeenCalledOnce();
 
@@ -73,6 +229,40 @@ describe("BusinessAgent", () => {
       name: "get_sales_summary",
       content: JSON.stringify(salesResult),
     });
+  });
+
+  it("允许 Markdown 有序列表编号而不把编号视为经营数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("1. 销售额为 1,742 元。\n2. 共 5 单。"),
+    ]);
+
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe("1. 销售额为 1,742 元。\n2. 共 5 单。");
+  });
+
+  it("忽略列表编号后仍拒绝来源不明的经营数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("1. 销售额为 1,742 元。\n2. 订单数为 999 单。"),
+    ]);
+
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).not.toContain("999");
   });
 
   it("无须经营工具的中文回答可直接完成", async () => {
@@ -108,19 +298,55 @@ describe("BusinessAgent", () => {
     expect(provider.requests[1]?.messages.at(-1)?.content).not.toContain("SELECT 1");
   });
 
-  it("拒绝重复的相同工具调用，避免无限循环", async () => {
-    const repeated = toolCallResult("call-sales", "get_sales_summary", period);
-    const provider = scriptedProvider([repeated, repeated]);
+  it("重复的相同工具调用复用已有结果而不重复执行工具", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales-1", "get_sales_summary", period),
+      toolCallResult("call-sales-2", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，共 5 单。"),
+    ]);
+
     const handler = vi.fn(() => salesResult);
     const agent = new BusinessAgent(provider, salesRegistry(handler));
 
     const result = await agent.run({ question: "查询销售额", context });
 
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe("销售额为 1,742 元，共 5 单。");
+    expect(result.rounds).toBe(3);
+
+    // 相同工具和参数只真正执行一次。
+    expect(handler).toHaveBeenCalledOnce();
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+
+    expect(provider.requests[2]?.messages.at(-1)).toEqual({
+      role: "tool",
+      toolCallId: "call-sales-2",
+      name: "get_sales_summary",
+      content: JSON.stringify(salesResult),
+    });
+  });
+
+  it("持续重复相同工具调用时仍受工具轮次上限保护", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales-1", "get_sales_summary", period),
+      toolCallResult("call-sales-2", "get_sales_summary", period),
+      toolCallResult("call-sales-3", "get_sales_summary", period),
+    ]);
+
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler), {
+      maxToolRounds: 2,
+    });
+
+    const result = await agent.run({ question: "查询销售额", context });
+
     expect(result.status).toBe("limited");
     expect(result.answer).toContain("无法继续安全查询");
-    expect(result.rounds).toBe(2);
+    expect(result.rounds).toBe(3);
+
+    // 第二轮复用缓存，第三轮在执行前被轮次上限拦截。
     expect(handler).toHaveBeenCalledOnce();
-    expect(provider.generate).toHaveBeenCalledTimes(2);
+    expect(provider.generate).toHaveBeenCalledTimes(3);
   });
 
   it("达到工具轮次上限后停止，不会继续调用 Provider", async () => {
@@ -210,6 +436,68 @@ describe("BusinessAgent", () => {
     expect(result.answer).not.toContain("999");
   });
 
+  it("工具返回 empty 时允许回答引用已查询的 ISO 日期范围", async () => {
+    const emptyResult: SalesSummaryOutput = {
+      status: "empty",
+      reason: "NO_DATA",
+      message: "当前时段没有销售数据。",
+    };
+    const provider = scriptedProvider([
+      toolCallResult("call-empty", "get_sales_summary", period),
+      finalResult("2026-08-25 到 2026-08-31 暂无销售数据。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(vi.fn(() => emptyResult)));
+
+    const result = await agent.run({
+      question: "查询 2026-08-25 到 2026-08-31 的销售情况",
+      context,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe("2026-08-25 到 2026-08-31 暂无销售数据。");
+  });
+
+  it("允许已查询日期后仍拒绝模型编造经营数字", async () => {
+    const emptyResult: SalesSummaryOutput = {
+      status: "empty",
+      reason: "NO_DATA",
+      message: "当前时段没有销售数据。",
+    };
+    const provider = scriptedProvider([
+      toolCallResult("call-empty", "get_sales_summary", period),
+      finalResult("2026-08-25 到 2026-08-31 暂无数据，但共有 999 单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(vi.fn(() => emptyResult)));
+
+    const result = await agent.run({
+      question: "查询 2026-08-25 到 2026-08-31 的销售情况",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.answer).not.toContain("999");
+  });
+
+  it("拒绝回答中出现未经工具调用验证的 ISO 日期", async () => {
+    const emptyResult: SalesSummaryOutput = {
+      status: "empty",
+      reason: "NO_DATA",
+      message: "当前时段没有销售数据。",
+    };
+    const provider = scriptedProvider([
+      toolCallResult("call-empty", "get_sales_summary", period),
+      finalResult("2026-08-20 到 2026-08-31 暂无销售数据。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(vi.fn(() => emptyResult)));
+
+    const result = await agent.run({
+      question: "查询 2026-08-25 到 2026-08-31 的销售情况",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+  });
+
   it("工具只返回 empty 时仍拒绝模型编造经营数字", async () => {
     const emptyResult: SalesSummaryOutput = {
       status: "empty",
@@ -226,6 +514,205 @@ describe("BusinessAgent", () => {
 
     expect(result.status).toBe("limited");
     expect(result.answer).not.toContain("999");
+  });
+
+  it("中文列表编号不是销售证据，不应触发额外修正请求", async () => {
+    const answer = "1、销售额为 1,742 元。\n2、订单数为 5 单。";
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult(answer),
+      finalResult(answer),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "查销售",
+      context,
+    });
+    expect(result.status).toBe("completed");
+    expect(provider.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it("中文列表正文中的无依据数字仍被拒绝", async () => {
+    const answer = "1、销售额为 999 元。\n2、订单数为 888 单。";
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult(answer),
+      finalResult(answer),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "查销售",
+      context,
+    });
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+  });
+
+  it("行首数字并列不是列表编号，不能隐藏无依据数字", async () => {
+    const answer = "999、5 单分别是两家店的订单量。";
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult(answer),
+      finalResult(answer),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "查销售",
+      context,
+    });
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+  });
+
+  it("最终回答数据校验失败后自动 repair 一次并返回修正结果", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，但订单数为 999 单。"),
+      finalResult("销售额为 1,742 元，共 5 单。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler));
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "销售额为 1,742 元，共 5 单。",
+      usedTools: ["get_sales_summary"],
+      rounds: 3,
+      toolOutputs: [
+        { name: "get_sales_summary", output: expect.objectContaining({ status: "ok" }) },
+      ],
+    });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+
+    const repairRequest = provider.requests[2];
+    expect(repairRequest?.tools).toEqual([]);
+    expect(repairRequest?.messages.at(-1)).toMatchObject({
+      role: "user",
+    });
+  });
+
+  it("自动 repair 后仍包含来源不明数字时保持拒绝", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额为 1,742 元，但订单数为 999 单。"),
+      finalResult("销售额为 1,742 元，但订单数为 888 单。"),
+    ]);
+    const handler = vi.fn(() => salesResult);
+    const agent = new BusinessAgent(provider, salesRegistry(handler));
+
+    const result = await agent.run({
+      question: "查询销售额和订单数",
+      context,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+    expect(result.answer).not.toContain("888");
+    expect(handler).toHaveBeenCalledOnce();
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+    expect(provider.requests[2]?.tools).toEqual([]);
+  });
+
+  it("默认最近周期允许引用工具输出中的实际日期范围", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", {}),
+      finalResult("2026-08-25 到 2026-08-31 销售额为 1,742 元，共 5 单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "最近销售情况怎么样？",
+      context,
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toContain("2026-08-25 到 2026-08-31");
+  });
+
+  it("允许使用已验证 items 数量说明低库存商品数量", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-inventory", "get_inventory_risks", {}),
+      finalResult("共有 4 款商品库存不足。"),
+    ]);
+    const agent = new BusinessAgent(provider, inventoryRegistry());
+
+    const result = await agent.run({
+      question: "最近哪些商品库存不足？",
+      context: inventoryContext,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "共有 4 款商品库存不足。",
+      usedTools: ["get_inventory_risks"],
+      rounds: 2,
+    });
+  });
+
+  it("允许与工具证据一致的中文订单数量并规范为阿拉伯数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("订单数为五单。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({
+      question: "查询订单数",
+      context,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "订单数为5单。",
+      usedTools: ["get_sales_summary"],
+      rounds: 2,
+      toolOutputs: [
+        { name: "get_sales_summary", output: expect.objectContaining({ status: "ok" }) },
+      ],
+    });
+  });
+
+  it("允许与 items 数量一致的中文商品数量并规范为阿拉伯数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-inventory", "get_inventory_risks", {}),
+      finalResult("共有四款商品库存不足。"),
+    ]);
+    const agent = new BusinessAgent(provider, inventoryRegistry());
+
+    const result = await agent.run({
+      question: "最近哪些商品库存不足？",
+      context: inventoryContext,
+    });
+
+    expect(result).toEqual({
+      status: "completed",
+      answer: "共有4款商品库存不足。",
+      usedTools: ["get_inventory_risks"],
+      rounds: 2,
+    });
+  });
+
+  it("允许统计 items 数量但仍拒绝编造补货数量", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-inventory", "get_inventory_risks", {}),
+      finalResult("共有 4 款商品库存不足，建议每款补货 999 件。"),
+      finalResult("共有 4 款商品库存不足，建议每款补货 999 件。"),
+    ]);
+    const handler = vi.fn(() => inventoryResult);
+    const agent = new BusinessAgent(provider, inventoryRegistry(handler));
+
+    const result = await agent.run({
+      question: "最近哪些商品值得补货？",
+      context: inventoryContext,
+    });
+
+    expect(result.status).toBe("limited");
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    expect(result.answer).not.toContain("999");
+    expect(handler).toHaveBeenCalledOnce();
   });
 
   it("成功工具结果存在时仍拒绝混入来源不明的经营数字", async () => {
@@ -329,6 +816,20 @@ describe("BusinessAgent", () => {
     expect(result.status).toBe("limited");
   });
 });
+
+function inventoryRegistry(
+  handler: () => InventoryRisksOutput = vi.fn(() => inventoryResult),
+): ToolRegistry {
+  const registry = new ToolRegistry({
+    allowedToolNames: [GetInventoryRisksTool.name],
+  });
+  registry.register({
+    ...GetInventoryRisksTool,
+    requiredPermissions: [AuthPermission.ProductsRead, AuthPermission.OrdersRead],
+    handler,
+  });
+  return registry;
+}
 
 function salesRegistry(handler: () => SalesSummaryOutput = vi.fn(() => salesResult)): ToolRegistry {
   const registry = new ToolRegistry({ allowedToolNames: [GetSalesSummaryTool.name] });

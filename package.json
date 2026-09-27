@@ -10,7 +10,7 @@
     "predev": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build",
     "dev": "pnpm -r --parallel --if-present run dev",
     "build": "pnpm -r --if-present run build",
-    "test": "node --test tests/workspace-structure.test.mjs tests/smoke-test.test.mjs tests/ci-workflow.test.mjs tests/secret-scan.test.mjs tests/demo-deployment.test.mjs tests/demo-live-env.test.mjs && pnpm -r --if-present run test",
+    "test": "node --test tests/client-compatibility.test.mjs tests/workspace-structure.test.mjs tests/smoke-test.test.mjs tests/ci-workflow.test.mjs tests/secret-scan.test.mjs tests/demo-deployment.test.mjs tests/demo-live-env.test.mjs && pnpm -r --if-present run test",
     "test:unit": "pnpm -r --if-present run test:unit",
     "test:integration": "pnpm -r --if-present run test:integration",
     "coverage": "pnpm -r --if-present run coverage",
@@ -31,9 +31,11 @@
     "@types/node": "^24.13.3",
     "@typescript-eslint/eslint-plugin": "8.47.0",
     "@typescript-eslint/parser": "8.47.0",
+    "acorn": "8.15.0",
     "eslint": "9.39.5",
     "eslint-config-prettier": "10.1.8",
     "prettier": "3.6.2",
+    "typescript": "5.9.3",
     "typescript-eslint": "8.47.0"
   }
 }

@@ -9,6 +9,7 @@ export interface ToolSchema<T> {
 }
 
 export interface ToolInvocationContext {
+  readonly signal?: AbortSignal;
   readonly userId: string;
   readonly merchantId: string;
   readonly permissions: readonly AuthPermission[];
@@ -144,14 +145,20 @@ export class ToolRegistry {
     this.tools.set(tool.name, storedTool);
   }
 
-  listDefinitions(): readonly LLMToolDefinition[] {
-    const definitions = [...this.tools.values()].map((tool) =>
-      Object.freeze({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.input.jsonSchema,
-      }),
-    );
+  listDefinitions(context?: Readonly<ToolInvocationContext>): readonly LLMToolDefinition[] {
+    const definitions = [...this.tools.values()]
+      .filter(
+        (tool) =>
+          !context ||
+          tool.requiredPermissions.every((permission) => context.permissions.includes(permission)),
+      )
+      .map((tool) =>
+        Object.freeze({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.input.jsonSchema,
+        }),
+      );
 
     return Object.freeze(definitions);
   }
@@ -190,9 +197,10 @@ export class ToolRegistry {
 
     try {
       rawOutput = await tool.handler(parsedInput, context);
-    } catch {
+    } catch (cause: unknown) {
       throw new ToolRegistryError({
         code: "HANDLER_FAILED",
+        cause,
         toolName,
         message: `工具 "${toolName}" 执行失败。`,
       });

@@ -5,20 +5,29 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack && node ../../scripts/check-client-compatibility.mjs",
     "start": "next start",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "eslint . --ignore-pattern '.next-live/**' --max-warnings=0",
     "test": "vitest run",
     "test:unit": "vitest run src --passWithNoTests",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "coverage": "vitest run --coverage",
     "typecheck": "next typegen && tsc --noEmit"
   },
+  "browserslist": [
+    "Chrome >= 111",
+    "Edge >= 111",
+    "Firefox >= 111",
+    "Safari >= 16.2",
+    "iOS >= 16.2"
+  ],
   "dependencies": {
     "@shopmate/contracts": "workspace:*",
     "next": "16.3.3",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -121,12 +121,18 @@ export {
   DashboardInsightExecuteRequestSchema,
   DashboardInsightExecuteResponseSchema,
   DashboardInsightGenerateRequestSchema,
+  DashboardInsightKindSchema,
   DashboardInsightMetricSchema,
   DashboardInsightPreviewResponseSchema,
   DashboardInsightQuerySchema,
   DashboardInsightResultSchema,
+  DashboardChartViewSchema,
+  getDashboardInsightLayoutViews,
+  getDashboardInsightViews,
 } from "./ai/dashboard-insight.schema.js";
 export type {
+  DashboardChartView,
+  DashboardInsightKind,
   DashboardInsightGenerateRequest,
   DashboardInsightExecuteRequest,
   DashboardInsightExecuteResponse,
@@ -240,3 +246,25 @@ export type {
   ProductCopyRequest,
   ProductCopyType,
 } from "./ai/product-copy.schema.js";
+export { sanitizeDebugData, DebugReportSchema } from "./debug-report.js";
+export {
+  AssistantRunRequestSchema,
+  AssistantRunEventSchema,
+  AssistantReplySchema,
+} from "./ai/assistant-run.schema.js";
+export type {
+  AssistantRunRequest,
+  AssistantRunEvent,
+  AssistantReply,
+  AssistantProgress,
+} from "./ai/assistant-run.schema.js";
+export {
+  AssistantIdentitySchema,
+  WorkspaceSnapshotSchema,
+} from "./ai/assistant-workspace.schema.js";
+export type {
+  AssistantIdentity,
+  WorkspaceSnapshot,
+  WorkspaceSession,
+  WorkspaceMessage,
+} from "./ai/assistant-workspace.schema.js";

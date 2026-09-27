@@ -76,6 +76,25 @@ describe("销售与 Dashboard AI 读取工具", () => {
     ).resolves.toMatchObject({ status: "empty", reason: "NO_DATA" });
   });
 
+  it("热销排行省略开始日期时使用 Service 默认最近周期", async () => {
+    const analyze = vi.fn(async () => performanceFixture());
+    const registry = performanceRegistry(analyze);
+
+    const result = await registry.invoke(
+      "get_best_sellers",
+      { endDate: "2026-08-31", limit: 1 },
+      context,
+    );
+
+    expect(analyze).toHaveBeenCalledWith(context, "2026-08-31", undefined);
+    expect(result).toMatchObject({
+      status: "ok",
+      data: {
+        items: [{ rank: 1, productId: "product-1" }],
+      },
+    });
+  });
+
   it("热销排行调用 ProductPerformanceService 并应用 limit", async () => {
     const analyze = vi.fn(async () => performanceFixture());
     const registry = performanceRegistry(analyze);

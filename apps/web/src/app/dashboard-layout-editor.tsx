@@ -4,6 +4,8 @@ import type {
   AnalyticsDashboardResponse,
   DashboardLayoutCard,
   DashboardLayoutSize,
+  DashboardInsightResult,
+  DashboardChartView,
 } from "@shopmate/contracts";
 import { DASHBOARD_COMPONENT_REGISTRY } from "@shopmate/contracts";
 import {
@@ -39,13 +41,17 @@ import {
   type LayoutEditorState,
 } from "./dashboard-layout-state";
 import { animateCardReflow, captureCardRects, type CardRectMap } from "./dashboard-layout-motion";
+import { observeContentFit } from "./dashboard-content-fit";
 import {
   adjacentAllowedSize,
   footprintForSize,
   previewWidgetSize,
+  widthSizes,
 } from "./dashboard-layout-resize";
 import { DashboardWidgetGallery } from "./dashboard-widget-gallery";
 import { DashboardInsightCard } from "./dashboard-insight-card";
+import { useAppearance } from "./appearance-provider";
+import { materialVariables } from "./appearance-model";
 import { DashboardAiAssistant } from "./dashboard-ai-assistant";
 import { HotProductsPanel } from "./hot-products-panel";
 import { LowInventoryPanel } from "./low-inventory-panel";
@@ -53,9 +59,9 @@ import { MetricCard } from "./metric-card";
 import { SalesTrend } from "./sales-trend";
 
 const sizeOptions = [
-  { value: "1x1", label: "1 × 1" },
-  { value: "2x1", label: "2 × 1" },
-  { value: "2x2", label: "2 × 2" },
+  { value: "1x1", label: "窄卡 · 高度自适应" },
+  { value: "2x1", label: "宽卡 · 高度自适应" },
+  { value: "2x2", label: "宽卡 · 高度自适应" },
 ] as const satisfies ReadonlyArray<{ value: DashboardLayoutSize; label: string }>;
 
 const metricLabels = {
@@ -106,6 +112,12 @@ function ReadyLayoutEditor({
 }: EditorProps & { persistence: Persistence }) {
   const { state, dispatch } = persistence;
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const { setCards } = useAppearance();
+  useEffect(() => {
+    setCards(state.draft.cards.map((card) => ({ id: card.id, title: cardTitle(card) })));
+    return () => setCards([]);
+  }, [state.draft.cards, setCards]);
+  const [initialResults, setInitialResults] = useState<Record<string, DashboardInsightResult>>({});
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const gridRef = useRef<HTMLElement>(null);
   const interactions = useCardInteractions(state, dispatch, gridRef);
@@ -119,6 +131,37 @@ function ReadyLayoutEditor({
   useEffect(() => {
     announce(state.mode === "edit" ? "已进入看板编辑模式" : "已退出看板编辑模式");
   }, [announce, state.mode]);
+
+  useEffect(() => {
+    const addedCardId = state.addedCard?.card.id;
+    if (!addedCardId) return;
+
+    let highlightTimer: number | undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      const card = Array.from(
+        gridRef.current?.querySelectorAll<HTMLElement>("[data-dashboard-card-id]") ?? [],
+      ).find((element) => element.dataset.dashboardCardId === addedCardId);
+
+      if (!card) return;
+
+      card.scrollIntoView?.({
+        behavior: "smooth",
+        block: "center",
+      });
+
+      card.classList.add("is-newly-added");
+
+      highlightTimer = window.setTimeout(() => {
+        card.classList.remove("is-newly-added");
+      }, 1600);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (highlightTimer !== undefined) window.clearTimeout(highlightTimer);
+    };
+  }, [state.addedCard?.card.id]);
 
   return (
     <>
@@ -136,11 +179,13 @@ function ReadyLayoutEditor({
         />
         <LayoutMessage state={state} onRetrySave={persistence.save} onReload={persistence.reload} />
         <DashboardGrid
+          initialResults={initialResults}
           data={data}
           periodLabel={periodLabel}
           state={state}
           gridRef={gridRef}
           interactions={interactions}
+          dispatch={dispatch}
         />
       </div>
       <DashboardWidgetGallery
@@ -156,19 +201,24 @@ function ReadyLayoutEditor({
           setGalleryOpen(false);
           interactions.announce("组件已添加到看板末尾");
         }}
-        onAddInsight={(component, preview) => {
+        onAddInsight={(component, preview, view) => {
           interactions.prepareAnimation();
+          const savedView = component === "pieChart" && view !== "report" ? view : undefined;
+          const card = createInsightDashboardCard(
+            component,
+            preview.result.title,
+            preview.query,
+            state.draft.cards,
+            undefined,
+            savedView,
+          );
+          setInitialResults((results) => ({ ...results, [card.id]: preview.result }));
           dispatch({
             type: "cardAdded",
-            card: createInsightDashboardCard(
-              component,
-              preview.result.title,
-              preview.query,
-              state.draft.cards,
-            ),
+            card,
           });
           setGalleryOpen(false);
-          interactions.announce("AI 组件已加入草稿，可撤销或删除");
+          interactions.announce("AI 组件已加入草稿，请点击“完成并保存”");
         }}
       />
       <UndoToast
@@ -182,21 +232,30 @@ function ReadyLayoutEditor({
         <DashboardAiAssistant
           open={assistantOpen}
           onOpenChange={onAssistantOpenChange}
-          onInsightCreated={(preview) => {
+          isInsightAdded={(preview) =>
+            state.draft.cards.some((card) => initialResults[card.id] === preview.result)
+          }
+          onInsightCreated={(preview, view) => {
             if (state.draft.cards.length >= 24) throw new Error("看板最多包含 24 张卡片");
-            const component = preview.result.kind === "pie" ? "pieChart" : "report";
+            const component = preview.result.kind === "report" ? "report" : "pieChart";
+            const savedView = component === "pieChart" && view !== "report" ? view : undefined;
+            const card = createInsightDashboardCard(
+              component,
+              preview.result.title,
+              preview.query,
+              state.draft.cards,
+              undefined,
+              savedView,
+            );
+            setInitialResults((results) => ({ ...results, [card.id]: preview.result }));
             dispatch({ type: "modeChanged", mode: "edit" });
             interactions.prepareAnimation();
             dispatch({
               type: "cardAdded",
-              card: createInsightDashboardCard(
-                component,
-                preview.result.title,
-                preview.query,
-                state.draft.cards,
-              ),
+              card,
             });
-            interactions.announce("AI 组件已加入草稿，可撤销或删除");
+            interactions.announce("AI 组件已加入草稿，请点击“完成并保存”");
+            onAssistantOpenChange(false);
           }}
         />
       )}
@@ -209,19 +268,26 @@ function ReadyLayoutEditor({
 }
 
 function DashboardGrid({
+  initialResults,
   data,
   periodLabel,
   state,
   gridRef,
   interactions,
+  dispatch,
 }: {
+  initialResults: Record<string, DashboardInsightResult>;
   data: AnalyticsDashboardResponse;
   periodLabel: string;
   state: LayoutEditorState;
   gridRef: MutableRefObject<HTMLElement | null>;
   interactions: ReturnType<typeof useCardInteractions>;
+  dispatch: Dispatch<LayoutEditorAction>;
 }) {
   const isEditing = state.mode === "edit";
+  useLayoutEffect(() => {
+    if (gridRef.current) return observeContentFit(gridRef.current);
+  }, [gridRef]);
   return (
     <section
       ref={gridRef}
@@ -245,7 +311,9 @@ function DashboardGrid({
           }
           interactions={interactions}
         >
-          {renderCard(card, data, periodLabel)}
+          {renderCard(card, data, periodLabel, initialResults[card.id], (view) =>
+            dispatch({ type: "insightViewChanged", cardId: card.id, view }),
+          )}
         </DashboardCard>
       ))}
     </section>
@@ -574,21 +642,23 @@ type DashboardCardProps = {
 };
 
 function DashboardCard(props: DashboardCardProps) {
+  const { settings } = useAppearance();
   const { card, isEditing, isDragging, isResizing, previewSize, children } = props;
   const title = cardTitle(card);
   const currentSize = previewSize ?? card.size;
   const footprint = footprintForSize(currentSize);
   const style = {
+    ...materialVariables(settings.cards[card.id] ?? settings.widgets),
     "--widget-columns": footprint.columns,
-    "--widget-rows": footprint.rows,
   } as CSSProperties;
   return (
     <div
       data-dashboard-card-id={card.id}
+      data-component={card.component}
       data-size={card.size}
       data-preview-size={previewSize}
       style={style}
-      className={`dashboard-layout-card min-w-0 ${isEditing ? "is-editing" : ""} ${isDragging ? "is-dragging" : ""} ${isResizing ? "is-resizing has-size-preview" : ""}`}
+      className={`dashboard-layout-card appearance-surface min-w-0 ${isEditing ? "is-editing" : ""} ${isDragging ? "is-dragging" : ""} ${isResizing ? "is-resizing has-size-preview" : ""}`}
       onDragOver={(event) => isEditing && event.preventDefault()}
       onDragEnter={() => handleDragEnter(props)}
       onDrop={(event) => {
@@ -621,7 +691,7 @@ function CardControls(props: DashboardCardProps & { title: string; size: Dashboa
         ⠿
       </span>
       <span className="dashboard-size-readout" aria-hidden="true">
-        {sizeLabel(props.size)}
+        {footprintForSize(props.size).columns === 1 ? "窄卡" : "宽卡"}
       </span>
       <CardMoreMenu {...props} open={menuOpen} onOpenChange={setMenuOpen} />
     </div>
@@ -677,12 +747,13 @@ function CardMoreMenu(
       </button>
       {props.open && (
         <div role="menu" aria-label={`${props.title}更多操作`} className="layout-card-more-menu">
-          <p>调整大小</p>
+          <p>调整宽度 · 高度随内容变化</p>
           {sizeOptions
             .filter((option) =>
-              DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes.some(
-                (size) => size === option.value,
-              ),
+              widthSizes(
+                DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes,
+                props.card.size,
+              ).some((size) => size === option.value),
             )
             .map((option) => (
               <button
@@ -720,7 +791,10 @@ function CardMoreMenu(
 function CardResizeHandle(
   props: DashboardCardProps & { title: string; size: DashboardLayoutSize },
 ) {
-  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes;
+  const allowedSizes = widthSizes(
+    DASHBOARD_COMPONENT_REGISTRY[props.card.component].allowedSizes,
+    props.size,
+  );
   const currentIndex = allowedSizes.findIndex((size) => size === props.size);
   return (
     <span
@@ -757,7 +831,7 @@ function UndoToast({
   const title = cardTitle(snapshot.card);
   return (
     <div className="layout-undo-toast" role="status">
-      <span>{isAddition ? `已添加 ${title}` : `已移除 ${title}`}</span>
+      <span>{isAddition ? `已添加 ${title}，请点击“完成并保存”` : `已移除 ${title}`}</span>
       <button
         type="button"
         aria-label={`撤销${isAddition ? "添加" : "删除"}${title}`}
@@ -850,7 +924,9 @@ function updateResize(
   const session = sessionRef.current;
   if (!session || session.pointerId !== event.pointerId) return;
   const width = gridRef.current?.getBoundingClientRect().width ?? 0;
-  const columns = width >= 768 ? 4 : 2;
+  const columns = gridRef.current
+    ? getComputedStyle(gridRef.current).gridTemplateColumns.split(" ").filter(Boolean).length || 2
+    : 2;
   const unitSize = (width - 16 * (columns - 1)) / columns;
   const size = previewWidgetSize({
     startSize: session.startSize,
@@ -898,7 +974,10 @@ function resizeWithKeyboard(
   interactions: ReturnType<typeof useCardInteractions>,
 ) {
   if (event.key === "Escape") return interactions.cancelResize();
-  const allowedSizes = DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes;
+  const allowedSizes = widthSizes(
+    DASHBOARD_COMPONENT_REGISTRY[card.component].allowedSizes,
+    card.size,
+  );
   const nextSize = keyboardResizeTarget(event.key, card.size, allowedSizes);
   if (!nextSize) return;
   event.preventDefault();
@@ -909,6 +988,8 @@ function renderCard(
   card: DashboardLayoutCard,
   data: AnalyticsDashboardResponse,
   periodLabel: string,
+  initialResult?: DashboardInsightResult,
+  onViewChange?: (view: DashboardChartView) => void,
 ): ReactNode {
   if (card.component === "metric") {
     const metric = data.metrics.find((candidate) => candidate.key === card.config.metric) ?? {
@@ -919,7 +1000,14 @@ function renderCard(
     return <MetricCard metric={metric} periodLabel={periodLabel} />;
   }
   if (card.component === "salesTrend") {
-    return <SalesTrend points={data.trend} periodLabel={periodLabel} />;
+    return (
+      <SalesTrend
+        points={data.trend}
+        periodLabel={periodLabel}
+        view={card.config.view}
+        onViewChange={onViewChange as ((view: "line" | "area") => void) | undefined}
+      />
+    );
   }
   if (card.component === "inventoryAlerts") {
     return (
@@ -930,7 +1018,14 @@ function renderCard(
     );
   }
   if (card.component === "pieChart" || card.component === "report") {
-    return <DashboardInsightCard query={card.config.query} />;
+    return (
+      <DashboardInsightCard
+        query={card.config.query}
+        initialResult={initialResult}
+        view={card.component === "pieChart" ? card.config.view : undefined}
+        onViewChange={onViewChange}
+      />
+    );
   }
   return <HotProductsPanel items={data.products.slice(0, card.config.limit)} />;
 }

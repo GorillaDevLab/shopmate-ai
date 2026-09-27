@@ -3,13 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-const BUTTON_CLASS = {
-  default:
-    "min-h-11 rounded-lg border border-app-line bg-app-surface px-3 text-sm font-medium text-app-text transition-colors hover:bg-gray-50 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60",
-  sidebar: "sidebar-action disabled:cursor-not-allowed disabled:opacity-60",
-} as const;
-
-export function LogoutButton({ variant = "default" }: { variant?: keyof typeof BUTTON_CLASS }) {
+export function LogoutButton() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState(false);
@@ -24,6 +18,7 @@ export function LogoutButton({ variant = "default" }: { variant?: keyof typeof B
         headers: { Accept: "application/json" },
       });
       if (!response.ok) throw new Error("logout failed");
+      window.dispatchEvent(new Event("shopmate:logout"));
       router.replace("/login");
       router.refresh();
     } catch {
@@ -33,22 +28,19 @@ export function LogoutButton({ variant = "default" }: { variant?: keyof typeof B
   }
 
   return (
-    <div className={variant === "sidebar" ? "grid gap-1" : "flex items-center gap-2"}>
+    <div className="flex items-center gap-2">
       {error && (
-        <span
-          className={variant === "sidebar" ? "px-3 text-xs text-red-300" : "text-xs text-danger"}
-          role="alert"
-        >
+        <span className="text-xs text-danger" role="alert">
           退出失败，请重试
         </span>
       )}
       <button
         type="button"
-        className={BUTTON_CLASS[variant]}
+        className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-app-line bg-app-surface px-3 text-sm font-medium text-app-text transition-colors hover:bg-app-bg active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-60"
         onClick={logout}
         disabled={isSubmitting}
       >
-        {variant === "sidebar" && <LogoutIcon />}
+        <LogoutIcon />
         {isSubmitting ? "退出中…" : "退出登录"}
       </button>
     </div>

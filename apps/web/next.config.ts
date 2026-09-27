@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 
 const apiBaseUrl = resolveApiBaseUrl(process.env.API_BASE_URL);
+const distDir = process.env.NEXT_DIST_DIR?.trim() || ".next";
 
 const nextConfig: NextConfig = {
   agentRules: false,
+  distDir,
   async rewrites() {
     return [
       {

@@ -4,6 +4,7 @@ import {
   DashboardInsightGenerateRequestSchema,
   DashboardInsightQuerySchema,
   DashboardInsightResultSchema,
+  getDashboardInsightViews,
 } from "../index.js";
 
 const query = {
@@ -48,6 +49,63 @@ describe("AI 经营查询 DSL", () => {
     ).toBe(false);
   });
 
+  it.each(["auto", "pie", "bar", "line", "area", "report"])("生成请求接受 %s 图表意图", (kind) => {
+    expect(DashboardInsightGenerateRequestSchema.parse({ question: "查询", kind })).toEqual({
+      question: "查询",
+      kind,
+    });
+  });
+
+  it("查询不接受 auto，但接受具体图表类型", () => {
+    for (const visualization of ["pie", "bar", "line", "area", "report"] as const) {
+      expect(
+        DashboardInsightQuerySchema.safeParse({
+          ...query,
+          groupBy: visualization === "report" ? null : query.groupBy,
+          visualization,
+        }).success,
+      ).toBe(true);
+    }
+    expect(DashboardInsightQuerySchema.safeParse({ ...query, visualization: "auto" }).success).toBe(
+      false,
+    );
+  });
+
+  it("从查询纯函数推导兼容视图", () => {
+    expect(getDashboardInsightViews(query)).toEqual(["pie", "bar"]);
+    expect(
+      getDashboardInsightViews({
+        ...query,
+        metric: "averageOrderValue",
+        aggregation: "average",
+        groupBy: "store",
+        visualization: "bar",
+      }),
+    ).toEqual(["bar"]);
+    expect(getDashboardInsightViews({ ...query, groupBy: "date", visualization: "line" })).toEqual([
+      "line",
+      "area",
+      "bar",
+    ]);
+    expect(getDashboardInsightViews({ ...query, groupBy: "date", visualization: "pie" })).toEqual([
+      "line",
+      "area",
+      "bar",
+    ]);
+    expect(getDashboardInsightViews({ ...query, groupBy: null, visualization: "report" })).toEqual([
+      "report",
+    ]);
+    expect(
+      getDashboardInsightViews({
+        ...query,
+        dataset: "products",
+        metric: "productCount",
+        aggregation: "count",
+        visualization: "bar",
+      }),
+    ).toEqual([]);
+  });
+
   it("饼图与报告结果只能携带受限结构化内容", () => {
     expect(
       DashboardInsightResultSchema.parse({
@@ -67,6 +125,52 @@ describe("AI 经营查询 DSL", () => {
         highlights: [],
         metrics: [],
         html: "<script>alert(1)</script>",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("接受最多 366 个日期唯一且升序的序列结果", () => {
+    const points = Array.from({ length: 366 }, (_, index) => {
+      const date = new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10);
+      return { date, value: index };
+    });
+    expect(
+      DashboardInsightResultSchema.parse({
+        kind: "series",
+        title: "每日销售额",
+        summary: "全年趋势",
+        unit: "currencyMinor",
+        points,
+      }),
+    ).toBeTruthy();
+    expect(
+      DashboardInsightResultSchema.safeParse({
+        kind: "series",
+        title: "每日销售额",
+        summary: "错误顺序",
+        unit: "currencyMinor",
+        points: [points[1], points[0]],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("拒绝 367 个序列点和重复日期", () => {
+    const points = Array.from({ length: 367 }, (_, index) => ({
+      date: new Date(Date.UTC(2024, 0, 1 + index)).toISOString().slice(0, 10),
+      value: index,
+    }));
+    const result = {
+      kind: "series",
+      title: "每日销售额",
+      summary: "边界校验",
+      unit: "currencyMinor",
+      points,
+    } as const;
+    expect(DashboardInsightResultSchema.safeParse(result).success).toBe(false);
+    expect(
+      DashboardInsightResultSchema.safeParse({
+        ...result,
+        points: [points[0], points[0]],
       }).success,
     ).toBe(false);
   });

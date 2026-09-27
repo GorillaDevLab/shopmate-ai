@@ -32,18 +32,14 @@ function HotProductItem({ item }: { item: DashboardHotProduct }) {
         <h3 className="text-sm font-semibold">{item.name}</h3>
         <p className="mt-1 text-xs text-app-muted lg:mt-0">SKU：{item.skuCodes.join("、")}</p>
       </div>
-      <dl className="grid grid-cols-2 gap-3 text-xs sm:text-right">
-        <div className="sm:flex sm:items-baseline sm:justify-end sm:gap-3">
+      <dl className="product-values">
+        <div>
           <dt className="text-app-muted">本期销量</dt>
-          <dd className="mt-1 break-all font-semibold tabular-nums sm:mt-0 sm:text-sm">
-            {item.sold === null ? "暂无数据" : `${count.format(item.sold)} 件`}
-          </dd>
+          <dd>{item.sold === null ? "暂无数据" : `${count.format(item.sold)} 件`}</dd>
         </div>
-        <div className="sm:flex sm:items-baseline sm:justify-end sm:gap-3">
+        <div>
           <dt className="text-app-muted">本期销售额</dt>
-          <dd className="mt-1 break-all font-semibold tabular-nums sm:mt-0 sm:text-sm">
-            {formatMoneyMinor(item.salesMinor)}
-          </dd>
+          <dd>{formatMoneyMinor(item.salesMinor)}</dd>
         </div>
       </dl>
     </li>

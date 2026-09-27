@@ -22,6 +22,245 @@ const query = {
 } as const;
 
 describe("AI 看板组件生成服务", () => {
+  it("图表追问传递已校验的历史及上一查询，仍使用当前身份执行", async () => {
+    const provider = scriptedProvider(query);
+    const execute = vi.fn().mockResolvedValue({
+      kind: "pie",
+      title: "销售",
+      summary: "本期",
+      unit: "currencyMinor",
+      slices: [],
+    });
+    const history = [
+      { role: "user", content: "看各商品销售额" },
+      { role: "assistant", content: "已生成。" },
+    ];
+    await new DashboardInsightService(provider, { execute }).preview(context, {
+      question: "只看上个月",
+      kind: "pie",
+      history,
+      previousQuery: query,
+    });
+    const request = provider.generate.mock.calls[0]?.[0];
+    expect(request?.messages).toEqual(expect.arrayContaining(history));
+    expect(request?.messages.at(-1)?.content).toContain(JSON.stringify(query));
+    expect(execute).toHaveBeenCalledWith(context, query);
+  });
+  it("auto 只调用一次模型并按日期形状确定为折线图", async () => {
+    const dateQuery = { ...query, groupBy: "date", visualization: "line" } as const;
+    const provider = scriptedProvider(dateQuery);
+    const executor = {
+      execute: vi.fn().mockResolvedValue({
+        kind: "series",
+        title: "每日销售额",
+        summary: "近 30 天",
+        unit: "currencyMinor",
+        points: [],
+      }),
+    };
+    await expect(
+      new DashboardInsightService(provider, executor).preview(context, {
+        question: "最近每天销售额趋势",
+        kind: "auto",
+      }),
+    ).resolves.toMatchObject({ query: dateQuery, result: { kind: "series" } });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto 类目构成意图确定为饼图，普通类目确定为柱状图", async () => {
+    for (const [question, visualization] of [
+      ["各商品销售额占比构成", "pie"],
+      ["各商品销售额对比", "bar"],
+    ] as const) {
+      const planned = { ...query, visualization };
+      const provider = scriptedProvider(planned);
+      const executor = {
+        execute: vi.fn().mockResolvedValue({
+          kind: "pie",
+          title: "商品销售额",
+          summary: "近 30 天",
+          unit: "currencyMinor",
+          slices: [],
+        }),
+      };
+      await new DashboardInsightService(provider, executor).preview(context, {
+        question,
+        kind: "auto",
+      });
+      expect(executor.execute).toHaveBeenCalledWith(context, planned);
+    }
+  });
+
+  it("显式不兼容图表给出清晰中文 400", async () => {
+    const provider = scriptedProvider({ ...query, visualization: "line" });
+    const service = new DashboardInsightService(provider, { execute: vi.fn() });
+    await expect(
+      service.preview(context, { question: "商品销售额", kind: "line" }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        message: expect.stringContaining("请选择兼容视图"),
+        allowedViews: ["pie", "bar"],
+      },
+    });
+  });
+
+  it("新生成的按日期饼图保持不兼容，不会执行旧版饼图路径", async () => {
+    const planned = { ...query, groupBy: "date", visualization: "pie" } as const;
+    const executor = { execute: vi.fn() };
+    await expect(
+      new DashboardInsightService(scriptedProvider(planned), executor).preview(context, {
+        question: "每日销售额饼图",
+        kind: "pie",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        allowedViews: ["line", "area", "bar"],
+      },
+    });
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("auto 不为尚无安全执行器的 products 分类查询广告图表", async () => {
+    const planned = {
+      ...query,
+      dataset: "products",
+      metric: "productCount",
+      aggregation: "count",
+      groupBy: "product",
+      visualization: "bar",
+    } as const;
+    const provider = scriptedProvider(planned);
+    const executor = { execute: vi.fn() };
+    await expect(
+      new DashboardInsightService(provider, executor).preview(context, {
+        question: "按商品统计商品数",
+        kind: "auto",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        message: "商品计数目前仅支持不分组的报告，请取消分组后生成报告",
+        allowedViews: [],
+      },
+    });
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("显式 report 的 products 分组查询返回同一安全 400", async () => {
+    const planned = {
+      ...query,
+      dataset: "products",
+      metric: "productCount",
+      aggregation: "count",
+      groupBy: "product",
+      visualization: "report",
+    } as const;
+    const executor = { execute: vi.fn() };
+    await expect(
+      new DashboardInsightService(scriptedProvider(planned), executor).preview(context, {
+        question: "按商品统计商品数报告",
+        kind: "report",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: {
+        code: "INSIGHT_VIEW_INCOMPATIBLE",
+        message: "商品计数目前仅支持不分组的报告，请取消分组后生成报告",
+        allowedViews: [],
+      },
+    });
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("新规划的分组报告保持受限并返回兼容视图指引", async () => {
+    const provider = scriptedProvider({ ...query, groupBy: "store", visualization: "report" });
+    await expect(
+      new DashboardInsightService(provider, { execute: vi.fn() }).preview(context, {
+        question: "按门店生成报告",
+        kind: "report",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      response: { code: "INSIGHT_VIEW_INCOMPATIBLE", allowedViews: ["pie", "bar"] },
+    });
+  });
+
+  it("显式报告会覆盖模型遗留的饼图字段并执行报告查询", async () => {
+    const planned = { ...query, groupBy: null, visualization: "pie" } as const;
+    const executor = {
+      execute: vi.fn().mockResolvedValue({
+        kind: "report",
+        title: "经营报告",
+        summary: "近 30 天",
+        highlights: ["销售额保持稳定"],
+        metrics: [{ label: "销售额", value: "¥1,000" }],
+      }),
+    };
+    const service = new DashboardInsightService(scriptedProvider(planned), executor);
+
+    await expect(
+      service.preview(context, { question: "最近经营情况", kind: "report" }),
+    ).resolves.toMatchObject({
+      query: { ...planned, visualization: "report" },
+      result: { kind: "report" },
+    });
+    expect(executor.execute).toHaveBeenCalledWith(context, {
+      ...planned,
+      visualization: "report",
+    });
+  });
+
+  it("模型工具声明门店、渠道分组和筛选结构，并传入当前商家目录", async () => {
+    const storeQuery = { ...query, groupBy: "store" };
+    const provider = scriptedProvider(storeQuery);
+    const catalog = [{ id: "s1", name: "朝阳店", platform: "OFFLINE" }];
+    const executor = {
+      catalog: vi.fn().mockResolvedValue(catalog),
+      execute: vi.fn().mockResolvedValue({
+        kind: "pie",
+        title: "门店销售额",
+        summary: "近30天",
+        unit: "currencyMinor",
+        slices: [],
+      }),
+    };
+    await new DashboardInsightService(provider, executor).preview(context, {
+      question: "各门店销售额",
+      kind: "pie",
+    });
+    expect(executor.catalog).toHaveBeenCalledWith(context);
+    expect(provider.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "user",
+            content: expect.stringContaining(JSON.stringify(catalog)),
+          }),
+        ]),
+        tools: [
+          expect.objectContaining({
+            inputSchema: expect.objectContaining({
+              properties: expect.objectContaining({
+                groupBy: expect.objectContaining({
+                  enum: expect.arrayContaining(["store", "platform"]),
+                }),
+                filters: expect.objectContaining({
+                  items: expect.objectContaining({ required: ["field", "operator", "values"] }),
+                }),
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(executor.execute).toHaveBeenCalledWith(context, storeQuery);
+  });
   it("严格校验模型 DSL 后在服务端身份范围执行", async () => {
     const provider = scriptedProvider(query);
     const executor = {

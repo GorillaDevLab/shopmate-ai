@@ -2,14 +2,19 @@
 
 import {
   DASHBOARD_COMPONENT_REGISTRY,
+  getDashboardInsightViews,
   type DashboardInsightPreviewResponse,
+  type DashboardChartView,
+  type DashboardInsightKind,
   type DashboardLayoutComponent,
 } from "@shopmate/contracts";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import { generateDashboardInsight } from "./dashboard-insight-api";
-import { DashboardPieChart } from "./dashboard-pie-chart";
-import { DashboardReportCard } from "./dashboard-report-card";
+import {
+  DashboardInsightPresentation,
+  recommendInsightView,
+} from "./dashboard-insight-presentation";
 
 type StandardComponent = Exclude<DashboardLayoutComponent, "pieChart" | "report">;
 
@@ -20,6 +25,7 @@ type DashboardWidgetGalleryProps = {
   onAddInsight?: (
     component: "pieChart" | "report",
     preview: DashboardInsightPreviewResponse,
+    view?: DashboardChartView,
   ) => void;
   onClose: () => void;
 };
@@ -46,9 +52,19 @@ export function DashboardWidgetGallery({
   const [selected, setSelected] = useState<DashboardLayoutComponent>("metric");
   const [question, setQuestion] = useState("");
   const [preview, setPreview] = useState<DashboardInsightPreviewResponse>();
+  const [previewView, setPreviewView] = useState<DashboardChartView>();
+  const [generationKind, setGenerationKind] = useState<DashboardInsightKind>("auto");
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string>();
+  const generationRef = useRef(0);
   useGalleryDialog(open, dialogRef);
+  const selectComponent = (component: DashboardLayoutComponent) => {
+    generationRef.current += 1;
+    setPreview(undefined);
+    setPreviewView(undefined);
+    setGenerationError(undefined);
+    setSelected(component);
+  };
   if (!open) return null;
 
   const isFull = cardCount >= 24;
@@ -73,7 +89,7 @@ export function DashboardWidgetGallery({
                 key={component}
                 type="button"
                 aria-pressed={selected === component}
-                onClick={() => setSelected(component)}
+                onClick={() => selectComponent(component)}
               >
                 <WidgetMark component={component} />
                 <span>{DASHBOARD_COMPONENT_REGISTRY[component].label}</span>
@@ -83,7 +99,11 @@ export function DashboardWidgetGallery({
           <section className="widget-gallery-preview" aria-live="polite">
             <div className="widget-gallery-preview-card">
               {preview && isInsightComponent(selected) ? (
-                <InsightPreview preview={preview} />
+                <InsightPreview
+                  preview={preview}
+                  view={previewView}
+                  onViewChange={setPreviewView}
+                />
               ) : (
                 <WidgetPreview component={selected} />
               )}
@@ -99,27 +119,37 @@ export function DashboardWidgetGallery({
                 component={selected}
                 question={question}
                 preview={preview}
+                generationKind={generationKind}
                 generating={generating}
                 error={generationError}
                 isFull={isFull}
                 onQuestionChange={setQuestion}
+                onKindChange={setGenerationKind}
                 onGenerate={async () => {
+                  const requestId = generationRef.current + 1;
+                  generationRef.current = requestId;
                   setGenerating(true);
                   setGenerationError(undefined);
                   try {
-                    setPreview(
-                      await generateDashboardInsight(
-                        question,
-                        selected === "pieChart" ? "pie" : "report",
-                      ),
+                    const nextPreview = await generateDashboardInsight(question, generationKind);
+                    if (requestId !== generationRef.current) return;
+                    setPreview(nextPreview);
+                    setPreviewView(
+                      recommendInsightView(nextPreview.result, nextPreview.query.visualization)
+                        .view,
                     );
                   } catch (error: unknown) {
+                    if (requestId !== generationRef.current) return;
                     setGenerationError(error instanceof Error ? error.message : "生成失败，请重试");
                   } finally {
-                    setGenerating(false);
+                    if (requestId === generationRef.current) setGenerating(false);
                   }
                 }}
-                onAdd={() => preview && onAddInsight?.(selected, preview)}
+                onAdd={() => {
+                  if (!preview) return;
+                  const component = preview.result.kind === "report" ? "report" : "pieChart";
+                  onAddInsight?.(component, preview, previewView);
+                }}
               />
             ) : (
               <button type="button" disabled={isFull} onClick={() => onAdd(selected)}>
@@ -179,10 +209,12 @@ function InsightGenerator(props: {
   component: "pieChart" | "report";
   question: string;
   preview?: DashboardInsightPreviewResponse;
+  generationKind: DashboardInsightKind;
   generating: boolean;
   error?: string;
   isFull: boolean;
   onQuestionChange: (value: string) => void;
+  onKindChange: (value: DashboardInsightKind) => void;
   onGenerate: () => Promise<void>;
   onAdd: () => void;
 }) {
@@ -193,6 +225,19 @@ function InsightGenerator(props: {
   return (
     <form className="widget-insight-form" onSubmit={submit}>
       <label htmlFor="widget-insight-question">想分析什么？</label>
+      <label htmlFor="widget-insight-kind">呈现方式</label>
+      <select
+        id="widget-insight-kind"
+        value={props.generationKind}
+        onChange={(event) => props.onKindChange(event.target.value as DashboardInsightKind)}
+      >
+        <option value="auto">让 AI 自动选择</option>
+        <option value="line">折线图</option>
+        <option value="area">面积图</option>
+        <option value="bar">柱状图</option>
+        <option value="pie">环形图</option>
+        <option value="report">经营报告</option>
+      </select>
       <textarea
         id="widget-insight-question"
         value={props.question}
@@ -222,9 +267,30 @@ function InsightGenerator(props: {
   );
 }
 
-function InsightPreview({ preview }: { preview: DashboardInsightPreviewResponse }) {
-  if (preview.result.kind === "pie") return <DashboardPieChart result={preview.result} />;
-  return <DashboardReportCard result={preview.result} />;
+function InsightPreview({
+  preview,
+  view,
+  onViewChange,
+}: {
+  preview: DashboardInsightPreviewResponse;
+  view?: DashboardChartView;
+  onViewChange: (view: DashboardChartView) => void;
+}) {
+  const allowed = getDashboardInsightViews(preview.query);
+  const safeView = view && allowed.includes(view) ? view : undefined;
+  return (
+    <>
+      <DashboardInsightPresentation
+        result={preview.result}
+        view={safeView}
+        onViewChange={onViewChange}
+        allowDonut={preview.query.metric !== "averageOrderValue"}
+      />
+      <p className="widget-gallery-recommendation">
+        {recommendInsightView(preview.result, safeView ?? "auto").reason}
+      </p>
+    </>
+  );
 }
 
 function isInsightComponent(

@@ -33,8 +33,14 @@ export function readDemoAuthConfig(env: NodeJS.ProcessEnv): DemoAuthConfig | nul
     merchantId: values.DEMO_AUTH_MERCHANT_ID.trim(),
     sessionSecret: values.DEMO_SESSION_SECRET,
     ttlSeconds,
-    secureCookie: env.NODE_ENV === "production",
+    secureCookie: readSecureCookie(env),
   };
+}
+
+function readSecureCookie(env: NodeJS.ProcessEnv): boolean {
+  if (env.DEMO_AUTH_SECURE_COOKIE === "false") return false;
+  if (env.DEMO_AUTH_SECURE_COOKIE === "true") return true;
+  return env.NODE_ENV === "production";
 }
 
 export function readOptionalDemoAuthConfig(env: NodeJS.ProcessEnv): DemoAuthConfig | null {

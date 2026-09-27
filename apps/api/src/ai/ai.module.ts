@@ -9,6 +9,7 @@ import { ProductService } from "../products/product.service.js";
 import { DeepSeekLLMProvider } from "./providers/deepseek-llm.provider.js";
 import { MockLLMProvider } from "./providers/mock-llm.provider.js";
 import { AiChatController } from "./chat/ai-chat.controller.js";
+import { AssistantRunController } from "./chat/assistant-run.controller.js";
 import { AiChatService } from "./chat/ai-chat.service.js";
 import { BusinessAgent } from "./agent/business-agent.js";
 import {
@@ -31,6 +32,12 @@ import { AI_READ_TOOL_NAMES } from "@shopmate/contracts";
 import { DashboardInsightController } from "./insights/dashboard-insight.controller.js";
 import { DashboardInsightExecutor } from "./insights/dashboard-insight-executor.js";
 import { DashboardInsightService } from "./insights/dashboard-insight.service.js";
+import { StoreSalesReader } from "./insights/store-sales-reader.js";
+import {
+  createStoreCatalogTool,
+  createBusinessQueryTool,
+  createBusinessChartTool,
+} from "./tools/business-query.tools.js";
 
 export const AI_LLM_PROVIDER = Symbol("AI_LLM_PROVIDER");
 export const AI_TOOL_REGISTRY = Symbol("AI_TOOL_REGISTRY");
@@ -38,7 +45,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
 
 @Module({
   imports: [AnalyticsModule, ProductModule],
-  controllers: [AiChatController, DashboardInsightController],
+  controllers: [AiChatController, DashboardInsightController, AssistantRunController],
   providers: [
     {
       provide: AI_LLM_PROVIDER,
@@ -55,9 +62,16 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         productService: Parameters<typeof createProductDetailsToolRegistration>[0],
         performanceService: Parameters<typeof createBestSellersToolRegistration>[0],
         provider: DeepSeekLLMProvider | MockLLMProvider,
+        insightExecutor: DashboardInsightExecutor,
       ) => {
         const registry = new ToolRegistry({
-          allowedToolNames: [...AI_READ_TOOL_NAMES, GENERATE_PRODUCT_COPY_TOOL_NAME],
+          allowedToolNames: [
+            ...AI_READ_TOOL_NAMES,
+            GENERATE_PRODUCT_COPY_TOOL_NAME,
+            "get_store_catalog",
+            "query_business_data",
+            "create_business_chart",
+          ],
         });
         registry.register(createProductDetailsToolRegistration(productService));
         registry.register(createInventoryRisksToolRegistration(lowStockService));
@@ -65,6 +79,9 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         registry.register(createSalesTrendToolRegistration(dashboardService));
         registry.register(createBestSellersToolRegistration(performanceService));
         registry.register(createProductPerformanceToolRegistration(performanceService));
+        registry.register(createStoreCatalogTool(new StoreSalesReader()));
+        registry.register(createBusinessQueryTool(insightExecutor));
+        registry.register(createBusinessChartTool(insightExecutor));
 
         const productCopyService = new ProductCopyService(productService, provider);
         registry.register(createGenerateProductCopyToolRegistration(productCopyService));
@@ -77,6 +94,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         ProductService,
         ProductPerformanceService,
         AI_LLM_PROVIDER,
+        DashboardInsightExecutor,
       ],
     },
     {
@@ -87,8 +105,9 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
     },
     {
       provide: AiChatService,
-      useFactory: (agent: BusinessAgent) => new AiChatService(agent),
-      inject: [AI_BUSINESS_AGENT],
+      useFactory: (agent: BusinessAgent, registry: ToolRegistry) =>
+        new AiChatService(agent, registry),
+      inject: [AI_BUSINESS_AGENT, AI_TOOL_REGISTRY],
     },
     {
       provide: DashboardInsightExecutor,

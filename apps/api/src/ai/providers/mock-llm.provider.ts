@@ -170,7 +170,11 @@ function isDashboardInsightRequest(request: LLMGenerationRequest): boolean {
 
 function dashboardInsightResult(request: LLMGenerationRequest): LLMGenerationResult {
   const userText = getLatestUserText(request);
-  const visualization = userText.includes("目标组件：report") ? "report" : "pie";
+  const requested = userText.match(/目标组件：(auto|pie|bar|line|area|report)/u)?.[1] ?? "auto";
+  const dateGrouped = /每天|每日|按日|日期|趋势/u.test(userText);
+  const composition = /占比|构成|份额/u.test(userText);
+  const visualization =
+    requested === "auto" ? (dateGrouped ? "line" : composition ? "pie" : "bar") : requested;
   const metric = userText.includes("销量") ? "unitsSold" : "revenue";
   return toolCallGeneration({
     id: "mock-call-dashboard-insight-001",
@@ -179,7 +183,7 @@ function dashboardInsightResult(request: LLMGenerationRequest): LLMGenerationRes
       dataset: "sales",
       metric,
       aggregation: "sum",
-      groupBy: visualization === "pie" ? "product" : null,
+      groupBy: visualization === "report" ? null : dateGrouped ? "date" : "product",
       dateRange: { start: "2026-08-25", end: "2026-08-31" },
       filters: [],
       order: "desc",

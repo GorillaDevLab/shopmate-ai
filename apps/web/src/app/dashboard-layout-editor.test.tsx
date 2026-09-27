@@ -1,10 +1,23 @@
 import { DEFAULT_DASHBOARD_LAYOUT } from "@shopmate/contracts";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { render } from "../test/assistant-render";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "./dashboard-layout-api";
 import { dashboardResponsePreview } from "./dashboard-data";
 import { DashboardLayoutEditor } from "./dashboard-layout-editor";
+import { useState } from "react";
+import * as assistantTransport from "./assistant/transport";
+vi.mock("./assistant/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./assistant/transport")>()),
+  runAssistant: vi.fn(),
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+import * as insights from "./dashboard-insight-api";
+vi.mock("./dashboard-insight-api", () => ({
+  generateDashboardInsight: vi.fn(),
+  executeDashboardInsight: vi.fn(),
+}));
 
 vi.mock("./dashboard-layout-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./dashboard-layout-api")>();
@@ -33,6 +46,65 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("DashboardLayoutEditor", () => {
+  it("先预览，再主动加入可见草稿，复用结果且不自动保存", async () => {
+    const result = {
+      kind: "pie" as const,
+      title: "测试销售占比",
+      summary: "近30天",
+      unit: "currencyMinor" as const,
+      slices: [{ key: "p", label: "商品", value: 100 }],
+    };
+    const query = {
+      dataset: "sales" as const,
+      metric: "revenue" as const,
+      aggregation: "sum" as const,
+      groupBy: "product" as const,
+      dateRange: { start: "2026-08-01", end: "2026-08-31" },
+      filters: [],
+      order: "desc" as const,
+      limit: 8,
+      visualization: "pie" as const,
+    };
+    vi.mocked(insights.generateDashboardInsight).mockResolvedValue({ query, result });
+    vi.mocked(assistantTransport.runAssistant).mockResolvedValue({
+      role: "assistant",
+      content: "分析完成",
+      insightPreview: { query, result },
+    });
+    vi.mocked(insights.executeDashboardInsight).mockResolvedValue(result);
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <DashboardLayoutEditor
+          data={dashboardResponsePreview}
+          periodLabel="近7天"
+          assistantOpen={open}
+          onAssistantOpenChange={setOpen}
+        />
+      );
+    }
+    render(<Harness />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "消息" }), {
+      target: { value: "生成饼图" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发送消息" }));
+    const add = await screen.findByRole("button", { name: "加入看板并查看" });
+    expect(screen.getByRole("dialog", { name: "AI 经营助手" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "测试销售占比" })).toBeInTheDocument();
+    fireEvent.click(add);
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "AI 经营助手" })).not.toBeInTheDocument(),
+    );
+    expect(await screen.findByRole("heading", { name: "测试销售占比" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "完成并保存" })).toBeInTheDocument();
+    expect(api.saveDashboardLayout).not.toHaveBeenCalled();
+    expect(insights.executeDashboardInsight).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "完成并保存" }));
+    await waitFor(() => expect(api.saveDashboardLayout).toHaveBeenCalledTimes(1));
+    const savedCards = vi.mocked(api.saveDashboardLayout).mock.calls[0][0].layout.cards;
+    expect(savedCards.at(-1)).toMatchObject({ component: "pieChart", config: { query } });
+    expect(JSON.stringify(savedCards)).not.toContain('"slices"');
+  });
   it("重新渲染期间保持同一个快捷键监听器", async () => {
     const addListener = vi.spyOn(window, "addEventListener");
     const removeListener = vi.spyOn(window, "removeEventListener");
@@ -222,15 +294,15 @@ describe("DashboardLayoutEditor", () => {
     enterEditMode();
     expect(card("metric-sales")).toHaveAttribute("data-size", "1x1");
     openCardMenu("销售额");
-    expect(screen.getByRole("menuitemradio", { name: "1 × 1" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitemradio", { name: "2 × 1" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "窄卡 · 高度自适应" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "宽卡 · 高度自适应" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitemradio", { name: "2 × 2" })).not.toBeInTheDocument();
     expect(screen.queryByText("整行")).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "下移" })).toBeInTheDocument();
     for (const button of screen.getAllByRole("button")) expect(button).toHaveAccessibleName();
     expect(
       within(card("metric-sales")).getByRole("slider", { name: "调整销售额卡片尺寸" }),
-    ).toHaveAttribute("aria-valuetext", "1 × 1");
+    ).toHaveAttribute("aria-valuetext", "窄卡 · 高度自适应");
   });
 });
 
@@ -241,6 +313,12 @@ function keydownListenerCalls(calls: readonly (readonly unknown[])[]): number {
 async function renderEditor() {
   render(<DashboardLayoutEditor data={dashboardResponsePreview} periodLabel="近 7 天" />);
   await screen.findByRole("button", { name: "编辑看板" });
+  // Wait for passive mount effects (including the keyboard listener), not just DOM insertion.
+  await waitFor(() =>
+    expect(screen.getByRole("status", { name: "布局编辑反馈" })).toHaveTextContent(
+      "已退出看板编辑模式",
+    ),
+  );
 }
 
 function enterEditMode() {

@@ -11,6 +11,7 @@ describe("AI Chat API", () => {
 
   beforeAll(async () => {
     vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("DEEPSEEK_API_KEY", "");
     vi.stubEnv("DEMO_AUTH_EMAIL", "owner@shopmate.co.nz");
     vi.stubEnv("DEMO_AUTH_PASSWORD", "demo-pass-2026");
     vi.stubEnv("DEMO_AUTH_USER_ID", "demo-user");
@@ -44,6 +45,39 @@ describe("AI Chat API", () => {
       .post("/api/v1/ai/chat")
       .send({ message: { role: "user", content: "你好" } })
       .expect(401);
+  });
+  it("工作区身份和流式入口都要求认证", async () => {
+    await request(app.getHttpServer()).get("/api/v1/auth/me").expect(401);
+    await request(app.getHttpServer())
+      .post("/api/v1/ai/assistant/run")
+      .send({ requestId: "unauthorized", message: { role: "user", content: "你好" } })
+      .expect(401);
+    const identity = await request(app.getHttpServer())
+      .get("/api/v1/auth/me")
+      .set("Cookie", cookie)
+      .expect(200);
+    expect(identity.body).toEqual({ userId: "demo-user", merchantId: "demo-merchant" });
+    expect(identity.headers["cache-control"]).toBe("no-store");
+  });
+  it("认证后按 NDJSON 返回状态与唯一结果，重复请求不再执行", async () => {
+    const body = { requestId: "stream-test", message: { role: "user", content: "你好" } };
+    const reply = await request(app.getHttpServer())
+      .post("/api/v1/ai/assistant/run")
+      .set("Cookie", cookie)
+      .send(body)
+      .expect(201);
+    expect(reply.headers["content-type"]).toContain("application/x-ndjson");
+    const events = reply.text
+      .trim()
+      .split("\n")
+      .map((line: string) => JSON.parse(line));
+    expect(events[0].type).toBe("accepted");
+    expect(events.at(-1).type).toBe("completed");
+    await request(app.getHttpServer())
+      .post("/api/v1/ai/assistant/run")
+      .set("Cookie", cookie)
+      .send(body)
+      .expect(409);
   });
 
   it("认证后返回中文 assistant 消息", async () => {

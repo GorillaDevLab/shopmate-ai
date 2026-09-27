@@ -1,0 +1,57 @@
+diff --git a/lib/index.js b/lib/index.js
+index c5ca771c24dd914e342f791716a822431ee32b3a..0fa453d9512ad1bfae9d6f520d241afa446d6833 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -2,7 +2,7 @@
+  * @import {RegExpMatchObject, ReplaceFunction} from 'mdast-util-find-and-replace'
+  * @import {CompileContext, Extension as FromMarkdownExtension, Handle as FromMarkdownHandle, Transform as FromMarkdownTransform} from 'mdast-util-from-markdown'
+  * @import {ConstructName, Options as ToMarkdownExtension} from 'mdast-util-to-markdown'
+- * @import {Link, PhrasingContent} from 'mdast'
++ * @import {Link, Text, PhrasingContent} from 'mdast'
+  */
+ 
+ import {ccount} from 'ccount'
+@@ -132,7 +132,7 @@ function transformGfmAutolinkLiterals(tree) {
+     tree,
+     [
+       [/(https?:\/\/|www(?=\.))([-.\w]+)([^ \t\r\n]*)/gi, findUrl],
+-      [/(?<=^|\s|\p{P}|\p{S})([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/gu, findEmail]
++      [/(^|\s|\p{P}|\p{S})([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/gu, findEmail]
+     ],
+     {ignore: ['link', 'linkReference']}
+   )
+@@ -189,27 +189,29 @@ function findUrl(_, protocol, domain, path, match) {
+ /**
+  * @type {ReplaceFunction}
+  * @param {string} _
++ * @param {string} prefix
+  * @param {string} atext
+  * @param {string} label
+  * @param {RegExpMatchObject} match
+- * @returns {Link | false}
++ * @returns {Array<Link | Text> | false}
+  */
+-function findEmail(_, atext, label, match) {
++function findEmail(_, prefix, atext, label, match) {
+   if (
+     // Not an expected previous character.
+-    !previous(match, true) ||
++    !previous({...match, index: match.index + prefix.length}, true) ||
+     // Label ends in not allowed character.
+     /[-\d_]$/.test(label)
+   ) {
+     return false
+   }
+ 
+-  return {
++  // Retain the boundary consumed instead of lookbehind (Safari before 16.4).
++  return [{type: 'text', value: prefix}, {
+     type: 'link',
+     title: null,
+     url: 'mailto:' + atext + '@' + label,
+     children: [{type: 'text', value: atext + '@' + label}]
+-  }
++  }]
+ }
+ 
+ /**

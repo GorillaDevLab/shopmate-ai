@@ -58,6 +58,7 @@ interface DeepSeekCompletionResponse {
 export interface DeepSeekChatCompletionsClient {
   create(
     request: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+    options?: { signal?: AbortSignal },
   ): Promise<DeepSeekCompletionResponse>;
 }
 
@@ -111,7 +112,7 @@ export class DeepSeekLLMProvider implements LLMProvider {
     });
 
     this.client = {
-      create: (request) => sdk.chat.completions.create(request),
+      create: (request, options) => sdk.chat.completions.create(request, options),
     };
   }
 
@@ -121,10 +122,14 @@ export class DeepSeekLLMProvider implements LLMProvider {
     const body = buildCompletionRequest(request, model);
 
     try {
-      const response = await this.client.create(body);
+      request.signal?.throwIfAborted();
+      const response = request.signal
+        ? await this.client.create(body, { signal: request.signal })
+        : await this.client.create(body);
 
       return mapCompletionResponse(response);
     } catch (error: unknown) {
+      request.signal?.throwIfAborted();
       throw mapProviderError(error);
     }
   }

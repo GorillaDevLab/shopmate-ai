@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import "./appearance.css";
+import "./assistant/assistant.css";
 import { THEME_INIT_SCRIPT } from "./theme";
+import { APPEARANCE_INIT_SCRIPT } from "./appearance-model";
+import { isMobileDebugEnabled, mobileDebugScript } from "./mobile-debug-script";
+import { AssistantWorkspaceProvider } from "./assistant/provider";
 
 export const metadata: Metadata = {
   title: "ShopMate AI｜智能经营助手",
@@ -14,11 +19,17 @@ type RootLayoutProps = Readonly<{
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="zh-CN" data-theme="purple" suppressHydrationWarning>
+    <html lang="zh-CN" data-theme="purple" data-appearance="calm" suppressHydrationWarning>
       <head>
+        {isMobileDebugEnabled(process.env.NEXT_PUBLIC_ENABLE_DEBUG_REPORT) && (
+          <script dangerouslySetInnerHTML={{ __html: mobileDebugScript() }} />
+        )}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: APPEARANCE_INIT_SCRIPT }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <AssistantWorkspaceProvider>{children}</AssistantWorkspaceProvider>
+      </body>
     </html>
   );
 }
