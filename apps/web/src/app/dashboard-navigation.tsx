@@ -5,16 +5,14 @@ import { useId, useState, type ReactNode } from "react";
 import { ThemeSettings } from "./theme-settings";
 import { LogoutButton } from "./logout-button";
 
-export type NavigationSection = "dashboard" | "analytics" | "assistant";
+export type NavigationSection = "analytics" | "assistant";
 
 type Props = {
   readonly active?: NavigationSection;
-  /** 提供时在当前页打开 AI 抽屉，否则跳到完整对话页。 */
-  readonly onAssistant?: () => void;
   readonly onMonitoring: () => void;
 };
 
-export function DashboardNavigation({ active = "dashboard", onAssistant, onMonitoring }: Props) {
+export function DashboardNavigation({ active = "analytics", onMonitoring }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuId = useId();
@@ -37,18 +35,8 @@ export function DashboardNavigation({ active = "dashboard", onAssistant, onMonit
         </button>
         <div id={menuId} className="workspace-menu">
           <nav aria-label="工作台主导航">
-            <NavLink href="/" icon="overview" label="经营看板" current={active === "dashboard"} />
-            <NavLink
-              href="/analytics"
-              icon="analytics"
-              label="经营分析"
-              current={active === "analytics"}
-            />
-            {onAssistant ? (
-              <NavButton icon="ai" label="AI 助手" onClick={() => run(onAssistant)} />
-            ) : (
-              <NavLink href="/chat" icon="ai" label="AI 助手" current={active === "assistant"} />
-            )}
+            <NavLink href="/" icon="analytics" label="经营分析" current={active === "analytics"} />
+            <NavLink href="/chat" icon="ai" label="AI 助手" current={active === "assistant"} />
             <NavButton icon="monitor" label="经营监听" onClick={() => run(onMonitoring)} />
           </nav>
           <div className="workspace-settings">
@@ -106,10 +94,9 @@ function NavButton({
   );
 }
 
-type IconKind = "overview" | "analytics" | "ai" | "monitor" | "menu" | "collapse" | "expand";
+type IconKind = "analytics" | "ai" | "monitor" | "menu" | "collapse" | "expand";
 
 const ICON_PATHS: Record<IconKind, ReactNode> = {
-  overview: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
   analytics: <path d="M4 20V11h3.5v9zm6.25 0V4h3.5v16zM16.5 20v-6H20v6z" />,
   ai: <path d="m12 3 2.3 6.2L20.5 11.5l-6.2 2.3L12 20l-2.3-6.2-6.2-2.3 6.2-2.3Z" />,
   monitor: <path d="M3 12h4l3-7 4 14 3-7h4" />,

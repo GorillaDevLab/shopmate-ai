@@ -6,7 +6,6 @@ import { useRef, useState } from "react";
 
 import { executeDashboardInsight, generateDashboardInsight } from "../../dashboard-insight-api";
 import { isAbortError } from "../../dashboard-api";
-import { addInsightToDashboard } from "./explore-dashboard";
 import { applyConfig, type ConfigPatch } from "./explore-model";
 import { ExploreView } from "./explore-view";
 
@@ -28,48 +27,21 @@ export type ExploreState =
       readonly authRequired: boolean;
     };
 
-export type SaveState =
-  | { readonly status: "idle" | "saving" | "saved" }
-  | { readonly status: "error"; readonly message: string };
-
 export function ExploreClient() {
   const [state, setState] = useState<ExploreState>({ status: "idle" });
-  const [save, setSave] = useState<SaveState>({ status: "idle" });
-  const generate = useGenerate(setState, setSave);
-  const reconfigure = useReconfigure(state, setState, setSave);
-
-  const addToDashboard = async () => {
-    if (state.status !== "ready" || state.updating) return;
-    setSave({ status: "saving" });
-    try {
-      await addInsightToDashboard(state.query, state.result);
-      setSave({ status: "saved" });
-    } catch (error: unknown) {
-      setSave({ status: "error", message: errorMessage(error, "加入看板失败，请稍后重试") });
-    }
-  };
-
-  return (
-    <ExploreView
-      state={state}
-      save={save}
-      onGenerate={generate}
-      onConfigChange={reconfigure}
-      onAddToDashboard={addToDashboard}
-    />
-  );
+  const generate = useGenerate(setState);
+  const reconfigure = useReconfigure(state, setState);
+  return <ExploreView state={state} onGenerate={generate} onConfigChange={reconfigure} />;
 }
 
 type SetState = (update: ExploreState | ((state: ExploreState) => ExploreState)) => void;
-type SetSave = (save: SaveState) => void;
 
 /** 生成会调用模型并可能产生费用：进行中不接受重复提交，超时也不自动重试。 */
-function useGenerate(setState: SetState, setSave: SetSave) {
+function useGenerate(setState: SetState) {
   const pending = useRef(false);
   return async (question: string) => {
     if (pending.current) return;
     pending.current = true;
-    setSave({ status: "idle" });
     setState({ status: "generating", question });
     try {
       const preview = await generateDashboardInsight(question);
@@ -94,7 +66,7 @@ function useGenerate(setState: SetState, setSave: SetSave) {
 }
 
 /** 调整配置只重新执行结构化查询，不再调用模型；新请求会中止尚未返回的旧请求。 */
-function useReconfigure(state: ExploreState, setState: SetState, setSave: SetSave) {
+function useReconfigure(state: ExploreState, setState: SetState) {
   const controller = useRef<AbortController | null>(null);
   return async (patch: ConfigPatch) => {
     if (state.status !== "ready") return;
@@ -106,7 +78,6 @@ function useReconfigure(state: ExploreState, setState: SetState, setSave: SetSav
     controller.current?.abort();
     const active = new AbortController();
     controller.current = active;
-    setSave({ status: "idle" });
     setState({ ...state, query: parsed.data, updating: true, updateError: undefined });
     try {
       const result = await executeDashboardInsight(parsed.data, active.signal);

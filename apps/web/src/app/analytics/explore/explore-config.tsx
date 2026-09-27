@@ -3,7 +3,7 @@
 import { getDashboardInsightViews, type DashboardInsightQuery } from "@shopmate/contracts";
 import { useId, useState, type ReactNode } from "react";
 
-import { shanghaiToday } from "../../dashboard-client";
+import { shanghaiToday } from "../../dashboard-range";
 import {
   DIMENSION_LABELS,
   LIMIT_OPTIONS,

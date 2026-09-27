@@ -1,5 +1,11 @@
 import { Module } from "@nestjs/common";
 
+import { AnalyticsLayoutController } from "./analytics-layout.controller.js";
+import {
+  ANALYTICS_LAYOUT_REPOSITORY,
+  PrismaAnalyticsLayoutRepository,
+} from "./analytics-layout.repository.js";
+import { AnalyticsLayoutService } from "./analytics-layout.service.js";
 import { AnalyticsOverviewController } from "./analytics-overview.controller.js";
 import { AnalyticsOverviewService } from "./analytics-overview.service.js";
 import { DashboardApiService } from "./dashboard-api.service.js";
@@ -12,7 +18,7 @@ import { PrismaSalesQueryRepository, SALES_QUERY_REPOSITORY } from "./sales-quer
 import { SalesQueryService } from "./sales-query.service.js";
 
 @Module({
-  controllers: [DashboardController, AnalyticsOverviewController],
+  controllers: [DashboardController, AnalyticsOverviewController, AnalyticsLayoutController],
   providers: [
     SalesQueryService,
     PrismaSalesQueryRepository,
@@ -31,6 +37,9 @@ import { SalesQueryService } from "./sales-query.service.js";
     DashboardService,
     DashboardApiService,
     AnalyticsOverviewService,
+    AnalyticsLayoutService,
+    PrismaAnalyticsLayoutRepository,
+    { provide: ANALYTICS_LAYOUT_REPOSITORY, useExisting: PrismaAnalyticsLayoutRepository },
     ProductPerformanceService,
   ],
 

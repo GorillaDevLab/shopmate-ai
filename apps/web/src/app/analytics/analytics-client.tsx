@@ -7,10 +7,11 @@ import { useEffect, useState } from "react";
 import { SEARCH_MAX_LENGTH } from "../app-shell";
 import { useAssistantWorkspace } from "../assistant/provider";
 import { isAbortError } from "../dashboard-api";
-import { shanghaiToday } from "../dashboard-client";
+import { shanghaiToday } from "../dashboard-range";
 import { daysBefore, type DashboardRange } from "../dashboard-range";
 import { fetchAnalyticsOverview } from "./analytics-api";
 import { AnalyticsView, type OverviewState } from "./analytics-view";
+import { useAnalyticsLayout } from "./use-analytics-layout";
 
 const DEFAULT_DAYS = 30;
 
@@ -33,6 +34,7 @@ export function AnalyticsClient({ asOfDate = shanghaiToday() }: { asOfDate?: str
       onRangeChange={setRange}
       onRetry={retry}
       onAsk={useAskAssistant()}
+      editor={useAnalyticsLayout()}
     />
   );
 }

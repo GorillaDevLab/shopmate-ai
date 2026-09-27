@@ -5,7 +5,7 @@ import { useId, useState, type FormEvent } from "react";
 
 import { AppShell } from "../../app-shell";
 import { SparkIcon } from "../analytics-panels";
-import type { ExploreState, SaveState } from "./explore-client";
+import type { ExploreState } from "./explore-client";
 import { ExploreChart } from "./explore-chart";
 import { ConfigPanel } from "./explore-config";
 import {
@@ -21,19 +21,17 @@ const QUESTION_MAX_LENGTH = 2000;
 
 type Props = {
   readonly state: ExploreState;
-  readonly save: SaveState;
   readonly onGenerate: (question: string) => void;
   readonly onConfigChange: (patch: ConfigPatch) => void;
-  readonly onAddToDashboard: () => void;
 };
 
-export function ExploreView({ state, save, onGenerate, onConfigChange, onAddToDashboard }: Props) {
+export function ExploreView({ state, onGenerate, onConfigChange }: Props) {
   return (
     <AppShell active="analytics">
       <div className="analytics-page explore-page" id="main-content">
         <header className="explore-header">
           <nav aria-label="位置" className="explore-breadcrumb">
-            <Link href="/analytics">经营分析</Link>
+            <Link href="/">经营分析</Link>
             <span aria-hidden="true">/</span>
             <span aria-current="page">AI 图表探索</span>
           </nav>
@@ -54,14 +52,7 @@ export function ExploreView({ state, save, onGenerate, onConfigChange, onAddToDa
         {state.status === "error" && (
           <GenerateError state={state} onRetry={() => onGenerate(state.question)} />
         )}
-        {state.status === "ready" && (
-          <ReadyState
-            state={state}
-            save={save}
-            onConfigChange={onConfigChange}
-            onAddToDashboard={onAddToDashboard}
-          />
-        )}
+        {state.status === "ready" && <ReadyState state={state} onConfigChange={onConfigChange} />}
       </div>
     </AppShell>
   );
@@ -105,7 +96,7 @@ function IdleState({ onPick }: { onPick: (question: string) => void }) {
   return (
     <section className="analytics-state explore-idle" aria-label="示例问题">
       <h2>用一句话描述你想看的数据</h2>
-      <p>AI 会选好指标、分组和图表类型，你可以再调整图表配置，满意后加入经营看板。</p>
+      <p>AI 会选好指标、分组和图表类型，你可以再调整图表配置。</p>
       <div className="explore-examples">
         {EXAMPLE_PROMPTS.map((prompt) => (
           <button
@@ -152,14 +143,10 @@ type Ready = Extract<ExploreState, { status: "ready" }>;
 
 function ReadyState({
   state,
-  save,
   onConfigChange,
-  onAddToDashboard,
 }: {
   state: Ready;
-  save: SaveState;
   onConfigChange: (patch: ConfigPatch) => void;
-  onAddToDashboard: () => void;
 }) {
   const { result, query } = state;
   const empty = isEmptyResult(result);
@@ -177,7 +164,6 @@ function ReadyState({
               <p className="muted">{result.summary}</p>
               <p className="explore-question">问题：{state.question}</p>
             </div>
-            <SaveButton save={save} disabled={state.updating || empty} onClick={onAddToDashboard} />
           </div>
           {state.updateError && (
             <p className="explore-inline-error" role="alert">
@@ -193,37 +179,6 @@ function ReadyState({
         {!empty && <ResultTable state={state} />}
       </div>
       <ConfigPanel query={query} onChange={onConfigChange} />
-    </div>
-  );
-}
-
-function SaveButton({
-  save,
-  disabled,
-  onClick,
-}: {
-  save: SaveState;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <div className="explore-save">
-      <button
-        type="button"
-        className="btn-primary"
-        disabled={disabled || save.status === "saving" || save.status === "saved"}
-        onClick={onClick}
-      >
-        {save.status === "saving"
-          ? "正在加入…"
-          : save.status === "saved"
-            ? "已加入看板"
-            : "加入经营看板"}
-      </button>
-      <p className="explore-save-status" role="status" aria-live="polite">
-        {save.status === "saved" && <Link href="/">去经营看板查看</Link>}
-        {save.status === "error" && <span className="explore-inline-error">{save.message}</span>}
-      </p>
     </div>
   );
 }

@@ -36,7 +36,7 @@ export function AssistantWorkspace({
           <button type="button" disabled={!state.ready} onClick={store.create}>
             ＋ 新对话
           </button>
-          {!compact && <Link href="/">返回看板</Link>}
+          {!compact && <Link href="/">返回经营分析</Link>}
         </div>
         {current?.query && (
           <p className="assistant-context">

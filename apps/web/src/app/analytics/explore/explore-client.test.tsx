@@ -18,9 +18,6 @@ vi.mock("../../dashboard-insight-api", async (importOriginal) => ({
   ...api,
 }));
 
-const dashboard = vi.hoisted(() => ({ addInsightToDashboard: vi.fn() }));
-vi.mock("./explore-dashboard", () => dashboard);
-
 import { DashboardInsightApiError } from "../../dashboard-insight-api";
 import { ExploreClient } from "./explore-client";
 
@@ -107,19 +104,6 @@ describe("ExploreClient", () => {
     fireEvent.click(screen.getByRole("button", { name: "环形图" }));
     expect(await screen.findByText("暂时无法生成经营组件，请重试")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "柱状图" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("adds the current chart to the dashboard", async () => {
-    api.generateDashboardInsight.mockResolvedValue(preview);
-    dashboard.addInsightToDashboard.mockResolvedValue(undefined);
-    render(<ExploreClient />);
-    await generate();
-    fireEvent.click(screen.getByRole("button", { name: "加入经营看板" }));
-    expect(await screen.findByRole("link", { name: "去经营看板查看" })).toHaveAttribute(
-      "href",
-      "/",
-    );
-    expect(dashboard.addInsightToDashboard).toHaveBeenCalledWith(preview.query, preview.result);
   });
 
   it("shows a retry for generation failures without retrying automatically", async () => {
