@@ -338,6 +338,8 @@
   .analytics-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* 卡片按内容高度显示，不被同一行最高的卡片拉伸出大片空白。 */
+    align-items: start;
     gap: 16px;
   }
   .analytics-grid .span-2 {
