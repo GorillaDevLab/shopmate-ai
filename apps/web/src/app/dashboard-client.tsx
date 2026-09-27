@@ -139,7 +139,7 @@ function isEmptyDashboard(data: AnalyticsDashboardResponse): boolean {
   );
 }
 
-function shanghaiToday(now = new Date()): string {
+export function shanghaiToday(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",

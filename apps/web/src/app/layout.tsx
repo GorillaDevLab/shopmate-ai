@@ -4,6 +4,7 @@ import "./globals.css";
 import "./shell.css";
 import "./appearance.css";
 import "./assistant/assistant.css";
+import "./analytics/analytics.css";
 import { THEME_INIT_SCRIPT } from "./theme";
 import { APPEARANCE_INIT_SCRIPT } from "./appearance-model";
 import { isMobileDebugEnabled, mobileDebugScript } from "./mobile-debug-script";
