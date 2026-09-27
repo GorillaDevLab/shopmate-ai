@@ -1,51 +1,65 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { screen } from "@testing-library/react";
-import { render } from "../test/assistant-render";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { render } from "../test/assistant-render";
+
+const navigation = vi.hoisted(() => ({
+  redirect: vi.fn(),
+  push: vi.fn(),
+}));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
-  useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: navigation.push, replace: vi.fn(), refresh: vi.fn() }),
+  redirect: navigation.redirect,
 }));
-vi.mock("./dashboard-layout-api", async () => {
-  const { DEFAULT_DASHBOARD_LAYOUT } = await import("@shopmate/contracts");
+vi.mock("./analytics/analytics-api", async () => {
+  const { overviewFixture } = await import("./analytics/analytics-fixture");
   return {
-    fetchDashboardLayout: vi.fn(async () => ({
-      layout: DEFAULT_DASHBOARD_LAYOUT,
+    fetchAnalyticsOverview: vi.fn(async (asOfDate: string, startDate: string) => ({
+      ...overviewFixture(),
+      period: { startDate, endDate: asOfDate, days: 14 },
+    })),
+  };
+});
+vi.mock("./analytics/analytics-layout-api", async () => {
+  const { DEFAULT_ANALYTICS_LAYOUT } = await import("@shopmate/contracts");
+  return {
+    fetchAnalyticsLayout: vi.fn(async () => ({
+      layout: DEFAULT_ANALYTICS_LAYOUT,
       revision: 0,
       updatedAt: null,
     })),
-    saveDashboardLayout: vi.fn(),
+    saveAnalyticsLayout: vi.fn(),
   };
 });
 
 import RootLayout, { metadata } from "./layout";
-import { Dashboard } from "./dashboard";
-import { dashboardResponsePreview } from "./dashboard-data";
+import Home from "./page";
+import AnalyticsRedirect from "./analytics/page";
 
-const readyDashboard = <Dashboard state="ready" data={dashboardResponsePreview} />;
+beforeEach(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("[]", { status: 200 })),
+  );
+});
 
 describe("中文应用基础", () => {
-  it("展示四项经营指标而非库存占位指标", async () => {
-    render(readyDashboard);
-    await screen.findByRole("region", { name: "经营看板卡片" });
-    for (const name of ["近 7 天销售额", "近 7 天订单", "近 7 天销量", "近 7 天客单价"]) {
-      expect(screen.getByRole("article", { name })).toBeInTheDocument();
-    }
-    expect(screen.getByText("¥44.34")).toBeInTheDocument();
-    expect(screen.queryByText("库存健康度")).not.toBeInTheDocument();
+  it("首页就是经营分析，侧栏只保留一个经营分析入口", async () => {
+    render(<Home />);
+    expect(await screen.findByRole("region", { name: "经营总览" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "经营分析" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "经营分析" })).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("link", { name: "经营看板" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑看板" })).toBeEnabled();
   });
-  it("展示经营 Dashboard 的核心区域", async () => {
-    render(readyDashboard);
-    await screen.findByRole("region", { name: "经营看板卡片" });
 
-    expect(screen.getByRole("heading", { name: "近 7 天经营，一眼看清" })).toBeInTheDocument();
-    expect(screen.getByText("ShopMate AI")).toBeInTheDocument();
-    expect(screen.getByText("经营总览")).toBeInTheDocument();
-    expect(screen.getByText("热销商品")).toBeInTheDocument();
-    expect(screen.getByText("库存提醒")).toBeInTheDocument();
+  it("旧的 /analytics 地址跳转到首页", () => {
+    AnalyticsRedirect();
+    expect(navigation.redirect).toHaveBeenCalledWith("/");
   });
 
   it("声明中文页面语言与元数据", () => {
@@ -63,46 +77,5 @@ describe("中文应用基础", () => {
 
   it("提供浏览器应用图标", () => {
     expect(existsSync(resolve(process.cwd(), "src/app/icon.svg"))).toBe(true);
-  });
-
-  it("明确展示 Analytics API 的统计日期", async () => {
-    render(readyDashboard);
-    await screen.findByRole("region", { name: "经营看板卡片" });
-    expect(screen.getByText("数据来自 Analytics API")).toBeInTheDocument();
-    expect(screen.getByText("统计截至 2026年8月31日")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /查看全部提醒/ })).not.toBeInTheDocument();
-    expect(screen.getByText("已售罄")).toBeInTheDocument();
-    expect(screen.getByText("暂无销量，无法估算")).toBeInTheDocument();
-  });
-
-  it("展示真实日期与金额的响应式趋势图", async () => {
-    render(readyDashboard);
-    expect(await screen.findByRole("img", { name: "近 7 天销售趋势图" })).toBeInTheDocument();
-  });
-});
-
-describe("Dashboard 三态", () => {
-  it.each(["loading", "empty", "error"] as const)("%s 时不残留演示指标", (state) => {
-    render(<Dashboard state={state} />);
-    expect(screen.queryByText("¥12,680.00")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "热销商品" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toBeInTheDocument();
-  });
-  it("加载时显示骨架提示", () => {
-    render(<Dashboard state="loading" />);
-    expect(screen.getByText("正在整理你的经营数据…")).toBeInTheDocument();
-    expect(screen.getAllByText("正在加载指标")).toHaveLength(4);
-  });
-
-  it("空数据时给出下一步提示", () => {
-    render(<Dashboard state="empty" />);
-    expect(screen.getByText("还没有经营数据")).toBeInTheDocument();
-    expect(screen.getByText("导入第一批商品后，这里会自动生成经营概览。")).toBeInTheDocument();
-  });
-
-  it("错误时说明可以重试", () => {
-    render(<Dashboard state="error" />);
-    expect(screen.getByText("数据暂时加载失败")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "重新加载" })).toBeInTheDocument();
   });
 });

@@ -22,18 +22,18 @@ const QUESTION_MAX_LENGTH = 2000;
 type Props = {
   readonly state: ExploreState;
   readonly save: SaveState;
+  readonly onSave: () => void;
   readonly onGenerate: (question: string) => void;
   readonly onConfigChange: (patch: ConfigPatch) => void;
-  readonly onAddToDashboard: () => void;
 };
 
-export function ExploreView({ state, save, onGenerate, onConfigChange, onAddToDashboard }: Props) {
+export function ExploreView({ state, save, onGenerate, onConfigChange, onSave }: Props) {
   return (
     <AppShell active="analytics">
       <div className="analytics-page explore-page" id="main-content">
         <header className="explore-header">
           <nav aria-label="位置" className="explore-breadcrumb">
-            <Link href="/analytics">经营分析</Link>
+            <Link href="/">经营分析</Link>
             <span aria-hidden="true">/</span>
             <span aria-current="page">AI 图表探索</span>
           </nav>
@@ -55,12 +55,7 @@ export function ExploreView({ state, save, onGenerate, onConfigChange, onAddToDa
           <GenerateError state={state} onRetry={() => onGenerate(state.question)} />
         )}
         {state.status === "ready" && (
-          <ReadyState
-            state={state}
-            save={save}
-            onConfigChange={onConfigChange}
-            onAddToDashboard={onAddToDashboard}
-          />
+          <ReadyState state={state} save={save} onConfigChange={onConfigChange} onSave={onSave} />
         )}
       </div>
     </AppShell>
@@ -105,7 +100,7 @@ function IdleState({ onPick }: { onPick: (question: string) => void }) {
   return (
     <section className="analytics-state explore-idle" aria-label="示例问题">
       <h2>用一句话描述你想看的数据</h2>
-      <p>AI 会选好指标、分组和图表类型，你可以再调整图表配置，满意后加入经营看板。</p>
+      <p>AI 会选好指标、分组和图表类型，你可以再调整图表配置，满意后保存到经营分析。</p>
       <div className="explore-examples">
         {EXAMPLE_PROMPTS.map((prompt) => (
           <button
@@ -154,12 +149,12 @@ function ReadyState({
   state,
   save,
   onConfigChange,
-  onAddToDashboard,
+  onSave,
 }: {
   state: Ready;
   save: SaveState;
   onConfigChange: (patch: ConfigPatch) => void;
-  onAddToDashboard: () => void;
+  onSave: () => void;
 }) {
   const { result, query } = state;
   const empty = isEmptyResult(result);
@@ -177,7 +172,7 @@ function ReadyState({
               <p className="muted">{result.summary}</p>
               <p className="explore-question">问题：{state.question}</p>
             </div>
-            <SaveButton save={save} disabled={state.updating || empty} onClick={onAddToDashboard} />
+            <SaveButton save={save} disabled={state.updating || empty} onClick={onSave} />
           </div>
           {state.updateError && (
             <p className="explore-inline-error" role="alert">
@@ -206,6 +201,8 @@ function SaveButton({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const label =
+    save.status === "saving" ? "正在保存…" : save.status === "saved" ? "已保存" : "保存到经营分析";
   return (
     <div className="explore-save">
       <button
@@ -214,14 +211,10 @@ function SaveButton({
         disabled={disabled || save.status === "saving" || save.status === "saved"}
         onClick={onClick}
       >
-        {save.status === "saving"
-          ? "正在加入…"
-          : save.status === "saved"
-            ? "已加入看板"
-            : "加入经营看板"}
+        {label}
       </button>
       <p className="explore-save-status" role="status" aria-live="polite">
-        {save.status === "saved" && <Link href="/">去经营看板查看</Link>}
+        {save.status === "saved" && <Link href="/">去经营分析查看</Link>}
         {save.status === "error" && <span className="explore-inline-error">{save.message}</span>}
       </p>
     </div>

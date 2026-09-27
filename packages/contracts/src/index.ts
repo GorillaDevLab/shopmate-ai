@@ -58,6 +58,27 @@ export type {
   AnalyticsOverviewResponse,
   AnalyticsProduct,
 } from "./analytics/analytics-overview.schema.js";
+export {
+  ANALYTICS_MAX_AI_CARDS,
+  AnalyticsAiCardSchema,
+  AnalyticsCardIdSchema,
+  isAnalyticsAiCard,
+  AnalyticsCardSpanSchema,
+  AnalyticsLayoutReadResponseSchema,
+  AnalyticsLayoutSaveRequestSchema,
+  AnalyticsLayoutSchema,
+  DEFAULT_ANALYTICS_LAYOUT,
+} from "./analytics/analytics-layout.schema.js";
+export type {
+  AnalyticsAiCard,
+  AnalyticsBuiltinCard,
+  AnalyticsLayoutCard,
+  AnalyticsCardId,
+  AnalyticsCardSpan,
+  AnalyticsLayout,
+  AnalyticsLayoutReadResponse,
+  AnalyticsLayoutSaveRequest,
+} from "./analytics/analytics-layout.schema.js";
 
 export {
   DASHBOARD_COMPONENT_REGISTRY,

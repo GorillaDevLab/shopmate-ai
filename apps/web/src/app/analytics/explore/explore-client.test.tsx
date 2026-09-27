@@ -18,8 +18,8 @@ vi.mock("../../dashboard-insight-api", async (importOriginal) => ({
   ...api,
 }));
 
-const dashboard = vi.hoisted(() => ({ addInsightToDashboard: vi.fn() }));
-vi.mock("./explore-dashboard", () => dashboard);
+const saver = vi.hoisted(() => ({ saveChartToAnalytics: vi.fn() }));
+vi.mock("./explore-save", () => saver);
 
 import { DashboardInsightApiError } from "../../dashboard-insight-api";
 import { ExploreClient } from "./explore-client";
@@ -109,17 +109,33 @@ describe("ExploreClient", () => {
     expect(screen.getByRole("button", { name: "柱状图" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("adds the current chart to the dashboard", async () => {
+  it("saves the current chart to 经营分析 and links there", async () => {
     api.generateDashboardInsight.mockResolvedValue(preview);
-    dashboard.addInsightToDashboard.mockResolvedValue(undefined);
+    saver.saveChartToAnalytics.mockResolvedValue(undefined);
     render(<ExploreClient />);
     await generate();
-    fireEvent.click(screen.getByRole("button", { name: "加入经营看板" }));
-    expect(await screen.findByRole("link", { name: "去经营看板查看" })).toHaveAttribute(
+    fireEvent.click(screen.getByRole("button", { name: "保存到经营分析" }));
+    expect(await screen.findByRole("link", { name: "去经营分析查看" })).toHaveAttribute(
       "href",
       "/",
     );
-    expect(dashboard.addInsightToDashboard).toHaveBeenCalledWith(preview.query, preview.result);
+    expect(screen.getByRole("button", { name: "已保存" })).toBeDisabled();
+    expect(saver.saveChartToAnalytics).toHaveBeenCalledWith(preview.query, preview.result);
+  });
+
+  it("shows why saving failed and lets the chart be saved again after a change", async () => {
+    api.generateDashboardInsight.mockResolvedValue(preview);
+    api.executeDashboardInsight.mockResolvedValue(preview.result);
+    saver.saveChartToAnalytics.mockRejectedValueOnce(new Error("布局已在其他设备更新"));
+    render(<ExploreClient />);
+    await generate();
+    fireEvent.click(screen.getByRole("button", { name: "保存到经营分析" }));
+    expect(await screen.findByText("布局已在其他设备更新")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "环形图" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "保存到经营分析" })).toBeEnabled(),
+    );
+    expect(screen.queryByText("布局已在其他设备更新")).not.toBeInTheDocument();
   });
 
   it("shows a retry for generation failures without retrying automatically", async () => {

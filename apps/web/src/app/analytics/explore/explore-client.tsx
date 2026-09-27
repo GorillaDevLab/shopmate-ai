@@ -6,8 +6,8 @@ import { useRef, useState } from "react";
 
 import { executeDashboardInsight, generateDashboardInsight } from "../../dashboard-insight-api";
 import { isAbortError } from "../../dashboard-api";
-import { addInsightToDashboard } from "./explore-dashboard";
 import { applyConfig, type ConfigPatch } from "./explore-model";
+import { saveChartToAnalytics } from "./explore-save";
 import { ExploreView } from "./explore-view";
 
 export type ExploreState =
@@ -35,17 +35,22 @@ export type SaveState =
 export function ExploreClient() {
   const [state, setState] = useState<ExploreState>({ status: "idle" });
   const [save, setSave] = useState<SaveState>({ status: "idle" });
-  const generate = useGenerate(setState, setSave);
-  const reconfigure = useReconfigure(state, setState, setSave);
+  // 图表换了（重新生成或改配置）就可以再次保存。
+  const track = (update: ExploreState | ((current: ExploreState) => ExploreState)) => {
+    setSave({ status: "idle" });
+    setState(update);
+  };
+  const generate = useGenerate(track);
+  const reconfigure = useReconfigure(state, track);
 
-  const addToDashboard = async () => {
-    if (state.status !== "ready" || state.updating) return;
+  const saveToAnalytics = async () => {
+    if (state.status !== "ready" || state.updating || save.status === "saving") return;
     setSave({ status: "saving" });
     try {
-      await addInsightToDashboard(state.query, state.result);
+      await saveChartToAnalytics(state.query, state.result);
       setSave({ status: "saved" });
     } catch (error: unknown) {
-      setSave({ status: "error", message: errorMessage(error, "加入看板失败，请稍后重试") });
+      setSave({ status: "error", message: errorMessage(error, "保存失败，请稍后重试") });
     }
   };
 
@@ -55,21 +60,19 @@ export function ExploreClient() {
       save={save}
       onGenerate={generate}
       onConfigChange={reconfigure}
-      onAddToDashboard={addToDashboard}
+      onSave={saveToAnalytics}
     />
   );
 }
 
 type SetState = (update: ExploreState | ((state: ExploreState) => ExploreState)) => void;
-type SetSave = (save: SaveState) => void;
 
 /** 生成会调用模型并可能产生费用：进行中不接受重复提交，超时也不自动重试。 */
-function useGenerate(setState: SetState, setSave: SetSave) {
+function useGenerate(setState: SetState) {
   const pending = useRef(false);
   return async (question: string) => {
     if (pending.current) return;
     pending.current = true;
-    setSave({ status: "idle" });
     setState({ status: "generating", question });
     try {
       const preview = await generateDashboardInsight(question);
@@ -94,7 +97,7 @@ function useGenerate(setState: SetState, setSave: SetSave) {
 }
 
 /** 调整配置只重新执行结构化查询，不再调用模型；新请求会中止尚未返回的旧请求。 */
-function useReconfigure(state: ExploreState, setState: SetState, setSave: SetSave) {
+function useReconfigure(state: ExploreState, setState: SetState) {
   const controller = useRef<AbortController | null>(null);
   return async (patch: ConfigPatch) => {
     if (state.status !== "ready") return;
@@ -106,7 +109,6 @@ function useReconfigure(state: ExploreState, setState: SetState, setSave: SetSav
     controller.current?.abort();
     const active = new AbortController();
     controller.current = active;
-    setSave({ status: "idle" });
     setState({ ...state, query: parsed.data, updating: true, updateError: undefined });
     try {
       const result = await executeDashboardInsight(parsed.data, active.signal);

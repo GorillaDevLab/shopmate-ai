@@ -60,6 +60,7 @@ model Merchant {
   orders           Order[]
   stores           Store[]
   dashboardLayouts UserDashboardLayout[]
+  analyticsLayouts UserAnalyticsLayout[]
   monitoringRules  UserMonitoringRule[]
   notifications    MonitoringNotification[]
 
@@ -170,6 +171,25 @@ model OrderItem {
 }
 
 model UserDashboardLayout {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+
+  schemaVersion Int  @default(1)
+  revision      Int  @default(1)
+  layout        Json
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, merchantId])
+  @@index([merchantId])
+}
+
+// 经营分析页（首页）的卡片顺序、宽度与显隐；与旧版 UserDashboardLayout 分开存储，旧记录保留不动。
+model UserAnalyticsLayout {
   id         String @id @default(cuid())
   userId     String
   merchantId String

@@ -15,30 +15,18 @@ export const SEARCH_MAX_LENGTH = 2000;
 type Props = {
   readonly active: NavigationSection;
   readonly children: ReactNode;
-  /** 提供时，侧栏的 AI 助手与顶部搜索在当前页打开 AI 抽屉。 */
-  readonly onAssistant?: () => void;
   readonly notificationsEnabled?: boolean;
   /** 内容区占满视口剩余高度并自行滚动（如对话页）。 */
   readonly fill?: boolean;
 };
 
-export function AppShell({
-  active,
-  children,
-  onAssistant,
-  notificationsEnabled = true,
-  fill = false,
-}: Props) {
+export function AppShell({ active, children, notificationsEnabled = true, fill = false }: Props) {
   const [monitoringOpen, setMonitoringOpen] = useState(false);
   return (
     <div className={`workspace-layout app-shell${fill ? " app-shell--fill" : ""}`}>
-      <ShellTopbar onAssistant={onAssistant} notificationsEnabled={notificationsEnabled} />
+      <ShellTopbar notificationsEnabled={notificationsEnabled} />
       <div className="app-shell-body">
-        <DashboardNavigation
-          active={active}
-          onAssistant={onAssistant}
-          onMonitoring={() => setMonitoringOpen(true)}
-        />
+        <DashboardNavigation active={active} onMonitoring={() => setMonitoringOpen(true)} />
         <main className="app-shell-main">{children}</main>
       </div>
       <MonitoringRuleManager open={monitoringOpen} onOpenChange={setMonitoringOpen} />
@@ -46,20 +34,14 @@ export function AppShell({
   );
 }
 
-function ShellTopbar({
-  onAssistant,
-  notificationsEnabled,
-}: {
-  onAssistant?: () => void;
-  notificationsEnabled: boolean;
-}) {
+function ShellTopbar({ notificationsEnabled }: { notificationsEnabled: boolean }) {
   return (
     <header className="app-topbar">
       <Link href="/" className="app-brand focus-ring">
         <span aria-hidden="true">S</span>
         ShopMate AI
       </Link>
-      <TopbarSearch onAssistant={onAssistant} />
+      <TopbarSearch />
       <div className="app-topbar-actions">
         <NotificationCenter enabled={notificationsEnabled} />
         <span className="app-merchant">
@@ -71,7 +53,7 @@ function ShellTopbar({
   );
 }
 
-function TopbarSearch({ onAssistant }: { onAssistant?: () => void }) {
+function TopbarSearch() {
   const id = useId();
   const router = useRouter();
   const { store } = useAssistantWorkspace();
@@ -83,8 +65,7 @@ function TopbarSearch({ onAssistant }: { onAssistant?: () => void }) {
     // 只写入草稿，不自动发送：商家在助手里确认后再提交。
     store.setDraft(query);
     setValue("");
-    if (onAssistant) onAssistant();
-    else router.push("/chat");
+    router.push("/chat");
   };
   return (
     <form role="search" className="app-search" onSubmit={submit}>

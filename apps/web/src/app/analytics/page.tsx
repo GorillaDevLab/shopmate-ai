@@ -1,16 +1,6 @@
-import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { AppearanceProvider } from "../appearance-provider";
-import { AnalyticsClient } from "./analytics-client";
-
-export const metadata: Metadata = {
-  title: "经营分析｜ShopMate AI",
-};
-
+// 经营分析已成为首页；保留旧地址的书签与链接。
 export default function AnalyticsPage() {
-  return (
-    <AppearanceProvider>
-      <AnalyticsClient />
-    </AppearanceProvider>
-  );
+  redirect("/");
 }
