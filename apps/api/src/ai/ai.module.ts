@@ -39,6 +39,12 @@ import {
   createBusinessChartTool,
 } from "./tools/business-query.tools.js";
 
+import { AnalyticsOverviewService } from "../analytics/analytics-overview.service.js";
+import {
+  BUSINESS_OVERVIEW_TOOL_NAME,
+  createBusinessOverviewTool,
+} from "./tools/business-overview.tool.js";
+
 export const AI_LLM_PROVIDER = Symbol("AI_LLM_PROVIDER");
 export const AI_TOOL_REGISTRY = Symbol("AI_TOOL_REGISTRY");
 export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
@@ -63,6 +69,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         performanceService: Parameters<typeof createBestSellersToolRegistration>[0],
         provider: DeepSeekLLMProvider | MockLLMProvider,
         insightExecutor: DashboardInsightExecutor,
+        overviewService: AnalyticsOverviewService,
       ) => {
         const registry = new ToolRegistry({
           allowedToolNames: [
@@ -71,6 +78,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
             "get_store_catalog",
             "query_business_data",
             "create_business_chart",
+            BUSINESS_OVERVIEW_TOOL_NAME,
           ],
         });
         registry.register(createProductDetailsToolRegistration(productService));
@@ -82,6 +90,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         registry.register(createStoreCatalogTool(new StoreSalesReader()));
         registry.register(createBusinessQueryTool(insightExecutor));
         registry.register(createBusinessChartTool(insightExecutor));
+        registry.register(createBusinessOverviewTool(overviewService));
 
         const productCopyService = new ProductCopyService(productService, provider);
         registry.register(createGenerateProductCopyToolRegistration(productCopyService));
@@ -95,6 +104,7 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         ProductPerformanceService,
         AI_LLM_PROVIDER,
         DashboardInsightExecutor,
+        AnalyticsOverviewService,
       ],
     },
     {
