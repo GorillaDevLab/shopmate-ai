@@ -125,6 +125,8 @@ function safeFailure(error: unknown) {
     AI_TIMEOUT: "处理超时，未自动重试。",
     AI_RATE_LIMIT: "AI 服务请求过多，请稍后再试。",
     AI_CONFIGURATION: "AI 服务配置异常，请联系管理员。",
+    AI_TOOL_LIMIT: "这个问题需要的查询步骤太多，已先停止。可以拆成几个更具体的问题分别问。",
+    AI_CHAT_UNAVAILABLE: "AI 服务暂时没有返回有效结果，请稍后重试。",
   };
   return { code, message: messages[code] ?? "本次查询未完成，未自动重试；请稍后检查服务状态。" };
 }

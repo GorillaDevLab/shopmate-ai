@@ -21,12 +21,14 @@ describe("NumericGrounding", () => {
     expect(grounded("占比 100%")).toBe(true); // 同一数字自比
   });
 
-  it("does not round plain numbers or whole percentages without an explicit 约", () => {
+  it("rounds percentages and 万 values to the precision shown, but not plain numbers", () => {
+    expect(grounded("环比下降 41%")).toBe(true); // 40.61%
+    expect(grounded("销售额 1.78万")).toBe(true); // 17,818.2
     expect(grounded("销售额 17,818 元")).toBe(false);
-    expect(grounded("销售额 1.8万")).toBe(false);
-    expect(grounded("环比下降 41%")).toBe(false);
+    expect(grounded("销售额 1.8万")).toBe(false); // 少于 3 位有效数字，需写“约”
+    expect(grounded("销售额 2万")).toBe(false);
     expect(
-      grounding.isGrounded({ text: "41%", value: 41, decimals: 0, suffix: "%", approximate: true }),
+      grounding.isGrounded({ text: "2万", value: 2, decimals: 0, suffix: "万", approximate: true }),
     ).toBe(true);
   });
 
@@ -34,5 +36,7 @@ describe("NumericGrounding", () => {
     expect(grounded("销售额 18,500 元")).toBe(false);
     expect(grounded("环比下降 25.0%")).toBe(false);
     expect(grounded("共 5 单")).toBe(false);
+    expect(grounded("环比下降 45%")).toBe(false);
+    expect(grounded("销售额 1.79万")).toBe(false);
   });
 });
