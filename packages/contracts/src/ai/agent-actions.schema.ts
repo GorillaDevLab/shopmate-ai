@@ -11,14 +11,14 @@ export const AgentActionKindSchema = z.enum([
 ]);
 export type AgentActionKind = z.infer<typeof AgentActionKindSchema>;
 
-export const AgentActionTokenSchema = z.uuid();
+export const AgentActionIdSchema = z.uuid();
 
 /**
  * AI 只能“提出”操作：卡片展示将要发生的变化，只有用户点确认后，
  * 客户端直接调用确认接口执行；模型没有确认能力。
  */
 export const AgentActionProposalSchema = z.strictObject({
-  token: AgentActionTokenSchema,
+  actionId: AgentActionIdSchema,
   kind: AgentActionKindSchema,
   title: z.string().trim().min(1).max(80),
   summary: z.string().trim().min(1).max(280),

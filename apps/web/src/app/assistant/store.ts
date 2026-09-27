@@ -293,12 +293,12 @@ export class AssistantStore {
       ...s,
       messages: s.messages.map((m) => (m.id === messageId ? { ...m, chartView } : m)),
     }));
-  setActionOutcome = (messageId: string, token: string, outcome: AgentActionOutcome) =>
+  setActionOutcome = (messageId: string, actionId: string, outcome: AgentActionOutcome) =>
     this.updateSession(this.state.currentId, (s) => ({
       ...s,
       messages: s.messages.map((m) =>
         m.id === messageId
-          ? { ...m, actionOutcomes: { ...m.actionOutcomes, [token]: outcome } }
+          ? { ...m, actionOutcomes: { ...m.actionOutcomes, [actionId]: outcome } }
           : m,
       ),
     }));

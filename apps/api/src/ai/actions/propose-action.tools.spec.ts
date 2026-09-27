@@ -73,7 +73,7 @@ describe("propose action tools", () => {
       { label: "当前阈值", value: "10" },
       { label: "调整为", value: "25" },
     ]);
-    expect(store.take(output.data.proposal.token, context)).toMatchObject({
+    expect(store.take(output.data.proposal.actionId, context)).toMatchObject({
       kind: "ok",
       action: { payload: { expectedAlertThreshold: 10, targetAlertThreshold: 25 } },
     });

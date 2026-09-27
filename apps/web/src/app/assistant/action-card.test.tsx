@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ActionProposalCard } from "./action-card";
 
 const proposal: AgentActionProposal = {
-  token: "0b5f0a3e-4f6a-4b8b-9a55-1c2d3e4f5a6b",
+  actionId: "0b5f0a3e-4f6a-4b8b-9a55-1c2d3e4f5a6b",
   kind: "saveChartToAnalytics",
   title: "保存图表到经营分析",
   summary: "各门店销售额",
@@ -44,7 +44,7 @@ describe("ActionProposalCard", () => {
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      `/api/v1/ai/actions/${proposal.token}/confirm`,
+      `/api/v1/ai/actions/${proposal.actionId}/confirm`,
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );
   });

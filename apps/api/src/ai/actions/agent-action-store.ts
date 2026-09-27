@@ -65,28 +65,28 @@ export class AgentActionStore {
     }
     const expiresAt = this.now() + AGENT_ACTION_TTL_MS;
     const proposal: AgentActionProposal = {
-      token: randomUUID(),
+      actionId: randomUUID(),
       kind: payload.kind satisfies AgentActionKind,
       ...content,
       expiresAt: new Date(expiresAt).toISOString(),
     };
-    this.actions.set(proposal.token, { proposal, payload, ...actor, expiresAt });
+    this.actions.set(proposal.actionId, { proposal, payload, ...actor, expiresAt });
     return proposal;
   }
 
   /** 取出即作废：同一张卡片不会被执行两次。别人的令牌与不存在的令牌表现一致。 */
-  take(token: string, actor: Actor): TakeResult {
-    const action = this.actions.get(token);
+  take(actionId: string, actor: Actor): TakeResult {
+    const action = this.actions.get(actionId);
     if (!action || !sameActor(action, actor)) return { kind: "not_found" };
-    this.actions.delete(token);
+    this.actions.delete(actionId);
     if (action.expiresAt <= this.now()) return { kind: "expired" };
     return { kind: "ok", action };
   }
 
   private prune(): void {
     const now = this.now();
-    for (const [token, action] of this.actions) {
-      if (action.expiresAt <= now) this.actions.delete(token);
+    for (const [actionId, action] of this.actions) {
+      if (action.expiresAt <= now) this.actions.delete(actionId);
     }
   }
 }

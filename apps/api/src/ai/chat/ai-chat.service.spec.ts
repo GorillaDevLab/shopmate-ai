@@ -20,7 +20,7 @@ const authContext = createAuthContext({
 describe("AiChatService", () => {
   it("把工具创建的确认卡片附在回复上，忽略格式无效的提案", async () => {
     const proposal = {
-      token: "0b5f0a3e-4f6a-4b8b-9a55-1c2d3e4f5a6b",
+      actionId: "0b5f0a3e-4f6a-4b8b-9a55-1c2d3e4f5a6b",
       kind: "createMonitoringRule",
       title: "创建经营监听",
       summary: "销售额下降提醒",
@@ -37,7 +37,7 @@ describe("AiChatService", () => {
           { name: "propose_monitoring_alert", output: { status: "ok", data: { proposal } } },
           {
             name: "propose_save_chart",
-            output: { status: "ok", data: { proposal: { token: "x" } } },
+            output: { status: "ok", data: { proposal: { actionId: "x" } } },
           },
         ],
       }),
