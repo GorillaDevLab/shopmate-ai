@@ -45,6 +45,19 @@ export type {
   AnalyticsDashboardQuery,
   AnalyticsDashboardResponse,
 } from "./analytics/dashboard-api.schema.js";
+export {
+  ANALYTICS_OVERVIEW_MAX_CHANNELS,
+  ANALYTICS_OVERVIEW_MAX_DAYS,
+  ANALYTICS_OVERVIEW_TOP_PRODUCTS,
+  AnalyticsChannelSchema,
+  AnalyticsOverviewResponseSchema,
+  AnalyticsProductSchema,
+} from "./analytics/analytics-overview.schema.js";
+export type {
+  AnalyticsChannel,
+  AnalyticsOverviewResponse,
+  AnalyticsProduct,
+} from "./analytics/analytics-overview.schema.js";
 
 export {
   DASHBOARD_COMPONENT_REGISTRY,
