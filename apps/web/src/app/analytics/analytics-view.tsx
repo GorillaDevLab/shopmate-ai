@@ -1,6 +1,7 @@
 "use client";
 
 import type { AnalyticsChannel, AnalyticsOverviewResponse } from "@shopmate/contracts";
+import Link from "next/link";
 
 import { AppShell } from "../app-shell";
 import { AppearanceAmbient } from "../appearance-controls";
@@ -70,10 +71,10 @@ export function AnalyticsView({
       >
         <header className="analytics-header">
           <h1>经营分析</h1>
-          <button type="button" className="btn-primary" onClick={() => onAsk(NEW_CHART_PROMPT)}>
+          <Link className="btn-primary" href={EXPLORE_HREF}>
             <SparkIcon size={15} />
             新建 AI 图表
-          </button>
+          </Link>
         </header>
         <div className="analytics-filters">
           <DashboardRangeControls value={range} latestDate={latestDate} onChange={onRangeChange} />
@@ -95,7 +96,7 @@ export function AnalyticsView({
   );
 }
 
-const NEW_CHART_PROMPT = "帮我生成一张新的经营图表：";
+const EXPLORE_HREF = "/analytics/explore";
 
 function Overview({ data, onAsk }: { data: AnalyticsOverviewResponse; onAsk: Ask }) {
   const insights = buildInsights(data);
@@ -131,17 +132,13 @@ function Overview({ data, onAsk }: { data: AnalyticsOverviewResponse; onAsk: Ask
             <p className="card-note">本期没有商品销售。</p>
           )}
         </ChartCard>
-        <button
-          type="button"
-          className="analytics-new-chart"
-          onClick={() => onAsk(NEW_CHART_PROMPT)}
-        >
+        <Link className="analytics-new-chart" href={EXPLORE_HREF}>
           <span className="analytics-new-chart-icon">
             <SparkIcon size={18} />
           </span>
           <strong>让 AI 生成新图表</strong>
           <span>例如“对比各渠道的客单价”</span>
-        </button>
+        </Link>
       </section>
     </>
   );

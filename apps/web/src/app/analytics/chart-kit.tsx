@@ -53,7 +53,15 @@ export function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-export function YAxis({ max, frame }: { max: number; frame: Frame }) {
+export function YAxis({
+  max,
+  frame,
+  format = (tick) => (tick === 0 ? "¥0" : formatYuanShort(tick)),
+}: {
+  max: number;
+  frame: Frame;
+  format?: (tick: number) => string;
+}) {
   const { x0, x1 } = plot(frame);
   return (
     <g className="chart-axis">
@@ -63,7 +71,7 @@ export function YAxis({ max, frame }: { max: number; frame: Frame }) {
           <g key={tick}>
             <line x1={x0} x2={x1} y1={y} y2={y} className="chart-grid" />
             <text x={x0 - 8} y={y + 4} textAnchor="end">
-              {tick === 0 ? "¥0" : formatYuanShort(tick)}
+              {format(tick)}
             </text>
           </g>
         );
