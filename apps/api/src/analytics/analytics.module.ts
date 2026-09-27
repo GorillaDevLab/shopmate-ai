@@ -49,6 +49,7 @@ import { SalesQueryService } from "./sales-query.service.js";
     DashboardService,
     ProductPerformanceService,
     AnalyticsOverviewService,
+    AnalyticsLayoutService,
   ],
 })
 export class AnalyticsModule {}

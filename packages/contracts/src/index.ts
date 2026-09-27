@@ -302,3 +302,20 @@ export type {
   WorkspaceSession,
   WorkspaceMessage,
 } from "./ai/assistant-workspace.schema.js";
+
+export {
+  AGENT_ACTION_MAX_PER_REPLY,
+  AGENT_ACTION_TTL_MS,
+  AgentActionCancelResponseSchema,
+  AgentActionConfirmResponseSchema,
+  AgentActionKindSchema,
+  AgentActionOutcomeSchema,
+  AgentActionProposalSchema,
+  AgentActionIdSchema,
+} from "./ai/agent-actions.schema.js";
+export type {
+  AgentActionConfirmResponse,
+  AgentActionKind,
+  AgentActionOutcome,
+  AgentActionProposal,
+} from "./ai/agent-actions.schema.js";

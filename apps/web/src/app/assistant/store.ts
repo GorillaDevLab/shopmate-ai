@@ -1,4 +1,5 @@
 import type {
+  AgentActionOutcome,
   AssistantIdentity,
   WorkspaceSnapshot,
   WorkspaceSession,
@@ -225,6 +226,15 @@ export class AssistantStore {
     this.updateSession(this.state.currentId, (s) => ({
       ...s,
       messages: s.messages.map((m) => (m.id === messageId ? { ...m, chartView } : m)),
+    }));
+  setActionOutcome = (messageId: string, actionId: string, outcome: AgentActionOutcome) =>
+    this.updateSession(this.state.currentId, (s) => ({
+      ...s,
+      messages: s.messages.map((m) =>
+        m.id === messageId
+          ? { ...m, actionOutcomes: { ...m.actionOutcomes, [actionId]: outcome } }
+          : m,
+      ),
     }));
   private localChartFollowup(session: WorkspaceSession, prompt: string): boolean {
     const view = chartFollowupView(prompt);
