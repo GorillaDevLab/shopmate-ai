@@ -17,6 +17,11 @@ import {
   historyFor,
 } from "./model";
 import { runAssistant, AssistantTransportError } from "./transport";
+import { WorkspaceConflictError, type WorkspaceRemote } from "./memory-api";
+import { mergeWorkspaces, sameWorkspace } from "./workspace-merge";
+
+// 本地写入 300ms 后落盘，再等一会儿批量同步到服务端，避免每次按键都发请求。
+const REMOTE_SYNC_DELAY_MS = 1500;
 import { chartFollowupMessage, chartFollowupView } from "../chart-followup";
 
 export type WorkspaceState = WorkspaceSnapshot & {
@@ -42,10 +47,13 @@ export class AssistantStore {
   private key = "";
   private controller: AbortController | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
+  private uploadTimer: ReturnType<typeof setTimeout> | undefined;
+  private remoteRevision = 0;
   private readonly addedArtifacts = new Set<DashboardInsightPreviewResponse>();
   constructor(
     private readonly storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | undefined,
     private readonly run = runAssistant,
+    private readonly remote?: Pick<WorkspaceRemote, "load" | "save" | "delete">,
   ) {}
   getSnapshot = () => this.state;
   ownsStorageKey = (key: string | null) => Boolean(this.key) && key === this.key;
@@ -71,6 +79,57 @@ export class AssistantStore {
     } catch {
       this.publish({ warning: "历史暂未保存到此设备，请检查浏览器存储或清理旧会话。" });
     }
+    this.scheduleUpload();
+  };
+  private scheduleUpload() {
+    if (!this.remote) return;
+    clearTimeout(this.uploadTimer);
+    this.uploadTimer = setTimeout(() => void this.upload(this.key), REMOTE_SYNC_DELAY_MS);
+  }
+  /** 按 revision 上传；另一台设备先写过时，拉取最新记录合并后重试一次。 */
+  private async upload(key: string, retry = true): Promise<void> {
+    if (!this.remote || !key || key !== this.key || !this.state.ready) return;
+    try {
+      this.remoteRevision = await this.remote.save(this.snapshot(), this.remoteRevision);
+    } catch (error) {
+      if (key !== this.key) return;
+      if (error instanceof WorkspaceConflictError && retry) {
+        await this.pull(key);
+        return this.upload(key, false);
+      }
+      this.publish({ warning: "对话暂未同步到账号，下次修改时会再试。" });
+    }
+  }
+  /** 拉取服务端记录并与本机合并；合并结果与服务端不同则回传。 */
+  private async pull(key: string): Promise<void> {
+    if (!this.remote) return;
+    try {
+      const { snapshot, revision } = await this.remote.load();
+      if (key !== this.key) return;
+      this.remoteRevision = revision;
+      const local = this.snapshot();
+      const merged = snapshot ? mergeWorkspaces(snapshot, local) : local;
+      if (!sameWorkspace(merged, local)) {
+        this.publish({ sessions: merged.sessions, currentId: merged.currentId });
+        this.save();
+      } else if (!snapshot || !sameWorkspace(merged, snapshot)) {
+        this.scheduleUpload();
+      }
+    } catch {
+      if (key === this.key)
+        this.publish({ warning: "暂时无法读取账号里的对话记录，先显示本机记录。" });
+    }
+  }
+  /** 删除账号里与本机的全部对话；需要调用方先二次确认。 */
+  deleteAllHistory = async () => {
+    this.controller?.abort();
+    this.controller = null;
+    clearTimeout(this.saveTimer);
+    clearTimeout(this.uploadTimer);
+    await this.remote?.delete();
+    this.remoteRevision = 0;
+    this.publish({ sessions: [], currentId: "", runningId: "", progress: "", error: "" });
+    this.flush();
   };
   private snapshot(): WorkspaceSnapshot {
     return { version: 1, sessions: this.state.sessions, currentId: this.state.currentId };
@@ -83,6 +142,8 @@ export class AssistantStore {
     if (key === this.key) {
       this.publish({ ready: true, error: "" });
       this.flush();
+      // 回到页面时拉取一次，另一台设备上的新对话能及时出现。
+      if (!this.state.runningId) void this.pull(key);
       return;
     }
     this.controller?.abort();
@@ -118,6 +179,7 @@ export class AssistantStore {
       }),
     };
     this.key = key;
+    this.remoteRevision = 0;
     this.publish({
       ...INITIAL_STATE,
       ...snapshot,
@@ -125,6 +187,7 @@ export class AssistantStore {
       warning,
       pendingArtifact: undefined,
     });
+    void this.pull(key);
   }
   unavailable(message: string) {
     this.publish({ ready: false, error: message });
@@ -136,6 +199,9 @@ export class AssistantStore {
     this.controller?.abort();
     this.controller = null;
     clearTimeout(this.saveTimer);
+    // 退出登录只清本机缓存；账号里的对话保留，下次登录会同步回来。
+    clearTimeout(this.uploadTimer);
+    this.remoteRevision = 0;
     this.addedArtifacts.clear();
     let warning = "";
     try {

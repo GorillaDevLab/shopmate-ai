@@ -134,6 +134,12 @@ function Message({
         />
       )}
       {message.productCopy && <ProductCopyCard copy={message.productCopy} />}
+      {message.rememberedPreferences && message.rememberedPreferences.length > 0 && (
+        <p className="assistant-remembered" role="note">
+          <span aria-hidden="true">✓</span> 已记住：{message.rememberedPreferences.join("；")}
+          <span className="assistant-remembered-hint">（可在“记忆”里查看或删除）</span>
+        </p>
+      )}
       {message.actionProposals?.map((proposal) => (
         <ActionProposalCard
           key={proposal.actionId}

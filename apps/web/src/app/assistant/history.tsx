@@ -27,7 +27,7 @@ export function AssistantHistory({ onSelect }: { onSelect?: () => void }) {
           ＋
         </button>
       </div>
-      <p>仅保存在此浏览器，退出登录后清理</p>
+      <p>已同步到你的账号，换设备登录也能看到</p>
       <div className="assistant-history-list">
         {state.sessions.length === 0 ? (
           <span className="assistant-history-empty">从一个问题开始，记录会出现在这里。</span>

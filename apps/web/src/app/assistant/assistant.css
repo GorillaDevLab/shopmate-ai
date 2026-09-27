@@ -764,3 +764,149 @@
 .assistant-action-result a {
   color: var(--brand-strong);
 }
+
+/* 页头操作区：窄屏下旧规则会隐藏页头最后一个 div，这里保证“记忆”入口始终可见 */
+.assistant-page-header > .assistant-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.assistant-memory-trigger {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--app-line);
+  border-radius: 999px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+@media (max-width: 900px) {
+  .assistant-page-header > .assistant-page-actions > :not(.assistant-memory-trigger) {
+    display: none;
+  }
+}
+
+/* “已记住”提示 */
+.assistant-remembered {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.assistant-remembered-hint {
+  color: var(--app-muted);
+}
+
+/* 记忆面板 */
+.assistant-memory-dialog {
+  width: min(480px, calc(100% - 32px));
+  max-height: min(640px, calc(100dvh - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 22%);
+}
+.assistant-memory-dialog::backdrop {
+  background: rgb(0 0 0 / 30%);
+}
+.assistant-memory-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px 20px;
+  font-size: 13px;
+}
+.assistant-memory-body header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.assistant-memory-body h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.assistant-memory-body header button {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+.assistant-memory-body p {
+  margin: 0;
+  line-height: 1.6;
+}
+.assistant-memory-hint,
+.assistant-memory-empty {
+  color: var(--app-muted);
+}
+.assistant-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow: auto;
+}
+.assistant-memory-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--app-bg);
+}
+.assistant-memory-list span {
+  overflow-wrap: anywhere;
+}
+.assistant-memory-body button:not(header button) {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--app-line);
+  border-radius: 10px;
+  background: var(--app-surface);
+  color: var(--app-text);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.assistant-memory-body button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.assistant-memory-body footer,
+.assistant-memory-confirm > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.assistant-memory-body .assistant-memory-danger {
+  border-color: #b42318;
+  color: #b42318;
+}
+.assistant-memory-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #f1c4bf;
+  border-radius: 12px;
+  background: #fff7f6;
+}
+.assistant-memory-confirm .assistant-memory-danger {
+  background: #b42318;
+  color: #ffffff;
+}

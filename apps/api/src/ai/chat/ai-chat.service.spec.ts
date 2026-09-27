@@ -48,6 +48,33 @@ describe("AiChatService", () => {
     expect(reply.message.actionProposals).toEqual([proposal]);
   });
 
+  it("把已存偏好交给 Agent，并提示本轮新记住的偏好", async () => {
+    const run = vi.fn().mockResolvedValue({
+      status: "completed",
+      answer: "已记住：常看北京朝阳店。",
+      usedTools: ["remember_preference"],
+      rounds: 2,
+      toolOutputs: [
+        {
+          name: "remember_preference",
+          output: { status: "ok", data: { content: "常看北京朝阳店", alreadyKnown: false } },
+        },
+        {
+          name: "remember_preference",
+          output: { status: "error", error: { code: "MEMORY_FULL" } },
+        },
+      ],
+    });
+    const memories = { promptContext: vi.fn(async () => ["回答简短"]) };
+    const service = new AiChatService({ run }, undefined, memories);
+    const reply = await service.chat(authContext, {
+      message: { role: "user", content: "记住我常看北京朝阳店" },
+    });
+    expect(memories.promptContext).toHaveBeenCalledWith(authContext);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ memories: ["回答简短"] }));
+    expect(reply.message.rememberedPreferences).toEqual(["常看北京朝阳店"]);
+  });
+
   it("保留汇总工具核实的周期供下一轮追问，不伪造图表", async () => {
     const service = new AiChatService({
       run: vi.fn().mockResolvedValue({
