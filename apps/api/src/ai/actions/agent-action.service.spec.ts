@@ -48,7 +48,8 @@ describe("AgentActionService", () => {
   const monitoring = { create: vi.fn() };
   const layouts = { get: vi.fn(), save: vi.fn() };
   const service = () => new AgentActionService(store, inventory, monitoring, layouts);
-  const propose = (payload: AgentActionPayload) => store.propose(context, content, payload).token;
+  const propose = (payload: AgentActionPayload) =>
+    store.propose(context, content, payload).actionId;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -60,15 +61,15 @@ describe("AgentActionService", () => {
     await expect(service().confirm(context, "not-a-uuid")).rejects.toBeInstanceOf(
       NotFoundException,
     );
-    const token = propose(inventoryPayload);
+    const actionId = propose(inventoryPayload);
     inventory.confirmAlertThreshold.mockResolvedValue({
       kind: "CONFIRMED",
       skuId: "sku-1",
       previousAlertThreshold: 10,
       newAlertThreshold: 20,
     });
-    await service().confirm(context, token);
-    await expect(service().confirm(context, token)).rejects.toBeInstanceOf(NotFoundException);
+    await service().confirm(context, actionId);
+    await expect(service().confirm(context, actionId)).rejects.toBeInstanceOf(NotFoundException);
     const stale = propose(inventoryPayload);
     now += AGENT_ACTION_TTL_MS;
     await expect(service().confirm(context, stale)).rejects.toBeInstanceOf(GoneException);
@@ -76,13 +77,13 @@ describe("AgentActionService", () => {
   });
 
   it("re-checks permissions at confirmation time", async () => {
-    const token = propose(inventoryPayload);
+    const actionId = propose(inventoryPayload);
     const readOnly = createAuthContext({
       userId: "u1",
       merchantId: "m1",
       permissions: [AuthPermission.OrdersRead],
     });
-    await expect(service().confirm(readOnly, token)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service().confirm(readOnly, actionId)).rejects.toBeInstanceOf(ForbiddenException);
     expect(inventory.confirmAlertThreshold).not.toHaveBeenCalled();
   });
 
@@ -167,9 +168,9 @@ describe("AgentActionService", () => {
     expect(layouts.save).not.toHaveBeenCalled();
   });
 
-  it("cancels by discarding the token", async () => {
-    const token = propose(inventoryPayload);
-    expect(service().cancel(context, token)).toEqual({ status: "cancelled" });
-    await expect(service().confirm(context, token)).rejects.toBeInstanceOf(NotFoundException);
+  it("cancels by discarding the actionId", async () => {
+    const actionId = propose(inventoryPayload);
+    expect(service().cancel(context, actionId)).toEqual({ status: "cancelled" });
+    await expect(service().confirm(context, actionId)).rejects.toBeInstanceOf(NotFoundException);
   });
 });

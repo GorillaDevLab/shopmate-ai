@@ -25,25 +25,25 @@ describe("AgentActionStore", () => {
     const store = new AgentActionStore();
     const proposal = store.propose(owner, content, payload);
     expect(proposal).toMatchObject({ kind: "createMonitoringRule", title: "创建经营监听" });
-    expect(store.take(proposal.token, owner)).toMatchObject({ kind: "ok" });
-    expect(store.take(proposal.token, owner)).toEqual({ kind: "not_found" });
+    expect(store.take(proposal.actionId, owner)).toMatchObject({ kind: "ok" });
+    expect(store.take(proposal.actionId, owner)).toEqual({ kind: "not_found" });
   });
 
   it("hides proposals from other users and merchants without consuming them", () => {
     const store = new AgentActionStore();
-    const { token } = store.propose(owner, content, payload);
-    expect(store.take(token, { userId: "u2", merchantId: "m1" })).toEqual({ kind: "not_found" });
-    expect(store.take(token, { userId: "u1", merchantId: "m2" })).toEqual({ kind: "not_found" });
-    expect(store.take(token, owner)).toMatchObject({ kind: "ok" });
+    const { actionId } = store.propose(owner, content, payload);
+    expect(store.take(actionId, { userId: "u2", merchantId: "m1" })).toEqual({ kind: "not_found" });
+    expect(store.take(actionId, { userId: "u1", merchantId: "m2" })).toEqual({ kind: "not_found" });
+    expect(store.take(actionId, owner)).toMatchObject({ kind: "ok" });
   });
 
   it("expires proposals after the TTL", () => {
     let now = 1_000;
     const store = new AgentActionStore(() => now);
-    const { token, expiresAt } = store.propose(owner, content, payload);
+    const { actionId, expiresAt } = store.propose(owner, content, payload);
     expect(Date.parse(expiresAt)).toBe(1_000 + AGENT_ACTION_TTL_MS);
     now += AGENT_ACTION_TTL_MS;
-    expect(store.take(token, owner)).toEqual({ kind: "expired" });
+    expect(store.take(actionId, owner)).toEqual({ kind: "expired" });
   });
 
   it("limits how many proposals one actor can keep pending", () => {

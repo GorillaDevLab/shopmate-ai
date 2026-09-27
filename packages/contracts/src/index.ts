@@ -311,7 +311,7 @@ export {
   AgentActionKindSchema,
   AgentActionOutcomeSchema,
   AgentActionProposalSchema,
-  AgentActionTokenSchema,
+  AgentActionIdSchema,
 } from "./ai/agent-actions.schema.js";
 export type {
   AgentActionConfirmResponse,

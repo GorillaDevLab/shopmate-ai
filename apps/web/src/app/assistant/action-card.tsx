@@ -40,14 +40,14 @@ export function ActionProposalCard({
     setBusy(action);
     try {
       if (action === "confirm") {
-        const result = await confirmAgentAction(proposal.token);
+        const result = await confirmAgentAction(proposal.actionId);
         onOutcome({
           status: "done",
           message: result.message,
           ...(result.href ? { href: result.href } : {}),
         });
       } else {
-        await cancelAgentAction(proposal.token);
+        await cancelAgentAction(proposal.actionId);
         onOutcome({ status: "cancelled", message: "已取消，没有做任何修改。" });
       }
     } catch (error: unknown) {

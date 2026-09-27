@@ -10,7 +10,7 @@ import {
 import {
   ANALYTICS_MAX_AI_CARDS,
   AgentActionConfirmResponseSchema,
-  AgentActionTokenSchema,
+  AgentActionIdSchema,
   isAnalyticsAiCard,
   type AgentActionConfirmResponse,
 } from "@shopmate/contracts";
@@ -40,8 +40,8 @@ export class AgentActionService {
     private readonly layouts: Layouts,
   ) {}
 
-  async confirm(context: AuthContext, rawToken: string): Promise<AgentActionConfirmResponse> {
-    const taken = this.store.take(parseToken(rawToken), context);
+  async confirm(context: AuthContext, rawActionId: string): Promise<AgentActionConfirmResponse> {
+    const taken = this.store.take(parseActionId(rawActionId), context);
     if (taken.kind === "not_found") throw new NotFoundException({ code: "ACTION_NOT_FOUND" });
     if (taken.kind === "expired") {
       throw new GoneException({
@@ -60,8 +60,8 @@ export class AgentActionService {
     return AgentActionConfirmResponseSchema.parse(await this.execute(context, payload));
   }
 
-  cancel(context: AuthContext, rawToken: string): { status: "cancelled" } {
-    this.store.take(parseToken(rawToken), context);
+  cancel(context: AuthContext, rawActionId: string): { status: "cancelled" } {
+    this.store.take(parseActionId(rawActionId), context);
     return { status: "cancelled" };
   }
 
@@ -141,8 +141,8 @@ export class AgentActionService {
   }
 }
 
-function parseToken(raw: string): string {
-  const token = AgentActionTokenSchema.safeParse(raw);
-  if (!token.success) throw new NotFoundException({ code: "ACTION_NOT_FOUND" });
-  return token.data;
+function parseActionId(raw: string): string {
+  const actionId = AgentActionIdSchema.safeParse(raw);
+  if (!actionId.success) throw new NotFoundException({ code: "ACTION_NOT_FOUND" });
+  return actionId.data;
 }

@@ -83,8 +83,8 @@ function parseEvent(line: string): AssistantRunEvent {
 }
 
 /** 用户在确认卡片上点确认/取消；模型不会调用这两个接口。 */
-export async function confirmAgentAction(token: string): Promise<AgentActionConfirmResponse> {
-  const response = await postAction(token, "confirm");
+export async function confirmAgentAction(actionId: string): Promise<AgentActionConfirmResponse> {
+  const response = await postAction(actionId, "confirm");
   const parsed = AgentActionConfirmResponseSchema.safeParse(
     await response.json().catch(() => null),
   );
@@ -93,14 +93,14 @@ export async function confirmAgentAction(token: string): Promise<AgentActionConf
   return parsed.data;
 }
 
-export async function cancelAgentAction(token: string): Promise<void> {
-  await postAction(token, "cancel");
+export async function cancelAgentAction(actionId: string): Promise<void> {
+  await postAction(actionId, "cancel");
 }
 
-async function postAction(token: string, action: "confirm" | "cancel"): Promise<Response> {
+async function postAction(actionId: string, action: "confirm" | "cancel"): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(`/api/v1/ai/actions/${encodeURIComponent(token)}/${action}`, {
+    response = await fetch(`/api/v1/ai/actions/${encodeURIComponent(actionId)}/${action}`, {
       method: "POST",
       credentials: "include",
       cache: "no-store",

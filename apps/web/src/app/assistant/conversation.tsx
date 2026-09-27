@@ -136,10 +136,10 @@ function Message({
       {message.productCopy && <ProductCopyCard copy={message.productCopy} />}
       {message.actionProposals?.map((proposal) => (
         <ActionProposalCard
-          key={proposal.token}
+          key={proposal.actionId}
           proposal={proposal}
-          outcome={message.actionOutcomes?.[proposal.token]}
-          onOutcome={(outcome) => store.setActionOutcome(message.id, proposal.token, outcome)}
+          outcome={message.actionOutcomes?.[proposal.actionId]}
+          onOutcome={(outcome) => store.setActionOutcome(message.id, proposal.actionId, outcome)}
         />
       ))}
       {message.role === "assistant" && (

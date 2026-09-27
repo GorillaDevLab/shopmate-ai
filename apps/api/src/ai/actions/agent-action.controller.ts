@@ -8,15 +8,15 @@ import { AgentActionService } from "./agent-action.service.js";
 export class AgentActionController {
   constructor(private readonly service: AgentActionService) {}
 
-  @Post(":token/confirm")
+  @Post(":actionId/confirm")
   @HttpCode(200)
-  confirm(@MerchantContext() context: AuthContext, @Param("token") token: string) {
-    return this.service.confirm(context, token);
+  confirm(@MerchantContext() context: AuthContext, @Param("actionId") actionId: string) {
+    return this.service.confirm(context, actionId);
   }
 
-  @Post(":token/cancel")
+  @Post(":actionId/cancel")
   @HttpCode(200)
-  cancel(@MerchantContext() context: AuthContext, @Param("token") token: string) {
-    return this.service.cancel(context, token);
+  cancel(@MerchantContext() context: AuthContext, @Param("actionId") actionId: string) {
+    return this.service.cancel(context, actionId);
   }
 }
