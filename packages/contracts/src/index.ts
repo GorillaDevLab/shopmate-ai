@@ -319,3 +319,21 @@ export type {
   AgentActionOutcome,
   AgentActionProposal,
 } from "./ai/agent-actions.schema.js";
+
+export {
+  ASSISTANT_MEMORY_LIMIT,
+  ASSISTANT_MEMORY_MAX_LENGTH,
+  ASSISTANT_WORKSPACE_MAX_BYTES,
+  AssistantMemoryContentSchema,
+  AssistantMemoryListResponseSchema,
+  AssistantMemorySchema,
+  AssistantWorkspaceReadResponseSchema,
+  AssistantWorkspaceSaveRequestSchema,
+  AssistantWorkspaceSaveResponseSchema,
+} from "./ai/assistant-memory.schema.js";
+export type {
+  AssistantMemory,
+  AssistantMemoryListResponse,
+  AssistantWorkspaceReadResponse,
+  AssistantWorkspaceSaveRequest,
+} from "./ai/assistant-memory.schema.js";

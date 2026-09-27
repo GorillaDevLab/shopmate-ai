@@ -55,14 +55,16 @@ model Merchant {
   slug   String         @unique
   status MerchantStatus @default(ACTIVE)
 
-  products         Product[]
-  skus             Sku[]
-  orders           Order[]
-  stores           Store[]
-  dashboardLayouts UserDashboardLayout[]
-  analyticsLayouts UserAnalyticsLayout[]
-  monitoringRules  UserMonitoringRule[]
-  notifications    MonitoringNotification[]
+  products            Product[]
+  skus                Sku[]
+  orders              Order[]
+  stores              Store[]
+  dashboardLayouts    UserDashboardLayout[]
+  analyticsLayouts    UserAnalyticsLayout[]
+  assistantWorkspaces UserAssistantWorkspace[]
+  assistantMemories   AssistantMemory[]
+  monitoringRules     UserMonitoringRule[]
+  notifications       MonitoringNotification[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -204,6 +206,40 @@ model UserAnalyticsLayout {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, merchantId])
+  @@index([merchantId])
+}
+
+// AI 助手对话记录，按用户 + 商家同步到服务端，换设备也能看到；revision 用于防止多设备互相覆盖。
+model UserAssistantWorkspace {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+
+  revision Int  @default(1)
+  snapshot Json
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, merchantId])
+  @@index([merchantId])
+}
+
+// AI 记住的用户偏好（单行短句），每次对话作为偏好上下文提供给模型，不作为经营数据依据。
+model AssistantMemory {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+  content    String
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, merchantId, content])
+  @@index([userId, merchantId, createdAt])
   @@index([merchantId])
 }
 

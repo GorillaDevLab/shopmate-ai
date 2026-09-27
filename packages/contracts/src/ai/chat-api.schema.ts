@@ -21,6 +21,8 @@ const assistantMessageSchema = z.strictObject({
   insightPreview: DashboardInsightPreviewResponseSchema.optional(),
   insightQuery: DashboardInsightQuerySchema.optional(),
   actionProposals: z.array(AgentActionProposalSchema).max(AGENT_ACTION_MAX_PER_REPLY).optional(),
+  /** 本轮 AI 自动记住的偏好，用于在回复下方提示“已记住”。 */
+  rememberedPreferences: z.array(z.string().min(1).max(200)).max(3).optional(),
 });
 
 export const AiChatRequestSchema = z.strictObject({

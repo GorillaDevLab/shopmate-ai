@@ -10,6 +10,7 @@ import {
 import { usePathname } from "next/navigation";
 import { AssistantIdentitySchema } from "@shopmate/contracts";
 import { AssistantStore, INITIAL_STATE } from "./store";
+import { workspaceRemote } from "./memory-api";
 import { useAssistantViewport } from "./viewport";
 
 const Context = createContext<AssistantStore | null>(null);
@@ -24,7 +25,7 @@ export function AssistantStoreProvider({
 }
 export function AssistantWorkspaceProvider({ children }: { children: ReactNode }) {
   useAssistantViewport();
-  const [store] = useState(() => new AssistantStore(browserStorage()));
+  const [store] = useState(() => new AssistantStore(browserStorage(), undefined, workspaceRemote));
   const pathname = usePathname();
   useEffect(() => {
     let generation = 0,
