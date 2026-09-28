@@ -346,12 +346,12 @@ describe("BusinessAgent", () => {
     expect(result.answer).toContain("无法继续安全查询");
     expect(result.rounds).toBe(3);
 
-    // 第二轮复用缓存，第三轮在执行前被轮次上限拦截。
+    // 第二轮复用缓存，第三轮在执行前被轮次上限拦截；之后只再要一次不带工具的回答。
     expect(handler).toHaveBeenCalledOnce();
-    expect(provider.generate).toHaveBeenCalledTimes(3);
+    expect(provider.generate).toHaveBeenCalledTimes(4);
   });
 
-  it("达到工具轮次上限后停止，不会继续调用 Provider", async () => {
+  it("达到工具轮次上限后不再执行工具，改为根据已有结果作答", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-1", "get_sales_summary", {
         startDate: "2026-08-25",
@@ -361,16 +361,35 @@ describe("BusinessAgent", () => {
         startDate: "2026-08-26",
         endDate: "2026-08-26",
       }),
+      finalResult("已根据已查询的 8 月 25 日数据完成分析。"),
     ]);
     const handler = vi.fn(() => salesResult);
     const agent = new BusinessAgent(provider, salesRegistry(handler), { maxToolRounds: 1 });
 
     const result = await agent.run({ question: "逐日查询销售额", context });
 
-    expect(result.status).toBe("limited");
-    expect(result.rounds).toBe(2);
-    expect(provider.generate).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("completed");
+    expect(result.rounds).toBe(3);
     expect(handler).toHaveBeenCalledOnce();
+    // 最后一次生成不提供工具，模型无法继续调用。
+    expect(provider.requests[2]?.tools).toEqual([]);
+  });
+
+  it("超限后的回答仍要通过数字核对", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-1", "get_sales_summary", period),
+      toolCallResult("call-2", "get_sales_summary", {
+        startDate: "2026-08-26",
+        endDate: "2026-08-26",
+      }),
+      finalResult("销售额是 999 元。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(), { maxToolRounds: 1 });
+
+    const result = await agent.run({ question: "逐日查询销售额", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
   });
 
   it("最后一个允许的工具轮次之后仍可生成最终解释", async () => {
@@ -788,7 +807,24 @@ describe("BusinessAgent", () => {
 
     expect(result.status).toBe("limited");
     expect(handler).toHaveBeenCalledTimes(2);
-    expect(provider.generate).toHaveBeenCalledTimes(2);
+    // 第三个调用被拦下；随后的无工具回答没有脚本响应，按超限失败。
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+    expect(result.failureCode).toBe("AI_TOOL_LIMIT");
+  });
+
+  it("万元金额保留 3 位有效数字即可，单位“万”和行文“一个”不当作数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额 0.174 万元，共 5 单，有一个方向值得关注，一两天内可以复查。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({ question: "查询销售额", context });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe(
+      "销售额 0.174 万元，共 5 单，有一个方向值得关注，一两天内可以复查。",
+    );
   });
 
   it("用 calculate 算出的环比可以直接写进回答", async () => {

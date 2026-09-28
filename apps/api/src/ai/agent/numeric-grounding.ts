@@ -2,8 +2,10 @@
  * 判断回答中的数字是否有工具结果作为依据。
  *
  * 规则依旧严格：每个数字都必须能追溯到本轮工具结果。普通数字要求完全一致
- * （约数由 number-presentation 按单位单独核对，并要求写明“约”）；百分比与倍数
- * 额外接受“由两个已核实数字直接得出”的占比、环比和倍数，按回答给出的小数位比对。
+ * （约数由 number-presentation 按单位单独核对，并要求写明“约”）。百分比、倍数、
+ * 以万/亿为单位的数字本身就是换算后的展示值，按回答给出的小数位四舍五入比对
+ * （40.61% 可写成 41%，251,037 可写成 25.10万；万/亿至少保留 3 位有效数字）；百分比与倍数还接受“由两个已核实
+ * 数字直接得出”的占比、环比和倍数。
  * 差额、合计、平均等其他推算必须先调用 calculate 工具，结果才会成为依据。
  */
 
@@ -37,13 +39,21 @@ export class NumericGrounding {
 
   isGrounded(number: AnswerNumber): boolean {
     const scale = SCALE[number.suffix];
-    if (scale) return this.exact.has(canonical(number.value * scale));
+    if (scale) return this.isScaled(number, scale);
     if (this.exact.has(canonical(number.value))) return true;
     if (number.suffix !== "%" && number.suffix !== "倍") return false;
-    const [low, high] = precisionRange(number);
+    const [low, high] = precisionRange(number, true);
     if (this.hasValueIn(low, high)) return true;
     if (number.suffix === "倍") return this.isRatio(low, high, 1);
     return this.isRatio(low, high, 100) || this.isChange(low, high);
+  }
+
+  /** “1.78万”：有效数字少于 3 位（“2万”“0.12万”）误差太大，仍需完全一致或写“约”。 */
+  private isScaled(number: AnswerNumber, scale: number): boolean {
+    if (this.exact.has(canonical(number.value * scale))) return true;
+    if (significantDigits(number.text) < 3 && !number.approximate) return false;
+    const [low, high] = precisionRange(number, true);
+    return this.hasValueIn(low * scale, high * scale);
   }
 
   /** value ≈ a / b × factor，a、b 都是已核实数字。 */
@@ -76,10 +86,17 @@ export class NumericGrounding {
   }
 }
 
-/** 写了几位小数就按几位比对；整数百分比不做四舍五入（约数需写“约”）。 */
-function precisionRange({ value, decimals, approximate }: AnswerNumber): [number, number] {
-  const half = decimals > 0 || approximate ? 0.5 * 10 ** -decimals : 1e-9;
+/** 写了几位小数就按几位四舍五入比对；mayRound 为 false 时只接受完全一致（写了“约”除外）。 */
+function precisionRange(
+  { value, decimals, approximate }: AnswerNumber,
+  mayRound: boolean,
+): [number, number] {
+  const half = mayRound || approximate ? 0.5 * 10 ** -decimals : 1e-9;
   return [Math.max(0, value - half), value + half - 1e-12];
+}
+
+export function significantDigits(text: string): number {
+  return text.replace(/\D/gu, "").replace(/^0+/u, "").length;
 }
 
 function canonical(value: number): string {

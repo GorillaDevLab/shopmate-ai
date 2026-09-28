@@ -1,3 +1,5 @@
+import { significantDigits } from "./numeric-grounding.js";
+
 interface Evidence {
   amounts: number[];
   percentages: number[];
@@ -15,12 +17,33 @@ export function protectNumberPresentations(
   isDerivedPercent: DerivedPercentCheck = () => false,
 ) {
   if (content.includes(MARKER)) return null;
+  const { masked, originals, rejected } = scanPresentations(content, outputs, isDerivedPercent);
+  let index = 0;
+  return rejected.length === 0
+    ? { masked, restore: (text: string) => text.replaceAll(MARKER, () => originals[index++] ?? "") }
+    : null;
+}
+
+/** 供诊断日志使用：列出按单位核对失败的原文（如“46%”“25.1 万元”）。 */
+export function rejectedPresentations(
+  content: string,
+  outputs: readonly unknown[],
+  isDerivedPercent: DerivedPercentCheck = () => false,
+): string[] {
+  return scanPresentations(content, outputs, isDerivedPercent).rejected;
+}
+
+function scanPresentations(
+  content: string,
+  outputs: readonly unknown[],
+  isDerivedPercent: DerivedPercentCheck,
+) {
   const evidence: Evidence = { amounts: [], percentages: [] };
   for (const output of outputs) {
     if (isRecord(output) && output.status === "ok") collect(output, evidence);
   }
   const originals: string[] = [];
-  let valid = true;
+  const rejected: string[] = [];
   const masked = content.replace(
     /(约为|大约|约)?\s*([+-]?\d[\d,]*(?:\.\d+)?)\s*(万元|亿元|元|%|％)/gu,
     (match, approximate: string | undefined, digits: string, unit: string) => {
@@ -29,19 +52,19 @@ export function protectNumberPresentations(
       const values = percent ? evidence.percentages : evidence.amounts;
       const number = Number(digits.replaceAll(",", ""));
       const precision = digits.split(".")[1]?.length ?? 0;
-      const mayRound = Boolean(approximate) || (percent && precision > 0);
+      // 百分比和“万元/亿元”本身就是换算后的展示值，按给出的小数位四舍五入；
+      // 万元少于 3 位有效数字误差太大、“元”金额应精确到分，这两种仍需写“约”。
+      const mayRound =
+        Boolean(approximate) || percent || (scale > 1 && significantDigits(digits) >= 3);
       const grounded =
         values.some((value) => matches(value / scale, number, precision, mayRound)) ||
         (percent && isDerivedPercent(Math.abs(number), precision, Boolean(approximate)));
-      if (!grounded) valid = false;
+      if (!grounded) rejected.push(match.trim());
       originals.push(match);
       return MARKER;
     },
   );
-  let index = 0;
-  return valid
-    ? { masked, restore: (text: string) => text.replaceAll(MARKER, () => originals[index++] ?? "") }
-    : null;
+  return { masked, originals, rejected };
 }
 
 function matches(source: number, shown: number, precision: number, mayRound: boolean): boolean {
