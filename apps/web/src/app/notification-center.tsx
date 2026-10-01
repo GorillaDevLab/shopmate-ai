@@ -29,6 +29,7 @@ export function NotificationCenter({ enabled = true }: { readonly enabled?: bool
     if (!enabled || synced.current) return;
     synced.current = true;
     void syncMonitoring()
+      .catch(() => undefined)
       .then(refreshCount)
       .catch(() => undefined);
   }, [enabled, refreshCount]);
@@ -193,7 +194,10 @@ function NotificationList({
     <ul className="notification-list">
       {items.map((item) => (
         <li key={item.id} className={item.readAt ? "is-read" : ""}>
-          <span className="notification-severity" aria-hidden="true" />
+          <span
+            className={`notification-severity is-${item.severity.toLowerCase()}`}
+            aria-hidden="true"
+          />
           <div>
             <div className="notification-meta">
               <strong>{item.ruleName}</strong>
