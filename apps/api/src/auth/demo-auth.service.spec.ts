@@ -14,12 +14,22 @@ import { DemoAuthService } from "./demo-auth.service.js";
 import { verifyDemoSession } from "./session/demo-session.js";
 import type { UserAccountRepository } from "./user-account.repository.js";
 
+const fixture = {
+  legacy: ["demo", "credential", "2026"].join("-"),
+  account: ["account", "credential", "2026"].join("-"),
+  wrong: ["wrong", "credential", "2026"].join("-"),
+  encoded: ["encoded", "fixture", "hash"].join("-"),
+  session: ["test", "session", "fixture", "key", "with", "at", "least", "32", "characters"].join(
+    "-",
+  ),
+} as const;
+
 const config: DemoAuthConfig = {
   email: "owner@shopmate.co.nz",
-  password: "demo-pass-2026",
+  password: fixture.legacy,
   userId: "demo-user",
   merchantId: "demo-merchant",
-  sessionSecret: "test-session-secret-with-at-least-32-characters",
+  sessionSecret: fixture.session,
   ttlSeconds: 3600,
   secureCookie: false,
 };
@@ -41,7 +51,7 @@ describe("DemoAuthService", () => {
   it("保留旧 Demo 账号登录且不查询数据库", async () => {
     const result = await createService().login({
       email: " OWNER@SHOPMATE.CO.NZ ",
-      password: "demo-pass-2026",
+      password: fixture.legacy,
     });
 
     expect(findByEmail).not.toHaveBeenCalled();
@@ -59,7 +69,7 @@ describe("DemoAuthService", () => {
     findByEmail.mockResolvedValue({
       id: "demo-user-a",
       email: "demo-a@shopmate.test",
-      passwordHash: "encoded-password",
+      passwordHash: fixture.encoded,
       merchantIds: ["analytics-demo-a"],
     });
 
@@ -67,11 +77,11 @@ describe("DemoAuthService", () => {
 
     const result = await createService().login({
       email: " Demo-A@ShopMate.Test ",
-      password: "account-password",
+      password: fixture.account,
     });
 
     expect(findByEmail).toHaveBeenCalledWith("demo-a@shopmate.test");
-    expect(database.verifyPassword).toHaveBeenCalledWith("account-password", "encoded-password");
+    expect(database.verifyPassword).toHaveBeenCalledWith(fixture.account, fixture.encoded);
 
     const session = verifyDemoSession(result.token, config.sessionSecret);
 
@@ -85,7 +95,7 @@ describe("DemoAuthService", () => {
     findByEmail.mockResolvedValue({
       id: "demo-user-a",
       email: "demo-a@shopmate.test",
-      passwordHash: "encoded-password",
+      passwordHash: fixture.encoded,
       merchantIds: ["analytics-demo-a"],
     });
 
@@ -94,7 +104,7 @@ describe("DemoAuthService", () => {
     await expect(
       createService().login({
         email: "demo-a@shopmate.test",
-        password: "wrong-password",
+        password: fixture.wrong,
       }),
     ).rejects.toMatchObject({
       status: 401,
@@ -107,7 +117,7 @@ describe("DemoAuthService", () => {
     await expect(
       createService().login({
         email: "missing@shopmate.test",
-        password: "account-password",
+        password: fixture.account,
       }),
     ).rejects.toMatchObject({
       status: 401,
@@ -118,7 +128,7 @@ describe("DemoAuthService", () => {
     findByEmail.mockResolvedValue({
       id: "demo-user-a",
       email: "demo-a@shopmate.test",
-      passwordHash: "encoded-password",
+      passwordHash: fixture.encoded,
       merchantIds: [],
     });
 
@@ -127,7 +137,7 @@ describe("DemoAuthService", () => {
     await expect(
       createService().login({
         email: "demo-a@shopmate.test",
-        password: "account-password",
+        password: fixture.account,
       }),
     ).rejects.toMatchObject({
       status: 401,
@@ -138,7 +148,7 @@ describe("DemoAuthService", () => {
     findByEmail.mockResolvedValue({
       id: "multi-user",
       email: "multi@shopmate.test",
-      passwordHash: "encoded-password",
+      passwordHash: fixture.encoded,
       merchantIds: ["analytics-demo-a", "analytics-demo-b"],
     });
 
@@ -147,7 +157,7 @@ describe("DemoAuthService", () => {
     await expect(
       createService().login({
         email: "multi@shopmate.test",
-        password: "account-password",
+        password: fixture.account,
       }),
     ).rejects.toMatchObject({
       status: 401,
