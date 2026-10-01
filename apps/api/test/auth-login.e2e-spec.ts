@@ -10,6 +10,7 @@ describe("Demo 登录 API", () => {
 
   beforeAll(async () => {
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DEMO_AUTH_SECURE_COOKIE", "true");
     vi.stubEnv("DEMO_AUTH_EMAIL", "owner@shopmate.co.nz");
     vi.stubEnv("DEMO_AUTH_PASSWORD", "demo-pass-2026");
     vi.stubEnv("DEMO_AUTH_USER_ID", "demo-user");

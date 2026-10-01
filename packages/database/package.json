@@ -13,6 +13,7 @@
   },
   "scripts": {
     "seed:analytics": "tsx src/analytics-demo-seed.ts",
+    "seed:users": "tsx src/user-account-seed.ts",
     "build": "prisma generate && tsc --project tsconfig.build.json",
     "generate": "prisma generate",
     "seed": "prisma generate && tsx src/seed.ts",

@@ -65,11 +65,36 @@ model Merchant {
   assistantMemories   AssistantMemory[]
   monitoringRules     UserMonitoringRule[]
   notifications       MonitoringNotification[]
+  userMemberships     UserMerchantMembership[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
+}
+
+model UserAccount {
+  id           String @id @default(cuid())
+  email        String @unique
+  passwordHash String
+
+  memberships UserMerchantMembership[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserMerchantMembership {
+  userId     String
+  merchantId String
+
+  user     UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([userId, merchantId])
+  @@index([merchantId])
 }
 
 model Product {
