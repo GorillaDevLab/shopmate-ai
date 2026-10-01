@@ -1234,7 +1234,19 @@ button:focus-visible {
   height: 8px;
   margin-top: 5px;
   border-radius: 50%;
+  background: var(--app-subtle);
+}
+
+.notification-severity.is-critical {
+  background: var(--danger);
+}
+
+.notification-severity.is-warning {
   background: var(--warning);
+}
+
+.notification-severity.is-info {
+  background: var(--brand);
 }
 .notification-meta time {
   color: var(--app-muted);
