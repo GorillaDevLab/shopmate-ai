@@ -49,6 +49,82 @@ enum MonitoringResourceType {
   SKU
 }
 
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum TenantRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  ANALYST
+  VIEWER
+}
+
+model Organization {
+  id               String               @id @default(cuid())
+  name             String
+  status           OrganizationStatus   @default(ACTIVE)
+  legacyMerchantId String?              @unique
+  legacyMerchant   Merchant?            @relation(fields: [legacyMerchantId], references: [id], onDelete: Restrict)
+  members          OrganizationMember[]
+  workspaces       Workspace[]
+  stores           Store[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+}
+
+model OrganizationMember {
+  id             String            @id @default(cuid())
+  organizationId String
+  userId         String
+  role           TenantRole
+  status         MembershipStatus  @default(ACTIVE)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspaces     WorkspaceMember[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([organizationId, userId])
+  @@index([userId, status])
+}
+
+model Workspace {
+  id             String             @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  status         OrganizationStatus @default(ACTIVE)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        WorkspaceMember[]
+  stores         Store[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, slug])
+}
+
+model WorkspaceMember {
+  id             String             @id @default(cuid())
+  organizationId String
+  workspaceId    String
+  userId         String
+  status         MembershipStatus   @default(ACTIVE)
+  workspace      Workspace          @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Cascade)
+  membership     OrganizationMember @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade)
+  createdAt      DateTime           @default(now())
+
+  @@unique([organizationId, workspaceId, userId])
+  @@index([userId, status])
+}
+
 model Merchant {
   id     String         @id @default(cuid())
   name   String
@@ -62,6 +138,7 @@ model Merchant {
   dashboardLayouts UserDashboardLayout[]
   monitoringRules  UserMonitoringRule[]
   notifications    MonitoringNotification[]
+  organization     Organization?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -89,6 +166,7 @@ model Product {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([merchantId, id])
   @@index([merchantId])
   @@index([merchantId, status])
 }
@@ -104,25 +182,30 @@ model Sku {
   alertThreshold Int     @default(0)
 
   merchant   Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product    Product     @relation(fields: [merchantId, productId], references: [merchantId, id], onDelete: Cascade)
   orderItems OrderItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([merchantId, code])
+  @@unique([merchantId, id])
   @@index([merchantId])
   @@index([productId])
 }
 
 model Store {
-  id         String   @id
-  merchantId String
-  name       String
-  city       String
-  platform   String
-  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  orders     Order[]
+  id             String       @id
+  merchantId     String
+  name           String
+  city           String
+  platform       String
+  organizationId String       @default(dbgenerated("NULL::text"))
+  workspaceId    String       @default(dbgenerated("NULL::text"))
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  workspace      Workspace    @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict)
+  merchant       Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  orders         Order[]
 
   @@unique([merchantId, id])
   @@index([merchantId, platform])
@@ -146,22 +229,24 @@ model Order {
   updatedAt DateTime @updatedAt
 
   @@unique([merchantId, orderNo])
+  @@unique([merchantId, id])
   @@index([merchantId, orderedAt])
   @@index([merchantId, storeId, orderedAt])
   @@index([status])
 }
 
 model OrderItem {
-  id      String @id @default(cuid())
-  orderId String
-  skuId   String
+  id         String @id @default(cuid())
+  orderId    String
+  skuId      String
+  merchantId String @default(dbgenerated("NULL::text"))
 
   quantity   Int
   unitPrice  Decimal @db.Decimal(12, 2)
   lineAmount Decimal @db.Decimal(12, 2)
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  sku   Sku   @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  order Order @relation(fields: [merchantId, orderId], references: [merchantId, id], onDelete: Cascade)
+  sku   Sku   @relation(fields: [merchantId, skuId], references: [merchantId, id], onDelete: Restrict)
 
   createdAt DateTime @default(now())
 
