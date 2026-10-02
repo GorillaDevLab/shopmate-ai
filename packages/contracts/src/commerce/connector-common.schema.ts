@@ -2,9 +2,9 @@ import { z } from "zod";
 import { TenantIdSchema } from "../tenant/tenant.schema.js";
 
 /* eslint-disable no-control-regex -- Boundary validators deliberately reject hidden control characters. */
-const controlCharacters = /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u;
+const controlCharacters = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u;
 const unsafeTextCharacters =
-  /[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u;
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u;
 /* eslint-enable no-control-regex */
 export const CurrencySchema = z.literal("CNY");
 export const MinorAmountSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
@@ -17,11 +17,14 @@ export const ExternalIdSchema = z
 export const SourceVersionSchema = ExternalIdSchema;
 export const CommerceTextSchema = z
   .string()
-  .trim()
-  .min(1)
-  .max(5000)
-  .refine((value) => !unsafeTextCharacters.test(value))
-  .transform((value) => value.normalize("NFC"));
+  .transform((value) => value.replace(/\r\n?/gu, "\n").trim().normalize("NFC"))
+  .pipe(
+    z
+      .string()
+      .min(1)
+      .max(5000)
+      .refine((value) => !unsafeTextCharacters.test(value)),
+  );
 export const ConnectorTimestampSchema = z.iso.datetime({ offset: true });
 export const CursorSchema = z
   .string()

@@ -35,6 +35,16 @@ describe("connector common protocols", () => {
       contract.SyncPageQuerySchema.safeParse({ ...query, organizationId: "foreign" }).success,
     ).toBe(false);
   });
+  it.each(["\u0080", "\u0085", "\u009b", "\u009f"])("rejects C1 control %j", (control) => {
+    expect(contract.ExternalIdSchema.safeParse(`id${control}value`).success).toBe(false);
+    expect(contract.CursorSchema.safeParse(`cursor${control}value`).success).toBe(false);
+    expect(contract.CommerceTextSchema.safeParse(`text${control}value`).success).toBe(false);
+  });
+  it("normalizes legitimate description newlines and preserves tab", () => {
+    expect(contract.CommerceTextSchema.parse(" 第一行\r\n第二行\r第三行\t规格 ")).toBe(
+      "第一行\n第二行\n第三行\t规格",
+    );
+  });
   it("requires call identity and an ISO deadline, keeping signal outside JSON", () => {
     expect(
       contract.ReadOptionsSchema.safeParse({ requestId: "request-a", deadlineAt: query.until })
