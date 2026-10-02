@@ -7,6 +7,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
+    "test:tenant": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build && node scripts/test-tenant-database.mjs",
     "predev": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build",
     "dev": "pnpm -r --parallel --if-present run dev",
     "build": "pnpm -r --if-present run build",

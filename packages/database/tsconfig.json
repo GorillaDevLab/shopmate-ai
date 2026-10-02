@@ -7,12 +7,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": [
-    "src/**/*.ts",
-    "prisma.config.ts"
-  ],
-  "exclude": [
-    "generated",
-    "node_modules"
-  ]
+  "include": ["src/**/*.ts", "prisma.config.ts", "test/**/*.d.mts"],
+  "exclude": ["generated", "node_modules"]
 }
