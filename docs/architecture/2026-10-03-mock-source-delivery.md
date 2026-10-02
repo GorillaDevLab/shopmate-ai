@@ -2,6 +2,8 @@
 
 分支 `feat/mock-commerce-source`，基于已合并 Phase 1.1/1.2 的 main `4b3ef2c`。本阶段完成独立源数据基础；完整 Mock 平台仍按批准路线分阶段推进。
 
+已提交 [PR #204](https://github.com/GorillaDevLab/shopmate-ai/pull/204)，目标 main，已附加到当前聊天；远程 CI 结果以 PR 最新提交的质量门禁为准。未自动合并或部署，保留工作目录供反馈迭代。
+
 1. **Goal**：四画像的可复现源数据、业务时钟、180 日历史事件回放和不可变观测快照。
 2. **Why this is needed**：下一阶段 Connector、同步与指标必须读取同一套经营事实，能够验证资金/库存守恒与时点边界，不能依赖静态 JSON 或硬编码 Agent 答案。
 3. **Current architecture impact**：新增 API 项目下独立 server-only 纯模块；复用共享 CommerceConnector DTO 的严格 Zod schema。没有注册 Nest module/controller、改现有 reader 或 Web。调用方传入已验证 binding；配置解析不证明资源授权。
