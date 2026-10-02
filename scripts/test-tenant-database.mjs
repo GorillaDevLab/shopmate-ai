@@ -1,0 +1,44 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath, URL } from "node:url";
+import { isolatedPostgres } from "../packages/database/test/helpers/isolated-postgres.mjs";
+import { prepareTenantApiRuntime } from "../packages/database/test/helpers/tenant-api-fixture.mjs";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+function run(directory, script, args, environment) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script, ...args], {
+      cwd: path.join(root, directory),
+      env: { ...process.env, ...environment },
+      stdio: "inherit",
+      windowsHide: true,
+    });
+    child.once("error", reject);
+    child.once("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error("Required tenant database/API suite failed")),
+    );
+  });
+}
+
+const server = await isolatedPostgres();
+try {
+  await run("packages/database", "test/integration/tenant-migration-paths.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/tenant-database.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  const runtimeUrl = await prepareTenantApiRuntime(server.url);
+  await run(
+    "apps/api",
+    "node_modules/vitest/vitest.mjs",
+    ["run", "--config", "vitest.tenant.config.ts"],
+    { DATABASE_URL: runtimeUrl, TENANT_TEST_OPERATOR_URL: server.url },
+  );
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : "Tenant suite failed"}\n`);
+  process.exitCode = 1;
+} finally {
+  await server.stop();
+}

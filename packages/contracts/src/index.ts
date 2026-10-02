@@ -1,4 +1,19 @@
 export {
+  TenantIdSchema,
+  TenantRoleSchema,
+  TenantPermissionSchema,
+  TenantContextSchema,
+  TenantResourceSchema,
+} from "./tenant/tenant.schema.js";
+export type {
+  TenantRole,
+  TenantPermission,
+  TenantContext,
+  TenantResource,
+} from "./tenant/tenant.schema.js";
+export { TENANT_ROLE_PERMISSIONS, canAccessTenantResource } from "./tenant/tenant-policy.js";
+
+export {
   DashboardMetricSchema,
   DashboardPreviewSchema,
 } from "./dashboard/dashboard-preview.schema.js";
