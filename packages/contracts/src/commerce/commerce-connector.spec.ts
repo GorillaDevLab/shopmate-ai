@@ -40,7 +40,7 @@ it("publishes usable schemas and scoped parsers through the built package", () =
       "--eval",
       `
     import {
-      ConnectorStoreSchema, parseConnectorRead, parseConnectorPage,
+      ConnectorStoreSchema, parseConnectorRead, parseConnectorPage, parseConnectorVerification,
       SetInventoryCommandSchema, VerificationResultSchema,
     } from "@shopmate/contracts";
     const store = {
@@ -53,7 +53,7 @@ it("publishes usable schemas and scoped parsers through the built package", () =
       throw new Error("Public scoped parser failed");
     if (parseConnectorRead(ConnectorStoreSchema, "store-b", store).ok)
       throw new Error("Public scoped parser leaked foreign store");
-    if (typeof parseConnectorPage !== "function" || !SetInventoryCommandSchema || !VerificationResultSchema)
+    if (typeof parseConnectorPage !== "function" || typeof parseConnectorVerification !== "function" || !SetInventoryCommandSchema || !VerificationResultSchema)
       throw new Error("Commerce exports missing");
   `,
     ],

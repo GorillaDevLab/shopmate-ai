@@ -136,21 +136,31 @@ describe("connector action protocols", () => {
     );
   });
   it("does not let a VERIFIED label hide a price mismatch", () => {
-    expect(schema.VerificationResultSchema.parse({ status: "VERIFIED", snapshot }).status).toBe(
-      "VERIFIED",
-    );
+    expect(
+      schema.VerificationResultSchema.parse({
+        status: "VERIFIED",
+        executionId: "execution-a",
+        snapshot,
+      }).status,
+    ).toBe("VERIFIED");
     expect(
       schema.VerificationResultSchema.safeParse({
         status: "VERIFIED",
+        executionId: "execution-a",
         snapshot: { ...snapshot, actualPriceMinor: 5900 },
       }).success,
     ).toBe(false);
     expect(
-      schema.VerificationResultSchema.safeParse({ status: "MISMATCH", snapshot }).success,
+      schema.VerificationResultSchema.safeParse({
+        status: "MISMATCH",
+        executionId: "execution-a",
+        snapshot,
+      }).success,
     ).toBe(false);
     expect(
       schema.VerificationResultSchema.parse({
         status: "MISMATCH",
+        executionId: "execution-a",
         snapshot: { ...snapshot, actualPriceMinor: 5900 },
       }).status,
     ).toBe("MISMATCH");
@@ -165,10 +175,18 @@ describe("connector action protocols", () => {
   });
   it("requires real pending delay and distinguishes unavailable verification", () => {
     expect(
-      schema.VerificationResultSchema.safeParse({ status: "PENDING", retryAfterMs: 0 }).success,
+      schema.VerificationResultSchema.safeParse({
+        status: "PENDING",
+        executionId: "execution-a",
+        retryAfterMs: 0,
+      }).success,
     ).toBe(false);
     expect(
-      schema.VerificationResultSchema.parse({ status: "UNAVAILABLE", reason: "TEMPORARY" }).status,
+      schema.VerificationResultSchema.parse({
+        status: "UNAVAILABLE",
+        executionId: "execution-a",
+        reason: "TEMPORARY",
+      }).status,
     ).toBe("UNAVAILABLE");
   });
   it("compares product state independent of returned sku and attribute ordering", () => {
@@ -180,6 +198,7 @@ describe("connector action protocols", () => {
     expect(
       schema.VerificationResultSchema.safeParse({
         status: "VERIFIED",
+        executionId: "execution-a",
         snapshot: {
           kind: "PRODUCT",
           externalStoreId: "store-a",
@@ -203,6 +222,7 @@ describe("connector action protocols", () => {
     expect(
       schema.VerificationResultSchema.safeParse({
         status: "VERIFIED",
+        executionId: "execution-a",
         snapshot: {
           kind: "PRODUCT",
           externalStoreId: "store-a",

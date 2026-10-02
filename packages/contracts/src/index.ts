@@ -1,5 +1,9 @@
 export type { CommerceConnector } from "./commerce/commerce-connector.js";
-export { parseConnectorRead, parseConnectorPage } from "./commerce/connector-validation.js";
+export {
+  parseConnectorRead,
+  parseConnectorPage,
+  parseConnectorVerification,
+} from "./commerce/connector-validation.js";
 export * from "./commerce/connector-common.schema.js";
 export * from "./commerce/connector-data.schema.js";
 export * from "./commerce/connector-action.schema.js";

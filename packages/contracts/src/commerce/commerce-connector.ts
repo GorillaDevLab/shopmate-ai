@@ -33,6 +33,8 @@ import type {
  * Adapters validate unknown inputs and outputs and enforce deadlines/cancellation.
  * Capabilities describe provider behavior; the caller still enforces authorization.
  * ACCEPTED is a receipt, and UNKNOWN requires readback before deciding to retry.
+ * Verify responses echo executionId and pass parseConnectorVerification with the
+ * original query and trusted binding; schema validation alone cannot correlate them.
  */
 export interface CommerceConnector {
   readonly binding: ConnectorBinding;

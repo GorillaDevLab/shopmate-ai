@@ -144,13 +144,26 @@ export const VerifyActionQuerySchema = z
   .readonly();
 export const VerificationResultSchema = z
   .discriminatedUnion("status", [
-    z.strictObject({ status: z.literal("VERIFIED"), snapshot: VerifiedActionSnapshotSchema }),
-    z.strictObject({ status: z.literal("MISMATCH"), snapshot: VerifiedActionSnapshotSchema }),
+    z.strictObject({
+      executionId: TenantIdSchema,
+      status: z.literal("VERIFIED"),
+      snapshot: VerifiedActionSnapshotSchema,
+    }),
+    z.strictObject({
+      executionId: TenantIdSchema,
+      status: z.literal("MISMATCH"),
+      snapshot: VerifiedActionSnapshotSchema,
+    }),
     z.strictObject({
       status: z.literal("PENDING"),
+      executionId: TenantIdSchema,
       retryAfterMs: z.number().int().min(1).max(86_400_000),
     }),
-    z.strictObject({ status: z.literal("UNAVAILABLE"), reason: ConnectorFailureCodeSchema }),
+    z.strictObject({
+      executionId: TenantIdSchema,
+      status: z.literal("UNAVAILABLE"),
+      reason: ConnectorFailureCodeSchema,
+    }),
   ])
   .refine(
     (result) =>
@@ -181,6 +194,33 @@ function listingFingerprint(listing: z.infer<typeof ListingInputSchema>): string
 function compareOpaque(a: string, b: string): number {
   // Distinct identifiers can collate equally; exact code-unit ordering is portable.
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Compare parsed state to the caller's expectation, independently of provider claims. */
+export function matchesVerificationExpectation(
+  snapshot: VerifiedActionSnapshot,
+  expected: VerifyActionQuery["expected"],
+): boolean {
+  if (snapshot.kind === "PRICE" && expected.kind === "PRICE") {
+    return (
+      snapshot.externalSkuId === expected.externalSkuId &&
+      snapshot.currency === expected.currency &&
+      snapshot.expectedPriceMinor === expected.priceMinor
+    );
+  }
+  if (snapshot.kind === "INVENTORY" && expected.kind === "INVENTORY") {
+    return (
+      snapshot.externalSkuId === expected.externalSkuId &&
+      snapshot.externalLocationId === expected.externalLocationId &&
+      snapshot.expectedAvailable === expected.available
+    );
+  }
+  return (
+    snapshot.kind === "PRODUCT" &&
+    expected.kind === "PRODUCT" &&
+    snapshot.externalProductId === expected.externalProductId &&
+    listingFingerprint(snapshot.expectedListing) === listingFingerprint(expected.listing)
+  );
 }
 
 export type SetPriceCommand = z.infer<typeof SetPriceCommandSchema>;

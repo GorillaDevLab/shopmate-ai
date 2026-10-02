@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+  matchesVerificationExpectation,
+  VerificationResultSchema,
+  VerifyActionQuerySchema,
+} from "./connector-action.schema.js";
+import type { VerificationResult } from "./connector-action.schema.js";
+import {
   ConnectorPageSchema,
   ExternalIdSchema,
   InventoryQuerySchema,
@@ -13,6 +19,10 @@ import type {
 } from "./connector-common.schema.js";
 
 const PageQuerySchema = z.union([SyncPageQuerySchema, InventoryQuerySchema, MarketingQuerySchema]);
+type ScopedSource = {
+  readonly externalStoreId: string;
+  readonly source: { readonly updatedAt: string | null };
+};
 
 function invalid(code: ConnectorFailureCode): ConnectorResult<never> {
   return Object.freeze({ ok: false, error: Object.freeze({ code, retryAfterMs: null }) });
@@ -33,12 +43,7 @@ export function parseConnectorRead<T extends { readonly externalStoreId: string 
   return Object.freeze({ ok: true, data: parsed.data });
 }
 
-export function parseConnectorPage<
-  T extends {
-    readonly externalStoreId: string;
-    readonly source: { readonly updatedAt: string | null };
-  },
->(
+export function parseConnectorPage<T extends ScopedSource>(
   schema: z.ZodType<T>,
   externalStoreId: unknown,
   query: unknown,
@@ -65,4 +70,27 @@ export function parseConnectorPage<
   )
     return invalid("INVALID_RESPONSE");
   return Object.freeze({ ok: true, data: page });
+}
+
+/** Adapters must additionally obtain a fresh readback under the call deadline. */
+export function parseConnectorVerification(
+  externalStoreId: unknown,
+  query: unknown,
+  payload: unknown,
+): ConnectorResult<VerificationResult> {
+  const scope = ExternalIdSchema.safeParse(externalStoreId);
+  const request = VerifyActionQuerySchema.safeParse(query);
+  if (!scope.success || !request.success) return invalid("INVALID_INPUT");
+  const parsed = VerificationResultSchema.safeParse(payload);
+  if (!parsed.success || parsed.data.executionId !== request.data.executionId) {
+    return invalid("INVALID_RESPONSE");
+  }
+  const result = parsed.data;
+  if (
+    (result.status === "VERIFIED" || result.status === "MISMATCH") &&
+    (result.snapshot.externalStoreId !== scope.data ||
+      !matchesVerificationExpectation(result.snapshot, request.data.expected))
+  )
+    return invalid("INVALID_RESPONSE");
+  return Object.freeze({ ok: true, data: result });
 }
