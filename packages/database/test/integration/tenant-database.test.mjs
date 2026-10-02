@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import process from "node:process";
@@ -328,6 +329,19 @@ test("tenant migration preserves legacy records and rejects foreign relations in
         ).rows[0];
         assert.ok(row.organization.length <= 128);
         assert.ok(row.workspace.length <= 128);
+        const digest = createHash("sha256").update(id).digest("hex");
+        await client.query(
+          'INSERT INTO "Merchant" (id,name,slug,"updatedAt") VALUES ($1,$1,$1,now())',
+          [digest],
+        );
+        const other = (
+          await client.query(
+            'SELECT o.id AS organization,w.id AS workspace FROM "Organization" o JOIN "Workspace" w ON w."organizationId"=o.id WHERE o."legacyMerchantId"=$1',
+            [digest],
+          )
+        ).rows[0];
+        assert.notEqual(other.organization, row.organization);
+        assert.notEqual(other.workspace, row.workspace);
       },
     );
     await t.test("legacy Prisma seed and order seed work with inherited tenant fields", () => {

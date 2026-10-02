@@ -48,12 +48,12 @@ CREATE INDEX "WorkspaceMember_userId_status_idx" ON "WorkspaceMember"("userId",s
 CREATE FUNCTION legacy_organization_id(merchant_id TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE STRICT
   SET search_path=pg_catalog AS $$
   SELECT CASE WHEN length('legacy-org-'||merchant_id)<=128 THEN 'legacy-org-'||merchant_id
-    ELSE 'legacy-org-'||encode(sha256(convert_to(merchant_id,'UTF8')),'hex') END
+    ELSE 'hashed-legacy-org-'||encode(sha256(convert_to(merchant_id,'UTF8')),'hex') END
 $$;
 CREATE FUNCTION legacy_workspace_id(merchant_id TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE STRICT
   SET search_path=pg_catalog AS $$
   SELECT CASE WHEN length('legacy-workspace-'||merchant_id)<=128 THEN 'legacy-workspace-'||merchant_id
-    ELSE 'legacy-workspace-'||encode(sha256(convert_to(merchant_id,'UTF8')),'hex') END
+    ELSE 'hashed-legacy-workspace-'||encode(sha256(convert_to(merchant_id,'UTF8')),'hex') END
 $$;
 CREATE FUNCTION initialize_legacy_tenant() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
