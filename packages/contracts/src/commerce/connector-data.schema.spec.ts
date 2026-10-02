@@ -189,6 +189,44 @@ describe("normalized connector source records", () => {
       }).success,
     ).toBe(false);
   });
+  it.each(["PAID", "FULFILLED", "COMPLETED"])("labels contradictory %s payments", (status) => {
+    const inconsistent = { ...order, status, paidMinor: 0, paidAt: null };
+    expect(schema.ConnectorOrderSchema.safeParse(inconsistent).success).toBe(false);
+    expect(
+      schema.ConnectorOrderSchema.safeParse({
+        ...inconsistent,
+        source: {
+          ...source,
+          quality: { state: "PARTIAL", issues: ["SOURCE_INCONSISTENT", "PAYMENT_UNKNOWN"] },
+        },
+      }).success,
+    ).toBe(true);
+  });
+  it("labels unpaid orders with received funds as inconsistent", () => {
+    expect(
+      schema.ConnectorOrderSchema.safeParse({ ...order, status: "PENDING_PAYMENT" }).success,
+    ).toBe(false);
+  });
+  it("requires payment quality for a missing paid timestamp", () => {
+    expect(schema.ConnectorOrderSchema.safeParse({ ...order, paidAt: null }).success).toBe(false);
+    expect(
+      schema.ConnectorOrderSchema.safeParse({
+        ...order,
+        paidAt: null,
+        source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+      }).success,
+    ).toBe(true);
+  });
+  it.each(["FAILED", "REJECTED", "CANCELLED"])("labels contradictory %s refunds", (status) => {
+    expect(schema.ConnectorRefundSchema.safeParse({ ...refund, status }).success).toBe(false);
+    expect(
+      schema.ConnectorRefundSchema.safeParse({
+        ...refund,
+        status,
+        source: { ...source, quality: { state: "PARTIAL", issues: ["SOURCE_INCONSISTENT"] } },
+      }).success,
+    ).toBe(true);
+  });
   it("caps known refunds by payable even when paid amount is unknown", () => {
     const partial = {
       ...order,

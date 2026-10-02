@@ -148,6 +148,7 @@ export const ConnectorOrderSchema = z
     refundedMinor: MinorAmountSchema.nullable(),
   })
   .refine(validOrderAmounts)
+  .refine(validPaymentState)
   .refine(
     (order) => new Set(order.items.map((item) => item.externalLineId)).size === order.items.length,
   )
@@ -185,6 +186,26 @@ function validOrderAmounts(order: {
       order.refundedMinor <= order.paidMinor)
   );
 }
+function validPaymentState(order: {
+  status: string;
+  paidMinor: number | null;
+  paidAt: string | null;
+  payableMinor: number;
+  source: Source;
+}): boolean {
+  const settled = ["PAID", "FULFILLED", "COMPLETED"].includes(order.status);
+  const contradictsStatus =
+    (settled && order.paidMinor !== null && order.paidMinor !== order.payableMinor) ||
+    (order.status === "PENDING_PAYMENT" &&
+      ((order.paidMinor !== null && order.paidMinor > 0) || order.paidAt !== null));
+  // Preserve provider anomalies only when consumers can identify the inconsistency.
+  if (contradictsStatus && !declaresMissing(order.source, "SOURCE_INCONSISTENT")) return false;
+  return (
+    order.paidAt !== null ||
+    (!settled && (order.paidMinor === null || order.paidMinor === 0)) ||
+    declaresMissing(order.source, "PAYMENT_UNKNOWN")
+  );
+}
 export const ConnectorRefundSchema = z
   .strictObject({
     ...entityFields,
@@ -219,6 +240,13 @@ export const ConnectorRefundSchema = z
       refund.status !== "SUCCEEDED" ||
       (refund.succeededMinor !== null && refund.succeededAt !== null) ||
       declaresMissing(refund.source, "REFUND_UNKNOWN"),
+  )
+  .refine(
+    (refund) =>
+      refund.status === "SUCCEEDED" ||
+      ((refund.succeededMinor === null || refund.succeededMinor === 0) &&
+        refund.succeededAt === null) ||
+      declaresMissing(refund.source, "SOURCE_INCONSISTENT"),
   )
   .readonly();
 export const ConnectorInventorySchema = z
