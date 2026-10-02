@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import process from "node:process";
-import { URL } from "node:url";
+import { URL, fileURLToPath } from "node:url";
 import pg from "pg";
 import { isolatedPostgres } from "../helpers/isolated-postgres.mjs";
 
@@ -179,6 +180,39 @@ test("tenant migration preserves legacy records and rejects foreign relations in
       },
     );
     await t.test(
+      "legacy store writes work under a role without RLS bypass or tenant identity",
+      async () => {
+        await client.query(
+          await readFile(
+            new URL("20261003030000_tenant_compatibility_hardening/migration.sql", migrationRoot),
+            "utf8",
+          ),
+        );
+        await client.query('GRANT SELECT,INSERT,UPDATE ON "Store" TO shopmate_tenant_test_reader');
+        await client.query("SET ROLE shopmate_tenant_test_reader");
+        try {
+          await client.query(
+            'INSERT INTO "Store" (id,"merchantId",name,city,platform) VALUES ($1,$2,$1,$3,$4)',
+            ["store-legacy", "merchant-a", "上海", "mock"],
+          );
+          await client.query('UPDATE "Store" SET name=$1 WHERE id=$2', [
+            "更新门店",
+            "store-legacy",
+          ]);
+          assert.equal(
+            (
+              await client.query('SELECT "organizationId" FROM "Store" WHERE id=$1', [
+                "store-legacy",
+              ])
+            ).rows[0].organizationId,
+            "legacy-org-merchant-a",
+          );
+        } finally {
+          await client.query("RESET ROLE");
+        }
+      },
+    );
+    await t.test(
       "repository resolves fresh memberships and clears identity after its transaction",
       async () => {
         process.env.DATABASE_URL = server.url;
@@ -278,6 +312,32 @@ test("tenant migration preserves legacy records and rejects foreign relations in
         await assert.rejects(bootstrapTenantMembership(apply), /cannot be changed/u);
       },
     );
+    await t.test("deployed migrations match the Prisma schema without drift", () => {
+      const directory = fileURLToPath(new URL("../../", import.meta.url));
+      const cli = fileURLToPath(
+        new URL("../../node_modules/prisma/build/index.js", import.meta.url),
+      );
+      const output = execFileSync(
+        process.execPath,
+        [
+          cli,
+          "migrate",
+          "diff",
+          "--from-config-datasource",
+          "--to-schema",
+          "prisma/schema.prisma",
+          "--exit-code",
+          "--script",
+        ],
+        {
+          cwd: directory,
+          env: { ...process.env, DATABASE_URL: server.url },
+          encoding: "utf8",
+          windowsHide: true,
+        },
+      );
+      assert.match(output, /empty migration/u);
+    });
   } finally {
     await client.end();
     await server.stop();

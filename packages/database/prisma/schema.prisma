@@ -77,12 +77,14 @@ model Organization {
   name             String
   status           OrganizationStatus   @default(ACTIVE)
   legacyMerchantId String?              @unique
-  legacyMerchant   Merchant?            @relation(fields: [legacyMerchantId], references: [id], onDelete: Restrict)
+  legacyMerchant   Merchant?            @relation(fields: [legacyMerchantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Organization_legacyMerchantId_fkey")
   members          OrganizationMember[]
   workspaces       Workspace[]
   stores           Store[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
+
+  @@unique([legacyMerchantId, id])
 }
 
 model OrganizationMember {
@@ -91,7 +93,7 @@ model OrganizationMember {
   userId         String
   role           TenantRole
   status         MembershipStatus  @default(ACTIVE)
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   workspaces     WorkspaceMember[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
@@ -106,7 +108,7 @@ model Workspace {
   name           String
   slug           String
   status         OrganizationStatus @default(ACTIVE)
-  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   members        WorkspaceMember[]
   stores         Store[]
   createdAt      DateTime           @default(now())
@@ -122,8 +124,8 @@ model WorkspaceMember {
   workspaceId    String
   userId         String
   status         MembershipStatus   @default(ACTIVE)
-  workspace      Workspace          @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Cascade)
-  membership     OrganizationMember @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade)
+  workspace      Workspace          @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Cascade, onUpdate: NoAction, map: "WorkspaceMember_workspace_fkey")
+  membership     OrganizationMember @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade, onUpdate: NoAction, map: "WorkspaceMember_membership_fkey")
   createdAt      DateTime           @default(now())
 
   @@unique([organizationId, workspaceId, userId])
@@ -187,7 +189,7 @@ model Sku {
   alertThreshold Int     @default(0)
 
   merchant   Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  product    Product     @relation(fields: [merchantId, productId], references: [merchantId, id], onDelete: Cascade)
+  product    Product     @relation(fields: [merchantId, productId], references: [merchantId, id], onDelete: Cascade, onUpdate: NoAction)
   orderItems OrderItem[]
 
   createdAt DateTime @default(now())
@@ -205,10 +207,10 @@ model Store {
   name           String
   city           String
   platform       String
-  organizationId String       @default(dbgenerated("NULL::text"))
-  workspaceId    String       @default(dbgenerated("NULL::text"))
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  workspace      Workspace    @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict)
+  organizationId String       @default("")
+  workspaceId    String       @default("")
+  organization   Organization @relation(fields: [merchantId, organizationId], references: [legacyMerchantId, id], onDelete: Restrict, onUpdate: NoAction)
+  workspace      Workspace    @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   merchant       Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   orders         Order[]
 
@@ -244,14 +246,14 @@ model OrderItem {
   id         String @id @default(cuid())
   orderId    String
   skuId      String
-  merchantId String @default(dbgenerated("NULL::text"))
+  merchantId String @default("")
 
   quantity   Int
   unitPrice  Decimal @db.Decimal(12, 2)
   lineAmount Decimal @db.Decimal(12, 2)
 
-  order Order @relation(fields: [merchantId, orderId], references: [merchantId, id], onDelete: Cascade)
-  sku   Sku   @relation(fields: [merchantId, skuId], references: [merchantId, id], onDelete: Restrict)
+  order Order @relation(fields: [merchantId, orderId], references: [merchantId, id], onDelete: Cascade, onUpdate: NoAction)
+  sku   Sku   @relation(fields: [merchantId, skuId], references: [merchantId, id], onDelete: Restrict, onUpdate: NoAction)
 
   createdAt DateTime @default(now())
 
