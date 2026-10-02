@@ -1,4 +1,4 @@
-import type { Prisma, TenantRole } from "../generated/prisma/client.js";
+import type { TenantRole } from "../generated/prisma/client.js";
 import { getPrismaClient } from "./client.js";
 
 export interface TenantMembershipRecord {
@@ -17,41 +17,21 @@ export async function resolveTenantMembership(
   return getPrismaClient().$transaction(async (transaction) => {
     // LOCAL scope is cleared on commit/rollback, including when pooled connections are reused.
     await transaction.$queryRaw`SELECT set_config('app.user_id', ${userId}, true)`;
-    return readMembership(transaction, userId, merchantId, workspaceId);
+    // One statement snapshot prevents a role change between membership and resource checks.
+    const records = await transaction.$queryRaw<TenantMembershipRecord[]>`
+      SELECT m."userId", o."legacyMerchantId" AS "merchantId", o.id AS "organizationId",
+             w.id AS "workspaceId", m.role
+      FROM "OrganizationMember" m
+      JOIN "Organization" o ON o.id = m."organizationId"
+      JOIN "Workspace" w ON w."organizationId" = o.id
+      WHERE m."userId" = ${userId} AND o."legacyMerchantId" = ${merchantId}
+        AND m.status = 'ACTIVE' AND o.status = 'ACTIVE' AND w.status = 'ACTIVE'
+        AND ((${workspaceId ?? null}::text IS NULL AND w.slug = 'default') OR w.id = ${workspaceId ?? null})
+        AND (m.role IN ('OWNER','ADMIN') OR EXISTS (
+          SELECT 1 FROM "WorkspaceMember" wm
+          WHERE wm."organizationId" = o.id AND wm."workspaceId" = w.id
+            AND wm."userId" = ${userId} AND wm.status = 'ACTIVE'))
+      LIMIT 1`;
+    return records[0] ?? null;
   });
-}
-
-async function readMembership(
-  transaction: Prisma.TransactionClient,
-  userId: string,
-  merchantId: string,
-  workspaceId?: string,
-): Promise<TenantMembershipRecord | null> {
-  const membership = await transaction.organizationMember.findFirst({
-    where: {
-      userId,
-      status: "ACTIVE",
-      organization: { legacyMerchantId: merchantId, status: "ACTIVE" },
-    },
-    select: { organizationId: true, role: true },
-  });
-  if (!membership) return null;
-  const organizationWide = membership.role === "OWNER" || membership.role === "ADMIN";
-  const workspace = await transaction.workspace.findFirst({
-    where: {
-      organizationId: membership.organizationId,
-      status: "ACTIVE",
-      ...(workspaceId ? { id: workspaceId } : { slug: "default" }),
-      ...(organizationWide ? {} : { members: { some: { userId, status: "ACTIVE" } } }),
-    },
-    select: { id: true },
-  });
-  if (!workspace) return null;
-  return {
-    userId,
-    merchantId,
-    organizationId: membership.organizationId,
-    workspaceId: workspace.id,
-    role: membership.role,
-  };
 }
