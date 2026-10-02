@@ -114,7 +114,7 @@ scripts/test-tenant-database.mjs、.github/workflows/ci.yml、相关package scri
 
 ## Execution record
 
-工作目录：`C:/Users/harry/.codex/worktrees/tenant-foundation/aiShopASAS`；分支 `codex/tenant-foundation`。
+工作目录：`C:/Users/harry/.codex/worktrees/tenant-foundation/aiShopASAS`；分支 `tenant-foundation`。
 基线：`5e39cf6`。原 checkout 与用户未跟踪文件未修改；未复制原 `.env`，未推送/合并/部署。
 
 | Commit  | 独立改动                                                       |
