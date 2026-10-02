@@ -83,7 +83,9 @@ describe("mock configuration and catalog", () => {
     { profile: "unknown" },
     { historyStart: "2026-01-01T00:00:00Z" },
     { historyStart: "2026-02-30T00:00:00+08:00" },
-    { secret: "should-not-enter-source" },
+    { historyStart: "0000-01-01T00:00:00+08:00" },
+    { historyStart: "9999-12-30T00:00:00+08:00" },
+    { unexpectedField: "rejected" },
     { binding: { ...sourceConfig.binding, organizationId: "" } },
   ])("rejects invalid config %j", (change) => {
     expect(MockConfigSchema.safeParse({ ...sourceConfig, ...change }).success).toBe(false);

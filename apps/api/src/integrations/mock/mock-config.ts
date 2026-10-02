@@ -55,6 +55,14 @@ export const MockConfigSchema = inputSchema
   .refine((input) =>
     Number.isFinite(new Date(Date.parse(input.historyStart) + input.days * DAY_MS).getTime()),
   )
+  .refine(
+    (input) =>
+      ConnectorTimestampSchema.safeParse(input.historyStart).success &&
+      ConnectorTimestampSchema.safeParse(
+        new Date(Date.parse(input.historyStart) + (input.days + 5) * DAY_MS).toISOString(),
+      ).success,
+    { message: "History and settlement timestamps exceed connector calendar range" },
+  )
   .readonly();
 
 export type MockConfig = z.infer<typeof MockConfigSchema>;

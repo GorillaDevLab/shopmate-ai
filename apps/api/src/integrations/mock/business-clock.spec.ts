@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { RealBusinessClock, SimulationClock } from "./business-clock.js";
 
 describe("business clock", () => {
+  it("rejects calendar overflow before mutating simulated time", () => {
+    const clock = new SimulationClock("9999-12-31T23:59:59Z");
+    const before = clock.snapshot();
+    expect(() => clock.advance(1000)).toThrow();
+    expect(clock.snapshot()).toEqual(before);
+  });
   it("advances simulated time independently of real time", () => {
     const clock = new SimulationClock("2026-01-01T00:00:00Z");
     expect(clock.snapshot()).toEqual({ now: "2026-01-01T00:00:00.000Z", revision: 0 });
@@ -26,9 +32,12 @@ describe("business clock", () => {
     expect(clock.snapshot().revision).toBe(0);
   });
 
-  it.each(["bad", "2026-01-01", "2026-02-30T00:00:00Z"])("rejects %s", (now) => {
-    expect(() => new SimulationClock(now)).toThrow();
-  });
+  it.each(["bad", "2026-01-01", "2026-02-30T00:00:00Z", "0000-01-01T00:00:00+08:00"])(
+    "rejects %s",
+    (now) => {
+      expect(() => new SimulationClock(now)).toThrow();
+    },
+  );
 
   it("uses real time for the real business clock", () => {
     const before = Date.now();

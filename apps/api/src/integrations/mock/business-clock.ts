@@ -22,6 +22,7 @@ export class SimulationClock implements BusinessClock {
 
   constructor(now: unknown) {
     this.milliseconds = Date.parse(ConnectorTimestampSchema.parse(now));
+    ConnectorTimestampSchema.parse(new Date(this.milliseconds).toISOString());
   }
 
   snapshot(): BusinessTime {
@@ -43,6 +44,7 @@ export class SimulationClock implements BusinessClock {
       throw new RangeError("Invalid business clock advance");
     }
     if (durationMs > 0) {
+      ConnectorTimestampSchema.parse(new Date(next).toISOString());
       this.milliseconds = next;
       this.revision += 1;
     }
