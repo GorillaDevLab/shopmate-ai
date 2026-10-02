@@ -118,25 +118,27 @@ export const VerifiedActionSnapshotSchema = z
     }),
   ])
   .readonly();
-const ExpectedActionStateSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal("PRICE"),
-    externalSkuId: ExternalIdSchema,
-    priceMinor: MinorAmountSchema,
-    currency: CurrencySchema,
-  }),
-  z.strictObject({
-    kind: z.literal("INVENTORY"),
-    externalSkuId: ExternalIdSchema,
-    externalLocationId: ExternalIdSchema,
-    available: QuantitySchema,
-  }),
-  z.strictObject({
-    kind: z.literal("PRODUCT"),
-    externalProductId: ExternalIdSchema,
-    listing: ListingInputSchema,
-  }),
-]);
+const ExpectedActionStateSchema = z
+  .discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("PRICE"),
+      externalSkuId: ExternalIdSchema,
+      priceMinor: MinorAmountSchema,
+      currency: CurrencySchema,
+    }),
+    z.strictObject({
+      kind: z.literal("INVENTORY"),
+      externalSkuId: ExternalIdSchema,
+      externalLocationId: ExternalIdSchema,
+      available: QuantitySchema,
+    }),
+    z.strictObject({
+      kind: z.literal("PRODUCT"),
+      externalProductId: ExternalIdSchema,
+      listing: ListingInputSchema,
+    }),
+  ])
+  .readonly();
 export const VerifyActionQuerySchema = z
   .strictObject({ executionId: TenantIdSchema, expected: ExpectedActionStateSchema })
   .readonly();

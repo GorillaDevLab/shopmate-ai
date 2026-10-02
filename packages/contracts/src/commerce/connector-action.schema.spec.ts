@@ -155,6 +155,14 @@ describe("connector action protocols", () => {
       }).status,
     ).toBe("MISMATCH");
   });
+  it("freezes the nested expected target before asynchronous verification", () => {
+    const parsed = schema.VerifyActionQuerySchema.parse({
+      executionId: "execution-a",
+      expected: { kind: "PRICE", externalSkuId: "sku-a", priceMinor: 6000, currency: "CNY" },
+    });
+    expect(Object.isFrozen(parsed.expected)).toBe(true);
+    expect(Reflect.set(parsed.expected, "priceMinor", 1)).toBe(false);
+  });
   it("requires real pending delay and distinguishes unavailable verification", () => {
     expect(
       schema.VerificationResultSchema.safeParse({ status: "PENDING", retryAfterMs: 0 }).success,
