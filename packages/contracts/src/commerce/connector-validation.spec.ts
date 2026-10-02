@@ -136,6 +136,31 @@ describe("scoped connector pages", () => {
       }),
     ).toEqual(failure("INVALID_RESPONSE"));
   });
+  it("rejects a future item even when the watermark looks valid", () => {
+    expect(
+      parseConnectorPage(ConnectorStoreSchema, "store-a", query, {
+        ...page,
+        items: [{ ...store, source: { ...store.source, updatedAt: "2026-10-04T08:00:00Z" } }],
+      }),
+    ).toEqual(failure("INVALID_RESPONSE"));
+  });
+  it("rejects records and watermarks newer than the page observation", () => {
+    const earlier = "2026-10-02T08:00:00Z";
+    expect(
+      parseConnectorPage(ConnectorStoreSchema, "store-a", query, {
+        ...page,
+        observedAt: earlier,
+        sourceWatermark: null,
+      }),
+    ).toEqual(failure("INVALID_RESPONSE"));
+    expect(
+      parseConnectorPage(ConnectorStoreSchema, "store-a", query, {
+        ...page,
+        items: [],
+        observedAt: earlier,
+      }),
+    ).toEqual(failure("INVALID_RESPONSE"));
+  });
   it("compares watermark instants across timezone offsets", () => {
     expect(
       parseConnectorPage(ConnectorStoreSchema, "store-a", query, {

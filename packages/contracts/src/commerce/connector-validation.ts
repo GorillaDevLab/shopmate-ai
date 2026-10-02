@@ -33,7 +33,12 @@ export function parseConnectorRead<T extends { readonly externalStoreId: string 
   return Object.freeze({ ok: true, data: parsed.data });
 }
 
-export function parseConnectorPage<T extends { readonly externalStoreId: string }>(
+export function parseConnectorPage<
+  T extends {
+    readonly externalStoreId: string;
+    readonly source: { readonly updatedAt: string | null };
+  },
+>(
   schema: z.ZodType<T>,
   externalStoreId: unknown,
   query: unknown,
@@ -45,12 +50,18 @@ export function parseConnectorPage<T extends { readonly externalStoreId: string 
   const parsed = ConnectorPageSchema(schema).safeParse(payload);
   if (!parsed.success) return invalid("INVALID_RESPONSE");
   const page = parsed.data;
+  const cutoff = Math.min(Date.parse(window.data.until), Date.parse(page.observedAt));
   if (
     page.items.length > window.data.limit ||
-    page.items.some((item) => item.externalStoreId !== scope.data) ||
+    page.items.some(
+      (item) =>
+        item.externalStoreId !== scope.data ||
+        (item.source.updatedAt !== null &&
+          (!Number.isFinite(Date.parse(item.source.updatedAt)) ||
+            Date.parse(item.source.updatedAt) > cutoff)),
+    ) ||
     (page.nextCursor !== null && page.nextCursor === window.data.cursor) ||
-    (page.sourceWatermark !== null &&
-      Date.parse(page.sourceWatermark) > Date.parse(window.data.until))
+    (page.sourceWatermark !== null && Date.parse(page.sourceWatermark) > cutoff)
   )
     return invalid("INVALID_RESPONSE");
   return Object.freeze({ ok: true, data: page });
