@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { DashboardInsightQuery } from "../index.js";
 
 import {
   DashboardInsightGenerateRequestSchema,
@@ -17,7 +18,7 @@ const query = {
   order: "desc",
   limit: 8,
   visualization: "pie",
-} as const;
+} satisfies DashboardInsightQuery;
 
 describe("AI 经营查询 DSL", () => {
   it("接受不受 31 天限制的严格业务查询", () => {
