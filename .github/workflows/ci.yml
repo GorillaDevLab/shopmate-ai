@@ -58,6 +58,12 @@ jobs:
       - name: Check formatting
         run: pnpm format:check
 
+      - name: Check tenant database and test configuration formatting
+        run: >-
+          pnpm exec prettier --check packages/database/src/tenant*.ts
+          packages/database/test/helpers packages/database/test/integration
+          packages/database/test/tenant-bootstrap.test.mjs apps/api/vitest*.config.ts
+
       - name: Lint
         run: pnpm lint
 
