@@ -13,6 +13,8 @@ export function requireIsolatedDatabaseUrl(value) {
   if (
     !["postgres:", "postgresql:"].includes(url.protocol) ||
     !["localhost", "127.0.0.1", "::1"].includes(url.hostname) ||
+    url.search ||
+    url.hash ||
     !/^\/shopmate_tenant_test(?:_[a-z0-9]+)?$/u.test(url.pathname)
   ) {
     throw new Error("Tenant tests require a loopback shopmate_tenant_test database");

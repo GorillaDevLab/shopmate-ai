@@ -12,6 +12,7 @@
     }
   },
   "scripts": {
+    "tenant:bootstrap": "prisma generate && tsx src/tenant-bootstrap-cli.ts",
     "seed:analytics": "tsx src/analytics-demo-seed.ts",
     "build": "prisma generate && tsc --project tsconfig.build.json",
     "generate": "prisma generate",

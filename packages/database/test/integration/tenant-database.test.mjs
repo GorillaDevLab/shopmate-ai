@@ -217,6 +217,67 @@ test("tenant migration preserves legacy records and rejects foreign relations in
         }
       },
     );
+    await t.test(
+      "bootstrap requires a matching marker, previews without writes and never elevates existing members",
+      async () => {
+        await client.query(
+          await readFile(
+            new URL("20261003020000_tenant_bootstrap_environment/migration.sql", migrationRoot),
+            "utf8",
+          ),
+        );
+        const { bootstrapTenantMembership } = await import("../../dist/src/tenant-bootstrap.js");
+        const env = {
+          APP_ENV: "test",
+          NODE_ENV: "test",
+          DATABASE_URL: server.url,
+          TENANT_BOOTSTRAP_USER_ID: "bootstrap-user",
+          TENANT_BOOTSTRAP_MERCHANT_ID: "merchant-c",
+        };
+        await assert.rejects(bootstrapTenantMembership(env), /marker/u);
+        await client.query('UPDATE "TenantBootstrapEnvironment" SET environment=$1 WHERE id=$2', [
+          "TEST",
+          "singleton",
+        ]);
+        assert.equal((await bootstrapTenantMembership(env)).applied, false);
+        assert.equal(
+          (
+            await client.query('SELECT * FROM "OrganizationMember" WHERE "userId"=$1', [
+              "bootstrap-user",
+            ])
+          ).rowCount,
+          0,
+        );
+        const apply = { ...env, TENANT_BOOTSTRAP_APPLY: "true" };
+        await bootstrapTenantMembership(apply);
+        await bootstrapTenantMembership(apply);
+        assert.equal(
+          (
+            await client.query('SELECT * FROM "OrganizationMember" WHERE "userId"=$1', [
+              "bootstrap-user",
+            ])
+          ).rowCount,
+          1,
+        );
+        assert.equal(
+          (
+            await client.query('SELECT * FROM "WorkspaceMember" WHERE "userId"=$1', [
+              "bootstrap-user",
+            ])
+          ).rowCount,
+          1,
+        );
+        await assert.rejects(
+          bootstrapTenantMembership({ ...apply, TENANT_BOOTSTRAP_ROLE: "OWNER" }),
+          /cannot be changed/u,
+        );
+        await client.query('UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2', [
+          "INACTIVE",
+          "bootstrap-user",
+        ]);
+        await assert.rejects(bootstrapTenantMembership(apply), /cannot be changed/u);
+      },
+    );
   } finally {
     await client.end();
     await server.stop();
