@@ -1,7 +1,9 @@
 # DecisionProvider：领域决策层设计
 
-日期：2026-10-03。状态：Proposed，等待整体审查确认后按阶段实施。  
-范围：vendor-neutral 接口、证据契约、RulesDecisionProvider、路由、记录、通用fallback/shadow扩展点。  
+日期：2026-10-03。状态：Proposed，等待整体审查确认后按阶段实施。
+
+范围：vendor-neutral 接口、证据契约、RulesDecisionProvider、路由、记录、通用fallback/shadow扩展点。
+
 本轮仅文档；接口与Rules实现尚未存在于源码。真实Jev集成未经批准，不新增SDK、网络请求、密钥或虚构厂商协议。
 
 父报告：[生产与Mock架构审查](2026-10-03-production-mock-review.md)。当前代码锚点：`apps/api/src/monitoring/monitoring-evaluator.ts` 是阈值评估原型；`ai/agent/business-agent.ts` 是受控LLM编排；`ai/tools/tool-registry.ts` 做Tool权限和输入输出验证。尚无独立Event/DecisionProvider模块，所以不能通过简单替换一个Provider就宣称已有完整决策链。

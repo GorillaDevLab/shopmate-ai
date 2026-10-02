@@ -1,7 +1,9 @@
 # Shopmate AI：生产架构与 Mock Commerce Environment 审查
 
-日期：2026-10-03（用户时区 Pacific/Auckland）  
-状态：**Proposed / 等待产品负责人确认，尚未开始 Phase 1**  
+日期：2026-10-03（用户时区 Pacific/Auckland）
+
+状态：**Proposed / 等待产品负责人确认，尚未开始 Phase 1**
+
 代码基线：`af4f96d`，当前分支 `feat/assistant-workspace`。
 
 本报告覆盖三份需求：生产 SaaS 架构审查、最新优先级的 Mock Commerce Environment、Jev Decision Layer。当前不调用抖店或 Jev API，不接真实消费者数据。DecisionProvider 与 RulesDecisionProvider 纳入前置架构及获批后的实施范围，真实 Jev Adapter 需要未来单独批准。用户已确认：当前只用合成经营数据；演示环境可能公网开放；真实商家数据接入前默认中国大陆部署、跨境传输关闭。这里描述的目标能力、数据库及接口均为提案，不能理解为已实现。
