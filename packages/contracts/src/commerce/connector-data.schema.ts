@@ -180,6 +180,7 @@ function validOrderAmounts(order: {
     order.discountMinor === discount &&
     order.payableMinor === payable &&
     (order.paidMinor === null || order.paidMinor <= payable) &&
+    (order.refundedMinor === null || order.refundedMinor <= payable) &&
     (order.refundedMinor === null ||
       order.paidMinor === null ||
       order.refundedMinor <= order.paidMinor)

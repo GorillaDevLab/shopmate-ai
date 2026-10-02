@@ -163,6 +163,21 @@ describe("normalized connector source records", () => {
       }).success,
     ).toBe(false);
   });
+  it("caps known refunds by payable even when paid amount is unknown", () => {
+    const partial = {
+      ...order,
+      paidMinor: null,
+      refundedMinor: order.payableMinor + 1,
+      source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+    };
+    expect(schema.ConnectorOrderSchema.safeParse(partial).success).toBe(false);
+    expect(
+      schema.ConnectorOrderSchema.safeParse({
+        ...partial,
+        refundedMinor: order.payableMinor,
+      }).success,
+    ).toBe(true);
+  });
   it("rejects refund overflow and a success timestamp before request", () => {
     expect(
       schema.ConnectorRefundSchema.safeParse({ ...refund, succeededMinor: 6000 }).success,
