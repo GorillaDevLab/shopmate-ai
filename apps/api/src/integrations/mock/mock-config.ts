@@ -4,10 +4,20 @@ import { z } from "zod";
 export const DAY_MS = 86_400_000;
 export const GENERATOR_VERSION = "mock-source-v1";
 export const profileDefaults = Object.freeze({
-  growing: { dailyOrders: 180, growthBps: 8000, refundBps: 400, adSpendMinor: 30_000 },
-  problematic: { dailyOrders: 140, growthBps: 3500, refundBps: 700, adSpendMinor: 50_000 },
-  mature: { dailyOrders: 100, growthBps: 0, refundBps: 150, adSpendMinor: 10_000 },
-  new: { dailyOrders: 6, growthBps: 0, refundBps: 300, adSpendMinor: 1000 },
+  growing: Object.freeze({
+    dailyOrders: 180,
+    growthBps: 8000,
+    refundBps: 400,
+    adSpendMinor: 30_000,
+  }),
+  problematic: Object.freeze({
+    dailyOrders: 140,
+    growthBps: 3500,
+    refundBps: 700,
+    adSpendMinor: 50_000,
+  }),
+  mature: Object.freeze({ dailyOrders: 100, growthBps: 0, refundBps: 150, adSpendMinor: 10_000 }),
+  new: Object.freeze({ dailyOrders: 6, growthBps: 0, refundBps: 300, adSpendMinor: 1000 }),
 });
 
 const inputSchema = z.strictObject({
@@ -25,6 +35,9 @@ const inputSchema = z.strictObject({
 });
 
 export const MockConfigSchema = inputSchema
+  .refine((input) => input.binding.externalStoreId.length <= 200, {
+    message: "External store namespace exceeds derived ID budget",
+  })
   .refine((input) => (Date.parse(input.historyStart) + 8 * 3_600_000) % DAY_MS === 0, {
     message: "History must start at Asia/Shanghai midnight",
   })

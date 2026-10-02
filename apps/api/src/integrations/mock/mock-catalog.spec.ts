@@ -54,6 +54,22 @@ describe("mock configuration and catalog", () => {
   it("contains all four explicit profiles", () => {
     expect(Object.keys(profileDefaults)).toEqual(["growing", "problematic", "mature", "new"]);
     expect(profileDefaults.new.dailyOrders).toBeLessThanOrEqual(10);
+    expect(Object.isFrozen(profileDefaults.new)).toBe(true);
+  });
+
+  it("reserves space for derived entity IDs before generation", () => {
+    expect(
+      MockConfigSchema.safeParse({
+        ...sourceConfig,
+        binding: { ...sourceConfig.binding, externalStoreId: "a".repeat(201) },
+      }).success,
+    ).toBe(false);
+    expect(
+      MockConfigSchema.safeParse({
+        ...sourceConfig,
+        binding: { ...sourceConfig.binding, externalStoreId: "a".repeat(200) },
+      }).success,
+    ).toBe(true);
   });
 
   it.each([
