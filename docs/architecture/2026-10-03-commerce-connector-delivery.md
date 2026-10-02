@@ -11,11 +11,21 @@
 7. **Privacy/compliance considerations**：契约不包含消费者电话、地址、邮箱等字段，测试只用合成数据；自由文本仍可能包含平台提供的敏感内容，不能据此声称已经完成 PII 检测/脱敏。未读取原项目 `.env`、接入真实商家数据或调用平台/Jev/LLM。沿用已确认的中国大陆部署、跨境传输默认关闭边界；本阶段只实现技术契约，没有宣称全面合规。
 8. **Tests added**：新增 112 项契约测试，覆盖精度/strict scope、经营金额关系、未知数据质量、状态矛盾、写入三态、假验证、跨店铺响应、分页及时间边界、执行关联、Unicode 排序、C1 控制字符和公共包导出。全仓回归共 1,124 passed；另有 9 项既有 opt-in API 测试未启用。全部 contracts 测试也纳入 TypeScript 检查。
 9. **How to manually verify**：在上述 worktree 运行 `pnpm --filter @shopmate/contracts test`、`pnpm --filter @shopmate/contracts typecheck`；应分别得到 348 passed 和成功退出。运行 `pnpm test` 查看全仓回归；运行 `pnpm build` 查看下游构建及 27 个浏览器产物检查。本轮无 UI 改动，不需要截图验收。
-10. **Risks / limitations**：目前为可执行契约，尚无 Mock/真实 adapter、可信 Factory、网络超时/取消执行或写操作审批。能力声明不保证 provider 幂等和并发前置条件。仍需 adapter 校验具体资源引用/筛选条件、正确映射时间和状态、取得新鲜回读。9 项既有真实数据库/平台 opt-in API 测试未启用；本轮未重跑 Phase 1.1 隔离 PostgreSQL 专用测试或远程 GitHub CI。分支尚未合并、推送或部署。
+10. **Risks / limitations**：目前为可执行契约，尚无 Mock/真实 adapter、可信 Factory、网络超时/取消执行或写操作审批。能力声明不保证 provider 幂等和并发前置条件。仍需 adapter 校验具体资源引用/筛选条件、正确映射时间和状态、取得新鲜回读。9 项既有真实数据库/平台 opt-in API 测试未启用；初次交付未重跑 Phase 1.1 隔离 PostgreSQL 专用测试或远程 GitHub CI。初次交付时尚未推送或创建 PR；后续 PR 准备记录见下文，未合并或部署。
 11. **Next recommended step**：实现 Phase 1.3 Mock 源状态、合成数据关系、确定性业务时钟和 Connector conformance tests，再接同步服务；授权与安全截止时钟继续使用真实时钟。随后推进决策层和 ActionEngine，避免直接从 UI/LLM 执行平台写入。
 12. **Git commit message**：独立提交四块契约、每项审查修复、全测试类型门禁和交付文档。主要消息为 `feat(contracts): expose validated commerce connector boundary`；详细记录见下文与实施计划。
 
 ## Verification evidence
+
+### PR preparation against updated tenant foundation
+
+用户已授权本阶段及后续开发默认提交 PR（见根目录 AGENTS.md）。Phase 1.1 已提交 [PR #202](https://github.com/GorillaDevLab/shopmate-ai/pull/202)，目标 main；本阶段以 feat/tenant-foundation 为 base，先审查 1.1，再审查本阶段独立契约差异。1.1 合并后应将本阶段 PR 的 base 调整为 main。
+
+`bfc3cf2` 合入已更新的 Phase 1.1（包含最新 main 的 756a0c4）。合入后全仓回归：根 Node 23、contracts 359、database 44、API 538、Web 221，共 1,185 passed，另有 9 项既有 opt-in API 测试 skipped。本阶段新增仍为 112 项。lint、包含所有 contracts 测试的 typecheck、format、secret scan、build 均通过，31 个浏览器产物兼容性检查通过。
+
+原有验证数字如下保留为初次交付记录。后续提交 PR、远程 CI 和交付回复以实际 GitHub 状态为准。
+
+### Initial delivery evidence
 
 | 检查                                             | 实际结果                                                               |
 | ------------------------------------------------ | ---------------------------------------------------------------------- |
