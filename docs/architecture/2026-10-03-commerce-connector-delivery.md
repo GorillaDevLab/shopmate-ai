@@ -48,7 +48,7 @@
 8. verifyAction 进行新鲜、独立回读，然后调用 `parseConnectorVerification(binding.externalStoreId, originalQuery, unknownResponse)`；响应必须带一致 executionId，原请求应从可信执行记录取得。该 helper 核对 kind / SKU / warehouse / product / expected values 和实际状态，不能代替真实回读或证明某一次平台请求已执行。
 9. 失败日志和遥测只使用安全上下文；本契约失败响应无原始 payload。输出到 UI 时按文本转义；向 LLM 提供数据时隔离数据与指令。自由文本规范化不是 HTML sanitizer、敏感信息扫描或提示注入防护。
 
-现阶段 CNY / Asia-Shanghai 是明确的产品边界；尚无跨币种、负库存或多平台状态映射。本阶段测试没有把真实平台返回、网络事件或权限判定替换成虚假的已交付能力。
+现阶段 CNY / `Asia/Shanghai` 是明确的产品边界；尚无跨币种、负库存或多平台状态映射。本阶段测试没有把真实平台返回、网络事件或权限判定替换成虚假的已交付能力。
 
 ## Commit ledger
 
