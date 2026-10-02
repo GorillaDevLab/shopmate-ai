@@ -25,6 +25,8 @@
 
 原有验证数字如下保留为初次交付记录。后续提交 PR、远程 CI 和交付回复以实际 GitHub 状态为准。
 
+PR 准备期间还在更新后的本阶段分支执行了 `pnpm test:tenant`：真实 PostgreSQL migration/RLS/restricted-role API 25 passed，0 skipped。与全仓回归合计 1,210 passed。既有 opt-in API 的 9 项 skip 保持不变。
+
 ### Initial delivery evidence
 
 | 检查                                             | 实际结果                                                               |
