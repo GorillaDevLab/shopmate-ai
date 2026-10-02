@@ -312,6 +312,24 @@ test("tenant migration preserves legacy records and rejects foreign relations in
         await assert.rejects(bootstrapTenantMembership(apply), /cannot be changed/u);
       },
     );
+    await t.test(
+      "legacy tenant identifiers fit the contract at the maximum merchant identifier length",
+      async () => {
+        const id = "x".repeat(128);
+        await client.query(
+          'INSERT INTO "Merchant" (id,name,slug,"updatedAt") VALUES ($1,$1,$1,now())',
+          [id],
+        );
+        const row = (
+          await client.query(
+            'SELECT o.id AS organization,w.id AS workspace FROM "Organization" o JOIN "Workspace" w ON w."organizationId"=o.id WHERE o."legacyMerchantId"=$1',
+            [id],
+          )
+        ).rows[0];
+        assert.ok(row.organization.length <= 128);
+        assert.ok(row.workspace.length <= 128);
+      },
+    );
     await t.test("legacy Prisma seed and order seed work with inherited tenant fields", () => {
       const directory = fileURLToPath(new URL("../../", import.meta.url));
       for (const script of ["src/seed.ts", "src/order-seed.ts"]) {

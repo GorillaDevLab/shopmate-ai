@@ -44,19 +44,30 @@ CREATE TABLE "WorkspaceMember" (
 CREATE UNIQUE INDEX "WorkspaceMember_organizationId_workspaceId_userId_key" ON "WorkspaceMember"("organizationId","workspaceId","userId");
 CREATE INDEX "WorkspaceMember_userId_status_idx" ON "WorkspaceMember"("userId",status);
 
+-- Preserve readable legacy IDs where possible; bound derived IDs for long business keys.
+CREATE FUNCTION legacy_organization_id(merchant_id TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE STRICT
+  SET search_path=pg_catalog AS $$
+  SELECT CASE WHEN length('legacy-org-'||merchant_id)<=128 THEN 'legacy-org-'||merchant_id
+    ELSE 'legacy-org-'||encode(sha256(convert_to(merchant_id,'UTF8')),'hex') END
+$$;
+CREATE FUNCTION legacy_workspace_id(merchant_id TEXT) RETURNS TEXT LANGUAGE SQL IMMUTABLE STRICT
+  SET search_path=pg_catalog AS $$
+  SELECT CASE WHEN length('legacy-workspace-'||merchant_id)<=128 THEN 'legacy-workspace-'||merchant_id
+    ELSE 'legacy-workspace-'||encode(sha256(convert_to(merchant_id,'UTF8')),'hex') END
+$$;
 CREATE FUNCTION initialize_legacy_tenant() RETURNS TRIGGER LANGUAGE plpgsql AS $$
 BEGIN
   INSERT INTO "Organization" (id,name,"legacyMerchantId","updatedAt")
-    VALUES ('legacy-org-'||NEW.id,NEW.name,NEW.id,CURRENT_TIMESTAMP);
+    VALUES (public.legacy_organization_id(NEW.id),NEW.name,NEW.id,CURRENT_TIMESTAMP);
   INSERT INTO "Workspace" (id,"organizationId",name,slug,"updatedAt")
-    VALUES ('legacy-workspace-'||NEW.id,'legacy-org-'||NEW.id,'默认工作区','default',CURRENT_TIMESTAMP);
+    VALUES (public.legacy_workspace_id(NEW.id),public.legacy_organization_id(NEW.id),'默认工作区','default',CURRENT_TIMESTAMP);
   RETURN NEW;
 END $$;
 CREATE TRIGGER "Merchant_initialize_tenant" AFTER INSERT ON "Merchant" FOR EACH ROW EXECUTE FUNCTION initialize_legacy_tenant();
 INSERT INTO "Organization" (id,name,"legacyMerchantId","createdAt","updatedAt")
-  SELECT 'legacy-org-'||id,name,id,"createdAt","updatedAt" FROM "Merchant";
+  SELECT public.legacy_organization_id(id),name,id,"createdAt","updatedAt" FROM "Merchant";
 INSERT INTO "Workspace" (id,"organizationId",name,slug,"updatedAt")
-  SELECT 'legacy-workspace-'||id,'legacy-org-'||id,'默认工作区','default',CURRENT_TIMESTAMP FROM "Merchant";
+  SELECT public.legacy_workspace_id(id),public.legacy_organization_id(id),'默认工作区','default',CURRENT_TIMESTAMP FROM "Merchant";
 
 CREATE UNIQUE INDEX "Product_merchantId_id_key" ON "Product"("merchantId",id);
 CREATE UNIQUE INDEX "Sku_merchantId_id_key" ON "Sku"("merchantId",id);
