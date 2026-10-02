@@ -38,8 +38,8 @@ export class DemoAuthController {
   @Post("login")
   @HttpCode(200)
   @Public()
-  login(@Body() input: LoginInputDto, @Res({ passthrough: true }) response: CookieResponse) {
-    const result = this.authService.login(input);
+  async login(@Body() input: LoginInputDto, @Res({ passthrough: true }) response: CookieResponse) {
+    const result = await this.authService.login(input);
     response.cookie(DEMO_SESSION_COOKIE_NAME, result.token, {
       httpOnly: true,
       sameSite: "lax",

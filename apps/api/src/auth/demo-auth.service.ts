@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
+import { verifyPassword } from "@shopmate/database";
 import {
   Inject,
   Injectable,
@@ -15,6 +16,7 @@ import {
 } from "./contracts/index.js";
 import { DEMO_AUTH_CONFIG, type DemoAuthConfig } from "./demo-auth.config.js";
 import { signDemoSession } from "./session/demo-session.js";
+import { UserAccountRepository } from "./user-account.repository.js";
 
 export interface DemoLoginResult {
   readonly token: string;
@@ -25,28 +27,66 @@ export interface DemoLoginResult {
 
 @Injectable()
 export class DemoAuthService {
-  constructor(@Inject(DEMO_AUTH_CONFIG) private readonly config: DemoAuthConfig | null) {}
+  constructor(
+    @Inject(DEMO_AUTH_CONFIG)
+    private readonly config: DemoAuthConfig | null,
+    private readonly userAccounts: UserAccountRepository,
+  ) {}
 
   usesSecureCookie(): boolean {
     return this.config?.secureCookie ?? false;
   }
 
-  login(input: LoginInputDto): DemoLoginResult {
+  async login(input: LoginInputDto): Promise<DemoLoginResult> {
     const config = this.requireConfig();
-    if (!safeEqual(input.email, config.email) || !safeEqual(input.password, config.password)) {
-      throw new UnauthorizedException({
-        statusCode: 401,
-        ...createAuthError("INVALID_CREDENTIALS"),
-      });
+    const email = input.email.trim().toLowerCase();
+
+    // Keep the original Demo account as a temporary compatibility path.
+    // Existing E2E fixtures and the current production Demo login continue
+    // to work while database-backed accounts are rolled out.
+    if (safeEqual(email, config.email)) {
+      if (!safeEqual(input.password, config.password)) {
+        throwInvalidCredentials();
+      }
+
+      return this.createSession(config.userId, config.merchantId, config);
     }
 
+    const account = await this.userAccounts.findByEmail(email);
+
+    if (!account || !verifyPassword(input.password, account.passwordHash)) {
+      throwInvalidCredentials();
+    }
+
+    const [merchantId] = account.merchantIds;
+
+    // The current login contract has no merchant selector.
+    // Never silently choose one when an account belongs to multiple merchants.
+    if (!merchantId || account.merchantIds.length !== 1) {
+      throwInvalidCredentials();
+    }
+
+    return this.createSession(account.id, merchantId, config);
+  }
+
+  private createSession(
+    userId: string,
+    merchantId: string,
+    config: DemoAuthConfig,
+  ): DemoLoginResult {
     const context = createAuthContext({
-      userId: config.userId,
-      merchantId: config.merchantId,
+      userId,
+      merchantId,
       permissions: Object.values(AuthPermission),
     });
+
     const session = signDemoSession(context, config.sessionSecret, config.ttlSeconds);
-    return { ...session, ttlSeconds: config.ttlSeconds, secureCookie: config.secureCookie };
+
+    return {
+      ...session,
+      ttlSeconds: config.ttlSeconds,
+      secureCookie: config.secureCookie,
+    };
   }
 
   private requireConfig(): DemoAuthConfig {
@@ -57,8 +97,16 @@ export class DemoAuthService {
         message: "Demo 登录服务尚未配置",
       });
     }
+
     return this.config;
   }
+}
+
+function throwInvalidCredentials(): never {
+  throw new UnauthorizedException({
+    statusCode: 401,
+    ...createAuthError("INVALID_CREDENTIALS"),
+  });
 }
 
 function safeEqual(actual: string, expected: string): boolean {

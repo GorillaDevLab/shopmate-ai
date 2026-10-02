@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorkspaceMessage } from "@shopmate/contracts";
 import { AssistantMarkdown } from "../assistant-markdown";
+import { ActionProposalCard } from "./action-card";
 import { AssistantArtifact, ProductCopyCard, type AddInsight } from "./artifact";
 import { useAssistantWorkspace } from "./provider";
 export function AssistantConversation({
@@ -133,6 +134,20 @@ function Message({
         />
       )}
       {message.productCopy && <ProductCopyCard copy={message.productCopy} />}
+      {message.rememberedPreferences && message.rememberedPreferences.length > 0 && (
+        <p className="assistant-remembered" role="note">
+          <span aria-hidden="true">✓</span> 已记住：{message.rememberedPreferences.join("；")}
+          <span className="assistant-remembered-hint">（可在“记忆”里查看或删除）</span>
+        </p>
+      )}
+      {message.actionProposals?.map((proposal) => (
+        <ActionProposalCard
+          key={proposal.actionId}
+          proposal={proposal}
+          outcome={message.actionOutcomes?.[proposal.actionId]}
+          onOutcome={(outcome) => store.setActionOutcome(message.id, proposal.actionId, outcome)}
+        />
+      ))}
       {message.role === "assistant" && (
         <footer>
           <time dateTime={message.createdAt}>

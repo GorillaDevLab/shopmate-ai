@@ -1,17 +1,23 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { render } from "../test/assistant-render";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn() }) }));
-vi.mock("./dashboard-layout-api", async () => {
-  const { DEFAULT_DASHBOARD_LAYOUT } = await import("@shopmate/contracts");
+import { render } from "../test/assistant-render";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/",
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+const api = vi.hoisted(() => ({ fetchAnalyticsOverview: vi.fn() }));
+vi.mock("./analytics/analytics-api", () => api);
+vi.mock("./analytics/analytics-layout-api", async () => {
+  const { DEFAULT_ANALYTICS_LAYOUT } = await import("@shopmate/contracts");
   return {
-    fetchDashboardLayout: vi.fn(async () => ({
-      layout: DEFAULT_DASHBOARD_LAYOUT,
+    fetchAnalyticsLayout: vi.fn(async () => ({
+      layout: DEFAULT_ANALYTICS_LAYOUT,
       revision: 0,
       updatedAt: null,
     })),
-    saveDashboardLayout: vi.fn(),
+    saveAnalyticsLayout: vi.fn(),
   };
 });
 vi.mock("./monitoring-api", () => ({
@@ -25,50 +31,41 @@ vi.mock("./monitoring-api", () => ({
   })),
 }));
 
-import { dashboardResponsePreview } from "./dashboard-data";
-import { Dashboard } from "./dashboard";
+import { DashboardApiError } from "./dashboard-api";
+import { overviewFixture } from "./analytics/analytics-fixture";
+import Home from "./page";
 
-describe("Dashboard 响应式与无障碍验收", () => {
+function withRequestedPeriod() {
+  api.fetchAnalyticsOverview.mockImplementation(async (asOfDate: string, startDate: string) => ({
+    ...overviewFixture(),
+    period: { startDate, endDate: asOfDate, days: 14 },
+  }));
+}
+
+describe("首页响应式与无障碍验收", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it("为核心区域提供稳定的语义名称", async () => {
-    render(<Dashboard state="ready" data={dashboardResponsePreview} />);
-
+    withRequestedPeriod();
+    render(<Home />);
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(await screen.findByRole("region", { name: "经营看板卡片" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "销售趋势" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "库存提醒" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "热销商品" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "经营图表" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "经营总览" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "经营洞察" })).toBeInTheDocument();
   });
 
-  it("所有可操作控件都有可读名称，指标卡标注当前周期", async () => {
-    render(<Dashboard state="ready" data={dashboardResponsePreview} />);
-    await screen.findByRole("region", { name: "经营看板卡片" });
-
+  it("所有可操作控件都有可读名称", async () => {
+    withRequestedPeriod();
+    render(<Home />);
+    await screen.findByRole("region", { name: "经营图表" });
     for (const button of screen.getAllByRole("button")) {
       expect(button).toHaveAccessibleName();
     }
-    expect(screen.getByRole("button", { name: "外观设置" })).toHaveAttribute(
-      "aria-haspopup",
-      "dialog",
-    );
-    expect(screen.getByRole("article", { name: "近 7 天销售额" })).toBeInTheDocument();
-    expect(
-      within(screen.getByRole("region", { name: "经营看板卡片" })).getAllByRole("article"),
-    ).toHaveLength(4);
-  });
-
-  it("在当前看板打开 AI 助手，进入布局编辑时自动关闭", async () => {
-    render(<Dashboard state="ready" data={dashboardResponsePreview} />);
-    await screen.findByRole("button", { name: /编辑看板/ });
-
-    fireEvent.click(screen.getByRole("button", { name: "AI 助手" }));
-    expect(screen.getByRole("dialog", { name: "AI 经营助手" })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /编辑看板/ }));
-    expect(screen.queryByRole("dialog", { name: "AI 经营助手" })).not.toBeInTheDocument();
   });
 
   it("经营监听面板可由键盘关闭并将焦点还给入口", async () => {
-    render(<Dashboard state="ready" data={dashboardResponsePreview} />);
+    withRequestedPeriod();
+    render(<Home />);
     const trigger = screen.getByRole("button", { name: "经营监听" });
     trigger.focus();
     fireEvent.click(trigger);
@@ -81,23 +78,17 @@ describe("Dashboard 响应式与无障碍验收", () => {
     expect(trigger).toHaveFocus();
   });
 
-  it.each(["loading", "empty", "error"] as const)(
-    "%s 状态向辅助技术播报状态并避免残留内容",
-    (state) => {
-      render(<Dashboard state={state} />);
-      const status = screen.getByRole("status");
-      expect(status).toHaveAttribute("aria-live", "polite");
-      expect(status).toHaveTextContent(
-        state === "loading" ? "正在整理" : state === "empty" ? "还没有" : "失败",
-      );
-      expect(screen.queryByRole("region", { name: "销售趋势" })).not.toBeInTheDocument();
-    },
-  );
+  it("加载时向辅助技术播报状态", () => {
+    api.fetchAnalyticsOverview.mockReturnValue(new Promise(() => {}));
+    render(<Home />);
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+    expect(screen.queryByRole("region", { name: "经营图表" })).not.toBeInTheDocument();
+  });
 
-  it("会话失效状态提供可键盘访问的重新登录入口", () => {
-    render(<Dashboard state="error" authRequired />);
-    const link = screen.getByRole("link", { name: "重新登录" });
+  it("会话失效状态提供可键盘访问的重新登录入口", async () => {
+    api.fetchAnalyticsOverview.mockRejectedValue(new DashboardApiError("登录已失效", 401));
+    render(<Home />);
+    const link = await screen.findByRole("link", { name: "重新登录" });
     expect(link).toHaveAttribute("href", "/login");
-    expect(link).toHaveClass("min-h-11");
   });
 });

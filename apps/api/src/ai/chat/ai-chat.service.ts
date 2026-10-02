@@ -5,6 +5,9 @@ import {
   HttpException,
 } from "@nestjs/common";
 import {
+  AGENT_ACTION_MAX_PER_REPLY,
+  AgentActionProposalSchema,
+  type AgentActionProposal,
   AiChatRequestSchema,
   AiChatResponseSchema,
   ProductCopyOutputSchema,
@@ -19,6 +22,7 @@ import {
 } from "@shopmate/contracts";
 
 import type { AuthContext } from "../../auth/contracts/index.js";
+import type { AssistantMemoryService } from "../memory/assistant-memory.service.js";
 import {
   BusinessAgent,
   type BusinessAgentResult,
@@ -48,6 +52,7 @@ export class AiChatService {
   constructor(
     agentOrProvider: BusinessAgentRunner | LLMProvider,
     private readonly registry?: ToolRegistry,
+    private readonly memories?: Pick<AssistantMemoryService, "promptContext">,
   ) {
     this.agent = isAgent(agentOrProvider)
       ? agentOrProvider
@@ -71,8 +76,10 @@ export class AiChatService {
         control.onProgress?.("tool-completed", "商品文案已生成");
         return reply;
       }
+      const memories = (await this.memories?.promptContext(context)) ?? [];
       const result = await this.agent.run({
         ...control,
+        ...(memories.length ? { memories } : {}),
         question: request.data.message.content,
         ...(request.data.history ? { history: request.data.history } : {}),
         ...(request.data.insightQuery ? { insightQuery: request.data.insightQuery } : {}),
@@ -136,6 +143,8 @@ function formatReply(result: BusinessAgentResult): AiChatResponse {
     result: output?.data,
   });
   const query = latestQuery(result);
+  const actionProposals = collectProposals(result);
+  const rememberedPreferences = collectRemembered(result);
   return AiChatResponseSchema.parse({
     message: {
       role: "assistant",
@@ -143,8 +152,32 @@ function formatReply(result: BusinessAgentResult): AiChatResponse {
       ...(productCopy ? { productCopy } : {}),
       ...(preview.success ? { insightPreview: preview.data } : {}),
       ...(query.success ? { insightQuery: query.data } : {}),
+      ...(actionProposals.length ? { actionProposals } : {}),
+      ...(rememberedPreferences.length ? { rememberedPreferences } : {}),
     },
   });
+}
+
+function collectRemembered(result: BusinessAgentResult): string[] {
+  const saved = (result.toolOutputs ?? [])
+    .filter((item) => item.name === "remember_preference")
+    .map((item) => (item.output as { status?: unknown; data?: { content?: unknown } }) ?? {})
+    .filter((output) => output.status === "ok" && typeof output.data?.content === "string")
+    .map((output) => String(output.data?.content).slice(0, 200));
+  return [...new Set(saved)].slice(0, 3);
+}
+
+/** 只收集服务端刚创建、格式有效的确认卡片；模型文本里的任何“令牌”都不会被采信。 */
+function collectProposals(result: BusinessAgentResult): AgentActionProposal[] {
+  const proposals = (result.toolOutputs ?? [])
+    .filter((item) => item.name.startsWith("propose_"))
+    .map((item) => {
+      const output = item.output as { data?: { proposal?: unknown } } | undefined;
+      return AgentActionProposalSchema.safeParse(output?.data?.proposal);
+    })
+    .filter((parsed) => parsed.success)
+    .map((parsed) => parsed.data);
+  return proposals.slice(-AGENT_ACTION_MAX_PER_REPLY);
 }
 
 function latestQuery(result: BusinessAgentResult) {

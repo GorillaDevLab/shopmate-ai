@@ -18,7 +18,7 @@ export function createAnalyticsDemo(asOf: string) {
     new Date(end).toISOString().slice(0, 10) !== asOf
   )
     throw new Error("需要有效的 YYYY-MM-DD 日期");
-  return ["a", "b"].map((key) => createTenant(key, end));
+  return ["a", "b", "c"].map((key) => createTenant(key, end));
 }
 
 function createTenant(key: string, end: number) {
@@ -45,7 +45,7 @@ function createTenant(key: string, end: number) {
     city: "北京",
   }));
   const orders = Array.from({ length: 3000 }, (_, index) =>
-    createOrder(id, index, end, products, key === "a" ? 0 : 7),
+    createOrder(id, index, end, products, key === "a" ? 0 : key === "b" ? 7 : 14),
   );
   return {
     id,

@@ -1,0 +1,284 @@
+/* App shell: dark top bar + light sidebar. Layered over the .workspace-* base rules in globals.css. */
+.app-shell {
+  --shell-page: #f1f1f1;
+  --shell-side: #ebebeb;
+  --shell-top: #1a1a1a;
+  --shell-hover: rgb(26 26 26 / 6%);
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--shell-page);
+  color: var(--app-text);
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  height: 56px;
+  padding: 0 16px;
+  background: var(--shell-top);
+  color: #ffffff;
+}
+.app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.app-brand > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--brand);
+  font-size: 14px;
+}
+.app-search {
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(640px, 100%);
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  background: #303030;
+  color: #b5b5b5;
+  transition: border-color 150ms ease-out;
+}
+.app-search:focus-within {
+  border-color: #8a8a8a;
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 12%);
+}
+.app-search svg {
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.app-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #ffffff;
+  font: inherit;
+  font-size: 14px;
+}
+.app-search input::placeholder {
+  color: #b5b5b5;
+}
+.app-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-topbar .header-icon-button {
+  min-width: 40px;
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #e3e3e3;
+  font-size: 18px;
+}
+.app-topbar .header-icon-button:hover {
+  background: rgb(255 255 255 / 10%);
+}
+.app-topbar .notification-badge {
+  border-color: var(--shell-top);
+}
+.app-merchant {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.app-merchant > span:first-child {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: #d4f0e3;
+  color: #0b5d3b;
+  font-weight: 600;
+}
+
+.app-shell-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.app-shell-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-shell .workspace-sidebar {
+  position: sticky;
+  top: 56px;
+  width: 240px;
+  height: calc(100dvh - 56px);
+  min-height: 0;
+  align-self: flex-start;
+  flex-shrink: 0;
+  border-right: 0;
+  background: var(--shell-side);
+}
+.app-shell .workspace-sidebar[data-collapsed="true"] {
+  width: 64px;
+}
+.app-shell .workspace-sidebar-inner {
+  height: 100%;
+  min-height: 0;
+  padding: 12px 8px;
+}
+.app-shell .workspace-menu nav {
+  gap: 2px;
+}
+.app-shell .workspace-menu nav > * {
+  min-height: 36px;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 150ms ease-out;
+}
+.app-shell .workspace-menu nav > *:hover {
+  background: var(--shell-hover);
+}
+.app-shell .workspace-menu nav > [aria-current] {
+  background: var(--app-surface);
+  box-shadow: 0 1px 0 rgb(26 26 26 / 7%);
+  color: var(--app-text);
+  font-weight: 600;
+}
+.app-shell .workspace-menu nav svg {
+  width: 18px;
+  height: 18px;
+}
+.app-shell .workspace-settings {
+  gap: 2px;
+  padding-top: 16px;
+}
+.app-shell .workspace-settings button {
+  min-height: 36px;
+  justify-content: flex-start;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 0 10px;
+  color: var(--app-text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.app-shell .workspace-settings button:hover {
+  background: var(--shell-hover);
+}
+.app-shell .workspace-collapse {
+  min-height: 36px;
+  margin-top: 4px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.app-shell .workspace-collapse svg,
+.app-shell .workspace-mobile-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+.app-shell .workspace-collapse:hover {
+  background: var(--shell-hover);
+}
+.app-shell .workspace-content {
+  max-width: 1600px;
+  padding: 20px 24px 32px;
+}
+
+@media (max-width: 1023px) {
+  .app-topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .app-merchant-name {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-shell-body {
+    flex-direction: column;
+  }
+  .app-topbar {
+    gap: 10px;
+    padding: 0 12px;
+  }
+  .app-brand {
+    font-size: 0;
+    gap: 0;
+  }
+  .app-merchant {
+    display: none;
+  }
+  .app-shell .workspace-sidebar,
+  .app-shell .workspace-sidebar[data-collapsed="true"] {
+    position: static;
+    width: 100%;
+    height: auto;
+    border-bottom: 1px solid var(--app-line);
+  }
+  .app-shell .workspace-sidebar-inner {
+    padding: 4px 12px;
+  }
+  .app-shell .workspace-content {
+    padding: 14px 16px 24px;
+  }
+}
+
+/* Fill mode: the page (e.g. the assistant) scrolls internally instead of the document. */
+.app-shell--fill {
+  height: var(--assistant-viewport-height, 100dvh);
+  overflow: hidden;
+}
+.app-shell--fill .app-shell-main {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+.app-shell--fill .assistant-page {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+.assistant-page-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.app-shell .assistant-page-header {
+  min-height: 56px;
+  padding: 8px 24px;
+}

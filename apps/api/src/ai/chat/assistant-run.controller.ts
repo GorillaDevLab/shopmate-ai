@@ -119,11 +119,14 @@ function safeFailure(error: unknown) {
       ? payload.code
       : "AI_CHAT_UNAVAILABLE";
   const messages: Record<string, string> = {
-    AI_RESPONSE_REJECTED: "回答的数据未通过核实。本次已停止，请联系管理员查看诊断记录。",
+    AI_RESPONSE_REJECTED:
+      "这次回答里有数字没能和系统数据对上，为避免给出错误数字已停止。可以换个问法或缩小时间、门店范围再试。",
     AI_FORBIDDEN: "当前账号没有此项数据的访问权限。",
     AI_TIMEOUT: "处理超时，未自动重试。",
     AI_RATE_LIMIT: "AI 服务请求过多，请稍后再试。",
     AI_CONFIGURATION: "AI 服务配置异常，请联系管理员。",
+    AI_TOOL_LIMIT: "这个问题需要的查询步骤太多，已先停止。可以拆成几个更具体的问题分别问。",
+    AI_CHAT_UNAVAILABLE: "AI 服务暂时没有返回有效结果，请稍后重试。",
   };
   return { code, message: messages[code] ?? "本次查询未完成，未自动重试；请稍后检查服务状态。" };
 }
