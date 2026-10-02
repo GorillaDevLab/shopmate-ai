@@ -59,6 +59,9 @@ body {
   min-width: 320px;
   max-width: 100%;
   overflow-x: hidden;
+  /* clip 同样裁掉横向溢出，但不会把 body 变成滚动容器，顶栏与侧栏的 sticky 才能生效。
+     不支持 clip 的旧浏览器保留上一行的 hidden。 */
+  overflow-x: clip;
 }
 
 body {
@@ -1231,7 +1234,19 @@ button:focus-visible {
   height: 8px;
   margin-top: 5px;
   border-radius: 50%;
+  background: var(--app-subtle);
+}
+
+.notification-severity.is-critical {
+  background: var(--danger);
+}
+
+.notification-severity.is-warning {
   background: var(--warning);
+}
+
+.notification-severity.is-info {
+  background: var(--brand);
 }
 .notification-meta time {
   color: var(--app-muted);

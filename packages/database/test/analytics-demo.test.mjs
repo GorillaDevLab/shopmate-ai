@@ -18,7 +18,12 @@ test("seed defaults to offline dry run and refuses unconfirmed database writes",
 test("rich demo is deterministic, tenant isolated and arithmetically consistent", () => {
   const data = createAnalyticsDemo("2026-09-13");
   assert.deepEqual(data, createAnalyticsDemo("2026-09-13"));
-  assert.equal(data.length, 2);
+  assert.equal(data.length, 3);
+  assert.deepEqual(
+    data.map((tenant) => tenant.id),
+    ["analytics-demo-a", "analytics-demo-b", "analytics-demo-c"],
+  );
+
   for (const tenant of data) {
     assert.equal(tenant.stores.length, 6);
     assert.equal(tenant.products.length, 30);

@@ -5,11 +5,13 @@ import { MerchantScopeGuard } from "./access/merchant-scope.guard.js";
 import { DemoAuthController } from "./demo-auth.controller.js";
 import { DEMO_AUTH_CONFIG, readOptionalDemoAuthConfig } from "./demo-auth.config.js";
 import { DemoAuthService } from "./demo-auth.service.js";
+import { UserAccountRepository } from "./user-account.repository.js";
 
 @Module({
   controllers: [DemoAuthController],
   providers: [
     DemoAuthService,
+    UserAccountRepository,
     {
       provide: APP_GUARD,
       useClass: MerchantScopeGuard,

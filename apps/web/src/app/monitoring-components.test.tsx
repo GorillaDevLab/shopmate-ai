@@ -94,6 +94,15 @@ describe("通知中心", () => {
     vi.mocked(api.listMonitoringNotifications).mockResolvedValue({ items: [notification()] });
   });
 
+  it("同步监听失败时仍读取已有未读提醒", async () => {
+    vi.mocked(api.syncMonitoring).mockRejectedValue(new Error("sync failed"));
+
+    render(<NotificationCenter />);
+
+    expect(await screen.findByText("1", { selector: ".notification-badge" })).toBeInTheDocument();
+    expect(api.getMonitoringUnreadCount).toHaveBeenCalledTimes(1);
+  });
+
   it("进入看板后同步到期规则并显示未读提醒", async () => {
     vi.mocked(api.markMonitoringNotificationRead).mockResolvedValue({
       notification: { ...notification(), readAt: "2026-09-03T01:00:00.000Z" },

@@ -60,6 +60,40 @@ export type {
   AnalyticsDashboardQuery,
   AnalyticsDashboardResponse,
 } from "./analytics/dashboard-api.schema.js";
+export {
+  ANALYTICS_OVERVIEW_MAX_CHANNELS,
+  ANALYTICS_OVERVIEW_MAX_DAYS,
+  ANALYTICS_OVERVIEW_TOP_PRODUCTS,
+  AnalyticsChannelSchema,
+  AnalyticsOverviewResponseSchema,
+  AnalyticsProductSchema,
+} from "./analytics/analytics-overview.schema.js";
+export type {
+  AnalyticsChannel,
+  AnalyticsOverviewResponse,
+  AnalyticsProduct,
+} from "./analytics/analytics-overview.schema.js";
+export {
+  ANALYTICS_MAX_AI_CARDS,
+  AnalyticsAiCardSchema,
+  AnalyticsCardIdSchema,
+  isAnalyticsAiCard,
+  AnalyticsCardSpanSchema,
+  AnalyticsLayoutReadResponseSchema,
+  AnalyticsLayoutSaveRequestSchema,
+  AnalyticsLayoutSchema,
+  DEFAULT_ANALYTICS_LAYOUT,
+} from "./analytics/analytics-layout.schema.js";
+export type {
+  AnalyticsAiCard,
+  AnalyticsBuiltinCard,
+  AnalyticsLayoutCard,
+  AnalyticsCardId,
+  AnalyticsCardSpan,
+  AnalyticsLayout,
+  AnalyticsLayoutReadResponse,
+  AnalyticsLayoutSaveRequest,
+} from "./analytics/analytics-layout.schema.js";
 
 export {
   DASHBOARD_COMPONENT_REGISTRY,
@@ -283,3 +317,38 @@ export type {
   WorkspaceSession,
   WorkspaceMessage,
 } from "./ai/assistant-workspace.schema.js";
+
+export {
+  AGENT_ACTION_MAX_PER_REPLY,
+  AGENT_ACTION_TTL_MS,
+  AgentActionCancelResponseSchema,
+  AgentActionConfirmResponseSchema,
+  AgentActionKindSchema,
+  AgentActionOutcomeSchema,
+  AgentActionProposalSchema,
+  AgentActionIdSchema,
+} from "./ai/agent-actions.schema.js";
+export type {
+  AgentActionConfirmResponse,
+  AgentActionKind,
+  AgentActionOutcome,
+  AgentActionProposal,
+} from "./ai/agent-actions.schema.js";
+
+export {
+  ASSISTANT_MEMORY_LIMIT,
+  ASSISTANT_MEMORY_MAX_LENGTH,
+  ASSISTANT_WORKSPACE_MAX_BYTES,
+  AssistantMemoryContentSchema,
+  AssistantMemoryListResponseSchema,
+  AssistantMemorySchema,
+  AssistantWorkspaceReadResponseSchema,
+  AssistantWorkspaceSaveRequestSchema,
+  AssistantWorkspaceSaveResponseSchema,
+} from "./ai/assistant-memory.schema.js";
+export type {
+  AssistantMemory,
+  AssistantMemoryListResponse,
+  AssistantWorkspaceReadResponse,
+  AssistantWorkspaceSaveRequest,
+} from "./ai/assistant-memory.schema.js";

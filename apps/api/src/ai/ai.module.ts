@@ -39,14 +39,60 @@ import {
   createBusinessChartTool,
 } from "./tools/business-query.tools.js";
 
+import { AnalyticsOverviewService } from "../analytics/analytics-overview.service.js";
+import {
+  BUSINESS_OVERVIEW_TOOL_NAME,
+  createBusinessOverviewTool,
+} from "./tools/business-overview.tool.js";
+
+import { AgentActionStore } from "./actions/agent-action-store.js";
+import {
+  PROPOSE_ACTION_TOOL_NAMES,
+  createProposeInventoryThresholdTool,
+  createProposeMonitoringRuleTool,
+  createProposeSaveChartTool,
+} from "./actions/propose-action.tools.js";
+import { PrismaInventoryAlertUpdateRepository } from "./tools/inventory-alert-update.repository.js";
+
+import {
+  AssistantMemoryController,
+  AssistantWorkspaceController,
+} from "./memory/assistant-memory.controller.js";
+import { PrismaAssistantMemoryRepository } from "./memory/assistant-memory.repository.js";
+import {
+  AssistantMemoryService,
+  AssistantWorkspaceService,
+} from "./memory/assistant-memory.service.js";
+import { PrismaAssistantWorkspaceRepository } from "./memory/assistant-workspace.repository.js";
+import {
+  REMEMBER_PREFERENCE_TOOL_NAME,
+  createRememberPreferenceTool,
+} from "./memory/remember-preference.tool.js";
+
 export const AI_LLM_PROVIDER = Symbol("AI_LLM_PROVIDER");
+export const AI_ACTION_STORE = Symbol("AI_ACTION_STORE");
 export const AI_TOOL_REGISTRY = Symbol("AI_TOOL_REGISTRY");
 export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
 
 @Module({
   imports: [AnalyticsModule, ProductModule],
-  controllers: [AiChatController, DashboardInsightController, AssistantRunController],
+  controllers: [
+    AiChatController,
+    DashboardInsightController,
+    AssistantRunController,
+    AssistantMemoryController,
+    AssistantWorkspaceController,
+  ],
   providers: [
+    { provide: AI_ACTION_STORE, useFactory: () => new AgentActionStore() },
+    {
+      provide: AssistantMemoryService,
+      useFactory: () => new AssistantMemoryService(new PrismaAssistantMemoryRepository()),
+    },
+    {
+      provide: AssistantWorkspaceService,
+      useFactory: () => new AssistantWorkspaceService(new PrismaAssistantWorkspaceRepository()),
+    },
     {
       provide: AI_LLM_PROVIDER,
       useFactory: () => {
@@ -63,6 +109,9 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         performanceService: Parameters<typeof createBestSellersToolRegistration>[0],
         provider: DeepSeekLLMProvider | MockLLMProvider,
         insightExecutor: DashboardInsightExecutor,
+        overviewService: AnalyticsOverviewService,
+        actionStore: AgentActionStore,
+        memoryService: AssistantMemoryService,
       ) => {
         const registry = new ToolRegistry({
           allowedToolNames: [
@@ -71,6 +120,9 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
             "get_store_catalog",
             "query_business_data",
             "create_business_chart",
+            BUSINESS_OVERVIEW_TOOL_NAME,
+            ...PROPOSE_ACTION_TOOL_NAMES,
+            REMEMBER_PREFERENCE_TOOL_NAME,
           ],
         });
         registry.register(createProductDetailsToolRegistration(productService));
@@ -82,6 +134,16 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         registry.register(createStoreCatalogTool(new StoreSalesReader()));
         registry.register(createBusinessQueryTool(insightExecutor));
         registry.register(createBusinessChartTool(insightExecutor));
+        registry.register(createBusinessOverviewTool(overviewService));
+        registry.register(
+          createProposeInventoryThresholdTool(
+            actionStore,
+            new PrismaInventoryAlertUpdateRepository(),
+          ),
+        );
+        registry.register(createProposeMonitoringRuleTool(actionStore));
+        registry.register(createProposeSaveChartTool(actionStore));
+        registry.register(createRememberPreferenceTool(memoryService));
 
         const productCopyService = new ProductCopyService(productService, provider);
         registry.register(createGenerateProductCopyToolRegistration(productCopyService));
@@ -95,6 +157,9 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
         ProductPerformanceService,
         AI_LLM_PROVIDER,
         DashboardInsightExecutor,
+        AnalyticsOverviewService,
+        AI_ACTION_STORE,
+        AssistantMemoryService,
       ],
     },
     {
@@ -105,9 +170,12 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
     },
     {
       provide: AiChatService,
-      useFactory: (agent: BusinessAgent, registry: ToolRegistry) =>
-        new AiChatService(agent, registry),
-      inject: [AI_BUSINESS_AGENT, AI_TOOL_REGISTRY],
+      useFactory: (
+        agent: BusinessAgent,
+        registry: ToolRegistry,
+        memories: AssistantMemoryService,
+      ) => new AiChatService(agent, registry, memories),
+      inject: [AI_BUSINESS_AGENT, AI_TOOL_REGISTRY, AssistantMemoryService],
     },
     {
       provide: DashboardInsightExecutor,
@@ -127,6 +195,6 @@ export const AI_BUSINESS_AGENT = Symbol("AI_BUSINESS_AGENT");
       inject: [AI_LLM_PROVIDER, DashboardInsightExecutor],
     },
   ],
-  exports: [AiChatService, AI_LLM_PROVIDER],
+  exports: [AiChatService, AI_LLM_PROVIDER, AI_ACTION_STORE],
 })
 export class AiModule {}

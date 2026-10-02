@@ -17,9 +17,6 @@ type FormProps = {
   onApply: (value: DateRange) => void;
 };
 
-export function rangeLabel(range: DashboardRange) {
-  return range.kind === "custom" ? "所选时段" : `近 ${range.kind} 天`;
-}
 export function daysBefore(date: string, days: number) {
   return new Date(Date.parse(date) - days * 86_400_000).toISOString().slice(0, 10);
 }
@@ -196,4 +193,15 @@ function RangeActions({ onCancel }: { onCancel: () => void }) {
       </button>
     </div>
   );
+}
+
+export function shanghaiToday(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "Asia/Shanghai",
+  }).formatToParts(now);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }

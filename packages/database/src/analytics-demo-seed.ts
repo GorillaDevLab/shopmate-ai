@@ -20,7 +20,7 @@ async function main() {
     },
     { timeout: 180000 },
   );
-  process.stdout.write("演示数据导入完成：2 个商家、12 个网点、6000 笔订单。\n");
+  process.stdout.write("演示数据导入完成：3 个商家、18 个网点、9000 笔订单。\n");
 }
 
 type Transaction = Prisma.TransactionClient;

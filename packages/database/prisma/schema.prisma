@@ -138,19 +138,47 @@ model Merchant {
   slug   String         @unique
   status MerchantStatus @default(ACTIVE)
 
-  products         Product[]
-  skus             Sku[]
-  orders           Order[]
-  stores           Store[]
-  dashboardLayouts UserDashboardLayout[]
-  monitoringRules  UserMonitoringRule[]
-  notifications    MonitoringNotification[]
-  organization     Organization?
+  products            Product[]
+  skus                Sku[]
+  orders              Order[]
+  stores              Store[]
+  dashboardLayouts    UserDashboardLayout[]
+  analyticsLayouts    UserAnalyticsLayout[]
+  assistantWorkspaces UserAssistantWorkspace[]
+  assistantMemories   AssistantMemory[]
+  monitoringRules     UserMonitoringRule[]
+  notifications       MonitoringNotification[]
+  userMemberships     UserMerchantMembership[]
+  organization        Organization?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
+}
+
+model UserAccount {
+  id           String @id @default(cuid())
+  email        String @unique
+  passwordHash String
+
+  memberships UserMerchantMembership[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserMerchantMembership {
+  userId     String
+  merchantId String
+
+  user     UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([userId, merchantId])
+  @@index([merchantId])
 }
 
 model Product {
@@ -276,6 +304,59 @@ model UserDashboardLayout {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, merchantId])
+  @@index([merchantId])
+}
+
+// 经营分析页（首页）的卡片顺序、宽度与显隐；与旧版 UserDashboardLayout 分开存储，旧记录保留不动。
+model UserAnalyticsLayout {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+
+  schemaVersion Int  @default(1)
+  revision      Int  @default(1)
+  layout        Json
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, merchantId])
+  @@index([merchantId])
+}
+
+// AI 助手对话记录，按用户 + 商家同步到服务端，换设备也能看到；revision 用于防止多设备互相覆盖。
+model UserAssistantWorkspace {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+
+  revision Int  @default(1)
+  snapshot Json
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, merchantId])
+  @@index([merchantId])
+}
+
+// AI 记住的用户偏好（单行短句），每次对话作为偏好上下文提供给模型，不作为经营数据依据。
+model AssistantMemory {
+  id         String @id @default(cuid())
+  userId     String
+  merchantId String
+  content    String
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, merchantId, content])
+  @@index([userId, merchantId, createdAt])
   @@index([merchantId])
 }
 

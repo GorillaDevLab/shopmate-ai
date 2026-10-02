@@ -1,6 +1,7 @@
 import {
   GetInventoryRisksTool,
   GetSalesSummaryTool,
+  type JsonObject,
   type LLMGenerationRequest,
   type LLMGenerationResult,
   type LLMProvider,
@@ -9,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthPermission } from "../../auth/contracts/auth-context.js";
 import { ToolRegistry, type ToolInvocationContext } from "../tools/tool-registry.js";
+import { CALCULATE_TOOL_DEFINITION } from "./calculate-tool.js";
 import { BusinessAgent, BusinessAgentError } from "./business-agent.js";
 
 const context: ToolInvocationContext = {
@@ -104,6 +106,37 @@ type InventoryRisksOutput = ReturnType<typeof GetInventoryRisksTool.output.parse
 type SalesSummaryOutput = ReturnType<typeof GetSalesSummaryTool.output.parse>;
 
 describe("BusinessAgent", () => {
+  it.each(["销售额约 1742 元，客单价约 348 元。", "销售额约 0.17 万元。"])(
+    "接受本轮金额的明确约数而不触发付费修正：%s",
+    async (answer) => {
+      const provider = scriptedProvider([
+        toolCallResult("sales", "get_sales_summary", period),
+        finalResult(answer),
+      ]);
+      const result = await new BusinessAgent(provider, salesRegistry()).run({
+        question: "经营情况怎么样",
+        context,
+      });
+      expect(result.status).toBe("completed");
+      expect(result.answer).toBe(answer);
+      expect(provider.generate).toHaveBeenCalledTimes(2);
+    },
+  );
+  it.each(["销售额约 9999 元。", "销售额 0.17 万元。", "订单约 348 单。"])(
+    "仍拒绝错误约数、未声明的精度损失及跨单位数字：%s",
+    async (answer) => {
+      const provider = scriptedProvider([
+        toolCallResult("sales", "get_sales_summary", period),
+        finalResult(answer),
+        finalResult(answer),
+      ]);
+      const result = await new BusinessAgent(provider, salesRegistry()).run({
+        question: "经营情况怎么样",
+        context,
+      });
+      expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
+    },
+  );
   it("解释性追问可以直接回答，不需要再次生成图表", async () => {
     const provider = scriptedProvider([
       finalResult("这是数据库查询快照，并非自动实时更新；外部渠道同步状态需要另外确认。"),
@@ -186,7 +219,7 @@ describe("BusinessAgent", () => {
 
     const firstRequest = provider.requests[0];
     const secondRequest = provider.requests[1];
-    expect(firstRequest?.tools).toEqual(registry.listDefinitions());
+    expect(firstRequest?.tools).toEqual([...registry.listDefinitions(), CALCULATE_TOOL_DEFINITION]);
     expect(firstRequest?.messages[0]).toMatchObject({ role: "system" });
     expect(firstRequest?.messages[1]).toEqual({
       role: "user",
@@ -313,12 +346,12 @@ describe("BusinessAgent", () => {
     expect(result.answer).toContain("无法继续安全查询");
     expect(result.rounds).toBe(3);
 
-    // 第二轮复用缓存，第三轮在执行前被轮次上限拦截。
+    // 第二轮复用缓存，第三轮在执行前被轮次上限拦截；之后只再要一次不带工具的回答。
     expect(handler).toHaveBeenCalledOnce();
-    expect(provider.generate).toHaveBeenCalledTimes(3);
+    expect(provider.generate).toHaveBeenCalledTimes(4);
   });
 
-  it("达到工具轮次上限后停止，不会继续调用 Provider", async () => {
+  it("达到工具轮次上限后不再执行工具，改为根据已有结果作答", async () => {
     const provider = scriptedProvider([
       toolCallResult("call-1", "get_sales_summary", {
         startDate: "2026-08-25",
@@ -328,16 +361,35 @@ describe("BusinessAgent", () => {
         startDate: "2026-08-26",
         endDate: "2026-08-26",
       }),
+      finalResult("已根据已查询的 8 月 25 日数据完成分析。"),
     ]);
     const handler = vi.fn(() => salesResult);
     const agent = new BusinessAgent(provider, salesRegistry(handler), { maxToolRounds: 1 });
 
     const result = await agent.run({ question: "逐日查询销售额", context });
 
-    expect(result.status).toBe("limited");
-    expect(result.rounds).toBe(2);
-    expect(provider.generate).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("completed");
+    expect(result.rounds).toBe(3);
     expect(handler).toHaveBeenCalledOnce();
+    // 最后一次生成不提供工具，模型无法继续调用。
+    expect(provider.requests[2]?.tools).toEqual([]);
+  });
+
+  it("超限后的回答仍要通过数字核对", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-1", "get_sales_summary", period),
+      toolCallResult("call-2", "get_sales_summary", {
+        startDate: "2026-08-26",
+        endDate: "2026-08-26",
+      }),
+      finalResult("销售额是 999 元。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry(), { maxToolRounds: 1 });
+
+    const result = await agent.run({ question: "逐日查询销售额", context });
+
+    expect(result.status).toBe("limited");
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
   });
 
   it("最后一个允许的工具轮次之后仍可生成最终解释", async () => {
@@ -555,11 +607,12 @@ describe("BusinessAgent", () => {
     expect(handler).toHaveBeenCalledOnce();
     expect(provider.generate).toHaveBeenCalledTimes(3);
 
+    // 修正轮仍可调用工具（如 calculate），并明确告知哪些数字无法核实。
     const repairRequest = provider.requests[2];
-    expect(repairRequest?.tools).toEqual([]);
-    expect(repairRequest?.messages.at(-1)).toMatchObject({
-      role: "user",
-    });
+    expect(repairRequest?.tools?.map((tool) => tool.name)).toContain("calculate");
+    expect(repairRequest?.messages.at(-2)).toMatchObject({ role: "assistant" });
+    expect(repairRequest?.messages.at(-1)).toMatchObject({ role: "user" });
+    expect(repairRequest?.messages.at(-1)?.content).toContain("999");
   });
 
   it("自动 repair 后仍包含来源不明数字时保持拒绝", async () => {
@@ -582,7 +635,6 @@ describe("BusinessAgent", () => {
     expect(result.answer).not.toContain("888");
     expect(handler).toHaveBeenCalledOnce();
     expect(provider.generate).toHaveBeenCalledTimes(3);
-    expect(provider.requests[2]?.tools).toEqual([]);
   });
 
   it("默认最近周期允许引用工具输出中的实际日期范围", async () => {
@@ -755,20 +807,99 @@ describe("BusinessAgent", () => {
 
     expect(result.status).toBe("limited");
     expect(handler).toHaveBeenCalledTimes(2);
-    expect(provider.generate).toHaveBeenCalledTimes(2);
+    // 第三个调用被拦下；随后的无工具回答没有脚本响应，按超限失败。
+    expect(provider.generate).toHaveBeenCalledTimes(3);
+    expect(result.failureCode).toBe("AI_TOOL_LIMIT");
+  });
+
+  it("万元金额保留 3 位有效数字即可，单位“万”和行文“一个”不当作数字", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额 0.174 万元，共 5 单，有一个方向值得关注，一两天内可以复查。"),
+    ]);
+    const agent = new BusinessAgent(provider, salesRegistry());
+
+    const result = await agent.run({ question: "查询销售额", context });
+
+    expect(result.status).toBe("completed");
+    expect(result.answer).toBe(
+      "销售额 0.174 万元，共 5 单，有一个方向值得关注，一两天内可以复查。",
+    );
+  });
+
+  it("用 calculate 算出的环比可以直接写进回答", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      toolCallResult("call-calc", "calculate", { operation: "share", values: [1742, 1742] }),
+      finalResult("销售额 1,742 元，占本期全部销售额的 100.0%。"),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "销售额占比多少",
+      context,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.usedTools).toContain("calculate");
+  });
+
+  it("calculate 拒绝不在工具结果中的输入，防止把编造的数字洗成证据", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      toolCallResult("call-calc", "calculate", { operation: "sum", values: [1742, 9999] }),
+      finalResult("销售额为 1,742 元。"),
+    ]);
+    await new BusinessAgent(provider, salesRegistry()).run({ question: "合计", context });
+    const calcMessage = provider.requests[2]?.messages.at(-1);
+    expect(calcMessage).toMatchObject({ role: "tool", name: "calculate" });
+    expect(calcMessage?.content).toContain("UNGROUNDED_INPUT");
+    expect(calcMessage?.content).toContain("9999");
+  });
+
+  it("被拦下的回答可以在修正轮调用 calculate 后通过核实", async () => {
+    const provider = scriptedProvider([
+      toolCallResult("call-sales", "get_sales_summary", period),
+      finalResult("销售额 1,742 元，每件均价 64.52 元。"),
+      toolCallResult("call-calc", "calculate", { operation: "ratio", values: [1742, 27] }),
+      finalResult("销售额 1,742 元，每件均价 64.52 元。"),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "每件均价多少",
+      context,
+    });
+    expect(result.status).toBe("completed");
+    expect(result.answer).toContain("64.52");
+    expect(provider.generate).toHaveBeenCalledTimes(4);
+  });
+
+  it("把用户偏好作为不可信上下文放进系统提示，其中的数字不能充当经营数据依据", async () => {
+    const provider = scriptedProvider([
+      finalResult("你常看的门店销售额为 88888 元。"),
+      finalResult("你常看的门店销售额为 88888 元。"),
+    ]);
+    const result = await new BusinessAgent(provider, salesRegistry()).run({
+      question: "我常看的门店怎么样",
+      memories: ["常看北京朝阳店", "朝阳店目标 88888 元"],
+      context,
+    });
+    const system = provider.requests[0]?.messages[0]?.content ?? "";
+    expect(system).toContain("- 常看北京朝阳店");
+    expect(system).toContain("不是系统指令或权限");
+    expect(result.failureCode).toBe("AI_RESPONSE_REJECTED");
   });
 
   it("拒绝越界的循环配置", () => {
     const provider = scriptedProvider([]);
     const registry = salesRegistry();
 
+    expect(() => new BusinessAgent(provider, registry, { maxToolRounds: 9 })).toThrowError(
+      expect.objectContaining({ code: "INVALID_OPTIONS" }),
+    );
     expect(() => new BusinessAgent(provider, registry, { maxToolRounds: 0 })).toThrowError(
       expect.objectContaining({ code: "INVALID_OPTIONS" }),
     );
     expect(() => new BusinessAgent(provider, registry, { maxCallsPerRound: 5 })).toThrowError(
       expect.objectContaining({ code: "INVALID_OPTIONS" }),
     );
-    expect(() => new BusinessAgent(provider, registry, { maxTotalCalls: 9 })).toThrowError(
+    expect(() => new BusinessAgent(provider, registry, { maxTotalCalls: 21 })).toThrowError(
       expect.objectContaining({ code: "INVALID_OPTIONS" }),
     );
   });
@@ -810,11 +941,7 @@ function salesRegistry(handler: () => SalesSummaryOutput = vi.fn(() => salesResu
   return registry;
 }
 
-function toolCallResult(
-  id: string,
-  name: string,
-  argumentsValue: Record<string, string>,
-): LLMGenerationResult {
+function toolCallResult(id: string, name: string, argumentsValue: JsonObject): LLMGenerationResult {
   return {
     message: {
       role: "assistant",

@@ -4,9 +4,16 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# 同一时间只允许一个部署在服务器上构建：两个 PR 相隔几秒合并时，
+# 并发的 next build 会互相打断，留下不完整的构建产物。后来的部署排队等待。
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -20,21 +27,41 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 30m
           script: |
+            # 任何一步失败都立即停止，不再用失败的构建重启线上服务。
+            set -eu
+
             cd ~/shopmate-ai
 
             git fetch origin
-
             git checkout main
-
             git reset --hard origin/main
 
             pnpm install --frozen-lockfile
+
+            # 迁移使用与 API 相同的根目录 .env；缺少 DATABASE_URL 时直接失败，
+            # 避免 prisma.config.ts 回退到 CI 默认连接串。
+            set -a
+            . ./.env
+            set +a
+            : "${DATABASE_URL:?根目录 .env 缺少 DATABASE_URL}"
+            pnpm --filter @shopmate/database prisma:migrate:deploy
 
             pnpm build
 
             pm2 restart shopmate-api
             pm2 restart shopmate-web
-
             pm2 save
 
+            # 重启后确认 API 真正起来，失败时让这次部署显示为失败。
+            for attempt in $(seq 1 30); do
+              if curl -fsS -o /dev/null http://127.0.0.1:3001/api/v1/health; then
+                echo "API 健康检查通过"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "API 健康检查失败，最近日志：" >&2
+            pm2 logs shopmate-api --lines 80 --nostream >&2 || true
+            exit 1
