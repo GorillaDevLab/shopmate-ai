@@ -148,7 +148,10 @@ describe("normalized connector source records", () => {
       ...order,
       paidMinor: null,
       refundedMinor: null,
-      source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+      source: {
+        ...source,
+        quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN", "REFUND_UNKNOWN"] },
+      },
     });
     expect(parsed.paidMinor).toBeNull();
     expect(parsed.refundedMinor).toBeNull();
@@ -160,6 +163,29 @@ describe("normalized connector source records", () => {
         quantity: 2,
         unitPriceMinor: Number.MAX_SAFE_INTEGER,
         grossMinor: Number.MAX_SAFE_INTEGER,
+      }).success,
+    ).toBe(false);
+  });
+  it("distinguishes unknown refund from unknown payment", () => {
+    expect(
+      schema.ConnectorOrderSchema.safeParse({
+        ...order,
+        refundedMinor: null,
+        source: { ...source, quality: { state: "PARTIAL", issues: ["REFUND_UNKNOWN"] } },
+      }).success,
+    ).toBe(true);
+    expect(
+      schema.ConnectorOrderSchema.safeParse({
+        ...order,
+        refundedMinor: null,
+        source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+      }).success,
+    ).toBe(false);
+    expect(
+      schema.ConnectorOrderSchema.safeParse({
+        ...order,
+        paidMinor: null,
+        source: { ...source, quality: { state: "PARTIAL", issues: ["REFUND_UNKNOWN"] } },
       }).success,
     ).toBe(false);
   });

@@ -154,10 +154,9 @@ export const ConnectorOrderSchema = z
   .refine(
     (order) => order.paidAt === null || Date.parse(order.paidAt) >= Date.parse(order.orderedAt),
   )
+  .refine((order) => order.paidMinor !== null || declaresMissing(order.source, "PAYMENT_UNKNOWN"))
   .refine(
-    (order) =>
-      (order.paidMinor !== null && order.refundedMinor !== null) ||
-      declaresMissing(order.source, "PAYMENT_UNKNOWN"),
+    (order) => order.refundedMinor !== null || declaresMissing(order.source, "REFUND_UNKNOWN"),
   )
   .readonly();
 function validOrderAmounts(order: {
