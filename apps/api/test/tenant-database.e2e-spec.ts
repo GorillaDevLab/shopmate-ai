@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { randomBytes } from "node:crypto";
+import type { Server } from "node:http";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { canAccessTenantResource } from "@shopmate/contracts";
@@ -44,7 +45,8 @@ describe("Tenant API isolation against real PostgreSQL and a role without RLS by
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = module.createNestApplication();
     configureApp(app);
-    await app.init();
+    // Own the listener so Supertest cannot close it while parallel requests are connecting.
+    await app.listen(0, "127.0.0.1");
   });
   beforeEach(async () => {
     await fixture.reset();
@@ -133,14 +135,22 @@ describe("Tenant API isolation against real PostgreSQL and a role without RLS by
       .expect(404);
   });
   it("clears connection scope after parallel tenant requests", async () => {
-    await Promise.all(
+    const server: Server = app.getHttpServer();
+    expect(server.listening).toBe(true);
+    const responses = await Promise.all(
       Array.from({ length: 12 }, (_, index) =>
-        request(app.getHttpServer())
+        request(server)
           .get("/api/v1/tenant/context")
           .set("Cookie", cookie(index % 2 ? "a" : "b"))
           .expect(200),
       ),
     );
+    responses.forEach((response, index) => {
+      const key = index % 2 ? "a" : "b";
+      expect(response.body.organizationId).toBe(`legacy-org-api-merchant-${key}`);
+      expect(response.body.userId).toBe(`api-user-${key}`);
+    });
+    expect(server.listening).toBe(true);
     expect(await getPrismaClient().workspace.count()).toBe(0);
   });
 });
