@@ -1,6 +1,6 @@
 # Phase 1.1 Tenant Foundation Delivery
 
-2026-10-03：已实现并在隔离 PostgreSQL 16 验证；分支 `feat/tenant-foundation`。尚未合并、推送或部署。
+2026-10-03 初次交付：已实现并在隔离 PostgreSQL 16 验证；分支 `feat/tenant-foundation`。初次交付时尚未推送或创建 PR；后续 PR 准备验证见下文，未合并或部署。
 
 1. **Goal**：完成获批的 Phase 1.1：Organization、成员、Workspace、可信 TenantContext 和资源权限策略，保留 Merchant 兼容。
 2. **Why this is needed**：为后续 CommerceConnector、Mock commerce 和决策层建立明确的 ownership；新租户 API 不再凭 Cookie 中的旧权限授权。
@@ -11,11 +11,21 @@
 7. **Privacy/compliance considerations**：验证只使用临时合成数据；未读取原项目 `.env` 或连接现有经营数据库。未新增真实抖店、Jev 或真实 LLM 调用。当前交付是租户技术控制的一部分；完整隐私、数据留存、跨境及生产身份流程尚待后续实施和法律审查，不能宣称已全面合规。
 8. **Tests added**：新增 24 契约测试、6 service 测试、19 fixture HTTP 测试、3 bootstrap gate 测试，以及必跑的 25 项真实 PostgreSQL/API 测试（2 migration paths + 13 database checks，含父测试 + 10 restricted-role HTTP tests）。合计本阶段新增 77 个测试。全部验证明细如下；旧 seed 在隔离 DB 实际执行成功。
 9. **How to manually verify**：运行 `pnpm test:tenant`；查看两组织访问、成员降级/撤销、RLS 缺身份及连接池清理结果。独立演示 DB 初始化和两个 GET endpoint 的操作见下文。所有已运行测试的数据库均由测试 runner 创建/销毁或为明确命名的隔离库。
-10. **Risks / limitations**：旧 commerce endpoints 仍沿用 Merchant scope；全量 commerce RLS/context 切换、生产身份、用户邀请、组织管理写 API 尚未交付。默认 bootstrap 不授予用户成员身份，未配置时新 Tenant API 返回 404。现有 deploy workflow 不执行 migration，不能直接靠合并/重启发布本变更。迁移需要具备 RLS bypass 的 provisioning identity。未运行真实平台、LLM 或远程 GitHub CI；9 个既有 opt-in API 测试未启用。无 UI 改动，因此未做截图验收。
+10. **Risks / limitations**：旧 commerce endpoints 仍沿用 Merchant scope；全量 commerce RLS/context 切换、生产身份、用户邀请、组织管理写 API 尚未交付。默认 bootstrap 不授予用户成员身份，未配置时新 Tenant API 返回 404。最新主线的 deploy workflow 已增加 migration，但复用应用 DATABASE_URL；上线前仍需确认 migration/provisioning 与受限 runtime identity 分离。迁移需要具备 RLS bypass 的 provisioning identity。初次验证未运行真实平台、LLM 或远程 GitHub CI；9 个既有 opt-in API 测试未启用。无 UI 改动，因此未做截图验收。
 11. **Next recommended step**：先验收 Phase 1.1 和迁移权限；随后进入 CommerceConnector 契约及 Mock 源状态设计。完整生产身份与旧 commerce 隔离仍是接入真实商家数据前的发布门槛。
 12. **Git commit message**：已按独立变更提交；主要提交包括 `feat(contracts): define tenant scope and resource permissions`、`feat(database): add tenant foundation and legacy ownership constraints`、`feat(tenant): resolve protected contexts from current memberships`、`feat(tenant): add guarded demo membership bootstrap`、`test(tenant): run real API isolation with a restricted database role` 和 `ci(tenant): require PostgreSQL isolation regression`。审查修复和迁移/seed 回归分别独立提交，完整记录见实施计划。
 
 ## Verification evidence
+
+### PR preparation against updated main
+
+用户已授权本阶段及后续开发默认提交 PR（见根目录 AGENTS.md）。`2dd71b6` 合入 `origin/main` 的 `756a0c4`，保留最新账号、Agent、分析页与全部租户功能。PR 1.1 以 main 为目标；1.2 以本分支为依赖。
+
+合入主线后重新验证：根 Node 23、contracts 247、database 44、API 538、Web 221，共 1,073 passed，另有 9 项既有 opt-in API 测试 skipped。专用真实 PostgreSQL/API 测试仍为 25 passed（含完整新增账号/分析/记忆 migration history、schema drift 与 restricted-role HTTP），合计 1,098 passed。lint、typecheck、format、secret scan、构建全部通过，31 个浏览器产物兼容检查通过。原有验收数字如下保留为阶段初次交付记录。
+
+最新 deploy workflow 会在 main 推送时执行 migration，因此合并意味着进入部署流程；本轮只提交 PR，未合并或部署。部署前执行身份与权限分离仍需按下面的 operator procedure 验证。
+
+### Initial delivery evidence
 
 | 检查                                             | 实际结果                                                             |
 | ------------------------------------------------ | -------------------------------------------------------------------- |
