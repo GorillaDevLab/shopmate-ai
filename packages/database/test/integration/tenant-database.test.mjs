@@ -312,6 +312,17 @@ test("tenant migration preserves legacy records and rejects foreign relations in
         await assert.rejects(bootstrapTenantMembership(apply), /cannot be changed/u);
       },
     );
+    await t.test("legacy Prisma seed and order seed work with inherited tenant fields", () => {
+      const directory = fileURLToPath(new URL("../../", import.meta.url));
+      for (const script of ["src/seed.ts", "src/order-seed.ts"]) {
+        execFileSync(process.execPath, ["--import", "tsx", script], {
+          cwd: directory,
+          env: { ...process.env, DATABASE_URL: server.url },
+          encoding: "utf8",
+          windowsHide: true,
+        });
+      }
+    });
     await t.test("deployed migrations match the Prisma schema without drift", () => {
       const directory = fileURLToPath(new URL("../../", import.meta.url));
       const cli = fileURLToPath(
