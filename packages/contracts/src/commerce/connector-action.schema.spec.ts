@@ -192,4 +192,27 @@ describe("connector action protocols", () => {
       }).success,
     ).toBe(true);
   });
+  it("orders opaque sku ids deterministically even when locale collation equates them", () => {
+    const expectedListing = {
+      ...listing,
+      skus: [
+        { ...listing.skus[0], sellerSkuCode: "é", salePriceMinor: 5900 },
+        { ...listing.skus[0], sellerSkuCode: "e\u0301", salePriceMinor: 6000 },
+      ],
+    };
+    expect(
+      schema.VerificationResultSchema.safeParse({
+        status: "VERIFIED",
+        snapshot: {
+          kind: "PRODUCT",
+          externalStoreId: "store-a",
+          externalProductId: "product-a",
+          expectedListing,
+          actualListing: { ...expectedListing, skus: [...expectedListing.skus].reverse() },
+          version: "v2",
+          observedAt: time,
+        },
+      }).success,
+    ).toBe(true);
+  });
 });

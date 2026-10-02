@@ -173,10 +173,14 @@ function listingFingerprint(listing: z.infer<typeof ListingInputSchema>): string
   const skus = listing.skus
     .map((sku) => ({
       ...sku,
-      attributes: [...sku.attributes].sort((a, b) => a.name.localeCompare(b.name)),
+      attributes: [...sku.attributes].sort((a, b) => compareOpaque(a.name, b.name)),
     }))
-    .sort((a, b) => a.sellerSkuCode.localeCompare(b.sellerSkuCode));
+    .sort((a, b) => compareOpaque(a.sellerSkuCode, b.sellerSkuCode));
   return JSON.stringify({ ...listing, skus });
+}
+function compareOpaque(a: string, b: string): number {
+  // Distinct identifiers can collate equally; exact code-unit ordering is portable.
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export type SetPriceCommand = z.infer<typeof SetPriceCommandSchema>;
