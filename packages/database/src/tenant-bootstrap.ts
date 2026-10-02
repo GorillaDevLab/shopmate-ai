@@ -89,16 +89,9 @@ async function runBootstrap(
   });
   if (!workspace) fail("Active default workspace does not exist");
   await validateExistingMembership(transaction, request, organization.id, workspace.id);
-  if (!request.apply)
-    return {
-      applied: false,
-      organizationId: organization.id,
-      workspaceId: workspace.id,
-      role: request.role,
-    };
-  await provisionMembership(transaction, request, organization.id, workspace.id);
+  if (request.apply) await provisionMembership(transaction, request, organization.id, workspace.id);
   return {
-    applied: true,
+    applied: request.apply,
     organizationId: organization.id,
     workspaceId: workspace.id,
     role: request.role,
