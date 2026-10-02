@@ -23,6 +23,9 @@ function run(directory, script, args, environment) {
 
 const server = await isolatedPostgres();
 try {
+  await run("packages/database", "test/integration/tenant-migration-paths.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/tenant-database.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
