@@ -1,6 +1,6 @@
 # Phase 1.1 Tenant Foundation Delivery
 
-2026-10-03：已实现并在隔离 PostgreSQL 16 验证；分支 `tenant-foundation`。尚未合并、推送或部署。
+2026-10-03：已实现并在隔离 PostgreSQL 16 验证；分支 `feat/tenant-foundation`。尚未合并、推送或部署。
 
 1. **Goal**：完成获批的 Phase 1.1：Organization、成员、Workspace、可信 TenantContext 和资源权限策略，保留 Merchant 兼容。
 2. **Why this is needed**：为后续 CommerceConnector、Mock commerce 和决策层建立明确的 ownership；新租户 API 不再凭 Cookie 中的旧权限授权。
