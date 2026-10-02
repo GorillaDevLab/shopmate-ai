@@ -19,7 +19,7 @@
     "build": "tsc --project tsconfig.build.json",
     "test": "pnpm run build && vitest run",
     "test:unit": "pnpm run build && vitest run src --passWithNoTests",
-    "typecheck": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --project tsconfig.build.json && tsc --project tsconfig.commerce.json",
     "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {
