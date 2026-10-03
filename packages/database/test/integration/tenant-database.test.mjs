@@ -355,7 +355,13 @@ test("tenant migration preserves legacy records and rejects foreign relations in
         });
       }
     });
-    await t.test("deployed migrations match the Prisma schema without drift", () => {
+    await t.test("deployed migrations match the Prisma schema without drift", async () => {
+      await client.query(
+        await readFile(
+          new URL("20261003040000_demo_commerce_sessions/migration.sql", migrationRoot),
+          "utf8",
+        ),
+      );
       const directory = fileURLToPath(new URL("../../", import.meta.url));
       const cli = fileURLToPath(
         new URL("../../node_modules/prisma/build/index.js", import.meta.url),
