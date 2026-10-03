@@ -20,6 +20,7 @@ import type {
 } from "./types.js";
 
 export type * from "./types.js";
+export type * from "./publication-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
