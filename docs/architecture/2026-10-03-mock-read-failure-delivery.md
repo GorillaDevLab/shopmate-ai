@@ -1,6 +1,6 @@
 # Mock 只读故障注入交付记录（Phase 2.4a）
 
-分支 `feat/mock-connector-failures`；起点为已合并 main `6bfb39e`。本单元提供可调用的真实 Connector 包装器，后续在当前 main 上完成全仓验证、PR 与合并；部署由用户另行执行。
+分支 `feat/mock-connector-failures`；起点为 main `6bfb39e`，已接入 PR #206 的 main `4361b92`。本单元提供可调用的真实 Connector 包装器，已完成本地全仓验证；远程 CI 和合并结果另记于执行追踪。部署由用户另行执行。
 
 ## 1. Goal
 
@@ -34,7 +34,9 @@
 
 ## 8. Tests
 
-实际 Mock 专项：203 tests passed / 10 files，其中规则引擎 38、包装器 60，既有基线 105。类型检查、指定文件 ESLint、Prettier、diff 检查通过；生产函数最大 24 行、无 TypeScript any。全仓验证与远程 CI 以最终 PR 结果为准。
+实际 Mock 专项：203 tests passed / 10 files，其中规则引擎 38、包装器 60，既有基线 105。集成最新 main 后，全仓 `pnpm test` 1,658 passed，9 个既有可选数据库测试 skipped；`pnpm lint`、`pnpm typecheck`、`pnpm format:check`、`pnpm secret:scan`、`pnpm build`、diff 检查通过。生产函数最大 24 行、无 TypeScript any；构建中的 31 个客户端 bundle 兼容检查通过。
+
+本单元不改数据库、注册 API 或数据库 CI 门槛。main #206 的独立 PostgreSQL 强制门槛为 82 passed / 0 skipped；本分支该门槛以最新 PR CI 实际结果为准。任务复审和全分支复审均无 Critical / Important 未关闭问题。
 
 关键回归覆盖实际基础读取、固定快照分页、源不变、规则排序与窗口、权限撤销、异常脱敏、迟到加载、真实延迟/超时/取消清理、只读写入拒绝，以及跨 UTC 日历边界输入优先拒绝。失败测试记录在独立报告：引擎初始 38 失败、包装器初始 24 个功能缺失断言失败；日期修复实际 16 失败后 60 全通过。
 
