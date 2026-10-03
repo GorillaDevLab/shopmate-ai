@@ -11,6 +11,8 @@
 
 - Phase 2.3 持久演示会话与受控管理：[PR #206](https://github.com/GorillaDevLab/shopmate-ai/pull/206)。最新 PR CI success 后于 2026-10-03 合并（4361b92），全仓与强制隔离 PostgreSQL/HTTP 共 1,642 passed；部署仍暂缓。
 
+- Phase 2.4a 确定性只读故障注入：[PR #207](https://github.com/GorillaDevLab/shopmate-ai/pull/207)。head 781899c 的 CI 37111232661 success 后合并（5f56df7）；全仓 1,658 passed，加上强制隔离 PostgreSQL/API 82 passed / 0 skipped。真实延迟/截止取消、优先级和当前授权均有回归；故障管理、持久经营事实及完整 15 场景仍待后续单元。
+
 ## 连续实施顺序
 
 - [x] Phase 2.3 持久 Demo Session、PlatformConnection、演示租户标记、服务端管理与实际 resolver。

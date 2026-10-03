@@ -32,6 +32,9 @@ try {
   await run("packages/database", "test/integration/demo-commerce-database.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/mock-platform-generation.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   const runtimeUrl = await prepareTenantApiRuntime(server.url);
   await run(
     "apps/api",
