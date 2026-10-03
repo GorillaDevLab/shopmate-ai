@@ -4,6 +4,11 @@ import * as contract from "./connector-common.schema.js";
 
 const query = { until: "2026-10-03T00:00:00Z", limit: 50 };
 describe("connector common protocols", () => {
+  it("distinguishes a missing bound resource from invalid input", () => {
+    expect(
+      contract.ConnectorFailureSchema.safeParse({ code: "NOT_FOUND", retryAfterMs: null }).success,
+    ).toBe(true);
+  });
   it.each([0, 59_00, Number.MAX_SAFE_INTEGER])("preserves integer minor amounts %s", (value) => {
     expect(contract.MinorAmountSchema.parse(value)).toBe(value);
   });
