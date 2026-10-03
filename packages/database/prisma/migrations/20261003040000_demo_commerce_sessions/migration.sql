@@ -174,4 +174,3 @@ REVOKE ALL ON SCHEMA demo FROM PUBLIC;
 REVOKE ALL ON "DemoTenant","PlatformConnection",demo."DemoCommerceSession",demo."DemoControlAudit" FROM PUBLIC;
 REVOKE ALL ON FUNCTION demo.has_store_access(TEXT,TEXT,TEXT,BOOLEAN),demo.preserve_binding() FROM PUBLIC;
 COMMIT;
-
