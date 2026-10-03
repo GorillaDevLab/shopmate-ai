@@ -1,0 +1,32 @@
+# Phase 2.2 MockCommerceConnector implementation plan
+
+> Execute inline with executing-plans and TDD. Review through requesting-code-review before pushing the independent PR.
+
+**Goal:** expose the approved mock source through the vendor-neutral CommerceConnector port, with trustworthy server-side selection boundaries and repeatable read pagination.
+
+**Architecture:** keep the offline generator. A bounded session caches two immutable source frames; cursor handles reference pinned frames and canonical queries inside the connector instance. A factory accepts only server-authenticated identity + selected store ID and obtains current context/config/generation from a trusted access resolver on every operation. No HTTP endpoint, Nest registration, connection database table or production platform integration is added.
+
+**Alternatives:** per-page live regeneration risks inconsistent scans; large pre-generated datasets couple transport to storage; pinned immutable frames with bounded opaque cursor registry are chosen. Host composition must implement the authoritative resolver using membership/Store ownership and a demo connection registry; schema parsing does not replace authentication or database authorization.
+
+## Constraints and semantics
+
+- Branch feat/mock-commerce-connector, base merged main92964e4. No new package/dependency, database migration or seed. Original checkout/.env untouched.
+- Read capabilities true; all writes/publishing/webhooks/idempotency/preconditions unsupported. All 13 port methods exist; valid writes return REJECTED/UNSUPPORTED, never ACCEPTED; verification is unsupported and never invents execution evidence.
+- Add NOT_FOUND to shared connector failure codes for unknown/not-yet-visible product/order/store, uniformly including foreign IDs. Invalid inputs use INVALID_INPUT. Resolver exceptions use TEMPORARY without leaking data; revoked/generation-changed bindings fail closed.
+- Business time clips requested until; getStore/getProduct/getOrder use current business time. Financial facts are reconstructed at cutoff, never filtered from a later current state. Sync since is inclusive source.updatedAt. Marketing since must be Shanghai midnight; rows are daily cumulative through clipped cutoff, not arbitrary intraday attribution.
+- Cursor context includes method, original canonical since/until, limit and sorted inventory SKU selection; cursor cannot move to another connector/query. Same cursor retry returns the same page and next cursor. Clock advance preserves pinned observations. Two cached frames, at most256 cursor handles, real-time15minute expiry; evicted/expired frames require scan restart (CONFLICT). No client-decoded unsigned offset or cursor-derived authorization.
+- Source watermark conservatively caps to historyUntil; finishing a page is not proof of sync completion. No demand completeness beyond configured history horizon.
+- Options validate JSON request/deadline separately from native AbortSignal. Real-time deadline and a30second adapter call budget apply even while business time is simulated. Abort/timeout is raced for asynchronous resolver work; synchronous generation checks before/after and cannot be preempted, so it belongs in offline/worker composition, not high-concurrency requests.
+- Factory checks APP_ENV=demo/ENABLE_DEMO_MODE and resolver-provided demo database marker/demo tenant, complete context/binding correlation and per-method read permission. Directory/config/generation never come from a public request. Re-check membership/generation per call; factory is a composition boundary, not a deployed auth endpoint.
+
+## Tasks (each test first, inspect red, implement green, commit)
+
+- [x] Shared absence code: add a failure-schema regression in connector-common.schema.spec.ts; run contracts Vitest, add NOT_FOUND and re-run. Commit `feat(contracts): distinguish absent connector resources`.
+- [x] Call gate: create mock-call.spec.ts then mock-call.ts. Interface `executeMockRead<T>(unknownOptions, operation): Promise<ConnectorResult<T>>`, operation receives validated ReadOptions with linked cancellation. Tests: expired real deadline, invalid/unknown JSON options, native signal, cancellation during async work, pending timeout, cleanup, unexpected error sanitization. Run `pnpm --filter @shopmate/api exec vitest run src/integrations/mock/mock-call.spec.ts`. Commit `feat(mock): enforce read deadlines and cancellation`.
+- [x] Transport/session: create connector conformance/paging tests then mock-frame-store.ts, mock-cursor-store.ts, mock-page.ts and mock-commerce-connector.ts. Expose one CommerceConnector bound to parsed config/BusinessClock/current-access callback. Tests all reads, unknown/foreign IDs, complete no-gap pages, retries, old asOf, empty pre-opening, queries/limits/unknown keys, method/query/instance/cursor tampering, clock advance, stale scans, SKU filters, marketing window, unavailable writes/verify, scoped schema output, immutable state. Commit `feat(mock): implement read-only commerce connector`.
+- [x] Selection: mock-connector-factory.ts/spec. `MockConnectorAccessResolver.resolve(identity, storeId, options)` returns current `{context, config, generation, environmentMarker, demoTenant}` or null. Factory checks shape and identity/resource correlation, then the connector reuses resolver for fresh per-operation permissions/generation. Tests forged record, cross organization/workspace/store, denied role permission, disabled/non-demo/production gates, revocation/generation change, resolver timeout/error. Commit `feat(mock): select connectors through fresh tenant access`.
+- [ ] Verification/delivery: source + all contracts/API/full-root tests, real isolated PG gate, lint/typecheck/format/secrets/build sequentially where generated outputs overlap; AST functions<40, independent read-only review; document actual checks and limits. Push/create/attach PR against main; latest remote CI must be reported honestly. Commit `docs(mock): record connector conformance and operating boundaries`.
+
+## Deferred scope
+
+No real external platform or Jev. No state-mutating mock write/action execution, failure injection/scenario engine, sync database, persistent demo session, UI or MetricEngine. No claim of fixing the earlier deployment migration failure. Factory integration with real Store/PlatformConnection persistence requires a separate phase; the library's authoritative resolver contract is explicitly tested, not represented as deployed RLS enforcement.

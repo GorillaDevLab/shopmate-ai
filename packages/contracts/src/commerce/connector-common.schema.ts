@@ -65,6 +65,7 @@ export const ConnectorFailureCodeSchema = z.enum([
   "INVALID_INPUT",
   "INVALID_RESPONSE",
   "UNSUPPORTED",
+  "NOT_FOUND",
   "ABORTED",
 ]);
 export const ConnectorFailureSchema = z
