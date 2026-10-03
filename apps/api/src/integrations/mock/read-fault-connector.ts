@@ -18,8 +18,26 @@ import type { BusinessClock } from "./business-clock.js";
 import type { MockReadAccess } from "./mock-commerce-connector.js";
 import { executeMockRead, MockConnectorError, mockFailure } from "./mock-call.js";
 import { selectMockReadFailure, type MockReadMethod } from "./failure-rules.js";
+import { canonicalMockTime } from "./mock-frame-store.js";
 
-const marketingReadQuerySchema = MarketingQuerySchema.refine(
+function hasSupportedPageTimes(query: {
+  readonly until: string;
+  readonly since?: string;
+}): boolean {
+  try {
+    // Match the pager's UTC range before fault selection without creating or reading a frame.
+    canonicalMockTime(query.until);
+    if (query.since !== undefined) canonicalMockTime(query.since);
+    return true;
+  } catch (error) {
+    if (error instanceof MockConnectorError && error.code === "INVALID_INPUT") return false;
+    throw error;
+  }
+}
+
+const syncReadQuerySchema = SyncPageQuerySchema.refine(hasSupportedPageTimes);
+const inventoryReadQuerySchema = InventoryQuerySchema.refine(hasSupportedPageTimes);
+const marketingReadQuerySchema = MarketingQuerySchema.refine(hasSupportedPageTimes).refine(
   (query) => (Date.parse(query.since) + 8 * 3_600_000) % 86_400_000 === 0,
 );
 
@@ -88,7 +106,7 @@ export class ReadFaultInjectingConnector implements CommerceConnector {
     return this.validatedRead(
       "listProducts",
       "products:read",
-      SyncPageQuerySchema,
+      syncReadQuerySchema,
       query,
       options,
       (input, call) => this.base.listProducts(input, call),
@@ -110,7 +128,7 @@ export class ReadFaultInjectingConnector implements CommerceConnector {
     return this.validatedRead(
       "listOrders",
       "orders:read",
-      SyncPageQuerySchema,
+      syncReadQuerySchema,
       query,
       options,
       (input, call) => this.base.listOrders(input, call),
@@ -132,7 +150,7 @@ export class ReadFaultInjectingConnector implements CommerceConnector {
     return this.validatedRead(
       "listRefunds",
       "orders:read",
-      SyncPageQuerySchema,
+      syncReadQuerySchema,
       query,
       options,
       (input, call) => this.base.listRefunds(input, call),
@@ -143,7 +161,7 @@ export class ReadFaultInjectingConnector implements CommerceConnector {
     return this.validatedRead(
       "getInventory",
       "inventory:read",
-      InventoryQuerySchema,
+      inventoryReadQuerySchema,
       query,
       options,
       (input, call) => this.base.getInventory(input, call),

@@ -41,6 +41,42 @@ const reads = {
     c.getMarketingMetrics({ ...query, since: config.historyStart }, o),
 };
 const methods = Object.keys(reads) as MockReadMethod[];
+const pageMethods = [
+  "listProducts",
+  "listOrders",
+  "listRefunds",
+  "getInventory",
+  "getMarketingMetrics",
+] as const;
+const unsupportedUtcTimes = ["0000-01-01T00:00:00+14:00", "9999-12-31T23:59:59-14:00"];
+const calendarCases = pageMethods.flatMap((method) => {
+  const cases = unsupportedUtcTimes.map((until) => ({
+    method,
+    field: "until",
+    input: {
+      until,
+      limit: 1,
+      ...(method === "getMarketingMetrics"
+        ? { since: until.startsWith("0000") ? "0000-01-01T00:00:00+08:00" : config.historyStart }
+        : {}),
+    },
+  }));
+  if (method === "getInventory") return cases;
+  return cases.concat(
+    unsupportedUtcTimes.map((since) => ({
+      method,
+      field: "since",
+      input: {
+        until: since.startsWith("9999") ? since : now,
+        limit: 1,
+        since:
+          method === "getMarketingMetrics" && since.startsWith("0000")
+            ? "0000-01-01T00:00:00+08:00"
+            : since,
+      },
+    })),
+  );
+});
 const listing = {
   title: "测试",
   description: "测试说明",
@@ -208,6 +244,79 @@ describe("read-only fault injecting connector", () => {
     for (const result of results)
       expect(result).toEqual({ ok: false, error: { code: "INVALID_INPUT", retryAfterMs: null } });
     expect(load).not.toHaveBeenCalled();
+  });
+
+  it.each(calendarCases)(
+    "matches actual base calendar rejection for $method $field: $input",
+    async ({ method, input }) => {
+      const access = vi.fn(async () => true);
+      const load = vi.fn(async () => [rule(fail())]);
+      const { base, wrapper } = create([], access, load);
+      const expected = await base[method](input, options());
+      expect(expected).toEqual({
+        ok: false,
+        error: { code: "INVALID_INPUT", retryAfterMs: null },
+      });
+      access.mockClear();
+      const source = vi.spyOn(base, method);
+      expect(await wrapper[method](input, options())).toEqual(expected);
+      expect(access).not.toHaveBeenCalled();
+      expect(load).not.toHaveBeenCalled();
+      expect(source).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(pageMethods)("preserves actual %s valid UTC boundaries and offsets", async (method) => {
+    const { base, wrapper } = create();
+    const times = [
+      "0000-01-02T00:00:00Z",
+      "0000-01-02T08:00:00+08:00",
+      "9999-12-31T23:59:59Z",
+      "9999-12-31T09:59:59-14:00",
+    ];
+    if (method !== "getMarketingMetrics") times.push("0000-01-01T00:00:00Z");
+    for (const until of times) {
+      const input = {
+        until,
+        limit: 200,
+        ...(method === "getMarketingMetrics" ? { since: "0000-01-02T00:00:00+08:00" } : {}),
+      };
+      const expected = await base[method](input, options());
+      expect(expected.ok).toBe(true);
+      expect(await wrapper[method](input, options())).toEqual(expected);
+    }
+  });
+
+  it("preserves Shanghai midnight validation for equivalent since offsets", async () => {
+    const { base, wrapper } = create();
+    for (const since of [
+      config.historyStart,
+      "2025-12-31T16:00:00Z",
+      "2025-12-31T11:00:00-05:00",
+    ]) {
+      const input = { ...query, since, limit: 200 };
+      const expected = await base.getMarketingMetrics(input, options());
+      expect(expected.ok).toBe(true);
+      expect(await wrapper.getMarketingMetrics(input, options())).toEqual(expected);
+    }
+  });
+
+  it("retains the real call gate before calendar validation", async () => {
+    const { base, wrapper } = create([rule(fail())]);
+    const source = vi.spyOn(base, "listProducts");
+    const input = { ...query, until: unsupportedUtcTimes[1] };
+    const expired = { ...options(), deadlineAt: new Date(Date.now() - 1).toISOString() };
+    expect(await wrapper.listProducts(input, expired)).toMatchObject({
+      error: { code: "TIMEOUT" },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    expect(
+      await wrapper.listProducts(input, { ...options(), signal: controller.signal }),
+    ).toMatchObject({
+      error: { code: "ABORTED" },
+    });
+    expect(source).not.toHaveBeenCalled();
   });
 
   it("uses fresh explicit permission checks before loading or selecting faults", async () => {
