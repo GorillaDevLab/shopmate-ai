@@ -168,6 +168,7 @@ test("array subclasses are rejected", () => {
 test("nested product SKU array rejects inherited map before access", () => {
   const { value, reads } = arrayWithInheritedAccessor("map");
   const product = event("PRODUCT");
+  value.push(...product.after.skus);
   product.after.skus = value;
   inputError(() => codec.validateSnapshotEvent(product, scope));
   assert.equal(reads.count, 0);
