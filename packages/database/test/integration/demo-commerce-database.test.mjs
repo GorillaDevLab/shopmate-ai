@@ -421,7 +421,9 @@ test("persistent demo controls run under real restricted PostgreSQL RLS", async 
       const cli = fileURLToPath(
         new URL("../../node_modules/prisma/build/index.js", import.meta.url),
       );
-      dbUrl.username = "tenant_test_admin";
+      const operatorUrl = new URL(server.url);
+      dbUrl.username = operatorUrl.username;
+      dbUrl.password = operatorUrl.password;
       const output = execFileSync(
         process.execPath,
         [
