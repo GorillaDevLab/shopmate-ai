@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { readDemoRecord, readDemoStore, withDemoIdentity } from "./demo-commerce.repository.js";
+import {
+  lockDemoControl,
+  readDemoRecord,
+  readDemoStore,
+  withDemoIdentity,
+} from "./demo-commerce.repository.js";
 import type { DemoTransaction } from "./demo-commerce.repository.js";
 import type {
   DemoActor,
@@ -58,9 +63,27 @@ async function safelyMutate(
   try {
     return await withDemoIdentity(actor, action);
   } catch (error) {
+    if (isControlDenial(error)) return notFound;
     if (error instanceof DemoWriteConflict || isConstraintConflict(error)) return conflict;
     throw error;
   }
+}
+
+function isControlDenial(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("meta" in error)) return false;
+  const meta = error.meta;
+  if (typeof meta !== "object" || meta === null) return false;
+  if ("code" in meta) return meta.code === "SM001";
+  if (!("driverAdapterError" in meta)) return false;
+  const driver = meta.driverAdapterError;
+  if (typeof driver !== "object" || driver === null || !("cause" in driver)) return false;
+  const cause = driver.cause;
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "originalCode" in cause &&
+    cause.originalCode === "SM001"
+  );
 }
 
 async function insertConnection(
@@ -136,6 +159,10 @@ async function mutateExisting(
   if (!validActor(actor, storeId)) return notFound;
   if (!validCounter(revision)) return conflict;
   return safelyMutate(actor, async (tx) => {
+    const candidateAccess = await readDemoStore(tx, actor, storeId);
+    const candidate = candidateAccess && (await readDemoRecord(tx, candidateAccess));
+    if (!candidate) return notFound;
+    await lockDemoControl(tx, candidate.id);
     const access = await readDemoStore(tx, actor, storeId, true);
     if (!access) return notFound;
     const row = await readDemoRecord(tx, access, true);

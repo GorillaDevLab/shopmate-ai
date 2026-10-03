@@ -77,10 +77,12 @@ export async function sourceFixtures(client) {
     ["source_worker_login", "shopmate_mock_source_worker"],
     ["source_foreign_login", "shopmate_mock_source_worker"],
   ]) {
-    await client.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
+    if (!(await client.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [login])).rowCount)
+      await client.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
     await client.query(`GRANT ${group} TO ${login}`);
   }
-  await client.query("CREATE ROLE source_app_login LOGIN NOSUPERUSER NOBYPASSRLS");
+  if (!(await client.query("SELECT 1 FROM pg_roles WHERE rolname='source_app_login'")).rowCount)
+    await client.query("CREATE ROLE source_app_login LOGIN NOSUPERUSER NOBYPASSRLS");
   await client.query("ALTER ROLE source_worker_login SET timezone='Pacific/Auckland'");
   for (const key of ["a", "a2", "b"])
     await grantSource(client, scopeFor(key), `source-grant-${key}`);

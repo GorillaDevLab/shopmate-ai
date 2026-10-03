@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { verifyCredentials, type SourceMode, type SourcePool } from "./clients.js";
-import { sanitized, SourceStorageError } from "./errors.js";
+import { isGuardDenial, sanitized, SourceAccessDenied, SourceStorageError } from "./errors.js";
 import type { SourceReadActor, SourceScope, SourceWorkerGrant } from "./types.js";
 
 async function rollbackFailed(client: pg.PoolClient | undefined, begun: boolean): Promise<boolean> {
@@ -29,9 +29,9 @@ export async function transaction<T>(
     // A checked-out client has no pg-pool idle listener; contain socket failures here.
     client.on("error", onError);
     await verifyCredentials(client, mode);
-    await client.query("BEGIN");
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     begun = true;
-    await client.query("SET LOCAL TIME ZONE 'UTC'");
+    await configureTransaction(client);
     const result = await action(client);
     if (discard) throw new SourceStorageError("SOURCE_STORAGE");
     await client.query(rollbackWhen(result) ? "ROLLBACK" : "COMMIT");
@@ -39,11 +39,20 @@ export async function transaction<T>(
     return result;
   } catch (error) {
     discard = (await rollbackFailed(client, begun)) || discard;
+    if (isGuardDenial(error) && !discard) throw new SourceAccessDenied();
     throw sanitized(error);
   } finally {
     client?.off("error", onError);
     client?.release(discard);
   }
+}
+async function configureTransaction(client: pg.PoolClient): Promise<void> {
+  await client.query("SET LOCAL TIME ZONE 'UTC'");
+  await client.query("SET LOCAL lock_timeout='5s'");
+  await client.query("SET LOCAL statement_timeout='10s'");
+}
+export async function lockControl(client: pg.PoolClient, scope: SourceScope): Promise<void> {
+  await client.query("SELECT demo.lock_source_control($1)", [scope.sessionId]);
 }
 export async function readIdentity(client: pg.PoolClient, actor: SourceReadActor): Promise<void> {
   await client.query(
