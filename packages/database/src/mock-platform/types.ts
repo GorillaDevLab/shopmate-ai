@@ -1,0 +1,46 @@
+export interface SourceScope {
+  readonly organizationId: string;
+  readonly workspaceId: string;
+  readonly storeId: string;
+  readonly sessionId: string;
+  readonly connectionId: string;
+  readonly externalStoreId: string;
+  readonly generation: number;
+}
+export interface SourceReadActor {
+  readonly userId: string;
+  readonly merchantId: string;
+}
+export interface SourceWorkerActor {
+  readonly grantId: string;
+}
+export interface SourceWorkerGrant extends Omit<SourceScope, "generation"> {
+  readonly id: string;
+  readonly databaseRole: string;
+  readonly principalUserId: string;
+  readonly operation: "SOURCE_BUILD";
+  readonly status: "ACTIVE";
+}
+export interface SourceGeneration {
+  readonly scope: SourceScope;
+  readonly sourceConfig: unknown;
+  readonly configHash: string;
+  readonly generatorVersion: string;
+  readonly runtimeVersion: "mock-runtime-v2";
+  readonly openingAt: string;
+  readonly baselineEnd: string;
+  readonly createdAt: string;
+}
+export type SourceInitialization =
+  | { readonly status: "CREATED" | "EXISTS"; readonly generation: SourceGeneration }
+  | { readonly status: "DENIED" };
+export interface MockSourceReader {
+  findGeneration(actor: SourceReadActor, scope: SourceScope): Promise<SourceGeneration | null>;
+  close(): Promise<void>;
+}
+export interface MockSourceWorker {
+  listGrants(): Promise<readonly SourceWorkerGrant[]>;
+  initializeGeneration(actor: SourceWorkerActor, scope: SourceScope): Promise<SourceInitialization>;
+  close(): Promise<void>;
+}
+export type SourceEnvironment = Readonly<Record<string, string | undefined>>;
