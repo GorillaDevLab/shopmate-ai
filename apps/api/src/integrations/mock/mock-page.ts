@@ -95,7 +95,7 @@ export class MockPager {
     const items = selected.slice(offset, offset + query.limit);
     const nextCursor =
       offset + items.length < selected.length
-        ? this.cursors.next(key, frame.datasetHash, offset + items.length)
+        ? this.cursors.next(key, frame.datasetHash, offset + items.length, position ?? undefined)
         : null;
     const originalQuery = stripInternalFields(kind, query);
     return parseConnectorPage(schema, this.frames.config.binding.externalStoreId, originalQuery, {

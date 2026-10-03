@@ -29,4 +29,19 @@ describe("bounded opaque cursor registry", () => {
     cursors.clear();
     expect(() => cursors.read(replacement, "orders")).toThrow("INVALID_INPUT");
   });
+
+  it("expires a scan together so restarted scans never inherit older successors", () => {
+    vi.useFakeTimers();
+    const cursors = new MockCursorStore();
+    const first = cursors.next("orders", "frame", 1);
+    vi.advanceTimersByTime(1000);
+    const second = cursors.next("orders", "frame", 2, cursors.read(first, "orders"));
+    expect(cursors.read(second, "orders").expiresAt).toBe(cursors.read(first, "orders").expiresAt);
+    vi.advanceTimersByTime(15 * 60_000);
+    const restarted = cursors.next("orders", "frame", 1);
+    const successor = cursors.next("orders", "frame", 2, cursors.read(restarted, "orders"));
+    expect(successor).not.toBe(second);
+    vi.advanceTimersByTime(1000);
+    expect(cursors.next("orders", "frame", 2, cursors.read(restarted, "orders"))).toBe(successor);
+  });
 });

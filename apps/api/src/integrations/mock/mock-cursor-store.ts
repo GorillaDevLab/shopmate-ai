@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { MockConnectorError } from "./mock-call.js";
 
 interface CursorEntry {
+  readonly scanId: string;
+  readonly lookupKey: string;
   readonly queryKey: string;
   readonly frameHash: string;
   readonly offset: number;
@@ -20,8 +22,8 @@ export class MockCursorStore {
     return entry;
   }
 
-  next(queryKey: string, frameHash: string, offset: number): string {
-    const key = JSON.stringify([queryKey, frameHash, offset]);
+  next(queryKey: string, frameHash: string, offset: number, parent?: CursorEntry): string {
+    const key = JSON.stringify([queryKey, frameHash, offset, parent?.scanId ?? null]);
     const existing = this.reverse.get(key);
     if (existing && this.entries.get(existing)!.expiresAt > Date.now()) return existing;
     if (existing) this.remove(existing);
@@ -29,7 +31,14 @@ export class MockCursorStore {
     const token = `mock-cursor:${randomUUID()}`;
     this.entries.set(
       token,
-      Object.freeze({ queryKey, frameHash, offset, expiresAt: Date.now() + 15 * 60_000 }),
+      Object.freeze({
+        queryKey,
+        frameHash,
+        offset,
+        scanId: parent?.scanId ?? token,
+        lookupKey: key,
+        expiresAt: parent?.expiresAt ?? Date.now() + 15 * 60_000,
+      }),
     );
     this.reverse.set(key, token);
     return token;
@@ -43,6 +52,6 @@ export class MockCursorStore {
   private remove(token: string): void {
     const entry = this.entries.get(token)!;
     this.entries.delete(token);
-    this.reverse.delete(JSON.stringify([entry.queryKey, entry.frameHash, entry.offset]));
+    this.reverse.delete(entry.lookupKey);
   }
 }
