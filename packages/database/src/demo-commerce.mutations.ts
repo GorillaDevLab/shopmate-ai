@@ -25,6 +25,16 @@ const conflict = { status: "CONFLICT" } as const;
 const notFound = { status: "NOT_FOUND" } as const;
 type ControlKind = "CREATE" | "ADVANCE" | "RESET" | "DISCONNECT";
 
+class DemoWriteConflict extends Error {}
+
+function executeOne(tx: DemoTransaction) {
+  return async (template: TemplateStringsArray, ...values: unknown[]): Promise<void> => {
+    // RLS can hide a previously locked row between statements; throwing rolls back prior writes.
+    if ((await tx.$executeRaw(template, ...values)) !== 1)
+      throw new DemoWriteConflict("Demo mutation did not affect exactly one row");
+  };
+}
+
 async function finish(
   tx: DemoTransaction,
   access: DemoStoreAccess,
@@ -33,7 +43,7 @@ async function finish(
 ): Promise<DemoMutationResult> {
   const row = await readDemoRecord(tx, access);
   if (!row) throw new Error("Demo session disappeared during mutation");
-  await tx.$executeRaw`
+  await executeOne(tx)`
     INSERT INTO demo."DemoControlAudit" (id,"organizationId","workspaceId","storeId","sessionId","connectionId",
       "actorUserId",kind,"beforeRevision","afterRevision",generation,"configHash","clockNow")
     VALUES (${randomUUID()},${row.organizationId},${row.workspaceId},${row.storeId},${row.id},${row.connectionId},
@@ -48,7 +58,7 @@ async function safelyMutate(
   try {
     return await withDemoIdentity(actor, action);
   } catch (error) {
-    if (isConstraintConflict(error)) return conflict;
+    if (error instanceof DemoWriteConflict || isConstraintConflict(error)) return conflict;
     throw error;
   }
 }
@@ -58,7 +68,7 @@ async function insertConnection(
   access: DemoStoreAccess,
   input: DemoCreateInput,
 ): Promise<void> {
-  await tx.$executeRaw`
+  await executeOne(tx)`
     INSERT INTO public."PlatformConnection" (id,"organizationId","workspaceId","storeId","externalStoreId")
     VALUES (${input.connectionId},${access.organizationId},${access.workspaceId},${access.storeId},${input.externalStoreId})`;
 }
@@ -69,7 +79,7 @@ async function insertSession(
   input: DemoCreateInput,
   json: string,
 ): Promise<void> {
-  await tx.$executeRaw`
+  await executeOne(tx)`
     INSERT INTO demo."DemoCommerceSession" (id,"organizationId","workspaceId","storeId","connectionId","externalStoreId",
       config,"configHash","generatorVersion","clockNow")
     VALUES (${input.id},${access.organizationId},${access.workspaceId},${access.storeId},${input.connectionId},${input.externalStoreId},
@@ -151,7 +161,9 @@ export async function advanceDemoSession(
     const next = new Date(row.clockNow.getTime() + input.durationMs);
     if (!validClock(next) || row.clockRevision >= MAX_COUNTER || row.status !== "ACTIVE")
       return conflict;
-    await tx.$executeRaw`UPDATE demo."DemoCommerceSession" SET "clockNow"=${next},"clockRevision"="clockRevision"+1,
+    await executeOne(
+      tx,
+    )`UPDATE demo."DemoCommerceSession" SET "clockNow"=${next},"clockRevision"="clockRevision"+1,
       revision=revision+1 WHERE id=${row.id} AND revision=${input.expectedRevision}`;
     return finish(tx, row, "ADVANCE", row.revision);
   });
@@ -162,7 +174,9 @@ async function updateConnection(
   row: DemoConnectionRecord,
   status: "ACTIVE" | "DISCONNECTED",
 ): Promise<void> {
-  await tx.$executeRaw`UPDATE public."PlatformConnection" SET generation=generation+1,status=${status}
+  await executeOne(
+    tx,
+  )`UPDATE public."PlatformConnection" SET generation=generation+1,status=${status}
     WHERE id=${row.connectionId}`;
 }
 
@@ -181,7 +195,9 @@ export async function resetDemoSession(
     )
       return conflict;
     await updateConnection(tx, row, "ACTIVE");
-    await tx.$executeRaw`UPDATE demo."DemoCommerceSession" SET config=${json}::jsonb,"configHash"=${input.configHash},
+    await executeOne(
+      tx,
+    )`UPDATE demo."DemoCommerceSession" SET config=${json}::jsonb,"configHash"=${input.configHash},
       "generatorVersion"=${input.generatorVersion},"clockNow"=${input.clockNow},"clockRevision"="clockRevision"+1,
       revision=revision+1 WHERE id=${row.id} AND revision=${input.expectedRevision}`;
     return finish(tx, row, "RESET", row.revision);
@@ -196,7 +212,7 @@ export async function disconnectDemoSession(
   return mutateExisting(actor, storeId, expectedRevision, async (tx, row) => {
     if (row.generation >= MAX_COUNTER) return conflict;
     await updateConnection(tx, row, "DISCONNECTED");
-    await tx.$executeRaw`UPDATE demo."DemoCommerceSession" SET revision=revision+1
+    await executeOne(tx)`UPDATE demo."DemoCommerceSession" SET revision=revision+1
       WHERE id=${row.id} AND revision=${expectedRevision}`;
     return finish(tx, row, "DISCONNECT", row.revision);
   });
