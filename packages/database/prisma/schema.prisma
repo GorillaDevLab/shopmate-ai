@@ -3,65 +3,153 @@ generator client {
   output   = "../generated/prisma"
 }
 
+model DemoTenant {
+  organizationId String       @id
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@schema("public")
+}
+
+model PlatformConnection {
+  id              String                @id
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  externalStoreId String
+  provider        String                @default("MOCK")
+  status          String                @default("ACTIVE")
+  generation      Int                   @default(0)
+  store           Store                 @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
+  sessions        DemoCommerceSession[]
+
+  @@unique([storeId, provider])
+  @@unique([id, organizationId, workspaceId, storeId, externalStoreId])
+  @@schema("public")
+}
+
+model DemoCommerceSession {
+  id               String             @id
+  organizationId   String
+  workspaceId      String
+  storeId          String             @unique
+  connectionId     String             @unique
+  externalStoreId  String
+  config           Json
+  configHash       String
+  generatorVersion String
+  clockNow         DateTime           @db.Timestamp(3)
+  clockRevision    Int                @default(0)
+  revision         Int                @default(0)
+  connection       PlatformConnection @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction)
+  audits           DemoControlAudit[]
+
+  @@unique([id, organizationId, workspaceId, storeId, connectionId])
+  @@schema("demo")
+}
+
+model DemoControlAudit {
+  id             String              @id
+  organizationId String
+  workspaceId    String
+  storeId        String
+  sessionId      String
+  connectionId   String
+  actorUserId    String
+  kind           String
+  beforeRevision Int?
+  afterRevision  Int
+  generation     Int
+  configHash     String
+  clockNow       DateTime            @db.Timestamp(3)
+  createdAt      DateTime            @default(now())
+  session        DemoCommerceSession @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId], references: [id, organizationId, workspaceId, storeId, connectionId], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, workspaceId, sessionId])
+  @@schema("demo")
+}
+
 datasource db {
   provider = "postgresql"
+  schemas  = ["public", "demo"]
 }
 
 model TenantBootstrapEnvironment {
   id          String @id
   environment String @default("UNCONFIGURED")
+
+  @@schema("public")
 }
 
 enum MerchantStatus {
   ACTIVE
   INACTIVE
+
+  @@schema("public")
 }
 
 enum ProductStatus {
   ACTIVE
   INACTIVE
+
+  @@schema("public")
 }
 
 enum OrderStatus {
   PENDING
   PAID
   CANCELLED
+
+  @@schema("public")
 }
 
 enum MonitoringRuleKind {
   SALES_THRESHOLD
   INVENTORY_THRESHOLD
+
+  @@schema("public")
 }
 
 enum MonitoringRuleStatus {
   ACTIVE
   INACTIVE
+
+  @@schema("public")
 }
 
 enum MonitoringFrequency {
   DAILY
   WEEKLY
+
+  @@schema("public")
 }
 
 enum MonitoringSeverity {
   INFO
   WARNING
   CRITICAL
+
+  @@schema("public")
 }
 
 enum MonitoringResourceType {
   MERCHANT
   SKU
+
+  @@schema("public")
 }
 
 enum OrganizationStatus {
   ACTIVE
   SUSPENDED
+
+  @@schema("public")
 }
 
 enum MembershipStatus {
   ACTIVE
   INACTIVE
+
+  @@schema("public")
 }
 
 enum TenantRole {
@@ -70,6 +158,8 @@ enum TenantRole {
   OPERATOR
   ANALYST
   VIEWER
+
+  @@schema("public")
 }
 
 model Organization {
@@ -78,6 +168,7 @@ model Organization {
   status           OrganizationStatus   @default(ACTIVE)
   legacyMerchantId String?              @unique
   legacyMerchant   Merchant?            @relation(fields: [legacyMerchantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Organization_legacyMerchantId_fkey")
+  demoTenant       DemoTenant?
   members          OrganizationMember[]
   workspaces       Workspace[]
   stores           Store[]
@@ -85,6 +176,7 @@ model Organization {
   updatedAt        DateTime             @updatedAt
 
   @@unique([legacyMerchantId, id])
+  @@schema("public")
 }
 
 model OrganizationMember {
@@ -100,6 +192,7 @@ model OrganizationMember {
 
   @@unique([organizationId, userId])
   @@index([userId, status])
+  @@schema("public")
 }
 
 model Workspace {
@@ -116,6 +209,7 @@ model Workspace {
 
   @@unique([organizationId, id])
   @@unique([organizationId, slug])
+  @@schema("public")
 }
 
 model WorkspaceMember {
@@ -130,6 +224,7 @@ model WorkspaceMember {
 
   @@unique([organizationId, workspaceId, userId])
   @@index([userId, status])
+  @@schema("public")
 }
 
 model Merchant {
@@ -155,6 +250,7 @@ model Merchant {
   updatedAt DateTime @updatedAt
 
   @@index([status])
+  @@schema("public")
 }
 
 model UserAccount {
@@ -166,6 +262,8 @@ model UserAccount {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@schema("public")
 }
 
 model UserMerchantMembership {
@@ -179,6 +277,7 @@ model UserMerchantMembership {
 
   @@id([userId, merchantId])
   @@index([merchantId])
+  @@schema("public")
 }
 
 model Product {
@@ -204,6 +303,7 @@ model Product {
   @@unique([merchantId, id])
   @@index([merchantId])
   @@index([merchantId, status])
+  @@schema("public")
 }
 
 model Sku {
@@ -227,23 +327,27 @@ model Sku {
   @@unique([merchantId, id])
   @@index([merchantId])
   @@index([productId])
+  @@schema("public")
 }
 
 model Store {
-  id             String       @id
+  id             String               @id
   merchantId     String
   name           String
   city           String
   platform       String
-  organizationId String       @default("")
-  workspaceId    String       @default("")
-  organization   Organization @relation(fields: [merchantId, organizationId], references: [legacyMerchantId, id], onDelete: Restrict, onUpdate: NoAction)
-  workspace      Workspace    @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  merchant       Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  organizationId String               @default("")
+  workspaceId    String               @default("")
+  organization   Organization         @relation(fields: [merchantId, organizationId], references: [legacyMerchantId, id], onDelete: Restrict, onUpdate: NoAction)
+  workspace      Workspace            @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  merchant       Merchant             @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   orders         Order[]
+  connections    PlatformConnection[]
 
   @@unique([merchantId, id])
+  @@unique([organizationId, workspaceId, id])
   @@index([merchantId, platform])
+  @@schema("public")
 }
 
 model Order {
@@ -268,6 +372,7 @@ model Order {
   @@index([merchantId, orderedAt])
   @@index([merchantId, storeId, orderedAt])
   @@index([status])
+  @@schema("public")
 }
 
 model OrderItem {
@@ -287,6 +392,7 @@ model OrderItem {
 
   @@index([orderId])
   @@index([skuId])
+  @@schema("public")
 }
 
 model UserDashboardLayout {
@@ -305,6 +411,7 @@ model UserDashboardLayout {
 
   @@unique([userId, merchantId])
   @@index([merchantId])
+  @@schema("public")
 }
 
 // 经营分析页（首页）的卡片顺序、宽度与显隐；与旧版 UserDashboardLayout 分开存储，旧记录保留不动。
@@ -324,6 +431,7 @@ model UserAnalyticsLayout {
 
   @@unique([userId, merchantId])
   @@index([merchantId])
+  @@schema("public")
 }
 
 // AI 助手对话记录，按用户 + 商家同步到服务端，换设备也能看到；revision 用于防止多设备互相覆盖。
@@ -342,6 +450,7 @@ model UserAssistantWorkspace {
 
   @@unique([userId, merchantId])
   @@index([merchantId])
+  @@schema("public")
 }
 
 // AI 记住的用户偏好（单行短句），每次对话作为偏好上下文提供给模型，不作为经营数据依据。
@@ -358,6 +467,7 @@ model AssistantMemory {
   @@unique([userId, merchantId, content])
   @@index([userId, merchantId, createdAt])
   @@index([merchantId])
+  @@schema("public")
 }
 
 model UserMonitoringRule {
@@ -384,6 +494,7 @@ model UserMonitoringRule {
 
   @@index([userId, merchantId, status, nextRunAt])
   @@index([merchantId])
+  @@schema("public")
 }
 
 model MonitoringNotification {
@@ -411,4 +522,5 @@ model MonitoringNotification {
   @@index([userId, merchantId, readAt, createdAt])
   @@index([ruleId])
   @@index([merchantId])
+  @@schema("public")
 }

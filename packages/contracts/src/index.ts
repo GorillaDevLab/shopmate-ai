@@ -9,6 +9,16 @@ export * from "./commerce/connector-data.schema.js";
 export * from "./commerce/connector-action.schema.js";
 
 export {
+  DemoSourceSettingsSchema,
+  DemoSessionCreateSchema,
+  DemoSessionAdvanceSchema,
+  DemoSessionResetSchema,
+  DemoSessionDisconnectSchema,
+  DemoSessionViewSchema,
+} from "./demo/demo-commerce.schema.js";
+export type { DemoSourceSettings, DemoSessionView } from "./demo/demo-commerce.schema.js";
+
+export {
   TenantIdSchema,
   TenantRoleSchema,
   TenantPermissionSchema,

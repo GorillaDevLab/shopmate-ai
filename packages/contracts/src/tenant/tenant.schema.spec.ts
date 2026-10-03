@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { TenantContextSchema, TenantResourceSchema, TenantRoleSchema } from "./tenant.schema.js";
+import {
+  TenantContextSchema,
+  TenantPermissionSchema,
+  TenantResourceSchema,
+  TenantRoleSchema,
+} from "./tenant.schema.js";
 
 export const validTenant = {
   userId: "user-a",
@@ -31,6 +36,22 @@ describe("tenant schemas", () => {
   });
   it("keeps the five roles vendor-neutral", () => {
     expect(TenantRoleSchema.options).toEqual(["OWNER", "ADMIN", "OPERATOR", "ANALYST", "VIEWER"]);
+  });
+  it("accepts the ten unique permissions including demo management", () => {
+    const permissions = [...TenantPermissionSchema.options];
+    expect(permissions).toHaveLength(10);
+    expect(permissions).toContain("demo:manage");
+    expect(TenantContextSchema.parse({ ...validTenant, permissions }).permissions).toEqual(
+      permissions,
+    );
+  });
+  it("rejects more than ten permissions", () => {
+    expect(
+      TenantContextSchema.safeParse({
+        ...validTenant,
+        permissions: [...TenantPermissionSchema.options, "demo:manage"],
+      }).success,
+    ).toBe(false);
   });
   it("rejects unexpected resource authority fields", () => {
     expect(
