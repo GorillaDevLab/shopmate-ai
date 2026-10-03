@@ -9,9 +9,11 @@
 - Phase 2.1 因果历史源、四画像、业务时钟：[PR #204](https://github.com/GorillaDevLab/shopmate-ai/pull/204)。
 - Phase 2.2 只读 Connector、固定快照分页与 Factory 端口：[PR #205](https://github.com/GorillaDevLab/shopmate-ai/pull/205)。全仓/隔离数据库共 1,316 tests passed，PR CI success。
 
+- Phase 2.3 持久演示会话与受控管理：[PR #206](https://github.com/GorillaDevLab/shopmate-ai/pull/206)。最新 PR CI success 后于 2026-10-03 合并（4361b92），全仓与强制隔离 PostgreSQL/HTTP 共 1,642 passed；部署仍暂缓。
+
 ## 连续实施顺序
 
-- [ ] Phase 2.3 持久 Demo Session、PlatformConnection、演示租户标记、服务端管理与实际 resolver。
+- [x] Phase 2.3 持久 Demo Session、PlatformConnection、演示租户标记、服务端管理与实际 resolver。
 - [ ] Phase 2.4 运行源状态、场景引擎、15 个场景、故障注入及完整因果证据。
 - [ ] Phase 2.5 同步宿主、固定窗口分页、去重/乱序保护、运行恢复及 freshness。
 - [ ] Phase 3 财务/经营 Metric Engine、质量状态、证据版本与口径回归。
