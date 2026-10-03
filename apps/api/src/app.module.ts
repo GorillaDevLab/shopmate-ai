@@ -9,6 +9,7 @@ import { DashboardLayoutModule } from "./dashboard-layout/dashboard-layout.modul
 import { MonitoringModule } from "./monitoring/monitoring.module.js";
 import { TenantModule } from "./tenant/tenant.module.js";
 import { AgentActionsModule } from "./ai/actions/agent-actions.module.js";
+import { DemoCommerceModule } from "./demo-commerce/demo-commerce.module.js";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { AgentActionsModule } from "./ai/actions/agent-actions.module.js";
     MonitoringModule,
     TenantModule,
     AgentActionsModule,
+    DemoCommerceModule,
   ],
 })
 export class AppModule {}
