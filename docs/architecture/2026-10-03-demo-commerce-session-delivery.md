@@ -69,7 +69,7 @@ POST 仅接受唯一且匹配的 Origin；跨站标记被拒绝，不信任请�
 
 1. POST `/api/v1/demo-commerce/stores/:storeId/session`，提交严格 settings 与 observedAt；随后 GET 检查公开视图。
 2. POST `/advance`，带当前 expectedRevision 和 durationMs；同 revision 重试应 409。
-3. POST `/reset` 或 `/disconnect`，带 expectedRevision 和准确 confirmSessionId。确认错误应 400 且没有状态/审计变化。
+3. POST `/disconnect`，带 expectedRevision 和准确 confirmSessionId；POST `/reset` 还必须提交 settings 与 observedAt。确认错误应 400 且没有状态/审计变化。
 4. 同 Cookie 降为 VIEWER 后，合法工作区只读仍允许，管理应 403；撤销成员/工作区或标记后应 404/读取拒绝。
 5. 分别打开两店铺，推进其中之一；另一店铺时间与数据保持独立。重置后旧 Connector 返回 AUTH_EXPIRED，重新打开才能读取新 generation。
 
