@@ -28,22 +28,25 @@ model PlatformConnection {
 }
 
 model DemoCommerceSession {
-  id               String             @id
+  id               String              @id
   organizationId   String
   workspaceId      String
-  storeId          String             @unique
-  connectionId     String             @unique
+  storeId          String              @unique
+  connectionId     String              @unique
   externalStoreId  String
   config           Json
   configHash       String
   generatorVersion String
-  clockNow         DateTime           @db.Timestamp(3)
-  clockRevision    Int                @default(0)
-  revision         Int                @default(0)
-  connection       PlatformConnection @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction)
+  clockNow         DateTime            @db.Timestamp(3)
+  clockRevision    Int                 @default(0)
+  revision         Int                 @default(0)
+  connection       PlatformConnection  @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction)
   audits           DemoControlAudit[]
+  workerGrants     MockWorkerGrant[]
+  runtimes         MockSourceRuntime[]
 
   @@unique([id, organizationId, workspaceId, storeId, connectionId])
+  @@unique([id, organizationId, workspaceId, storeId, connectionId, externalStoreId], map: "DemoCommerceSession_source_binding_key")
   @@schema("demo")
 }
 
@@ -68,9 +71,50 @@ model DemoControlAudit {
   @@schema("demo")
 }
 
+model MockWorkerGrant {
+  id              String              @id
+  databaseRole    String
+  principalUserId String
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  sessionId       String
+  connectionId    String
+  externalStoreId String
+  operation       String              @default("SOURCE_BUILD")
+  status          String              @default("ACTIVE")
+  membership      OrganizationMember  @relation("WorkerMembership", fields: [organizationId, principalUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction, map: "MockWorkerGrant_membership_fkey")
+  assignment      WorkspaceMember     @relation(fields: [organizationId, workspaceId, principalUserId], references: [organizationId, workspaceId, userId], onDelete: Restrict, onUpdate: NoAction, map: "MockWorkerGrant_workspace_fkey")
+  session         DemoCommerceSession @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "MockWorkerGrant_session_fkey")
+
+  @@schema("demo")
+}
+
+model MockSourceRuntime {
+  sessionId        String
+  generation       Int
+  organizationId   String
+  workspaceId      String
+  storeId          String
+  connectionId     String
+  externalStoreId  String
+  sourceConfig     Json
+  configHash       String
+  generatorVersion String
+  runtimeVersion   String
+  openingAt        DateTime            @db.Timestamp(3)
+  baselineEnd      DateTime            @db.Timestamp(3)
+  createdAt        DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamp(3)
+  session          DemoCommerceSession @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "Runtime_session_fkey")
+
+  @@id([sessionId, generation], map: "Runtime_pkey")
+  @@map("Runtime")
+  @@schema("mock_platform")
+}
+
 datasource db {
   provider = "postgresql"
-  schemas  = ["public", "demo"]
+  schemas  = ["public", "demo", "mock_platform"]
 }
 
 model TenantBootstrapEnvironment {
@@ -187,6 +231,7 @@ model OrganizationMember {
   status         MembershipStatus  @default(ACTIVE)
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   workspaces     WorkspaceMember[]
+  mockGrants     MockWorkerGrant[] @relation("WorkerMembership")
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
@@ -220,6 +265,7 @@ model WorkspaceMember {
   status         MembershipStatus   @default(ACTIVE)
   workspace      Workspace          @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Cascade, onUpdate: NoAction, map: "WorkspaceMember_workspace_fkey")
   membership     OrganizationMember @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade, onUpdate: NoAction, map: "WorkspaceMember_membership_fkey")
+  mockGrants     MockWorkerGrant[]
   createdAt      DateTime           @default(now())
 
   @@unique([organizationId, workspaceId, userId])
