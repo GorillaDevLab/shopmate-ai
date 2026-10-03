@@ -52,6 +52,30 @@ describe("tenant resource authorization", () => {
       expect(canAccessTenantResource(context(), { organizationId: "org-a" }, action)).toBe(false);
     }
   });
+  it.each([
+    ["OWNER", true],
+    ["ADMIN", true],
+    ["OPERATOR", false],
+    ["ANALYST", false],
+    ["VIEWER", false],
+  ] as const)("%s demo management is %s", (role, allowed) => {
+    expect(TENANT_ROLE_PERMISSIONS[role].includes("demo:manage")).toBe(allowed);
+    expect(canAccessTenantResource(context(role), { organizationId: "org-a" }, "demo:manage")).toBe(
+      allowed,
+    );
+  });
+  it("denies demo management outside the resolved tenant scope", () => {
+    expect(
+      canAccessTenantResource(context("OWNER"), { organizationId: "org-b" }, "demo:manage"),
+    ).toBe(false);
+    expect(
+      canAccessTenantResource(
+        context("ADMIN"),
+        { organizationId: "org-a", workspaceId: "workspace-b" },
+        "demo:manage",
+      ),
+    ).toBe(false);
+  });
   it("denies malformed contexts and resources at runtime", () => {
     expect(
       canAccessTenantResource(

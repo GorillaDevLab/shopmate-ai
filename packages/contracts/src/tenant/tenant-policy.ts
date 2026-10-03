@@ -13,6 +13,7 @@ const adminPermissions = [
   ...operatorPermissions,
   "organization:manage",
   "actions:approve",
+  "demo:manage",
 ] as const;
 
 export const TENANT_ROLE_PERMISSIONS: Readonly<Record<TenantRole, readonly TenantPermission[]>> =

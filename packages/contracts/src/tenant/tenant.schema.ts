@@ -12,6 +12,7 @@ export const TenantPermissionSchema = z.enum([
   "inventory:write",
   "actions:propose",
   "actions:approve",
+  "demo:manage",
 ]);
 export const TenantContextSchema = z.strictObject({
   userId: TenantIdSchema,
@@ -21,7 +22,7 @@ export const TenantContextSchema = z.strictObject({
   role: TenantRoleSchema,
   permissions: z
     .array(TenantPermissionSchema)
-    .max(9)
+    .max(10)
     .refine((values) => new Set(values).size === values.length),
 });
 export const TenantResourceSchema = z.strictObject({
