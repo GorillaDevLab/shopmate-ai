@@ -1,6 +1,6 @@
 # Shared source CONTROL delivery (Phase 2.4c)
 
-Branch `feat/mock-source-control-locks`, reviewed generation foundation integrated at `1abfc51`. This bounded unit is locally implemented and verified; root owns final complete-unit/whole-branch review, repository-wide gates and GitHub delivery. Deployment and online migrations remain deferred.
+Branch `feat/mock-source-control-locks`, reviewed generation foundation integrated at `1abfc51`. This bounded unit is locally implemented and verified; final whole-branch review and GitHub delivery are recorded separately. Deployment and online migrations remain deferred.
 
 ## 1. Goal
 
@@ -42,7 +42,9 @@ Existing source+demo integration: 56 passed / 0 skipped (generation 24, demo 32)
 
 Actual red/green evidence: helper absent (`null` vs required function); missing raw INSERT scope (`23514` instead of SM002); old-snapshot raw INSERT did not reject; official initializer lacked mandatory scope (SOURCE_STORAGE); fresh connection revocation initially misclassified SM002 rather than SM001; mandatory shared-cluster fixture initially failed duplicate source login role. Each corresponding corrected focused/mandatory run passed. Initial lint found a missing test-only process import and passed after it was fixed.
 
-Independent task spec/quality inspection passed. Its P3 admin-only cleanup assertion was replaced with actual checked-out source backend observations after COMMIT/ROLLBACK; incremental review passed the fix, role reuse, expanded scope tests, runner wiring and operator docs. Root owns the final complete committed package review and wider gates; no remote CI outcome is claimed here.
+Root repository verification: `pnpm test` passed 1,663 tests (root 23 + contracts 480 + database 49 + API 890 + web 221); nine existing optional API tests were skipped in this command and the required restricted API suite passed separately. `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm format:check`, secret scan, extra database formatting and diff checks passed. Build checked 31 client bundles. Formatting initially caught an ignored generated `apps/web/next-env.d.ts`; formatting that generated file resolved the check without a tracked source change. No UI changed, so no new screenshot comparison was required.
+
+Independent task spec/quality inspection passed. Its P3 admin-only cleanup assertion was replaced with actual checked-out source backend observations after COMMIT/ROLLBACK; incremental review passed the fix, role reuse, expanded scope tests, runner wiring and operator docs. Final complete committed package review remains a separate merge gate; no remote CI outcome is claimed here.
 
 ## 9. How to manually verify
 
@@ -54,7 +56,7 @@ This unit delivers no global AUTH barrier, auth-table triggers, source facts/eve
 
 ## 11. Next recommended step
 
-Complete root review/gates/GitHub delivery, then proceed to the separately scoped append-only facts and fenced publication unit using this CONTROL contract. Phase 2.4 overall remains incomplete.
+Complete whole-branch review and GitHub delivery, then proceed to the separately scoped append-only facts and fenced publication unit using this CONTROL contract. Phase 2.4 overall remains incomplete.
 
 ## 12. Git commit message
 
