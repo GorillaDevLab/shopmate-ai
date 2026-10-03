@@ -293,6 +293,7 @@ test("persistent demo controls run under real restricted PostgreSQL RLS", async 
       assert.deepEqual(tables.rows.map((v) => v.tablename).sort(), [
         "DemoCommerceSession",
         "DemoControlAudit",
+        "MockWorkerGrant",
       ]);
     });
     // Stop before fixtures if the feature is absent, making the initial red assertion meaningful.

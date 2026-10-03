@@ -62,8 +62,10 @@ jobs:
         run: >-
           pnpm exec prettier --check packages/database/src/tenant*.ts
           packages/database/src/demo-commerce*.ts
+          packages/database/src/mock-platform
           packages/database/test/helpers packages/database/test/integration
-          packages/database/test/tenant-bootstrap.test.mjs apps/api/vitest*.config.ts
+          packages/database/test/tenant-bootstrap.test.mjs
+          packages/database/test/mock-platform-validation.test.mjs apps/api/vitest*.config.ts
 
       - name: Lint
         run: pnpm lint

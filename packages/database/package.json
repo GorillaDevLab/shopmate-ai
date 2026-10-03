@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/src/index.d.ts",
       "import": "./dist/src/index.js"
+    },
+    "./mock-platform": {
+      "types": "./dist/src/mock-platform/index.d.ts",
+      "import": "./dist/src/mock-platform/index.js"
     }
   },
   "scripts": {
