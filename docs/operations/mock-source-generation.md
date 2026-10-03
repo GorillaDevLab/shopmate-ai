@@ -29,6 +29,10 @@ Set only the appropriate secret environment variable in each process:
 
 Factories require an explicit environment configuration object and never fall back to `DATABASE_URL`. Connections are lazy so malformed actors/scopes fail before any database call. Login checks run on every valid operation, including a reused pooled connection. Storage errors expose only concrete source error codes; connection URLs and PostgreSQL error payloads are excluded.
 
+An idle connection failure is handled internally after PostgreSQL's pool removes the failed client. The next valid operation reports one sanitized `SOURCE_STORAGE` failure before opening a connection; an explicit subsequent retry creates a fresh connection and repeats all credential and authorization checks. Multiple idle failures before that operation coalesce into one pending failure. Invalid input does not consume it. Closing remains available with a pending failure, discards that pending report and releases the pool; close failures are also sanitized. No operation is automatically replayed.
+
+A connection lost while checked out is contained by that transaction's internal error listener. The operation fails with sanitized `SOURCE_STORAGE`, attempts rollback, and destroys the failed client on release. Its next explicit retry can create a fresh restricted connection. Neither idle nor transaction listeners throw asynchronous errors or retain raw database error payloads.
+
 The worker principal must already be a current ACTIVE VIEWER member with an ACTIVE assignment to the exact workspace. A fresh active organization/workspace, merchant-bound store, operator-approved DEMO environment and DemoTenant marker, approved session and ACTIVE MOCK connection are prerequisites. The source runtime cannot provision any of them. A human reader retains existing owner/admin workspace access; other human roles require current assignment.
 
 Provision a grant using the separate operator connection. The following prepared statement copies ownership from the existing session and binds the dedicated principal; the operator must require exactly one inserted row:

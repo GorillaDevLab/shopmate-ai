@@ -1,38 +1,48 @@
 import type pg from "pg";
-import { verifyCredentials, type SourceMode } from "./clients.js";
+import { verifyCredentials, type SourceMode, type SourcePool } from "./clients.js";
 import { sanitized, SourceStorageError } from "./errors.js";
 import type { SourceReadActor, SourceScope, SourceWorkerGrant } from "./types.js";
 
+async function rollbackFailed(client: pg.PoolClient | undefined, begun: boolean): Promise<boolean> {
+  if (!client || !begun) return false;
+  try {
+    await client.query("ROLLBACK");
+    return false;
+  } catch {
+    return true;
+  }
+}
 export async function transaction<T>(
-  pool: pg.Pool,
+  pool: SourcePool,
   mode: SourceMode,
   action: (client: pg.PoolClient) => Promise<T>,
   rollbackWhen: (result: T) => boolean = () => false,
 ): Promise<T> {
   let client: pg.PoolClient | undefined;
   let begun = false;
+  let discard = false;
+  const onError = () => {
+    discard = true;
+  };
   try {
     client = await pool.connect();
+    // A checked-out client has no pg-pool idle listener; contain socket failures here.
+    client.on("error", onError);
     await verifyCredentials(client, mode);
     await client.query("BEGIN");
     begun = true;
     await client.query("SET LOCAL TIME ZONE 'UTC'");
     const result = await action(client);
+    if (discard) throw new SourceStorageError("SOURCE_STORAGE");
     await client.query(rollbackWhen(result) ? "ROLLBACK" : "COMMIT");
     begun = false;
     return result;
   } catch (error) {
-    if (client && begun) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        client.release(true);
-        client = undefined;
-      }
-    }
+    discard = (await rollbackFailed(client, begun)) || discard;
     throw sanitized(error);
   } finally {
-    client?.release();
+    client?.off("error", onError);
+    client?.release(discard);
   }
 }
 export async function readIdentity(client: pg.PoolClient, actor: SourceReadActor): Promise<void> {

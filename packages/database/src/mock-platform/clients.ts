@@ -1,9 +1,39 @@
 import pg from "pg";
-import { SourceStorageError } from "./errors.js";
+import { sanitized, SourceStorageError } from "./errors.js";
 import type { SourceEnvironment } from "./types.js";
 
 export type SourceMode = "reader" | "worker";
-export function sourcePool(env: SourceEnvironment, mode: SourceMode): pg.Pool {
+export interface SourcePool {
+  connect(): Promise<pg.PoolClient>;
+  end(): Promise<void>;
+}
+function recoverablePool(connectionString: string): SourcePool {
+  const pool = new pg.Pool({ connectionString, max: 1, connectionTimeoutMillis: 5000 });
+  let pending: SourceStorageError | undefined;
+  // pg purges the failed idle client. Report once before an explicit retry reconnects.
+  pool.on("error", () => {
+    pending = new SourceStorageError("SOURCE_STORAGE");
+  });
+  return {
+    async connect() {
+      if (pending) {
+        const error = pending;
+        pending = undefined;
+        throw error;
+      }
+      return pool.connect();
+    },
+    async end() {
+      pending = undefined;
+      try {
+        await pool.end();
+      } catch (error) {
+        throw sanitized(error);
+      }
+    },
+  };
+}
+export function sourcePool(env: SourceEnvironment, mode: SourceMode): SourcePool {
   const key =
     mode === "reader" ? "MOCK_PLATFORM_READ_DATABASE_URL" : "MOCK_PLATFORM_WORKER_DATABASE_URL";
   const value = env?.[key];
@@ -19,7 +49,7 @@ export function sourcePool(env: SourceEnvironment, mode: SourceMode): pg.Pool {
       url.hash
     )
       throw new SourceStorageError("SOURCE_CONFIGURATION");
-    return new pg.Pool({ connectionString: value, max: 1, connectionTimeoutMillis: 5000 });
+    return recoverablePool(value);
   } catch {
     throw new SourceStorageError("SOURCE_CONFIGURATION");
   }

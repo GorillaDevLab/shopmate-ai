@@ -3,6 +3,7 @@ import test from "node:test";
 import pg from "pg";
 import { URL } from "node:url";
 import { isolatedPostgres } from "../helpers/isolated-postgres.mjs";
+import { idlePoolRecovery } from "../helpers/mock-platform-idle-regression.mjs";
 import {
   migrateSource,
   sourceFixtures,
@@ -614,6 +615,20 @@ test("frozen source generations use real restricted logins and fresh RLS", async
         await workLogin.query("RESET ROLE");
       }
     });
+    for (const mode of ["reader", "worker"]) {
+      await t.test(
+        `${mode} survives an idle backend loss with sanitized explicit recovery`,
+        async () => {
+          await idlePoolRecovery(admin, env, mode, readerActor, { ...scope, generation: 1 });
+        },
+      );
+      await t.test(
+        `${mode} survives loss of a checked-out backend and explicitly recovers`,
+        async () => {
+          await idlePoolRecovery(admin, env, mode, readerActor, { ...scope, generation: 1 }, true);
+        },
+      );
+    }
     await t.test("elevated login and storage failures are sanitized", async () => {
       const bad = source.createMockSourceReader({
         MOCK_PLATFORM_READ_DATABASE_URL: url.toString(),
