@@ -56,7 +56,7 @@ EXECUTE operator_source_grant
 DEALLOCATE operator_source_grant;
 ```
 
-Grant lookup intentionally precedes application identity and requires both `session_user` and `current_user` to equal the recorded database role. Each worker call derives its principal and merchant from the grant and stored ownership, validates the exact requested scope/current generation, and sets transaction-local identity. No caller-supplied principal or merchant can become worker authority. Grant, membership, assignment, marker, workspace or connection revocation denies the next call, including grant listing.
+Grant lookup intentionally precedes application identity and requires both `session_user` and `current_user` to equal the recorded database role. Initialization now takes shared session CONTROL before resolving its operative grant; grant listing remains advisory and unlocked. Each worker call derives its principal and merchant from the grant and stored ownership, validates the exact requested scope/current generation, and sets transaction-local identity. No caller-supplied principal or merchant can become worker authority. Grant, membership, assignment, marker, workspace or connection revocation denies the next call, including grant listing.
 
 An operator can revoke a grant without deleting history:
 
@@ -69,7 +69,7 @@ DEALLOCATE operator_revoke_source_grant;
 
 Runtime rows use `(sessionId,generation)` identity and retain the complete session/connection ownership binding. Configuration/hash/generator identity are copied from the stored session, after validating the canonical existing v1 hash and bounded finite configuration. Opening time is historyStart for mature/growing/problematic; new stores use `historyStart + max(0, days-14) days`. Baseline end is `historyStart + days days`. PostgreSQL insert validation rejects forged snapshots/dates, and an immutable UPDATE trigger protects every field even after an accidental UPDATE grant/policy.
 
-`generatorVersion` remains `mock-source-v1`; `runtimeVersion` is independently `mock-runtime-v2`. Creation timestamps have a database-level UTC default, and client transactions normalize their timezone locally. Advancing the session clock never changes the copied configuration or dates. Reset permits a new generation and fences previous reads while retaining previous rows. A failed final access check rolls back initialization before returning DENIED. No session UPDATE privilege or control lock is assumed.
+`generatorVersion` remains `mock-source-v1`; `runtimeVersion` is independently `mock-runtime-v2`. Creation timestamps have a database-level UTC default, and client transactions normalize their timezone locally. Advancing the session clock never changes the copied configuration or dates. Reset permits a new generation and fences previous reads while retaining previous rows. A failed final access check rolls back initialization before returning DENIED. Source roles retain no session UPDATE privilege; migration `20261003060000_mock_source_control` grants only the required lock helper capability. Follow the [shared CONTROL operator contract](mock-source-control.md), including its required grant for the configured demo-control runtime and declared scope on raw SQL writes.
 
 ## Twelve-item delivery record
 
@@ -90,4 +90,4 @@ Validation on 2026-10-04 used isolated loopback PostgreSQL 16.15 with actual app
 | 11  | Focused source validation/integration: 24 passed, zero failed/skipped. Mandatory tenant run: migration 2 + tenant 13 + demo 32 + source 19 + API 35 = 101 passed, zero failed/skipped. Database package tests: 49 passed; database build/lint and targeted formatting passed.                                                                           |
 | 12  | Unit limits: no journal/events/projections, leases, publication pointer, connector paging, background generator, source facts, product UI, provider integration or performance claim. Formal task/branch review, latest-main integration, root gates and GitHub delivery are controller-owned follow-up gates; no deployment/online migration occurred. |
 
-The next unit must establish an independently tested control lock protocol that serializes publication with reset/disconnect using privileges the SELECT-only source roles actually possess. This foundation does not claim that lock protocol or concurrent publication safety.
+The historical foundation evidence above predates shared CONTROL. The [subsequent CONTROL unit](mock-source-control.md) serializes initialization/official generation reads and controls through transaction completion. Publication and commerce facts remain a later unit and are not claimed by this foundation or CONTROL delivery.

@@ -6,6 +6,7 @@ import test from "node:test";
 import { URL, fileURLToPath } from "node:url";
 import pg from "pg";
 import { isolatedPostgres } from "../helpers/isolated-postgres.mjs";
+import { maintenanceClient } from "../helpers/mock-source-control-fixture.mjs";
 
 const actor = { userId: "demo-owner", merchantId: "demo-merchant-a" };
 const viewer = { ...actor, userId: "demo-viewer" };
@@ -68,7 +69,7 @@ async function fixtures(client) {
   }
   await client.query("GRANT USAGE ON SCHEMA public,demo TO shopmate_demo_runtime");
   await client.query(
-    "GRANT EXECUTE ON FUNCTION demo.has_store_access(TEXT,TEXT,TEXT,BOOLEAN) TO shopmate_demo_runtime",
+    "GRANT EXECUTE ON FUNCTION demo.has_store_access(TEXT,TEXT,TEXT,BOOLEAN),demo.lock_source_control(TEXT) TO shopmate_demo_runtime",
   );
   await client.query(
     'GRANT SELECT ON "Organization","OrganizationMember","Workspace","WorkspaceMember","Store","DemoTenant","TenantBootstrapEnvironment" TO shopmate_demo_runtime',
@@ -79,10 +80,11 @@ async function fixtures(client) {
   await client.query('GRANT SELECT,INSERT ON demo."DemoControlAudit" TO shopmate_demo_runtime');
 }
 
-async function identity(client, userId, action) {
+async function identity(client, userId, action, sessionId = input.id) {
   await client.query("BEGIN");
   try {
     await client.query("SELECT set_config('app.user_id',$1,true)", [userId]);
+    await client.query("SELECT demo.lock_source_control($1)", [sessionId]);
     const result = await action();
     await client.query("COMMIT");
     return result;
@@ -261,6 +263,7 @@ test("demo mutation atomicity rejects genuine zero-row PostgreSQL writes", async
     await admin.connect();
     await migrate(admin);
     await fixtures(admin);
+    admin = maintenanceClient(admin, actor.userId);
     url.username = "shopmate_demo_runtime";
     url.password = "";
     process.env.DATABASE_URL = url.toString();
@@ -301,6 +304,7 @@ test("persistent demo controls run under real restricted PostgreSQL RLS", async 
       (await admin.query("SELECT to_regclass('public.\"DemoTenant\"') AS table")).rows[0].table,
     );
     await fixtures(admin);
+    admin = maintenanceClient(admin, actor.userId);
     dbUrl.username = "shopmate_demo_runtime";
     dbUrl.password = "";
     runtime = new pg.Client({ connectionString: dbUrl.toString() });
@@ -677,11 +681,15 @@ test("persistent demo controls run under real restricted PostgreSQL RLS", async 
           other.record,
         );
         await assert.rejects(
-          identity(runtime, actor.userId, () =>
-            runtime.query('UPDATE demo."DemoCommerceSession" SET config=$1 WHERE id=$2', [
-              { binding: { ...otherBinding, externalStoreId: 42 } },
-              otherInput.id,
-            ]),
+          identity(
+            runtime,
+            actor.userId,
+            () =>
+              runtime.query('UPDATE demo."DemoCommerceSession" SET config=$1 WHERE id=$2', [
+                { binding: { ...otherBinding, externalStoreId: 42 } },
+                otherInput.id,
+              ]),
+            otherInput.id,
           ),
           (error) => error.code === "23514",
         );

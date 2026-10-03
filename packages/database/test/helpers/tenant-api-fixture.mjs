@@ -16,7 +16,7 @@ export async function prepareTenantApiRuntime(url) {
     );
     await client.query('GRANT SELECT,INSERT ON demo."DemoControlAudit" TO shopmate_tenant_api');
     await client.query(
-      "GRANT EXECUTE ON FUNCTION demo.has_store_access(TEXT,TEXT,TEXT,BOOLEAN) TO shopmate_tenant_api",
+      "GRANT EXECUTE ON FUNCTION demo.has_store_access(TEXT,TEXT,TEXT,BOOLEAN),demo.lock_source_control(TEXT) TO shopmate_tenant_api",
     );
     const runtime = new URL(url);
     runtime.username = "shopmate_tenant_api";

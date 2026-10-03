@@ -4,6 +4,7 @@ import pg from "pg";
 import { URL } from "node:url";
 import { isolatedPostgres } from "../helpers/isolated-postgres.mjs";
 import { idlePoolRecovery } from "../helpers/mock-platform-idle-regression.mjs";
+import { maintenanceClient, operatorControl } from "../helpers/mock-source-control-fixture.mjs";
 import {
   migrateSource,
   sourceFixtures,
@@ -41,6 +42,7 @@ test("frozen source generations use real restricted logins and fresh RLS", async
     });
     assert.ok(source, "stop if implementation is absent");
     await sourceFixtures(admin);
+    admin = maintenanceClient(admin, "source-human");
     const env = sourceEnv(url.toString());
     reader = source.createMockSourceReader(env);
     worker = source.createMockSourceWorker(env);
@@ -234,15 +236,13 @@ test("frozen source generations use real restricted logins and fresh RLS", async
         ['UPDATE "Organization" SET status=$1 WHERE id=$2', "SUSPENDED", "ACTIVE", true],
         ['UPDATE "Workspace" SET status=$1 WHERE "organizationId"=$2', "SUSPENDED", "ACTIVE", true],
         ['UPDATE "TenantBootstrapEnvironment" SET environment=$1', "PRODUCTION", "DEMO", true],
-        [
-          'UPDATE "PlatformConnection" SET status=$1 WHERE "organizationId"=$2',
-          "DISCONNECTED",
-          "ACTIVE",
-          true,
-        ],
+        ['UPDATE "PlatformConnection" SET status=$1 WHERE id=$2', "DISCONNECTED", "ACTIVE", true],
       ];
       for (const [sql, off, on, both] of changes) {
-        const parameters = sql.includes("$2") ? [off, scope.organizationId] : [off];
+        const coordinate = sql.includes('"PlatformConnection"')
+          ? scope.connectionId
+          : scope.organizationId;
+        const parameters = sql.includes("$2") ? [off, coordinate] : [off];
         await admin.query(sql, parameters);
         assert.deepEqual(
           await worker.initializeGeneration(actor, scope),
@@ -251,7 +251,7 @@ test("frozen source generations use real restricted logins and fresh RLS", async
         );
         assert.ok(!(await worker.listGrants()).some((grant) => grant.id === actor.grantId), sql);
         if (both) assert.equal(await reader.findGeneration(readerActor, scope), null, sql);
-        await admin.query(sql, parameters.length === 2 ? [on, scope.organizationId] : [on]);
+        await admin.query(sql, parameters.length === 2 ? [on, coordinate] : [on]);
       }
       await admin.query('DELETE FROM "DemoTenant" WHERE "organizationId"=$1', [
         scope.organizationId,
@@ -381,7 +381,8 @@ test("frozen source generations use real restricted logins and fresh RLS", async
       );
       try {
         await assert.rejects(
-          admin.query(
+          operatorControl(
+            admin,
             `INSERT INTO mock_platform."Runtime" ("sessionId",generation,"organizationId","workspaceId","storeId","connectionId","externalStoreId","sourceConfig","configHash","generatorVersion","runtimeVersion","openingAt","baselineEnd")
           SELECT "sessionId",2,"organizationId","workspaceId",'source-store-b',"connectionId","externalStoreId",jsonb_set("sourceConfig",'{binding,storeId}','"source-store-b"'),"configHash","generatorVersion","runtimeVersion","openingAt","baselineEnd" FROM mock_platform."Runtime" WHERE "sessionId"=$1 AND generation=1`,
             [scope.sessionId],
@@ -498,6 +499,7 @@ test("frozen source generations use real restricted logins and fresh RLS", async
             "SELECT set_config('app.user_id',$1,true),set_config('app.merchant_id',$2,true),set_config('mock.grant_id',$3,true)",
             ["source-worker", "source-merchant-a", "source-grant-a2"],
           );
+          await workLogin.query("SELECT demo.lock_source_control($1)", [s.sessionId]);
           await assert.rejects(workLogin.query(query, parameters), (e) => e.code === "23514");
         } finally {
           await workLogin.query("ROLLBACK");
@@ -509,6 +511,7 @@ test("frozen source generations use real restricted logins and fresh RLS", async
           "SELECT set_config('app.user_id',$1,true),set_config('app.merchant_id',$2,true),set_config('mock.grant_id',$3,true)",
           ["source-worker", "source-merchant-a", "source-grant-a2"],
         );
+        await workLogin.query("SELECT demo.lock_source_control($1)", [s.sessionId]);
         const started = Date.now();
         const raw = await workLogin.query(
           `${query} RETURNING to_char("createdAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS created`,
@@ -590,11 +593,11 @@ test("frozen source generations use real restricted logins and fresh RLS", async
       }
     });
     await t.test(
-      "generation change during INSERT never returns the old generation as active",
+      "access loss after successful Runtime INSERT returns DENIED only after rollback",
       async () => {
-        // Operator-owned fault trigger reproduces a control change after the copied row is inserted.
+        // The AFTER trigger verifies a real inserted row before revoking its operative grant.
         await admin.query(
-          'CREATE FUNCTION mock_platform.test_reset_after_insert() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$ BEGIN UPDATE public."PlatformConnection" SET generation=generation+1 WHERE id=NEW."connectionId"; RETURN NEW; END $$',
+          'CREATE FUNCTION mock_platform.test_reset_after_insert() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$ BEGIN IF NOT EXISTS (SELECT 1 FROM mock_platform."Runtime" WHERE "sessionId"=NEW."sessionId" AND generation=NEW.generation) THEN RAISE EXCEPTION \'Fixture requires successful INSERT\'; END IF; UPDATE demo."MockWorkerGrant" SET status=\'REVOKED\' WHERE "sessionId"=NEW."sessionId"; RETURN NEW; END $$',
         );
         await admin.query(
           'CREATE TRIGGER test_reset_after_insert AFTER INSERT ON mock_platform."Runtime" FOR EACH ROW EXECUTE FUNCTION mock_platform.test_reset_after_insert()',
@@ -605,11 +608,13 @@ test("frozen source generations use real restricted logins and fresh RLS", async
             { status: "DENIED" },
           );
           assert.equal(
-            await reader.findGeneration(
-              { ...readerActor, merchantId: "source-merchant-b" },
-              scopeFor("b"),
-            ),
-            null,
+            (
+              await admin.query('SELECT status FROM demo."MockWorkerGrant" WHERE id=$1', [
+                "source-grant-b",
+              ])
+            ).rows[0].status,
+            "ACTIVE",
+            "revocation itself is rolled back with the successful INSERT",
           );
           assert.equal(
             (

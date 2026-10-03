@@ -9,11 +9,21 @@ export async function withDemoIdentity<T>(
   actor: DemoActor,
   action: (tx: DemoTransaction) => Promise<T>,
 ): Promise<T> {
-  return getPrismaClient().$transaction(async (tx) => {
-    // Transaction-local identity cannot leak when pooled connections are reused.
-    await tx.$queryRaw`SELECT set_config('app.user_id', ${actor.userId}, true)`;
-    return action(tx);
-  });
+  return getPrismaClient().$transaction(
+    async (tx) => {
+      // Transaction-local identity cannot leak when pooled connections are reused.
+      await tx.$queryRaw`SELECT set_config('app.user_id', ${actor.userId}, true)`;
+      await tx.$executeRaw`SET LOCAL lock_timeout='5s'`;
+      await tx.$executeRaw`SET LOCAL statement_timeout='10s'`;
+      return action(tx);
+    },
+    { isolationLevel: "ReadCommitted", timeout: 15_000 },
+  );
+}
+
+export async function lockDemoControl(tx: DemoTransaction, sessionId: string): Promise<void> {
+  // VOID has no Prisma decoder; the text projection carries no authorization result.
+  await tx.$queryRaw`SELECT demo.lock_source_control(${sessionId})::text`;
 }
 
 export async function readDemoStore(
@@ -64,12 +74,11 @@ async function currentRecord(tx: DemoTransaction, storeId: string): Promise<Sess
 }
 
 async function lockedRecord(tx: DemoTransaction, storeId: string): Promise<SessionFields[]> {
-  // Lock both rows before comparing revisions so concurrent controls have exactly one winner.
-  return tx.$queryRaw<SessionFields[]>`
-    SELECT s.id,s."connectionId",s."externalStoreId",s.config,s."configHash",s."generatorVersion",
-      s."clockNow",s."clockRevision",s.revision,c.generation,c.status
-    FROM demo."DemoCommerceSession" s JOIN public."PlatformConnection" c ON c.id=s."connectionId"
-    WHERE s."storeId"=${storeId} FOR UPDATE OF s,c`;
+  // CONTROL precedes these separate ordered row locks on every supported mutation path.
+  await tx.$queryRaw`SELECT id FROM demo."DemoCommerceSession" WHERE "storeId"=${storeId} FOR UPDATE`;
+  await tx.$queryRaw`SELECT c.id FROM public."PlatformConnection" c
+    JOIN demo."DemoCommerceSession" s ON s."connectionId"=c.id WHERE s."storeId"=${storeId} FOR UPDATE OF c`;
+  return currentRecord(tx, storeId);
 }
 
 export async function findDemoStore(

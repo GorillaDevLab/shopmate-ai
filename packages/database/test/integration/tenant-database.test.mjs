@@ -368,6 +368,12 @@ test("tenant migration preserves legacy records and rejects foreign relations in
           "utf8",
         ),
       );
+      await client.query(
+        await readFile(
+          new URL("20261003060000_mock_source_control/migration.sql", migrationRoot),
+          "utf8",
+        ),
+      );
       const directory = fileURLToPath(new URL("../../", import.meta.url));
       const cli = fileURLToPath(
         new URL("../../node_modules/prisma/build/index.js", import.meta.url),
