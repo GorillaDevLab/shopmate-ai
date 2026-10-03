@@ -136,56 +136,49 @@ const mutate = (kind, change) => {
   change(value.after);
   return value;
 };
+function arrayWithInheritedAccessor(key) {
+  const reads = { count: 0 };
+  const value = [];
+  Object.setPrototypeOf(
+    value,
+    Object.create(Array.prototype, {
+      [key]: {
+        get() {
+          reads.count += 1;
+          return Array.prototype[key];
+        },
+      },
+    }),
+  );
+  return { value, reads };
+}
 
 test("pure publication boundary is implemented", () =>
   assert.equal(typeof codec?.validateChunk, "function"));
-test("arrays with inherited behavior are rejected before accessors run", () => {
-  let getterCalls = 0;
-  const customEvents = [];
-  Object.setPrototypeOf(
-    customEvents,
-    Object.create(Array.prototype, {
-      [Symbol.iterator]: {
-        get() {
-          getterCalls += 1;
-          return Array.prototype[Symbol.iterator];
-        },
-      },
-    }),
-  );
-  inputError(() => codec.validateChunk(chunk(customEvents), scope));
-
+test("custom events array rejects inherited iterator before access", () => {
+  const { value, reads } = arrayWithInheritedAccessor(Symbol.iterator);
+  inputError(() => codec.validateChunk(chunk(value), scope));
+  assert.equal(reads.count, 0);
+});
+test("array subclasses are rejected", () => {
   class EventList extends Array {}
   inputError(() => codec.validateChunk(chunk(new EventList()), scope));
+});
 
+test("nested product SKU array rejects inherited map before access", () => {
+  const { value, reads } = arrayWithInheritedAccessor("map");
   const product = event("PRODUCT");
-  Object.setPrototypeOf(
-    product.after.skus,
-    Object.create(Array.prototype, {
-      map: {
-        get() {
-          getterCalls += 1;
-          return Array.prototype.map;
-        },
-      },
-    }),
-  );
+  product.after.skus = value;
   inputError(() => codec.validateSnapshotEvent(product, scope));
+  assert.equal(reads.count, 0);
+});
 
+test("nested quality issues array rejects inherited every before access", () => {
+  const { value, reads } = arrayWithInheritedAccessor("every");
   const store = event("STORE");
-  Object.setPrototypeOf(
-    store.after.source.quality.issues,
-    Object.create(Array.prototype, {
-      every: {
-        get() {
-          getterCalls += 1;
-          return Array.prototype.every;
-        },
-      },
-    }),
-  );
+  store.after.source.quality.issues = value;
   inputError(() => codec.validateSnapshotEvent(store, scope));
-  assert.equal(getterCalls, 0);
+  assert.equal(reads.count, 0);
 });
 test("six closed record fixtures conform to Connector and source codec", () => {
   for (const [kind, value] of Object.entries(fixtures)) {
@@ -273,67 +266,31 @@ test("identity stays exact while generated IDs and normalized text have byte bou
     ),
   );
 });
-test("null refinements and quality exceptions mirror the Connector contract", () => {
-  const cases = [
-    [
-      "STORE",
-      (r) => {
-        r.category = null;
-      },
-      "CATEGORY_MISSING",
-    ],
-    [
-      "PRODUCT",
-      (r) => {
-        r.skus[0].costPriceMinor = null;
-      },
-      "COST_MISSING",
-    ],
-    [
-      "ORDER",
-      (r) => {
-        r.paidMinor = null;
-        r.paidAt = null;
-      },
-      "PAYMENT_UNKNOWN",
-    ],
-    [
-      "ORDER",
-      (r) => {
-        r.refundedMinor = null;
-      },
-      "REFUND_UNKNOWN",
-    ],
-    [
-      "INVENTORY",
-      (r) => {
-        r.available = null;
-      },
-      "INVENTORY_UNKNOWN",
-    ],
-    [
-      "MARKETING",
-      (r) => {
-        r.clicks = null;
-      },
-      "MARKETING_UNKNOWN",
-    ],
-    [
-      "REFUND",
-      (r) => {
-        r.succeededMinor = null;
-        r.succeededAt = null;
-      },
-      "REFUND_UNKNOWN",
-    ],
-  ];
-  for (const [kind, change, issue] of cases) {
-    const value = mutate(kind, change);
-    inputError(() => codec.validateSnapshotEvent(value, scope));
-    value.after.source.quality = { state: "PARTIAL", issues: [issue] };
-    assert.doesNotThrow(() => codec.validateSnapshotEvent(value, scope));
-    assert.deepEqual(records[schemas[kind]].parse(value.after), value.after);
-  }
+function assertQualityException(kind, change, issue) {
+  const value = mutate(kind, change);
+  inputError(() => codec.validateSnapshotEvent(value, scope));
+  value.after.source.quality = { state: "PARTIAL", issues: [issue] };
+  assert.doesNotThrow(() => codec.validateSnapshotEvent(value, scope));
+  assert.deepEqual(records[schemas[kind]].parse(value.after), value.after);
+}
+test("matching partial quality issues allow documented null fields", () => {
+  assertQualityException("STORE", (r) => (r.category = null), "CATEGORY_MISSING");
+  assertQualityException("PRODUCT", (r) => (r.skus[0].costPriceMinor = null), "COST_MISSING");
+  assertQualityException(
+    "ORDER",
+    (r) => Object.assign(r, { paidMinor: null, paidAt: null }),
+    "PAYMENT_UNKNOWN",
+  );
+  assertQualityException("ORDER", (r) => (r.refundedMinor = null), "REFUND_UNKNOWN");
+  assertQualityException("INVENTORY", (r) => (r.available = null), "INVENTORY_UNKNOWN");
+  assertQualityException("MARKETING", (r) => (r.clicks = null), "MARKETING_UNKNOWN");
+  assertQualityException(
+    "REFUND",
+    (r) => Object.assign(r, { succeededMinor: null, succeededAt: null }),
+    "REFUND_UNKNOWN",
+  );
+});
+test("quality state requires a unique known nonempty matching issue", () => {
   for (const quality of [
     { state: "PARTIAL", issues: [] },
     { state: "COMPLETE", issues: ["COST_MISSING"] },
@@ -349,64 +306,67 @@ test("null refinements and quality exceptions mirror the Connector contract", ()
       ),
     );
 });
+const invalidFinancialEvents = [
+  mutate("ORDER", (r) => {
+    r.items[0].quantity = Number.MAX_SAFE_INTEGER;
+  }),
+  mutate("ORDER", (r) => {
+    r.shippingMinor = Number.MAX_SAFE_INTEGER;
+  }),
+  mutate("ORDER", (r) => {
+    r.paidMinor = 194;
+  }),
+  mutate("ORDER", (r) => {
+    r.refundedMinor = 196;
+  }),
+  mutate("ORDER", (r) => {
+    r.paidAt = "2024-02-28T00:00:00.000Z";
+  }),
+  mutate("ORDER", (r) => {
+    r.items.push(r.items[0]);
+  }),
+  mutate("ORDER", (r) => {
+    r.items[0].netMinor = 189;
+  }),
+  mutate("ORDER", (r) => {
+    r.status = "PENDING_PAYMENT";
+  }),
+  mutate("REFUND", (r) => {
+    r.status = "REQUESTED";
+  }),
+  mutate("REFUND", (r) => {
+    r.succeededMinor = 11;
+  }),
+  mutate("REFUND", (r) => {
+    r.succeededAt = "2024-02-28T00:00:00.000Z";
+  }),
+  mutate("INVENTORY", (r) => {
+    r.available = 9;
+  }),
+  mutate("INVENTORY", (r) => {
+    r.leadTimeDays = 366;
+  }),
+  mutate("MARKETING", (r) => {
+    r.date = "2025-02-29";
+  }),
+  mutate("PRODUCT", (r) => {
+    r.skus.push(r.skus[0]);
+  }),
+  mutate("PRODUCT", (r) => {
+    r.skus[0].attributes.push(r.skus[0].attributes[0]);
+  }),
+  mutate("PRODUCT", (r) => {
+    r.skus[0].externalProductId = "other";
+  }),
+  mutate("STORE", (r) => {
+    r.currency = "USD";
+  }),
+];
 test("financial arithmetic, timing, enums and nested identities are enforced", () => {
-  const invalid = [
-    mutate("ORDER", (r) => {
-      r.items[0].quantity = Number.MAX_SAFE_INTEGER;
-    }),
-    mutate("ORDER", (r) => {
-      r.shippingMinor = Number.MAX_SAFE_INTEGER;
-    }),
-    mutate("ORDER", (r) => {
-      r.paidMinor = 194;
-    }),
-    mutate("ORDER", (r) => {
-      r.refundedMinor = 196;
-    }),
-    mutate("ORDER", (r) => {
-      r.paidAt = "2024-02-28T00:00:00.000Z";
-    }),
-    mutate("ORDER", (r) => {
-      r.items.push(r.items[0]);
-    }),
-    mutate("ORDER", (r) => {
-      r.items[0].netMinor = 189;
-    }),
-    mutate("ORDER", (r) => {
-      r.status = "PENDING_PAYMENT";
-    }),
-    mutate("REFUND", (r) => {
-      r.status = "REQUESTED";
-    }),
-    mutate("REFUND", (r) => {
-      r.succeededMinor = 11;
-    }),
-    mutate("REFUND", (r) => {
-      r.succeededAt = "2024-02-28T00:00:00.000Z";
-    }),
-    mutate("INVENTORY", (r) => {
-      r.available = 9;
-    }),
-    mutate("INVENTORY", (r) => {
-      r.leadTimeDays = 366;
-    }),
-    mutate("MARKETING", (r) => {
-      r.date = "2025-02-29";
-    }),
-    mutate("PRODUCT", (r) => {
-      r.skus.push(r.skus[0]);
-    }),
-    mutate("PRODUCT", (r) => {
-      r.skus[0].attributes.push(r.skus[0].attributes[0]);
-    }),
-    mutate("PRODUCT", (r) => {
-      r.skus[0].externalProductId = "other";
-    }),
-    mutate("STORE", (r) => {
-      r.currency = "USD";
-    }),
-  ];
-  for (const value of invalid) inputError(() => codec.validateSnapshotEvent(value, scope));
+  for (const value of invalidFinancialEvents)
+    inputError(() => codec.validateSnapshotEvent(value, scope));
+});
+test("inconsistent order and refund status may carry the matching partial issue", () => {
   for (const kind of ["ORDER", "REFUND"]) {
     const value = mutate(kind, (r) => {
       r.status = kind === "ORDER" ? "PENDING_PAYMENT" : "REQUESTED";
@@ -416,26 +376,25 @@ test("financial arithmetic, timing, enums and nested identities are enforced", (
     assert.deepEqual(records[schemas[kind]].parse(value.after), value.after);
   }
 });
-test("hostile objects reject without executing accessors or toJSON", () => {
-  let calls = 0;
+function hostileValueCases(reads) {
   const getter = event("STORE");
   Object.defineProperty(getter.after, "name", {
     enumerable: true,
     get() {
-      calls++;
+      reads.count++;
       return "name";
     },
   });
   const serializer = event("STORE");
   serializer.after.toJSON = () => {
-    calls++;
+    reads.count++;
     return {};
   };
   const cyclic = event("STORE");
   cyclic.after.self = cyclic.after;
   const symbol = event("STORE");
   symbol.after[Symbol("private")] = true;
-  const values = [
+  return [
     getter,
     serializer,
     cyclic,
@@ -454,10 +413,14 @@ test("hostile objects reject without executing accessors or toJSON", () => {
       r.name = 9007199254740992;
     }),
   ];
-  for (const value of values) inputError(() => codec.validateSnapshotEvent(value, scope));
-  assert.equal(calls, 0);
+}
+test("hostile object values reject without executing getter or serializer", () => {
+  const reads = { count: 0 };
+  for (const value of hostileValueCases(reads))
+    inputError(() => codec.validateSnapshotEvent(value, scope));
+  assert.equal(reads.count, 0);
 });
-test("chunk rejects duplicate tuples, order inversions, and size/node/depth limits", () => {
+test("chunks reject duplicate and inverted event tuples", () => {
   inputError(() => codec.validateChunk(chunk([event("STORE"), event("STORE")]), scope));
   inputError(() => codec.validateChunk(chunk([event("PRODUCT"), event("STORE")]), scope));
   inputError(() =>
@@ -472,25 +435,27 @@ test("chunk rejects duplicate tuples, order inversions, and size/node/depth limi
       scope,
     ),
   );
+});
+function depthLimitedEvent() {
   const depth = event("STORE");
   let nested = depth.after;
   for (let i = 0; i < 13; i++) {
     nested.deep = {};
     nested = nested.deep;
   }
+  return depth;
+}
+function nodeLimitedEvent() {
   const nodes = event("STORE");
   nodes.after.nodes = Array.from({ length: 500 }, () => Array.from({ length: 41 }, () => 0));
+  return nodes;
+}
+function byteLimitedEvent() {
   const bytes = event("STORE");
   bytes.after.name = "x".repeat(256 * 1024);
-  for (const value of [
-    depth,
-    nodes,
-    bytes,
-    mutate("PRODUCT", (r) => {
-      r.skus = Array(501).fill(r.skus[0]);
-    }),
-  ])
-    inputError(() => codec.validateSnapshotEvent(value, scope));
+  return bytes;
+}
+function oversizedProductChunk() {
   const largeProduct = event("PRODUCT");
   largeProduct.after.skus = Array.from({ length: 500 }, (_, i) => ({
     ...largeProduct.after.skus[0],
@@ -500,82 +465,96 @@ test("chunk rejects duplicate tuples, order inversions, and size/node/depth limi
       value: "x".repeat(200),
     })),
   }));
-  inputError(() =>
-    codec.validateChunk(
-      chunk(Array.from({ length: 100 }, (_, i) => ({ ...largeProduct, ordinal: String(i) }))),
-      scope,
-    ),
-  );
-});
-test("checkpoint, lease and publication are exact and stored defects are integrity errors", () => {
-  const checkpoint = {
-    codec: "source-checkpoint-v1",
-    chunkIndex: "0",
-    highEventSeq: "0",
-    processedThrough: time,
-    lastEvent: null,
-    sealed: false,
-  };
-  const lease = {
-    scope,
-    revision: "1",
-    fence: "1",
-    ownerId: "123e4567-e89b-42d3-a456-426614174000",
-  };
-  assert.doesNotThrow(() => codec.validateLeaseRef(lease));
-  assert.doesNotThrow(() => codec.validateCheckpoint(checkpoint));
-  assert.doesNotThrow(() =>
-    codec.validateBuildLease({
-      ...lease,
-      targetClockRevision: 0,
-      targetTime: time,
-      baseRevision: "0",
-      baseHighEventSeq: "0",
-      checkpoint,
-      checkpointHash: hash,
-      leaseUntil: time,
+  return chunk(Array.from({ length: 100 }, (_, i) => ({ ...largeProduct, ordinal: String(i) })));
+}
+test("events reject data depth, node, byte and array count excess", () => {
+  for (const value of [
+    depthLimitedEvent(),
+    nodeLimitedEvent(),
+    byteLimitedEvent(),
+    mutate("PRODUCT", (r) => {
+      r.skus = Array(501).fill(r.skus[0]);
     }),
-  );
-  assert.doesNotThrow(() =>
-    codec.validatePublishInput({ expectedBaseRevision: "0", checkpointHash: hash }),
-  );
-  const publication = {
-    scope,
-    revision: "1",
+  ])
+    inputError(() => codec.validateSnapshotEvent(value, scope));
+  inputError(() => codec.validateChunk(oversizedProductChunk(), scope));
+});
+const checkpointFixture = {
+  codec: "source-checkpoint-v1",
+  chunkIndex: "0",
+  highEventSeq: "0",
+  processedThrough: time,
+  lastEvent: null,
+  sealed: false,
+};
+const leaseFixture = {
+  scope,
+  revision: "1",
+  fence: "1",
+  ownerId: "123e4567-e89b-42d3-a456-426614174000",
+};
+const publicationFixture = {
+  scope,
+  revision: "1",
+  targetClockRevision: 0,
+  targetTime: time,
+  baseRevision: "0",
+  baseHighEventSeq: "0",
+  highEventSeq: "6",
+  eventCount: "6",
+  versionCount: "6",
+  processedThrough: time,
+  generatorVersion: "mock-source-v1",
+  runtimeVersion: "mock-runtime-v2",
+  codec: "source-snapshot-v1",
+  publishedAt: time,
+  certificateHash: hash,
+};
+function buildLeaseFixture() {
+  return {
+    ...leaseFixture,
     targetClockRevision: 0,
     targetTime: time,
     baseRevision: "0",
     baseHighEventSeq: "0",
-    highEventSeq: "6",
-    eventCount: "6",
-    versionCount: "6",
-    processedThrough: time,
-    generatorVersion: "mock-source-v1",
-    runtimeVersion: "mock-runtime-v2",
-    codec: "source-snapshot-v1",
-    publishedAt: time,
-    certificateHash: hash,
+    checkpoint: checkpointFixture,
+    checkpointHash: hash,
+    leaseUntil: time,
   };
-  assert.doesNotThrow(() => codec.validatePublication(publication));
+}
+test("valid checkpoint, lease, publication and publish input pass", () => {
+  assert.doesNotThrow(() => codec.validateLeaseRef(leaseFixture));
+  assert.doesNotThrow(() => codec.validateCheckpoint(checkpointFixture));
+  assert.doesNotThrow(() => codec.validateBuildLease(buildLeaseFixture()));
+  assert.doesNotThrow(() => codec.validatePublication(publicationFixture));
+  assert.doesNotThrow(() =>
+    codec.validatePublishInput({ expectedBaseRevision: "0", checkpointHash: hash }),
+  );
+});
+test("lease references reject invalid revisions, fences, owners and extra keys", () => {
   for (const value of [
-    { ...lease, revision: "0" },
-    { ...lease, fence: "0" },
-    { ...lease, ownerId: "owner" },
-    { ...lease, extra: true },
+    { ...leaseFixture, revision: "0" },
+    { ...leaseFixture, fence: "0" },
+    { ...leaseFixture, ownerId: "owner" },
+    { ...leaseFixture, extra: true },
   ])
     inputError(() => codec.validateLeaseRef(value));
+});
+test("publication rejects inconsistent stored sequence, counts and fields", () => {
   for (const value of [
-    { ...publication, highEventSeq: "7" },
-    { ...publication, versionCount: "5" },
-    { ...publication, processedThrough: "2024-02-28T00:00:00.000Z" },
-    { ...publication, certificateHash: "bad" },
-    { ...publication, checkpoint },
+    { ...publicationFixture, highEventSeq: "7" },
+    { ...publicationFixture, versionCount: "5" },
+    { ...publicationFixture, processedThrough: "2024-02-28T00:00:00.000Z" },
+    { ...publicationFixture, certificateHash: "bad" },
+    { ...publicationFixture, checkpoint: checkpointFixture },
   ])
     assert.throws(() => codec.validatePublication(value), { code: "SOURCE_INTEGRITY" });
+});
+test("checkpoint rejects invalid event ordering data", () => {
   assert.throws(
     () =>
       codec.validateCheckpoint({
-        ...checkpoint,
+        ...checkpointFixture,
         lastEvent: {
           occurredAt: time,
           kind: "INVENTORY",
@@ -697,33 +676,27 @@ test("strict field validation rejects missing and unknown keys throughout every 
   ])
     inputError(() => codec.validateChunk(value, scope));
 });
-test("amount and quantity fields reject fractional, unsafe and nonfinite numbers", () => {
-  const fields = {
-    PRODUCT: ["skus.0.salePriceMinor", "skus.0.costPriceMinor", "skus.0.originalPriceMinor"],
-    ORDER: [
-      "items.0.quantity",
-      "items.0.unitPriceMinor",
-      "items.0.grossMinor",
-      "items.0.discountMinor",
-      "items.0.netMinor",
-      "grossMinor",
-      "discountMinor",
-      "shippingMinor",
-      "payableMinor",
-      "paidMinor",
-      "refundedMinor",
-    ],
-    REFUND: ["requestedMinor", "succeededMinor"],
-    INVENTORY: ["available", "reserved", "onHand", "safetyStock", "leadTimeDays"],
-    MARKETING: [
-      "impressions",
-      "clicks",
-      "attributedOrders",
-      "spendMinor",
-      "attributedRevenueMinor",
-    ],
-  };
-  for (const [kind, paths] of Object.entries(fields)) {
+const numericFieldPaths = {
+  PRODUCT: ["skus.0.salePriceMinor", "skus.0.costPriceMinor", "skus.0.originalPriceMinor"],
+  ORDER: [
+    "items.0.quantity",
+    "items.0.unitPriceMinor",
+    "items.0.grossMinor",
+    "items.0.discountMinor",
+    "items.0.netMinor",
+    "grossMinor",
+    "discountMinor",
+    "shippingMinor",
+    "payableMinor",
+    "paidMinor",
+    "refundedMinor",
+  ],
+  REFUND: ["requestedMinor", "succeededMinor"],
+  INVENTORY: ["available", "reserved", "onHand", "safetyStock", "leadTimeDays"],
+  MARKETING: ["impressions", "clicks", "attributedOrders", "spendMinor", "attributedRevenueMinor"],
+};
+test("amount and quantity fields reject invalid numeric values", () => {
+  for (const [kind, paths] of Object.entries(numericFieldPaths)) {
     for (const path of paths) {
       for (const amount of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, "1"]) {
         const value = event(kind),
@@ -735,8 +708,10 @@ test("amount and quantity fields reject fractional, unsafe and nonfinite numbers
       }
     }
   }
-  const max = event("ORDER"),
-    item = max.after.items[0];
+});
+test("financial sums accept safe maximum and reject duplicate lines", () => {
+  const max = event("ORDER");
+  const item = max.after.items[0];
   item.quantity = 1;
   item.unitPriceMinor = Number.MAX_SAFE_INTEGER;
   item.grossMinor = Number.MAX_SAFE_INTEGER;
@@ -754,44 +729,48 @@ test("amount and quantity fields reject fractional, unsafe and nonfinite numbers
   max.after.items.push({ ...item, externalLineId: "line2" });
   inputError(() => codec.validateSnapshotEvent(max, scope));
 });
-test("stored DTOs reject hostile inputs and exact count and checkpoint defects", () => {
-  const checkpoint = {
-    codec: "source-checkpoint-v1",
-    chunkIndex: "0",
-    highEventSeq: "1",
-    processedThrough: time,
-    lastEvent: {
-      occurredAt: time,
-      kind: "STORE",
-      entityKey: ["STORE", scope.externalStoreId],
-      ordinal: "9223372036854775807",
-    },
-    sealed: false,
-  };
-  assert.doesNotThrow(() => codec.validateCheckpoint(checkpoint));
+const storedCheckpointFixture = {
+  codec: "source-checkpoint-v1",
+  chunkIndex: "0",
+  highEventSeq: "1",
+  processedThrough: time,
+  lastEvent: {
+    occurredAt: time,
+    kind: "STORE",
+    entityKey: ["STORE", scope.externalStoreId],
+    ordinal: "9223372036854775807",
+  },
+  sealed: false,
+};
+const storedLeaseFixture = {
+  ...leaseFixture,
+  targetClockRevision: 0,
+  targetTime: time,
+  baseRevision: "0",
+  baseHighEventSeq: "0",
+  checkpoint: storedCheckpointFixture,
+  checkpointHash: hash,
+  leaseUntil: time,
+};
+test("stored checkpoint accepts max ordinal and rejects malformed fields", () => {
+  assert.doesNotThrow(() => codec.validateCheckpoint(storedCheckpointFixture));
   for (const patch of [
     { chunkIndex: "01" },
     { highEventSeq: "9223372036854775808" },
     { codec: "source-checkpoint-v2" },
     { extra: true },
-    { lastEvent: { ...checkpoint.lastEvent, occurredAt: "2024-03-01T00:00:00.000Z" } },
+    {
+      lastEvent: {
+        ...storedCheckpointFixture.lastEvent,
+        occurredAt: "2024-03-01T00:00:00.000Z",
+      },
+    },
   ])
-    assert.throws(() => codec.validateCheckpoint({ ...checkpoint, ...patch }), {
+    assert.throws(() => codec.validateCheckpoint({ ...storedCheckpointFixture, ...patch }), {
       code: "SOURCE_INTEGRITY",
     });
-  const lease = {
-    scope,
-    revision: "1",
-    fence: "1",
-    ownerId: "123e4567-e89b-42d3-a456-426614174000",
-    targetClockRevision: 0,
-    targetTime: time,
-    baseRevision: "0",
-    baseHighEventSeq: "0",
-    checkpoint,
-    checkpointHash: hash,
-    leaseUntil: time,
-  };
+});
+test("stored build lease rejects invalid bounds and checkpoint mismatch", () => {
   for (const patch of [
     { targetClockRevision: 2147483648 },
     { baseRevision: "1" },
@@ -799,17 +778,21 @@ test("stored DTOs reject hostile inputs and exact count and checkpoint defects",
     { leaseUntil: "0000-01-01T00:00:00.000Z" },
     { baseHighEventSeq: "2" },
   ])
-    assert.throws(() => codec.validateBuildLease({ ...lease, ...patch }), {
+    assert.throws(() => codec.validateBuildLease({ ...storedLeaseFixture, ...patch }), {
       code: "SOURCE_INTEGRITY",
     });
+});
+test("stored publish input rejects malformed and unknown fields", () => {
   for (const input of [
     null,
     { expectedBaseRevision: "01", checkpointHash: hash },
     { expectedBaseRevision: "0", checkpointHash: hash, certificate: {} },
   ])
     inputError(() => codec.validatePublishInput(input));
+});
+test("stored checkpoint rejects hostile accessor without executing it", () => {
   let calls = 0;
-  const hostile = { ...checkpoint };
+  const hostile = { ...storedCheckpointFixture };
   Object.defineProperty(hostile, "sealed", {
     enumerable: true,
     get() {
