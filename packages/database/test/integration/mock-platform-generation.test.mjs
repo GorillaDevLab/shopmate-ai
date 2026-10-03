@@ -299,6 +299,14 @@ test("frozen source generations use real restricted logins and fresh RLS", async
           worker.initializeGeneration({ grantId: "source-grant-a2" }, s),
           (e) => e.code === "SOURCE_INTEGRITY",
         );
+        assert.equal(
+          (
+            await admin.query('SELECT * FROM mock_platform."Runtime" WHERE "sessionId"=$1', [
+              s.sessionId,
+            ])
+          ).rowCount,
+          0,
+        );
       }
       await admin.query(
         'UPDATE demo."DemoCommerceSession" SET config=$1,"configHash"=$2 WHERE id=$3',
@@ -321,6 +329,39 @@ test("frozen source generations use real restricted logins and fresh RLS", async
         [good, hashConfig(good), s.sessionId],
       );
     });
+    await t.test(
+      "persisted nonstring profiles fail integrity before any Runtime insertion",
+      async () => {
+        const s = scopeFor("a2");
+        const good = configFor(s);
+        try {
+          for (const profile of [["mature"], ["new"], { value: "mature" }, null]) {
+            const config = { ...good, profile };
+            await admin.query(
+              'UPDATE demo."DemoCommerceSession" SET config=$1,"configHash"=$2 WHERE id=$3',
+              [config, hashConfig(config), s.sessionId],
+            );
+            await assert.rejects(
+              worker.initializeGeneration({ grantId: "source-grant-a2" }, s),
+              (e) => e.code === "SOURCE_INTEGRITY",
+            );
+            assert.equal(
+              (
+                await admin.query('SELECT * FROM mock_platform."Runtime" WHERE "sessionId"=$1', [
+                  s.sessionId,
+                ])
+              ).rowCount,
+              0,
+            );
+          }
+        } finally {
+          await admin.query(
+            'UPDATE demo."DemoCommerceSession" SET config=$1,"configHash"=$2 WHERE id=$3',
+            [good, hashConfig(good), s.sessionId],
+          );
+        }
+      },
+    );
     await t.test("composite FKs and trigger prevent repurposing immutable rows", async () => {
       await assert.rejects(
         grantSource(admin, { ...scope, workspaceId: "source-unassigned" }, "bad-grant"),

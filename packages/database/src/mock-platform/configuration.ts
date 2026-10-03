@@ -60,7 +60,8 @@ function validShape(config: unknown, scope: SourceScope): config is Record<strin
   return (
     bindingKeys.every((key) => (config.binding as Record<string, unknown>)[key] === scope[key]) &&
     Object.entries(ranges).every(([key, [min, max]]) => integer(config[key], min, max)) &&
-    ["growing", "problematic", "mature", "new"].includes(String(config.profile)) &&
+    typeof config.profile === "string" &&
+    ["growing", "problematic", "mature", "new"].includes(config.profile) &&
     validStart(config.historyStart)
   );
 }
