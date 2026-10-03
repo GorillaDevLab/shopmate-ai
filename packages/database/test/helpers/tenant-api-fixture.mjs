@@ -7,9 +7,16 @@ export async function prepareTenantApiRuntime(url) {
   await client.connect();
   try {
     await client.query("CREATE ROLE shopmate_tenant_api LOGIN NOSUPERUSER NOBYPASSRLS");
-    await client.query("GRANT USAGE ON SCHEMA public TO shopmate_tenant_api");
+    await client.query("GRANT USAGE ON SCHEMA public,demo TO shopmate_tenant_api");
     await client.query(
-      'GRANT SELECT ON "Organization","OrganizationMember","Workspace","WorkspaceMember" TO shopmate_tenant_api',
+      'GRANT SELECT ON "Organization","OrganizationMember","Workspace","WorkspaceMember","Store","DemoTenant","TenantBootstrapEnvironment" TO shopmate_tenant_api',
+    );
+    await client.query(
+      'GRANT SELECT,INSERT,UPDATE ON public."PlatformConnection",demo."DemoCommerceSession" TO shopmate_tenant_api',
+    );
+    await client.query('GRANT SELECT,INSERT ON demo."DemoControlAudit" TO shopmate_tenant_api');
+    await client.query(
+      "GRANT EXECUTE ON FUNCTION demo.has_store_access(TEXT,TEXT,TEXT,BOOLEAN) TO shopmate_tenant_api",
     );
     const runtime = new URL(url);
     runtime.username = "shopmate_tenant_api";
