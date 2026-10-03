@@ -12,12 +12,13 @@ No AUTH barrier, authorization-table triggers, event/version/job/lease/scan tabl
 
 Preserve @shopmate/database/mock-platform, createMockSourceReader(env), createMockSourceWorker(env), SourceScope/actor validation, dedicated environment URLs and credential checks.
 Preserve the private SourcePool wrapper, contained idle/checked-out connection errors, explicit retry/revalidation and sanitized close from the reviewed foundation; do not expose a pool or introduce automatic replay.
+
 - Reader findGeneration(actor,scope): Promise<SourceGeneration|null>; close().
 - Worker initializeGeneration(actor,scope): Promise<{status:'CREATED'|'EXISTS';generation:SourceGeneration}|{status:'DENIED'}>; listGrants(); close().
 - Current SourceStorageError codes remain SOURCE_INPUT, SOURCE_CONFIGURATION, SOURCE_CREDENTIALS, SOURCE_STORAGE, SOURCE_INTEGRITY.
 - Demo create/advance/reset/disconnect signatures and WRITTEN/CONFLICT/NOT_FOUND results remain unchanged; preserve executeOne exact-row-count rollback and audit atomicity.
-Add packages/database/prisma/migrations/20261003060000_mock_source_control/migration.sql. Do not rewrite the foundation migration.
-Modify focused existing files: src/mock-platform/{transaction,index,generations,errors}.ts as needed; src/demo-commerce.{repository,mutations}.ts; integration/helpers/tests and operator delivery documentation. Small internal helper files are allowed. No new Prisma tables/models are required.
+  Add packages/database/prisma/migrations/20261003060000_mock_source_control/migration.sql. Do not rewrite the foundation migration.
+  Modify focused existing files: src/mock-platform/{transaction,index,generations,errors}.ts as needed; src/demo-commerce.{repository,mutations}.ts; integration/helpers/tests and operator delivery documentation. Small internal helper files are allowed. No new Prisma tables/models are required.
 
 ## Database lock contract
 
@@ -65,6 +66,7 @@ Supported paths use one CONTROL key before control rows and must be deadlock-fre
 ## Real integration acceptance (tests first)
 
 Use the existing isolated PostgreSQL harness and actual source/control login connections, not admin SET ROLE. Observe barriers/pg_locks from the test operator; no runtime monitoring privilege is added. Synchronize deterministically; timeout-only or sleeps-only tests do not prove blocking/order.
+
 1. Source initialization holds CONTROL before INSERT; start real reset and observe it waiting. Commit initialization=>CREATED, then reset=>WRITTEN; old scope read returns null and reinitialize returns DENIED; a fresh generation initializes independently.
 2. Reverse schedule: reset owns CONTROL before generation change; initialization waits; after reset commit initialization returns DENIED, and operator inspection confirms no old-generation Runtime row was inserted. Repeat both orders with disconnect; disconnected scope cannot initialize.
 3. Real raw worker INSERT begins with old snapshot and waits in BEFORE STATEMENT guard while the other connection owns CONTROL and resets/disconnects. After control commit the fresh row guard must throw SM001 or otherwise deny atomically; no old-generation row. Use direct VALUES from a frozen valid fixture so an old INSERT SELECT predicate cannot make this test vacuously affect zero rows.
