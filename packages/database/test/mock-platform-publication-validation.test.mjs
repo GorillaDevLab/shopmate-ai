@@ -139,6 +139,54 @@ const mutate = (kind, change) => {
 
 test("pure publication boundary is implemented", () =>
   assert.equal(typeof codec?.validateChunk, "function"));
+test("arrays with inherited behavior are rejected before accessors run", () => {
+  let getterCalls = 0;
+  const customEvents = [];
+  Object.setPrototypeOf(
+    customEvents,
+    Object.create(Array.prototype, {
+      [Symbol.iterator]: {
+        get() {
+          getterCalls += 1;
+          return Array.prototype[Symbol.iterator];
+        },
+      },
+    }),
+  );
+  inputError(() => codec.validateChunk(chunk(customEvents), scope));
+
+  class EventList extends Array {}
+  inputError(() => codec.validateChunk(chunk(new EventList()), scope));
+
+  const product = event("PRODUCT");
+  Object.setPrototypeOf(
+    product.after.skus,
+    Object.create(Array.prototype, {
+      map: {
+        get() {
+          getterCalls += 1;
+          return Array.prototype.map;
+        },
+      },
+    }),
+  );
+  inputError(() => codec.validateSnapshotEvent(product, scope));
+
+  const store = event("STORE");
+  Object.setPrototypeOf(
+    store.after.source.quality.issues,
+    Object.create(Array.prototype, {
+      every: {
+        get() {
+          getterCalls += 1;
+          return Array.prototype.every;
+        },
+      },
+    }),
+  );
+  inputError(() => codec.validateSnapshotEvent(store, scope));
+  assert.equal(getterCalls, 0);
+});
 test("six closed record fixtures conform to Connector and source codec", () => {
   for (const [kind, value] of Object.entries(fixtures)) {
     assert.deepEqual(records[schemas[kind]].parse(value), value);

@@ -39,7 +39,11 @@ function primitiveSize(value: unknown, remaining: number): number | null {
 }
 function children(value: object, budget: Budget): unknown[] {
   const array = Array.isArray(value);
-  requireInput(array || Object.getPrototypeOf(value) === Object.prototype);
+  requireInput(
+    array
+      ? Object.getPrototypeOf(value) === Array.prototype
+      : Object.getPrototypeOf(value) === Object.prototype,
+  );
   const keys = Reflect.ownKeys(value);
   requireInput(keys.length <= budget.maxNodes - budget.nodes + (array ? 1 : 0));
   requireInput(keys.length * 2 <= budget.maxBytes - budget.bytes + (array ? 2 : 0));
