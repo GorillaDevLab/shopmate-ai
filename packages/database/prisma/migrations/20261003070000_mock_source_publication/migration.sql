@@ -372,7 +372,7 @@ GRANT EXECUTE ON FUNCTION mock_platform.integrity(BOOLEAN),mock_platform.hash_js
   mock_platform.require_inventory(JSONB),mock_platform.require_record(TEXT,JSONB,TEXT,TEXT),mock_platform.phase_rank(TEXT),
   mock_platform.entity_key(TEXT,JSONB),mock_platform.require_event_tuple(JSONB),mock_platform.compare_event_tuples(JSONB,JSONB) TO shopmate_mock_source_worker;
 -- Append installs complete immediate and deferred physical proofs below.
--- Publication remains closed until its separate certificate proof is installed.
+-- Publication requires the complete physical journal proof and immutable certificate guards below.
 CREATE UNIQUE INDEX "Runtime_scope_key" ON mock_platform."Runtime"
   ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation);
 CREATE TABLE mock_platform."BuildJob" (
