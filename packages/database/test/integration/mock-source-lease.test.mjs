@@ -194,6 +194,28 @@ test("FAIL preserves progress and immediate takeover increments fence", async ()
     sqlError("SM003"),
   );
 });
+test("CLAIM takeover rejects a NULL state proposal and preserves the failed job", async () => {
+  const context = await fresh("null-claim");
+  const failed = (
+    await change(worker, context, context.job, "FAIL", {
+      state: "FAILED",
+      failure: "INTERRUPTED",
+    })
+  ).rows[0];
+  await assert.rejects(
+    change(worker, context, failed, "CLAIM", { state: null, owner: randomUUID() }),
+    sqlError("SM004"),
+  );
+  assert.deepEqual(await jobFor(admin, context), failed);
+});
+test("FAIL rejects a NULL state proposal and preserves the active job", async () => {
+  const context = await fresh("null-fail");
+  await assert.rejects(
+    change(worker, context, context.job, "FAIL", { state: null, failure: "INTERRUPTED" }),
+    sqlError("SM004"),
+  );
+  assert.deepEqual(await jobFor(admin, context), context.job);
+});
 for (const owner of [
   "BAD",
   randomUUID().toUpperCase(),

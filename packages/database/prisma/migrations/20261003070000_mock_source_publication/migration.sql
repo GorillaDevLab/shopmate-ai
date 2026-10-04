@@ -562,7 +562,7 @@ BEGIN
   END IF;
   IF op='CLAIM' THEN
     IF old_job.state='BUILDING' AND old_job."leaseUntil">clock_timestamp() THEN RETURN NULL; END IF;
-    IF proposal.state<>'BUILDING' OR proposal."failureCode" IS NOT NULL THEN PERFORM mock_platform.source_conflict(); END IF;
+    IF proposal.state IS DISTINCT FROM 'BUILDING' OR proposal."failureCode" IS NOT NULL THEN PERFORM mock_platform.source_conflict(); END IF;
     PERFORM mock_platform.require_lease_owner(proposal."leaseOwner");
     result."leaseOwner":=proposal."leaseOwner"; result.fence:=mock_platform.source_uint(mock_platform.increment_uint(old_job.fence::text));
     result.state:='BUILDING'; result."failureCode":=NULL; result."leaseGrantId":=current_setting('mock.grant_id',true);
@@ -572,7 +572,7 @@ BEGIN
     IF op='RENEW' THEN
       IF proposal.state IS DISTINCT FROM old_job.state OR proposal."failureCode" IS NOT NULL THEN PERFORM mock_platform.source_conflict(); END IF;
     ELSIF op='FAIL' THEN
-      IF proposal.state<>'FAILED' OR proposal."failureCode" IS NULL OR proposal."failureCode" NOT IN ('INTERRUPTED','GENERATOR_INVALID') THEN PERFORM mock_platform.source_conflict(); END IF;
+      IF proposal.state IS DISTINCT FROM 'FAILED' OR proposal."failureCode" IS NULL OR proposal."failureCode" NOT IN ('INTERRUPTED','GENERATOR_INVALID') THEN PERFORM mock_platform.source_conflict(); END IF;
       result.state:='FAILED'; result."failureCode":=proposal."failureCode";
     ELSE PERFORM mock_platform.source_conflict(); END IF;
   END IF;
