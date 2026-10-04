@@ -227,11 +227,11 @@ for (const owner of [
     await assert.rejects(claim(worker, context, owner), sqlError("SM005"));
   });
 for (const op of ["APPEND", "PUBLISH", "BOGUS"])
-  test(`${op} cannot mutate a job in lease foundation`, async () => {
+  test(`${op} without its valid protocol cannot mutate a job`, async () => {
     const context = await fresh(`closed-${op.toLowerCase()}`);
     await assert.rejects(
       change(worker, context, context.job, op, { state: "PUBLISHED" }),
-      sqlError("SM002"),
+      sqlError(op === "APPEND" ? "SM005" : "SM002"),
     );
     assert.deepEqual(await jobFor(admin, context), context.job);
   });
@@ -369,7 +369,7 @@ test("worker input columns exclude derived values and existing auth/control muta
       false,
     );
 });
-test("fact INSERT is unconditionally fail-closed even for zero candidates", async () => {
+test("fact INSERT without an append declaration fails even for zero candidates", async () => {
   const context = await fresh("facts");
   for (const table of ["SourceEvent", "EntityVersion"])
     await assert.rejects(
@@ -384,7 +384,7 @@ test("fact INSERT is unconditionally fail-closed even for zero candidates", asyn
         leaseOf(context.job),
         context.grant,
       ),
-      sqlError("SM002"),
+      sqlError("SM005"),
     );
 });
 test("statement CONTROL locks before candidate/unique work on INSERT and zero-row UPDATE", async () => {
