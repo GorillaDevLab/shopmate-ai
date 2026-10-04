@@ -918,6 +918,38 @@ for (const field of ["revision", "fence"])
     const lease = { ...leaseOf(context.job), [field]: "2" };
     await reject(context, [eventFor(context)], "SM003", { lease });
   });
+for (const [label, raw, zeroCandidates] of [
+  ["missing", "", true],
+  ["malformed JSON", "{", false],
+  ["oversized", " ".repeat(1025), true],
+  [
+    "numeric revision",
+    '{"revision":1,"fence":"1","ownerId":"00000000-0000-4000-8000-000000000000"}',
+    false,
+  ],
+  [
+    "uppercase owner",
+    '{"revision":"1","fence":"1","ownerId":"AAAAAAAA-0000-4000-8000-000000000000"}',
+    false,
+  ],
+  [
+    "zero revision",
+    '{"revision":"0","fence":"1","ownerId":"00000000-0000-4000-8000-000000000000"}',
+    false,
+  ],
+])
+  test(`append lease parser rejects ${label} before ${zeroCandidates ? "zero candidates" : "staging"}`, async () => {
+    const context = await fresh(`parser-${uniqueSuffix()}`);
+    await mutationRejected(context, async () => {
+      await worker.query("SELECT set_config('mock.source_lease',$1,true)", [raw]);
+      if (zeroCandidates)
+        await worker.query(
+          'INSERT INTO mock_platform."SourceEvent" ("sessionId") SELECT $1 WHERE false',
+          [context.scope.sessionId],
+        );
+      else await insertEvent(worker, context, eventFor(context));
+    });
+  });
 test("scope authorized without a claimed job has no append lease", async () => {
   const context = await newScope(admin, worker, "append-without-job");
   context.job = {

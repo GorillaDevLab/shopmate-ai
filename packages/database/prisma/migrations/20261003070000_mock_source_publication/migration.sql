@@ -494,7 +494,7 @@ CREATE FUNCTION mock_platform.require_lease_owner(owner_id TEXT) RETURNS VOID
 LANGUAGE SQL IMMUTABLE SECURITY INVOKER SET search_path=pg_catalog AS $$
   SELECT mock_platform.integrity(owner_id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$')
 $$;
-CREATE FUNCTION mock_platform.require_live_lease(job mock_platform."BuildJob") RETURNS VOID
+CREATE FUNCTION mock_platform.lease_reference() RETURNS JSONB
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
 DECLARE input TEXT; ref JSONB;
 BEGIN
@@ -509,6 +509,12 @@ BEGIN
     AND jsonb_typeof(ref->'ownerId')='string');
   PERFORM mock_platform.require_lease_owner(ref->>'ownerId');
   PERFORM mock_platform.integrity(mock_platform.source_uint(ref->>'revision')>0 AND mock_platform.source_uint(ref->>'fence')>0);
+  RETURN ref;
+END $$;
+CREATE FUNCTION mock_platform.require_live_lease(job mock_platform."BuildJob") RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE ref JSONB:=mock_platform.lease_reference();
+BEGIN
   IF ref->>'revision' IS DISTINCT FROM job.revision::text OR ref->>'fence' IS DISTINCT FROM job.fence::text
     OR ref->>'ownerId' IS DISTINCT FROM job."leaseOwner" OR job."leaseGrantId" IS DISTINCT FROM current_setting('mock.grant_id',true)
     OR job."leaseUntil"<=clock_timestamp() THEN
@@ -645,11 +651,11 @@ GRANT INSERT ("organizationId","workspaceId","storeId","sessionId","connectionId
 GRANT SELECT ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,revision,"targetClockRevision","targetTime","baseRevision","baseHighEventSeq","highEventSeq","eventCount","versionCount","processedThrough","generatorVersion","runtimeVersion",codec,"publishedAt","certificateHash",state) ON mock_platform."BuildJob" TO shopmate_mock_source_reader;
 GRANT SELECT ON mock_platform."EntityVersion" TO shopmate_mock_source_reader;
 REVOKE ALL ON FUNCTION mock_platform.source_scope(JSONB),mock_platform.source_conflict(),mock_platform.require_source_scope(JSONB),mock_platform.require_lease_statement(),
-  mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.require_live_lease(mock_platform."BuildJob"),
+  mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.lease_reference(),mock_platform.require_live_lease(mock_platform."BuildJob"),
   mock_platform.initial_job(mock_platform."BuildJob",mock_platform."Runtime",mock_platform."BuildJob"),mock_platform.guard_job_insert(),
   mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION mock_platform.source_scope(JSONB),mock_platform.source_conflict(),mock_platform.require_source_scope(JSONB),mock_platform.require_lease_statement(),
-  mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.require_live_lease(mock_platform."BuildJob"),
+  mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.lease_reference(),mock_platform.require_live_lease(mock_platform."BuildJob"),
   mock_platform.initial_job(mock_platform."BuildJob",mock_platform."Runtime",mock_platform."BuildJob"),mock_platform.guard_job_insert(),
   mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease() TO shopmate_mock_source_worker;
 -- Protocol settings are bounded declarations. None confers authority or lock ownership.
@@ -689,20 +695,12 @@ BEGIN
 END $$;
 CREATE FUNCTION mock_platform.require_append_statement() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
-DECLARE input TEXT; ref JSONB;
 BEGIN
   PERFORM demo.lock_source_control(current_setting('demo.control_session_id',true));
   IF current_setting('mock.source_op',true) IS DISTINCT FROM 'APPEND' THEN
     RAISE EXCEPTION 'Invalid source control protocol' USING ERRCODE='SM002'; END IF;
   PERFORM mock_platform.append_declaration();
-  input:=current_setting('mock.source_lease',true);
-  PERFORM mock_platform.integrity(input IS NOT NULL AND octet_length(input)<=1024);
-  BEGIN ref:=input::jsonb;
-  EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'Invalid source integrity' USING ERRCODE='SM005'; END;
-  PERFORM mock_platform.require_fields(ref,ARRAY['revision','fence','ownerId']);
-  PERFORM mock_platform.integrity(jsonb_typeof(ref->'revision')='string' AND jsonb_typeof(ref->'fence')='string' AND jsonb_typeof(ref->'ownerId')='string');
-  PERFORM mock_platform.require_lease_owner(ref->>'ownerId');
-  PERFORM mock_platform.integrity(mock_platform.source_uint(ref->>'revision')>0 AND mock_platform.source_uint(ref->>'fence')>0);
+  PERFORM mock_platform.lease_reference();
   -- Candidate scope is available only in the row guard; prove access there before fencing.
   RETURN NULL;
 END $$;

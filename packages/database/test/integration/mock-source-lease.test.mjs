@@ -536,6 +536,7 @@ test("new guards remain fixed-path invoker and PUBLIC cannot execute them", asyn
     "deny_source_fact_insert",
     "deny_source_mutation",
     "require_lease_owner",
+    "lease_reference",
     "require_live_lease",
     "initial_job",
     "guard_job_insert",
@@ -545,11 +546,15 @@ test("new guards remain fixed-path invoker and PUBLIC cannot execute them", asyn
   ];
   const rows = (
     await admin.query(
-      "SELECT p.proname,p.prosecdef,p.proconfig,has_function_privilege('public',p.oid,'EXECUTE') AS public_exec FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='mock_platform' AND p.proname=ANY($1)",
+      "SELECT p.proname,p.prosecdef,p.proconfig,p.provolatile,has_function_privilege('public',p.oid,'EXECUTE') AS public_exec,has_function_privilege('shopmate_mock_source_worker',p.oid,'EXECUTE') AS worker_exec,has_function_privilege('shopmate_mock_source_reader',p.oid,'EXECUTE') AS reader_exec FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='mock_platform' AND p.proname=ANY($1)",
       [names],
     )
   ).rows;
   assert.equal(rows.length, names.length);
+  const parser = rows.find((row) => row.proname === "lease_reference");
+  assert.equal(parser.provolatile, "v");
+  assert.equal(parser.worker_exec, true);
+  assert.equal(parser.reader_exec, false);
   assert.ok(
     rows.every(
       (row) =>
