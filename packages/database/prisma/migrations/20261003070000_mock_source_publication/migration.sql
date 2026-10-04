@@ -371,5 +371,283 @@ GRANT EXECUTE ON FUNCTION mock_platform.integrity(BOOLEAN),mock_platform.hash_js
   mock_platform.require_order_items(JSONB),mock_platform.require_payment(JSONB),mock_platform.require_order(JSONB),mock_platform.require_refund(JSONB),
   mock_platform.require_inventory(JSONB),mock_platform.require_record(TEXT,JSONB,TEXT,TEXT),mock_platform.phase_rank(TEXT),
   mock_platform.entity_key(TEXT,JSONB),mock_platform.require_event_tuple(JSONB),mock_platform.compare_event_tuples(JSONB,JSONB) TO shopmate_mock_source_worker;
+-- Durable shape is complete; facts and publication stay closed until their physical
+-- consistency guards are installed in a subsequent reviewed migration extension.
+CREATE UNIQUE INDEX "Runtime_scope_key" ON mock_platform."Runtime"
+  ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation);
+CREATE TABLE mock_platform."BuildJob" (
+  "organizationId" TEXT NOT NULL, "workspaceId" TEXT NOT NULL, "storeId" TEXT NOT NULL,
+  "sessionId" TEXT NOT NULL, "connectionId" TEXT NOT NULL, "externalStoreId" TEXT NOT NULL, generation INTEGER NOT NULL,
+  revision BIGINT NOT NULL CHECK (revision>0), "targetClockRevision" INTEGER NOT NULL CHECK ("targetClockRevision">=0),
+  "targetTime" TIMESTAMP(3) NOT NULL, "baseRevision" BIGINT NOT NULL CHECK ("baseRevision">=0),
+  "baseHighEventSeq" BIGINT NOT NULL CHECK ("baseHighEventSeq">=0), "baseProcessedThrough" TIMESTAMP(3) NOT NULL,
+  "createdAt" TIMESTAMPTZ(3) NOT NULL, state TEXT NOT NULL CHECK (state IN ('BUILDING','FAILED','PUBLISHED')),
+  "leaseGrantId" TEXT NOT NULL, "leaseOwner" TEXT NOT NULL CHECK ("leaseOwner" ~ '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$'),
+  fence BIGINT NOT NULL CHECK (fence>0), "leaseUntil" TIMESTAMPTZ(3) NOT NULL,
+  "failureCode" TEXT CHECK ("failureCode" IN ('INTERRUPTED','GENERATOR_INVALID')),
+  checkpoint JSONB NOT NULL CHECK (octet_length(checkpoint::text)<=4096),
+  "checkpointHash" TEXT NOT NULL CHECK ("checkpointHash" ~ '^[a-f0-9]{64}$'),
+  "highEventSeq" BIGINT NOT NULL CHECK ("highEventSeq">=0), "eventCount" BIGINT NOT NULL CHECK ("eventCount">=0),
+  "versionCount" BIGINT NOT NULL CHECK ("versionCount"="eventCount"),
+  "lastAppendExpectedHash" TEXT CHECK ("lastAppendExpectedHash" ~ '^[a-f0-9]{64}$'),
+  "lastAppendStartSeq" BIGINT CHECK ("lastAppendStartSeq">=0), "lastAppendEventCount" INTEGER CHECK ("lastAppendEventCount" BETWEEN 0 AND 100),
+  "lastAppendHash" TEXT CHECK ("lastAppendHash" ~ '^[a-f0-9]{64}$'), "processedThrough" TIMESTAMP(3) NOT NULL,
+  "generatorVersion" TEXT NOT NULL CHECK ("generatorVersion"='mock-source-v1'),
+  "runtimeVersion" TEXT NOT NULL CHECK ("runtimeVersion"='mock-runtime-v2'), codec TEXT NOT NULL CHECK (codec='source-snapshot-v1'),
+  "publishedAt" TIMESTAMPTZ(3), "certificateHash" TEXT CHECK ("certificateHash" ~ '^[a-f0-9]{64}$'), "mutationXid" xid8 NOT NULL,
+  CONSTRAINT "BuildJob_pkey" PRIMARY KEY ("sessionId",generation,revision),
+  CONSTRAINT "BuildJob_scope_revision_key" UNIQUE ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,revision),
+  CONSTRAINT "BuildJob_target_key" UNIQUE ("sessionId",generation,"targetClockRevision"),
+  CONSTRAINT "BuildJob_runtime_fkey" FOREIGN KEY ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation)
+    REFERENCES mock_platform."Runtime" ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation) ON DELETE RESTRICT ON UPDATE NO ACTION,
+  CONSTRAINT "BuildJob_counts_check" CHECK ("highEventSeq"::numeric="baseHighEventSeq"::numeric+"eventCount"::numeric AND revision>"baseRevision"),
+  CONSTRAINT "BuildJob_time_check" CHECK (isfinite("targetTime") AND "baseProcessedThrough">=timestamp '0001-01-01' AND "baseProcessedThrough"<="processedThrough" AND "processedThrough"<="targetTime" AND "targetTime"<=timestamp '9999-12-31 23:59:59.999'),
+  CONSTRAINT "BuildJob_publication_check" CHECK ((state='PUBLISHED')=("publishedAt" IS NOT NULL AND "certificateHash" IS NOT NULL) AND (state='FAILED')=("failureCode" IS NOT NULL)),
+  CONSTRAINT "BuildJob_receipt_check" CHECK (("lastAppendExpectedHash" IS NULL AND "lastAppendStartSeq" IS NULL AND "lastAppendEventCount" IS NULL AND "lastAppendHash" IS NULL)
+    OR ("lastAppendExpectedHash" IS NOT NULL AND "lastAppendStartSeq" IS NOT NULL AND "lastAppendEventCount" IS NOT NULL AND "lastAppendHash" IS NOT NULL))
+);
+CREATE UNIQUE INDEX "BuildJob_open_key" ON mock_platform."BuildJob" ("sessionId",generation) WHERE state IN ('BUILDING','FAILED');
+CREATE TABLE mock_platform."SourceEvent" (
+  "organizationId" TEXT NOT NULL, "workspaceId" TEXT NOT NULL, "storeId" TEXT NOT NULL,
+  "sessionId" TEXT NOT NULL, "connectionId" TEXT NOT NULL, "externalStoreId" TEXT NOT NULL, generation INTEGER NOT NULL,
+  "releaseRevision" BIGINT NOT NULL CHECK ("releaseRevision">0), "eventSeq" BIGINT NOT NULL CHECK ("eventSeq">0),
+  "eventId" TEXT NOT NULL CHECK ("eventId" ~ '^[a-f0-9]{64}$'), "appendIndex" BIGINT NOT NULL CHECK ("appendIndex">0),
+  "acceptedFence" BIGINT NOT NULL CHECK ("acceptedFence">0), "occurredAt" TIMESTAMP(3) NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('STORE','PRODUCT','ORDER','REFUND','INVENTORY','MARKETING')),
+  "phaseRank" SMALLINT NOT NULL, "entityKey" TEXT NOT NULL, ordinal BIGINT NOT NULL CHECK (ordinal>=0),
+  payload JSONB NOT NULL CHECK (octet_length(payload::text)<=262144), manifest JSONB NOT NULL,
+  "envelopeHash" TEXT NOT NULL CHECK ("envelopeHash" ~ '^[a-f0-9]{64}$'),
+  CONSTRAINT "SourceEvent_pkey" PRIMARY KEY ("sessionId",generation,"eventSeq"),
+  CONSTRAINT "SourceEvent_id_key" UNIQUE ("sessionId",generation,"eventId"),
+  CONSTRAINT "SourceEvent_scope_sequence_key" UNIQUE ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision","eventSeq"),
+  CONSTRAINT "SourceEvent_runtime_fkey" FOREIGN KEY ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation)
+    REFERENCES mock_platform."Runtime" ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation) ON DELETE RESTRICT ON UPDATE NO ACTION,
+  CONSTRAINT "SourceEvent_job_fkey" FOREIGN KEY ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision")
+    REFERENCES mock_platform."BuildJob" ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,revision) ON DELETE RESTRICT ON UPDATE NO ACTION,
+  CONSTRAINT "SourceEvent_calendar_check" CHECK (isfinite("occurredAt") AND "occurredAt" BETWEEN timestamp '0001-01-01' AND timestamp '9999-12-31 23:59:59.999')
+);
+CREATE INDEX "SourceEvent_job_append_idx" ON mock_platform."SourceEvent" ("sessionId",generation,"releaseRevision","appendIndex","eventSeq");
+CREATE TABLE mock_platform."EntityVersion" (
+  "organizationId" TEXT NOT NULL, "workspaceId" TEXT NOT NULL, "storeId" TEXT NOT NULL,
+  "sessionId" TEXT NOT NULL, "connectionId" TEXT NOT NULL, "externalStoreId" TEXT NOT NULL, generation INTEGER NOT NULL,
+  "releaseRevision" BIGINT NOT NULL CHECK ("releaseRevision">0), "eventSeq" BIGINT NOT NULL CHECK ("eventSeq">0),
+  kind TEXT NOT NULL CHECK (kind IN ('STORE','PRODUCT','ORDER','REFUND','INVENTORY','MARKETING')),
+  "entityKey" TEXT NOT NULL, "occurredAt" TIMESTAMP(3) NOT NULL,
+  payload JSONB NOT NULL CHECK (octet_length(payload::text)<=262144), "versionHash" TEXT NOT NULL CHECK ("versionHash" ~ '^[a-f0-9]{64}$'),
+  CONSTRAINT "EntityVersion_pkey" PRIMARY KEY ("sessionId",generation,"eventSeq"),
+  CONSTRAINT "EntityVersion_runtime_fkey" FOREIGN KEY ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation)
+    REFERENCES mock_platform."Runtime" ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation) ON DELETE RESTRICT ON UPDATE NO ACTION,
+  CONSTRAINT "EntityVersion_event_fkey" FOREIGN KEY ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision","eventSeq")
+    REFERENCES mock_platform."SourceEvent" ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision","eventSeq") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  CONSTRAINT "EntityVersion_calendar_check" CHECK (isfinite("occurredAt") AND "occurredAt" BETWEEN timestamp '0001-01-01' AND timestamp '9999-12-31 23:59:59.999')
+);
+CREATE INDEX "EntityVersion_entity_sequence_idx" ON mock_platform."EntityVersion" ("sessionId",generation,kind,"entityKey" COLLATE "C","eventSeq" DESC);
+
+CREATE FUNCTION mock_platform.source_scope(value JSONB) RETURNS JSONB
+LANGUAGE SQL IMMUTABLE SECURITY INVOKER SET search_path=pg_catalog AS $$
+  SELECT jsonb_build_object('organizationId',value->'organizationId','workspaceId',value->'workspaceId',
+    'storeId',value->'storeId','sessionId',value->'sessionId','connectionId',value->'connectionId',
+    'externalStoreId',value->'externalStoreId','generation',value->'generation')
+$$;
+CREATE FUNCTION mock_platform.source_conflict() RETURNS VOID
+LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
+BEGIN
+  RAISE EXCEPTION 'Source publication conflict' USING ERRCODE='SM004';
+END $$;
+CREATE FUNCTION mock_platform.require_source_scope(value JSONB) RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE allowed BOOLEAN;
+BEGIN
+  IF value->>'sessionId' IS DISTINCT FROM current_setting('demo.control_session_id',true) THEN
+    RAISE EXCEPTION 'Invalid source control protocol' USING ERRCODE='SM002';
+  END IF;
+  PERFORM demo.lock_source_control(value->>'sessionId');
+  -- A separate SQL command after CONTROL observes committed authorization changes.
+  SELECT mock_platform.has_worker_access(value->>'organizationId',value->>'workspaceId',value->>'storeId',
+    value->>'sessionId',value->>'connectionId',value->>'externalStoreId',(value->>'generation')::integer) INTO allowed;
+  IF allowed IS NOT TRUE THEN
+    RAISE EXCEPTION 'Source control access denied' USING ERRCODE='SM001';
+  END IF;
+END $$;
+CREATE FUNCTION mock_platform.require_lease_statement() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+BEGIN
+  PERFORM demo.lock_source_control(current_setting('demo.control_session_id',true));
+  IF current_setting('mock.source_op',true) IS NULL OR current_setting('mock.source_op',true) NOT IN ('CLAIM','RENEW','FAIL') THEN
+    RAISE EXCEPTION 'Invalid source control protocol' USING ERRCODE='SM002';
+  END IF;
+  RETURN NULL;
+END $$;
+CREATE FUNCTION mock_platform.deny_source_fact_insert() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+BEGIN
+  PERFORM demo.lock_source_control(current_setting('demo.control_session_id',true));
+  RAISE EXCEPTION 'Invalid source control protocol' USING ERRCODE='SM002';
+END $$;
+CREATE FUNCTION mock_platform.deny_source_mutation() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+BEGIN
+  RAISE EXCEPTION 'Invalid source integrity' USING ERRCODE='SM005';
+END $$;
+CREATE FUNCTION mock_platform.require_lease_owner(owner_id TEXT) RETURNS VOID
+LANGUAGE SQL IMMUTABLE SECURITY INVOKER SET search_path=pg_catalog AS $$
+  SELECT mock_platform.integrity(owner_id ~ '^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$')
+$$;
+CREATE FUNCTION mock_platform.require_live_lease(job mock_platform."BuildJob") RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE input TEXT; ref JSONB;
+BEGIN
+  input:=current_setting('mock.source_lease',true);
+  PERFORM mock_platform.integrity(input IS NOT NULL AND octet_length(input)<=1024);
+  BEGIN ref:=input::jsonb;
+  EXCEPTION WHEN invalid_text_representation THEN
+    RAISE EXCEPTION 'Invalid source integrity' USING ERRCODE='SM005';
+  END;
+  PERFORM mock_platform.require_fields(ref,ARRAY['revision','fence','ownerId']);
+  PERFORM mock_platform.integrity(jsonb_typeof(ref->'revision')='string' AND jsonb_typeof(ref->'fence')='string'
+    AND jsonb_typeof(ref->'ownerId')='string');
+  PERFORM mock_platform.require_lease_owner(ref->>'ownerId');
+  PERFORM mock_platform.integrity(mock_platform.source_uint(ref->>'revision')>0 AND mock_platform.source_uint(ref->>'fence')>0);
+  IF ref->>'revision' IS DISTINCT FROM job.revision::text OR ref->>'fence' IS DISTINCT FROM job.fence::text
+    OR ref->>'ownerId' IS DISTINCT FROM job."leaseOwner" OR job."leaseGrantId" IS DISTINCT FROM current_setting('mock.grant_id',true)
+    OR job."leaseUntil"<=clock_timestamp() THEN
+    RAISE EXCEPTION 'Source lease fence rejected' USING ERRCODE='SM003';
+  END IF;
+END $$;
+CREATE FUNCTION mock_platform.initial_job(candidate mock_platform."BuildJob",runtime mock_platform."Runtime",head mock_platform."BuildJob") RETURNS mock_platform."BuildJob"
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE wall TIMESTAMPTZ(3):=clock_timestamp();
+BEGIN
+  candidate.revision:=mock_platform.source_uint(mock_platform.increment_uint(coalesce(head.revision,0)::text));
+  SELECT d."clockNow",d."clockRevision" INTO candidate."targetTime",candidate."targetClockRevision"
+    FROM demo."DemoCommerceSession" d WHERE d.id=candidate."sessionId";
+  candidate."baseRevision":=coalesce(head.revision,0); candidate."baseHighEventSeq":=coalesce(head."highEventSeq",0);
+  candidate."baseProcessedThrough":=coalesce(head."processedThrough",runtime."openingAt");
+  candidate."processedThrough":=candidate."baseProcessedThrough"; candidate."highEventSeq":=candidate."baseHighEventSeq";
+  candidate."eventCount":=0; candidate."versionCount":=0; candidate.state:='BUILDING'; candidate.fence:=1;
+  candidate."leaseGrantId":=current_setting('mock.grant_id',true); candidate."createdAt":=wall; candidate."leaseUntil":=wall+interval '30 seconds';
+  candidate."failureCode":=NULL; candidate."publishedAt":=NULL; candidate."certificateHash":=NULL;
+  candidate."lastAppendExpectedHash":=NULL; candidate."lastAppendStartSeq":=NULL; candidate."lastAppendEventCount":=NULL; candidate."lastAppendHash":=NULL;
+  candidate."generatorVersion":=runtime."generatorVersion"; candidate."runtimeVersion":=runtime."runtimeVersion"; candidate.codec:='source-snapshot-v1';
+  candidate.checkpoint:=jsonb_build_object('codec','source-checkpoint-v1','chunkIndex','0','highEventSeq',candidate."highEventSeq"::text,
+    'processedThrough',mock_platform.canonical_utc(candidate."processedThrough"),'lastEvent',coalesce(head.checkpoint->'lastEvent','null'::jsonb),'sealed',false);
+  candidate."checkpointHash":=mock_platform.hash_jsonb(jsonb_build_object('codec','source-checkpoint-hash-v1',
+    'scope',mock_platform.source_scope(to_jsonb(candidate)),'revision',candidate.revision::text,'checkpoint',candidate.checkpoint));
+  candidate."mutationXid":=pg_current_xact_id();
+  RETURN candidate;
+END $$;
+CREATE FUNCTION mock_platform.guard_job_insert() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE runtime mock_platform."Runtime"; head mock_platform."BuildJob"; target TIMESTAMP;
+BEGIN
+  PERFORM mock_platform.require_source_scope(to_jsonb(NEW));
+  IF current_setting('mock.source_op',true) IS DISTINCT FROM 'CLAIM' THEN PERFORM mock_platform.source_conflict(); END IF;
+  PERFORM mock_platform.require_lease_owner(NEW."leaseOwner");
+  SELECT r.* INTO runtime FROM mock_platform."Runtime" r WHERE r."sessionId"=NEW."sessionId" AND r.generation=NEW.generation;
+  IF runtime IS NULL THEN RETURN NULL; END IF;
+  IF EXISTS (SELECT 1 FROM mock_platform."BuildJob" j WHERE j."sessionId"=NEW."sessionId" AND j.generation=NEW.generation AND j.state IN ('BUILDING','FAILED')) THEN RETURN NULL; END IF;
+  SELECT j.* INTO head FROM mock_platform."BuildJob" j WHERE j."sessionId"=NEW."sessionId" AND j.generation=NEW.generation AND j.state='PUBLISHED' ORDER BY j.revision DESC LIMIT 1;
+  SELECT d."clockNow" INTO target FROM demo."DemoCommerceSession" d WHERE d.id=NEW."sessionId";
+  IF target<runtime."openingAt" OR (head.revision IS NOT NULL AND head."targetTime">=target) THEN RETURN NULL; END IF;
+  RETURN mock_platform.initial_job(NEW,runtime,head);
+END $$;
+CREATE FUNCTION mock_platform.transition_job(old_job mock_platform."BuildJob",proposal mock_platform."BuildJob") RETURNS mock_platform."BuildJob"
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE op TEXT:=current_setting('mock.source_op',true); result mock_platform."BuildJob":=old_job;
+BEGIN
+  IF old_job.state='PUBLISHED' THEN PERFORM mock_platform.source_conflict(); END IF;
+  PERFORM mock_platform.integrity(old_job."mutationXid"<>pg_current_xact_id());
+  IF (to_jsonb(proposal)-ARRAY['state','leaseOwner','failureCode']) IS DISTINCT FROM (to_jsonb(old_job)-ARRAY['state','leaseOwner','failureCode']) THEN
+    PERFORM mock_platform.source_conflict();
+  END IF;
+  IF op='CLAIM' THEN
+    IF old_job.state='BUILDING' AND old_job."leaseUntil">clock_timestamp() THEN RETURN NULL; END IF;
+    IF proposal.state<>'BUILDING' OR proposal."failureCode" IS NOT NULL THEN PERFORM mock_platform.source_conflict(); END IF;
+    PERFORM mock_platform.require_lease_owner(proposal."leaseOwner");
+    result."leaseOwner":=proposal."leaseOwner"; result.fence:=mock_platform.source_uint(mock_platform.increment_uint(old_job.fence::text));
+    result.state:='BUILDING'; result."failureCode":=NULL; result."leaseGrantId":=current_setting('mock.grant_id',true);
+  ELSE
+    PERFORM mock_platform.require_live_lease(old_job);
+    IF old_job.state<>'BUILDING' OR proposal."leaseOwner" IS DISTINCT FROM old_job."leaseOwner" THEN PERFORM mock_platform.source_conflict(); END IF;
+    IF op='RENEW' THEN
+      IF proposal.state IS DISTINCT FROM old_job.state OR proposal."failureCode" IS NOT NULL THEN PERFORM mock_platform.source_conflict(); END IF;
+    ELSIF op='FAIL' THEN
+      IF proposal.state<>'FAILED' OR proposal."failureCode" IS NULL OR proposal."failureCode" NOT IN ('INTERRUPTED','GENERATOR_INVALID') THEN PERFORM mock_platform.source_conflict(); END IF;
+      result.state:='FAILED'; result."failureCode":=proposal."failureCode";
+    ELSE PERFORM mock_platform.source_conflict(); END IF;
+  END IF;
+  IF op IN ('CLAIM','RENEW') THEN result."leaseUntil":=clock_timestamp()+interval '30 seconds'; END IF;
+  result."mutationXid":=pg_current_xact_id();
+  RETURN result;
+END $$;
+CREATE FUNCTION mock_platform.guard_job_update() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE locked mock_platform."BuildJob";
+BEGIN
+  PERFORM mock_platform.require_source_scope(to_jsonb(OLD));
+  SELECT j.* INTO locked FROM mock_platform."BuildJob" j WHERE j."sessionId"=OLD."sessionId" AND j.generation=OLD.generation AND j.revision=OLD.revision FOR UPDATE;
+  -- This distinct command follows the job lock too; RLS on the outer UPDATE is insufficient.
+  PERFORM mock_platform.require_source_scope(to_jsonb(OLD));
+  PERFORM mock_platform.integrity(locked.revision IS NOT NULL AND locked IS NOT DISTINCT FROM OLD);
+  RETURN mock_platform.transition_job(OLD,NEW);
+END $$;
+CREATE FUNCTION mock_platform.check_final_job_lease() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE final mock_platform."BuildJob";
+BEGIN
+  PERFORM mock_platform.require_source_scope(to_jsonb(NEW));
+  SELECT j.* INTO final FROM mock_platform."BuildJob" j WHERE j."sessionId"=NEW."sessionId" AND j.generation=NEW.generation AND j.revision=NEW.revision;
+  PERFORM mock_platform.integrity(final.revision IS NOT NULL AND final IS NOT DISTINCT FROM NEW);
+  IF final."leaseGrantId" IS DISTINCT FROM current_setting('mock.grant_id',true) OR final."leaseUntil"<=clock_timestamp() THEN
+    RAISE EXCEPTION 'Source lease fence rejected' USING ERRCODE='SM003';
+  END IF;
+  RETURN NULL;
+END $$;
+CREATE TRIGGER source_job_control_insert BEFORE INSERT ON mock_platform."BuildJob" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.require_lease_statement();
+CREATE TRIGGER source_job_control_update BEFORE UPDATE ON mock_platform."BuildJob" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.require_lease_statement();
+CREATE TRIGGER source_job_insert BEFORE INSERT ON mock_platform."BuildJob" FOR EACH ROW EXECUTE FUNCTION mock_platform.guard_job_insert();
+CREATE TRIGGER source_job_update BEFORE UPDATE ON mock_platform."BuildJob" FOR EACH ROW EXECUTE FUNCTION mock_platform.guard_job_update();
+CREATE CONSTRAINT TRIGGER source_job_final_lease AFTER INSERT OR UPDATE ON mock_platform."BuildJob" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mock_platform.check_final_job_lease();
+CREATE TRIGGER source_job_destructive BEFORE DELETE OR TRUNCATE ON mock_platform."BuildJob" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.deny_source_mutation();
+CREATE TRIGGER source_event_closed BEFORE INSERT ON mock_platform."SourceEvent" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.deny_source_fact_insert();
+CREATE TRIGGER source_event_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON mock_platform."SourceEvent" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.deny_source_mutation();
+CREATE TRIGGER source_version_closed BEFORE INSERT ON mock_platform."EntityVersion" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.deny_source_fact_insert();
+CREATE TRIGGER source_version_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON mock_platform."EntityVersion" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.deny_source_mutation();
+
+ALTER TABLE mock_platform."BuildJob" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mock_platform."BuildJob" FORCE ROW LEVEL SECURITY;
+ALTER TABLE mock_platform."SourceEvent" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mock_platform."SourceEvent" FORCE ROW LEVEL SECURITY;
+ALTER TABLE mock_platform."EntityVersion" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mock_platform."EntityVersion" FORCE ROW LEVEL SECURITY;
+CREATE POLICY source_worker_job_select ON mock_platform."BuildJob" FOR SELECT TO shopmate_mock_source_worker USING (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_worker_job_insert ON mock_platform."BuildJob" FOR INSERT TO shopmate_mock_source_worker WITH CHECK (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_worker_job_update ON mock_platform."BuildJob" FOR UPDATE TO shopmate_mock_source_worker USING (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation)) WITH CHECK (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_worker_event_select ON mock_platform."SourceEvent" FOR SELECT TO shopmate_mock_source_worker USING (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_worker_event_insert ON mock_platform."SourceEvent" FOR INSERT TO shopmate_mock_source_worker WITH CHECK (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_worker_version_select ON mock_platform."EntityVersion" FOR SELECT TO shopmate_mock_source_worker USING (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_worker_version_insert ON mock_platform."EntityVersion" FOR INSERT TO shopmate_mock_source_worker WITH CHECK (mock_platform.has_worker_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_reader_certificate ON mock_platform."BuildJob" FOR SELECT TO shopmate_mock_source_reader USING (state='PUBLISHED' AND mock_platform.has_current_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation));
+CREATE POLICY source_reader_version ON mock_platform."EntityVersion" FOR SELECT TO shopmate_mock_source_reader USING (
+  mock_platform.has_current_access("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation)
+  AND EXISTS (SELECT 1 FROM mock_platform."BuildJob" j WHERE j."organizationId"="EntityVersion"."organizationId" AND j."workspaceId"="EntityVersion"."workspaceId"
+    AND j."storeId"="EntityVersion"."storeId" AND j."sessionId"="EntityVersion"."sessionId" AND j."connectionId"="EntityVersion"."connectionId"
+    AND j."externalStoreId"="EntityVersion"."externalStoreId" AND j.generation="EntityVersion".generation AND j.revision="EntityVersion"."releaseRevision" AND j.state='PUBLISHED'));
+REVOKE ALL ON mock_platform."BuildJob",mock_platform."SourceEvent",mock_platform."EntityVersion" FROM PUBLIC;
+GRANT SELECT ON mock_platform."BuildJob",mock_platform."SourceEvent",mock_platform."EntityVersion" TO shopmate_mock_source_worker;
+GRANT INSERT ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"leaseOwner") ON mock_platform."BuildJob" TO shopmate_mock_source_worker;
+GRANT UPDATE (state,"leaseOwner",checkpoint,"failureCode") ON mock_platform."BuildJob" TO shopmate_mock_source_worker;
+GRANT INSERT ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision",kind,"occurredAt",ordinal,payload) ON mock_platform."SourceEvent" TO shopmate_mock_source_worker;
+GRANT INSERT ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision","eventSeq") ON mock_platform."EntityVersion" TO shopmate_mock_source_worker;
+GRANT SELECT ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,revision,"targetClockRevision","targetTime","baseRevision","baseHighEventSeq","highEventSeq","eventCount","versionCount","processedThrough","generatorVersion","runtimeVersion",codec,"publishedAt","certificateHash",state) ON mock_platform."BuildJob" TO shopmate_mock_source_reader;
+GRANT SELECT ON mock_platform."EntityVersion" TO shopmate_mock_source_reader;
+REVOKE ALL ON FUNCTION mock_platform.source_scope(JSONB),mock_platform.source_conflict(),mock_platform.require_source_scope(JSONB),mock_platform.require_lease_statement(),
+  mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.require_live_lease(mock_platform."BuildJob"),
+  mock_platform.initial_job(mock_platform."BuildJob",mock_platform."Runtime",mock_platform."BuildJob"),mock_platform.guard_job_insert(),
+  mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION mock_platform.source_scope(JSONB),mock_platform.source_conflict(),mock_platform.require_source_scope(JSONB),mock_platform.require_lease_statement(),
+  mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.require_live_lease(mock_platform."BuildJob"),
+  mock_platform.initial_job(mock_platform."BuildJob",mock_platform."Runtime",mock_platform."BuildJob"),mock_platform.guard_job_insert(),
+  mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease() TO shopmate_mock_source_worker;
 COMMIT;
 
