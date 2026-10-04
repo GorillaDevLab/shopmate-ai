@@ -23,9 +23,7 @@
       "packages/contracts/src/metrics/metric-ports.ts",
       "packages/contracts/src/metrics/metric.schema.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
     "dependsOn": [],
     "integrationDependsOn": [],
     "acceptance": [
@@ -67,9 +65,7 @@
       "docs/analytics/p03-finance-golden-cases.md"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P03-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "夹具的收支每步可手算且折扣只扣一次",
@@ -105,14 +101,9 @@
       "checked add/subtract/multiply及整数比例工具；0分母返回nullable typed result",
       "固定basisPoints/展示舍入策略与overflow错误，不中间浮点累计金额"
     ],
-    "files": [
-      "apps/api/src/metrics/exact-math.ts",
-      "apps/api/src/metrics/exact-math.spec.ts"
-    ],
+    "files": ["apps/api/src/metrics/exact-math.ts", "apps/api/src/metrics/exact-math.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P03-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "0.1元+0.2元对应10+20=30minor",
@@ -153,9 +144,7 @@
       "apps/api/src/metrics/metric-window.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P03-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "上海零点转换正确，恰在periodEnd的支付不计入当前窗口",
@@ -196,13 +185,8 @@
       "apps/api/src/metrics/payment-metrics.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-003",
-      "P03-004"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-003", "P03-004"],
     "acceptance": [
       "GMV12000/折扣2000/运费500产生paid10500",
       "PENDING取消订单不进入GMV/paid，已支付后取消仍保留付款事实",
@@ -242,13 +226,8 @@
       "apps/api/src/metrics/refund-metrics.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-003",
-      "P03-004"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-003", "P03-004"],
     "acceptance": [
       "次日退款2000仅减少次日settlement净实收，不改变原日paid10500",
       "同一订单两次部分退款只算1个退款订单，REQUESTED不算已结算",
@@ -289,13 +268,8 @@
       "docs/analytics/p03-return-cost-policy.md"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-003",
-      "P03-006"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-003", "P03-006"],
     "acceptance": [
       "净商品8000-冻结COGS6000得到grossProfit2000",
       "SKU后续改成本不改变旧期COGS；只有合规returnReceipt触发规定冲回",
@@ -335,13 +309,8 @@
       "apps/api/src/metrics/contribution-metrics.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-003",
-      "P03-007"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-003", "P03-007"],
     "acceptance": [
       "毛利2000+运费500-700-300-100-800=contribution600；费用200=>400",
       "重复传入收入已扣折扣不再次扣2000",
@@ -381,13 +350,8 @@
       "apps/api/src/metrics/inventory-metrics.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-003",
-      "P03-004"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-003", "P03-004"],
     "acceptance": [
       "库存12/每小时3售出得到4小时覆盖；inbound不直接增加available",
       "销量0=>UNAVAILABLE/null；低量=>INSUFFICIENT；已售罄事实单独保留0available",
@@ -427,13 +391,8 @@
       "apps/api/src/metrics/funnel-marketing-metrics.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-003",
-      "P03-004"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-003", "P03-004"],
     "acceptance": [
       "1000visitors/100paid得到1000bp，spend10000/revenue30000得到3倍ROAS",
       "spend0与visitors0没有Infinity/伪0有效指标",
@@ -474,14 +433,8 @@
       "docs/analytics/p03-profit-attribution-method.md"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-003",
-      "P03-007",
-      "P03-008"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-003", "P03-007", "P03-008"],
     "acceptance": [
       "Scenario003风格营收升利润降样例的各贡献+残差严格等于利润delta",
       "折扣只出现在规定价格折扣贡献一次",
@@ -521,9 +474,7 @@
       "apps/api/src/metrics/metric-quality.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P03-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "未同步空数组返回UNAVAILABLE而非VERIFIED零销售",
@@ -565,9 +516,7 @@
       "apps/api/src/metrics/metric-definition-registry.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P03-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "同逻辑输入的对象/集合排序不改变hash，来源revision变化改变hash",
@@ -608,14 +557,8 @@
       "packages/database/test/integration/metric-storage.test.mjs",
       "docs/architecture/p03-metric-storage.md"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma",
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P03-001",
-      "P03-013"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma", "scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P03-001", "P03-013"],
     "integrationDependsOn": [],
     "acceptance": [
       "pnpm test:tenant强制运行新表越租户/缺scope拒绝案例，0skipped",
@@ -655,13 +598,8 @@
       "packages/database/src/metric-snapshot.repository.ts",
       "packages/database/test/metric-snapshot.test.mjs"
     ],
-    "sharedFiles": [
-      "packages/database/src/index.ts"
-    ],
-    "dependsOn": [
-      "P03-001",
-      "P03-014"
-    ],
+    "sharedFiles": ["packages/database/src/index.ts"],
+    "dependsOn": ["P03-001", "P03-014"],
     "integrationDependsOn": [],
     "acceptance": [
       "同scope/hash重复append返回同id而不覆盖旧证据",
@@ -702,9 +640,7 @@
       "apps/api/src/metrics/metric-computation.service.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P03-001"],
     "integrationDependsOn": [
       "P2-GATE",
       "P03-003",
@@ -760,12 +696,8 @@
       "apps/api/src/metrics/metrics.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P03-001"
-    ],
-    "integrationDependsOn": [
-      "P03-015"
-    ],
+    "dependsOn": ["P03-001"],
+    "integrationDependsOn": ["P03-015"],
     "acceptance": [
       "未认证401、无read permission403、跨店/跨租户404",
       "已验证空窗可返回零值快照；没有同步快照则明确empty/unavailable",
@@ -805,10 +737,7 @@
       "apps/api/src/metrics/metrics.module.ts",
       "apps/api/test/metrics-database.e2e-spec.ts"
     ],
-    "sharedFiles": [
-      "apps/api/src/app.module.ts",
-      "apps/api/vitest.tenant.config.ts"
-    ],
+    "sharedFiles": ["apps/api/src/app.module.ts", "apps/api/vitest.tenant.config.ts"],
     "dependsOn": [
       "P2-GATE",
       "P03-002",
@@ -872,12 +801,8 @@
       "packages/contracts/src/events/event-ports.ts",
       "packages/contracts/src/events/event.schema.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
-    "dependsOn": [
-      "P03-001"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
+    "dependsOn": ["P03-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "未知字段、姓名/地址/订单原文/token/任意JSON被strict拒绝",
@@ -923,12 +848,8 @@
       "packages/contracts/src/decisions/decision.schema.spec.ts",
       "packages/contracts/src/decisions/decision-shadow.fixture.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
-    "dependsOn": [
-      "P04-001"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
+    "dependsOn": ["P04-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "未知结果字段/approval/execute/secret/自由指令reason被拒绝",
@@ -971,13 +892,8 @@
       "apps/api/src/events/robust-baseline.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-004",
-      "P03-015"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-004", "P03-015"],
     "acceptance": [
       "当前14时只采历史同weekday同14时观测窗口，完整昨天被排除",
       "单个异常历史点不把median基线扭曲为异常均值",
@@ -1018,10 +934,7 @@
       "apps/api/src/events/event-rule-policy.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001",
-      "P04-002"
-    ],
+    "dependsOn": ["P04-001", "P04-002"],
     "integrationDependsOn": [],
     "acceptance": [
       "负freshness/coverage>10000/空version或未知配置字段拒绝",
@@ -1062,13 +975,8 @@
       "apps/api/src/events/detectors/stockout.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-009",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-009", "P04-004"],
     "acceptance": [
       "库存覆盖4小时产生候选，充足库存SKU无候选",
       "ETA晚于库存覆盖可检测供应延期；采购提案不增加库存",
@@ -1108,13 +1016,8 @@
       "apps/api/src/events/detectors/inventory-stagnation.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-009",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-009", "P04-004"],
     "acceptance": [
       "成熟SKU库存超过90日有效需求产生候选，恰90日边界按策略排除",
       "刚上市只有1单的SKU报告不足且无滞销候选",
@@ -1154,14 +1057,8 @@
       "apps/api/src/events/detectors/refund-spike.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-006",
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-006", "P04-003", "P04-004"],
     "acceptance": [
       "充分样本3倍退款基线生成候选，Day3观测前不泄露未来Day5异常",
       "SKU集中与全店共同上升证据不同，不声称已知道坏批次",
@@ -1201,13 +1098,8 @@
       "apps/api/src/events/detectors/cancelled-order-spike.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P04-003", "P04-004"],
     "acceptance": [
       "充分样本取消骤增生成候选并保留付款状态分解",
       "PENDING取消增加取消计数但不增加paid退款或降低已付营收",
@@ -1247,14 +1139,8 @@
       "apps/api/src/events/detectors/profit-margin-drop.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-011",
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-011", "P04-003", "P04-004"],
     "acceptance": [
       "同窗收入升/利润降充分输入生成候选且贡献之和可复算",
       "缺COGS/广告归因无法判断时保留ESTIMATED/不足，不宣称精确毛利恶化",
@@ -1294,15 +1180,8 @@
       "apps/api/src/events/detectors/unusual-discount.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-005",
-      "P03-008",
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-005", "P03-008", "P04-003", "P04-004"],
     "acceptance": [
       "大折扣达到策略阈值生成候选，折扣金额证据等于源聚合",
       "同一订单收入已扣折扣，检测不会再减一次contribution",
@@ -1342,14 +1221,8 @@
       "apps/api/src/events/detectors/marketing.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-010",
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-010", "P04-003", "P04-004"],
     "acceptance": [
       "spend升且归因收入降可输出两个有证据候选，不重复计算费用",
       "缺归因抑制确定ROAS下降，但可靠spend突增可单独保留",
@@ -1389,14 +1262,8 @@
       "apps/api/src/events/detectors/conversion-drop.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-010",
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-010", "P04-003", "P04-004"],
     "acceptance": [
       "流量稳定且涨价后conversion相对降35%的充分例生成候选",
       "涨价前时间窗口不声称价格已影响转换",
@@ -1436,15 +1303,8 @@
       "apps/api/src/events/detectors/product-breakout.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-009",
-      "P03-010",
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-009", "P03-010", "P04-003", "P04-004"],
     "acceptance": [
       "达到样本/增长/有效质量门槛的新品产生LOW/INFO机会",
       "只有1至2单的新店不宣称爆款",
@@ -1484,14 +1344,8 @@
       "apps/api/src/events/detectors/sync-quality.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P2-GATE",
-      "P03-012",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P2-GATE", "P03-012", "P04-004"],
     "acceptance": [
       "同步中断产生SYNC_FAILURE，陈旧sales不会产生REVENUE_DROP",
       "raw exception/token不进入证据或HTTP错误",
@@ -1531,9 +1385,7 @@
       "apps/api/src/events/event-evaluation.service.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
+    "dependsOn": ["P04-001"],
     "integrationDependsOn": [
       "P03-018",
       "P04-003",
@@ -1590,14 +1442,8 @@
       "packages/database/test/integration/event-storage.test.mjs",
       "docs/architecture/p04-event-storage.md"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma",
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P04-001",
-      "P03-014"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma", "scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P04-001", "P03-014"],
     "integrationDependsOn": [],
     "acceptance": [
       "两个并发同fingerprint活动事件最多1条；RESOLVED后允许新发生事件",
@@ -1637,13 +1483,8 @@
       "packages/database/src/event.repository.ts",
       "packages/database/test/event-repository.test.mjs"
     ],
-    "sharedFiles": [
-      "packages/database/src/index.ts"
-    ],
-    "dependsOn": [
-      "P04-001",
-      "P04-016"
-    ],
+    "sharedFiles": ["packages/database/src/index.ts"],
+    "dependsOn": ["P04-001", "P04-016"],
     "integrationDependsOn": [],
     "acceptance": [
       "每15分钟相同观察只保留1活动事件/同hash证据，lastSeen推进",
@@ -1685,14 +1526,8 @@
       "apps/api/src/events/event-lifecycle.service.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001",
-      "P09-001"
-    ],
-    "integrationDependsOn": [
-      "P04-017",
-      "P09-004"
-    ],
+    "dependsOn": ["P04-001", "P09-001"],
+    "integrationDependsOn": ["P04-017", "P09-004"],
     "acceptance": [
       "允许角色可按当前revision完成合法状态transition并留下actor/request/evidence引用审计",
       "未认证/只读role/跨store/成员撤销拒绝；非法状态及旧revision409",
@@ -1733,14 +1568,8 @@
       "apps/api/src/events/events.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001",
-      "P04-002"
-    ],
-    "integrationDependsOn": [
-      "P04-017",
-      "P04-027"
-    ],
+    "dependsOn": ["P04-001", "P04-002"],
+    "integrationDependsOn": ["P04-017", "P04-027"],
     "acceptance": [
       "未登录401、跨租户/店铺404、缺业务证据读permission403",
       "合法空列表显式empty；同步失败事件仍可见，不因IGNORE隐藏",
@@ -1780,12 +1609,8 @@
       "apps/api/src/decisions/inventory-refund-rules.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-002"
-    ],
-    "integrationDependsOn": [
-      "P04-004"
-    ],
+    "dependsOn": ["P04-002"],
+    "integrationDependsOn": ["P04-004"],
     "acceptance": [
       "5.99h给CRITICAL/NOTIFY_NOW/URGENT，exactly6h不触发该条，但可按交期触发HIGH",
       "current=2倍baseline且样本充分触发HIGH；baseline0走绝对计数分支而非倍数",
@@ -1826,14 +1651,8 @@
       "apps/api/src/decisions/rules-decision.provider.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-002"
-    ],
-    "integrationDependsOn": [
-      "P04-004",
-      "P04-020",
-      "P04-022"
-    ],
+    "dependsOn": ["P04-002"],
+    "integrationDependsOn": ["P04-004", "P04-020", "P04-022"],
     "acceptance": [
       "同输入/版本给同decision bundle且不修改readonly输入",
       "stale营收与正常weekday/hour波动不无依据升级；低量=>INSUFFICIENT_DATA/NO_LLM_NEEDED，冲突=>AMBIGUOUS",
@@ -1874,10 +1693,7 @@
       "apps/api/src/decisions/decision-boundary.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001",
-      "P04-002"
-    ],
+    "dependsOn": ["P04-001", "P04-002"],
     "integrationDependsOn": [],
     "acceptance": [
       "恶意订单/退款文本、credential、tenantId扩展字段不能出现在sanitized payload",
@@ -1918,12 +1734,8 @@
       "apps/api/src/decisions/decision-hard-gate.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-002"
-    ],
-    "integrationDependsOn": [
-      "P04-004"
-    ],
+    "dependsOn": ["P04-002"],
+    "integrationDependsOn": ["P04-004"],
     "acceptance": [
       "恶意LOW标签不能降确定性HIGH/CRITICAL floor，记录明确overrideReason",
       "DEEP标签遇缺样本/陈旧/冲突数据被阻断；scope不符拒绝全部effective routes",
@@ -1964,13 +1776,8 @@
       "apps/api/src/decisions/decision-routing.service.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-002"
-    ],
-    "integrationDependsOn": [
-      "P04-004",
-      "P04-023"
-    ],
+    "dependsOn": ["P04-002"],
+    "integrationDependsOn": ["P04-004", "P04-023"],
     "acceptance": [
       "重复decision key与未变严重度在cooldown内不重复NOTIFY/DEEP",
       "严重度升级/恢复可按固定规则打破cooldown；同store多事件遵守batch上限",
@@ -2010,16 +1817,8 @@
       "apps/api/src/decisions/decision-evaluation.host.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-002"
-    ],
-    "integrationDependsOn": [
-      "P04-021",
-      "P04-022",
-      "P04-023",
-      "P04-024",
-      "P04-027"
-    ],
+    "dependsOn": ["P04-002"],
+    "integrationDependsOn": ["P04-021", "P04-022", "P04-023", "P04-024", "P04-027"],
     "acceptance": [
       "fake timeout/throw/illegal output分别保存失败run并关联Rules fallback",
       "primary迟到结果不能覆盖已提交fallback或再次触发route",
@@ -2060,14 +1859,8 @@
       "packages/database/test/integration/decision-storage.test.mjs",
       "docs/architecture/p04-decision-storage.md"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma",
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P04-002",
-      "P04-016"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma", "scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P04-002", "P04-016"],
     "integrationDependsOn": [],
     "acceptance": [
       "同run/type重复拒绝，跨tenant fallbackOf或comparison关联拒绝",
@@ -2107,13 +1900,8 @@
       "packages/database/src/decision-run.repository.ts",
       "packages/database/test/decision-run.test.mjs"
     ],
-    "sharedFiles": [
-      "packages/database/src/index.ts"
-    ],
-    "dependsOn": [
-      "P04-002",
-      "P04-026"
-    ],
+    "sharedFiles": ["packages/database/src/index.ts"],
+    "dependsOn": ["P04-002", "P04-026"],
     "integrationDependsOn": [],
     "acceptance": [
       "同decision key再次claim返回已有结果，不能重复创建有效route记录",
@@ -2154,15 +1942,8 @@
       "apps/api/src/events/detectors/revenue-drop.detector.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P04-001"
-    ],
-    "integrationDependsOn": [
-      "P03-005",
-      "P03-006",
-      "P04-003",
-      "P04-004"
-    ],
+    "dependsOn": ["P04-001"],
+    "integrationDependsOn": ["P03-005", "P03-006", "P04-003", "P04-004"],
     "acceptance": [
       "充分样本同weekday/hour营收真实跌破策略带产生REVENUE_DROP正例，不能以永不报警通过负例",
       "比昨天低但同星期/同小时正常不生成下降候选",
@@ -2204,10 +1985,7 @@
       "apps/api/src/events/event-decision-unit-of-work.ts",
       "apps/api/test/event-decisions.e2e-spec.ts"
     ],
-    "sharedFiles": [
-      "apps/api/src/app.module.ts",
-      "apps/api/vitest.tenant.config.ts"
-    ],
+    "sharedFiles": ["apps/api/src/app.module.ts", "apps/api/vitest.tenant.config.ts"],
     "dependsOn": [
       "P2-GATE",
       "P03-018",
@@ -2280,13 +2058,8 @@
       "packages/database/test/integration/event-decision-concurrency.test.mjs",
       "apps/api/test/event-route-atomicity.e2e-spec.ts"
     ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs",
-      "apps/api/vitest.tenant.config.ts"
-    ],
-    "dependsOn": [
-      "P04-029"
-    ],
+    "sharedFiles": ["scripts/test-tenant-database.mjs", "apps/api/vitest.tenant.config.ts"],
+    "dependsOn": ["P04-029"],
     "integrationDependsOn": [],
     "acceptance": [
       "同事件十次/并发评估只有一条活动事实与一次即时通知intent，无重复DEEP授权",
@@ -2327,14 +2100,8 @@
       "apps/api/test/fixtures/events/scenario-001-008.expectations.ts",
       "apps/api/test/helpers/event-scenario-benchmark.ts"
     ],
-    "sharedFiles": [
-      "apps/api/vitest.tenant.config.ts"
-    ],
-    "dependsOn": [
-      "P2-GATE",
-      "P03-018",
-      "P04-029"
-    ],
+    "sharedFiles": ["apps/api/vitest.tenant.config.ts"],
+    "dependsOn": ["P2-GATE", "P03-018", "P04-029"],
     "integrationDependsOn": [],
     "acceptance": [
       "001售罄优先即时通知、002退款SKU集中、003利润贡献复算、004ROAS/花费、005转换、006滞销、007延期、008机会逐一匹配可接受集合",
@@ -2375,15 +2142,8 @@
       "apps/api/test/fixtures/events/scenario-009-015.expectations.ts",
       "apps/api/test/event-oracle-isolation.spec.ts"
     ],
-    "sharedFiles": [
-      "apps/api/vitest.tenant.config.ts"
-    ],
-    "dependsOn": [
-      "P2-GATE",
-      "P04-029",
-      "P04-030",
-      "P04-031"
-    ],
+    "sharedFiles": ["apps/api/vitest.tenant.config.ts"],
+    "dependsOn": ["P2-GATE", "P04-029", "P04-030", "P04-031"],
     "integrationDependsOn": [],
     "acceptance": [
       "009只有SYNC_FAILURE不能用stale sales报REVENUE_DROP；010十次只有一条事实且旧版不覆盖；011折扣只扣一次；012pending取消不是退款",
@@ -2423,22 +2183,15 @@
       "packages/contracts/src/overview/overview-view.schema.ts",
       "packages/contracts/src/overview/overview-view.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
-    "dependsOn": [
-      "P03-001",
-      "P04-001"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
+    "dependsOn": ["P03-001", "P04-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "未知status/无scope/非整数money被拒",
       "五种quality保留并能表达null未知值",
       "comparison必须同窗同watermark；缺证据不显示已验证"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/contracts test -- src/overview/overview-view.spec.ts "
-    ],
+    "tests": ["pnpm --filter @shopmate/contracts test -- src/overview/overview-view.spec.ts "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2456,32 +2209,21 @@
     "kind": "component",
     "priority": "P1",
     "contract": "MetricSnapshot → OverviewMetricPresentation",
-    "consumes": [
-      "P05-001视图契约；注入P03合成快照",
-      "复用现有dashboard number/date样式"
-    ],
-    "produces": [
-      "纯函数minor-CNY格式、unknown/freshness/quality标签与同窗比较状态"
-    ],
+    "consumes": ["P05-001视图契约；注入P03合成快照", "复用现有dashboard number/date样式"],
+    "produces": ["纯函数minor-CNY格式、unknown/freshness/quality标签与同窗比较状态"],
     "files": [
       "apps/web/src/app/overview/metric-presentation.ts",
       "apps/web/src/app/overview/metric-presentation.test.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P05-001"],
+    "integrationDependsOn": ["P03-001"],
     "acceptance": [
       "12345minor显示123.45元且不回写float",
       "缺cost导致INSUFFICIENT，不显示0利润",
       "不同window或watermark禁百分比比较"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/overview/metric-presentation.test.ts "
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/overview/metric-presentation.test.ts "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2503,29 +2245,21 @@
       "P05-001重要事件refs及已计算priority顺序",
       "复用dashboard-insight-presentation现有visual tokens"
     ],
-    "produces": [
-      "注入props的事件列表组件及模块内样式"
-    ],
+    "produces": ["注入props的事件列表组件及模块内样式"],
     "files": [
       "apps/web/src/app/overview/important-events.tsx",
       "apps/web/src/app/overview/important-events.test.tsx",
       "apps/web/src/app/overview/important-events.css"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P04-001"
-    ],
+    "dependsOn": ["P05-001"],
+    "integrationDependsOn": ["P04-001"],
     "acceptance": [
       "按effective urgency显示并区分EventSeverity与ActionRisk",
       "loading/empty/error可读且retry只触发注入回调",
       "375px文本换行且键盘能进入证据链接"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/overview/important-events.test.tsx "
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/overview/important-events.test.tsx "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2547,29 +2281,20 @@
       "P05-001 proposal ref/status/deadline脱敏摘要",
       "无actor/body approval字段；点击仅导航既有审批flow"
     ],
-    "produces": [
-      "只读待决策计数/状态/详情入口，不内嵌执行按钮"
-    ],
+    "produces": ["只读待决策计数/状态/详情入口，不内嵌执行按钮"],
     "files": [
       "apps/web/src/app/overview/pending-decisions.tsx",
       "apps/web/src/app/overview/pending-decisions.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P07-001",
-      "P07-014"
-    ],
+    "dependsOn": ["P05-001"],
+    "integrationDependsOn": ["P07-001", "P07-014"],
     "acceptance": [
       "空列表显示无待处理而非0风险",
       "expired/unknown状态不展示已批准绿标",
       "375px/loading/error/键盘入口均可用"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/overview/pending-decisions.test.tsx "
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/overview/pending-decisions.test.tsx "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2591,28 +2316,20 @@
       "P05-001 store selection、period、watermark和quality",
       "复用dashboard-range日期交互"
     ],
-    "produces": [
-      "可注入店铺/日期切换的scope条及截止同步时刻提示"
-    ],
+    "produces": ["可注入店铺/日期切换的scope条及截止同步时刻提示"],
     "files": [
       "apps/web/src/app/overview/scope-freshness.tsx",
       "apps/web/src/app/overview/scope-freshness.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P2-GATE"
-    ],
+    "dependsOn": ["P05-001"],
+    "integrationDependsOn": ["P2-GATE"],
     "acceptance": [
       "缺watermark显示尚未同步而非当前时间",
       "未来/反向日期受控拒绝；切店清除旧范围状态",
       "375px以及loading/empty/error各有可读标签"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/overview/scope-freshness.test.tsx "
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/overview/scope-freshness.test.tsx "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2634,29 +2351,21 @@
       "P05-001 evidence definition/version/window/source/time/quality/facts",
       "只展示授权scope可见且经过脱敏的facts"
     ],
-    "produces": [
-      "可复用证据详情panel及独立样式"
-    ],
+    "produces": ["可复用证据详情panel及独立样式"],
     "files": [
       "apps/web/src/app/evidence/evidence-detail.tsx",
       "apps/web/src/app/evidence/evidence-detail.test.tsx",
       "apps/web/src/app/evidence/evidence-detail.css"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P05-001"],
+    "integrationDependsOn": ["P03-001"],
     "acceptance": [
       "显示定义版本、window、watermark和读取时间",
       "STALE/ESTIMATED/INSUFFICIENT不称已验证事实",
       "恶意商品文本当纯文本；375px/loading/empty/error与键盘均可操作"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/evidence/evidence-detail.test.tsx "
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/evidence/evidence-detail.test.tsx "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2678,26 +2387,20 @@
       "P05-001注入transport，既有web API session错误处理",
       "scope和evidenceId由校验过的导航状态提供"
     ],
-    "produces": [
-      "overview与evidence读取适配器、AbortSignal及旧response丢弃"
-    ],
+    "produces": ["overview与evidence读取适配器、AbortSignal及旧response丢弃"],
     "files": [
       "apps/web/src/app/overview/overview-transport.ts",
       "apps/web/src/app/overview/overview-transport.test.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
+    "dependsOn": ["P05-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "未登录映射AUTH_REQUIRED不返回空数据",
       "切店后迟到响应不能覆盖新店证据",
       "500/schema非法返回可重试error且保留requestId"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/overview/overview-transport.test.ts "
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/overview/overview-transport.test.ts "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2730,9 +2433,7 @@
       "apps/api/src/overview/overview-read.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
+    "dependsOn": ["P05-001"],
     "integrationDependsOn": [
       "P03-001",
       "P04-001",
@@ -2774,30 +2475,20 @@
       "evidenceId与分页/日期strict参数验证",
       "查询/filter端点复用TenantScopeService.resolve；独立strict验证query，不直接挂现有TenantContextGuard"
     ],
-    "produces": [
-      "GET evidence details控制器，默认鉴权且返回脱敏DTO"
-    ],
+    "produces": ["GET evidence details控制器，默认鉴权且返回脱敏DTO"],
     "files": [
       "apps/api/src/evidence/evidence-read.controller.ts",
       "apps/api/src/evidence/evidence-read.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P03-001",
-      "P2-GATE",
-      "P03-018"
-    ],
+    "dependsOn": ["P05-001"],
+    "integrationDependsOn": ["P03-001", "P2-GATE", "P03-018"],
     "acceptance": [
       "无session401；跨租户/店铺拒绝且不暴露存在性",
       "非法ID/window返回400而不调用port",
       "合法返回定义/period/version/source/quality；超时返回明确error"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/evidence/evidence-read.controller.spec.ts "
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/evidence/evidence-read.controller.spec.ts "],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2819,19 +2510,14 @@
       "P05-002..009组件和控制器；P03/P04真实read implementations",
       "P07只读summary实现及P2源gate已合入"
     ],
-    "produces": [
-      "首页复用现有dashboard骨架，注册overview API module和evidence页面"
-    ],
+    "produces": ["首页复用现有dashboard骨架，注册overview API module和evidence页面"],
     "files": [
       "apps/api/src/overview/overview.module.ts",
       "apps/web/src/app/overview/overview-page.tsx",
       "apps/web/src/app/evidence/[evidenceId]/page.tsx",
       "apps/web/src/app/overview/overview-page.test.tsx"
     ],
-    "sharedFiles": [
-      "apps/web/src/app/page.tsx",
-      "apps/api/src/app.module.ts"
-    ],
+    "sharedFiles": ["apps/web/src/app/page.tsx", "apps/api/src/app.module.ts"],
     "dependsOn": [
       "P05-002",
       "P05-003",
@@ -2883,26 +2569,17 @@
       "P05-010本地路由和fixture-mode transport",
       "375px/桌面、五种quality、键盘和三态测试用例"
     ],
-    "produces": [
-      "定向Playwright截图/可访问性断言与验收记录"
-    ],
-    "files": [
-      "tests/e2e/overview-evidence.spec.ts",
-      "docs/qa/overview-evidence-ui.md"
-    ],
+    "produces": ["定向Playwright截图/可访问性断言与验收记录"],
+    "files": ["tests/e2e/overview-evidence.spec.ts", "docs/qa/overview-evidence-ui.md"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-010"
-    ],
+    "dependsOn": ["P05-010"],
     "integrationDependsOn": [],
     "acceptance": [
       "375px无横向溢出且证据入口可聚焦",
       "loading/empty/error截屏对比现有tokens并检查retry",
       "屏幕读出watermark/period/status；跨店后旧证据不可见"
     ],
-    "tests": [
-      "pnpm exec playwright test tests/e2e/overview-evidence.spec.ts"
-    ],
+    "tests": ["pnpm exec playwright test tests/e2e/overview-evidence.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2924,25 +2601,17 @@
       "P05-010真实read binding及受控P2 handoff local fixture",
       "P03 metric契约版本与P04 event evidenceHash"
     ],
-    "produces": [
-      "overview API与evidence API一致性定向集成测试"
-    ],
-    "files": [
-      "apps/api/test/overview-evidence.integration.spec.ts"
-    ],
+    "produces": ["overview API与evidence API一致性定向集成测试"],
+    "files": ["apps/api/test/overview-evidence.integration.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P05-010"
-    ],
+    "dependsOn": ["P05-010"],
     "integrationDependsOn": [],
     "acceptance": [
       "同window/definition/watermark的money与证据一一对应",
       "缺cost/stale样本不产生verified profit或虚假比较",
       "伪造tenant和未知evidenceId不能获取他店快照"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- test/overview-evidence.integration.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- test/overview-evidence.integration.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件"
@@ -2973,22 +2642,15 @@
       "packages/contracts/src/ai/safe-agent.schema.ts",
       "packages/contracts/src/ai/safe-agent.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
-    "dependsOn": [
-      "P03-001",
-      "P04-001"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
+    "dependsOn": ["P03-001", "P04-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "未知tool/scope注入/超长message拒绝",
       "claims必须标明事实/相关性/待验证假设并绑定evidence",
       "未知cost为null、CNY整数费用且无授权action字段"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/contracts test -- src/ai/safe-agent.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/contracts test -- src/ai/safe-agent.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3011,26 +2673,20 @@
       "P06-001及现有ToolRegistry/TenantScopeService；server context注入",
       "工具requiredPermissions与store membership resolver port"
     ],
-    "produces": [
-      "完整scope只读invoke wrapper及default-deny权限结果"
-    ],
+    "produces": ["完整scope只读invoke wrapper及default-deny权限结果"],
     "files": [
       "apps/api/src/ai/agent/safe-tool-invoker.ts",
       "apps/api/src/ai/agent/safe-tool-invoker.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "客户body的org/store/actor不覆盖server context",
       "权限撤销后同run下一次tool被拒；跨店读不可见",
       "未登记工具/execute_sql/approve/write即使模型请求也拒绝"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/agent/safe-tool-invoker.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/agent/safe-tool-invoker.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3053,30 +2709,20 @@
       "P06-001及注入MetricReadPort；复用business-overview tool登记格式",
       "服务已计算money/ratios、metricDefinitionVersion/window/watermark"
     ],
-    "produces": [
-      "store-summary与metrics两个薄tool adapters"
-    ],
+    "produces": ["store-summary与metrics两个薄tool adapters"],
     "files": [
       "apps/api/src/ai/tools/store-evidence.tools.ts",
       "apps/api/src/ai/tools/store-evidence.tools.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
-    "integrationDependsOn": [
-      "P03-001",
-      "P2-GATE",
-      "P03-018"
-    ],
+    "dependsOn": ["P06-001"],
+    "integrationDependsOn": ["P03-001", "P2-GATE", "P03-018"],
     "acceptance": [
       "同window结果保留minor CNY与evidence refs",
       "缺成本不从订单金额猜profit，保留INSUFFICIENT",
       "非法日期/跨scope在service调用前拒绝"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/tools/store-evidence.tools.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/tools/store-evidence.tools.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3099,32 +2745,20 @@
       "P06-001及注入inventory/refund evidence query ports",
       "退款paid-window与settlement/cohort口径分开"
     ],
-    "produces": [
-      "两个只读工具及无数据/STALE/partial结果"
-    ],
+    "produces": ["两个只读工具及无数据/STALE/partial结果"],
     "files": [
       "apps/api/src/ai/tools/risk-evidence.tools.ts",
       "apps/api/src/ai/tools/risk-evidence.tools.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
-    "integrationDependsOn": [
-      "P03-001",
-      "P04-001",
-      "P2-GATE",
-      "P03-018",
-      "P04-029"
-    ],
+    "dependsOn": ["P06-001"],
+    "integrationDependsOn": ["P03-001", "P04-001", "P2-GATE", "P03-018", "P04-029"],
     "acceptance": [
       "库存risk不把在途数量当可售库存",
       "不同退款窗口标明口径，不拼成同窗增长",
       "未知stock/cost/freshness明确UNAVAILABLE而非0；非法scope拒绝"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/tools/risk-evidence.tools.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/tools/risk-evidence.tools.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3147,17 +2781,13 @@
       "P06-001及三只读port，adapter仅验证转发不实现业务查询",
       "注入P04事件及P07 action history脱敏摘要"
     ],
-    "produces": [
-      "三个窄read registrations及统一evidence envelope"
-    ],
+    "produces": ["三个窄read registrations及统一evidence envelope"],
     "files": [
       "apps/api/src/ai/tools/context-evidence.tools.ts",
       "apps/api/src/ai/tools/context-evidence.tools.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [
       "P03-001",
       "P04-001",
@@ -3172,9 +2802,7 @@
       "history只显示已授权scope且剔除actor PII/token",
       "events保留事实与effective decision版本，未知action不假称success"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/tools/context-evidence.tools.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/tools/context-evidence.tools.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3197,30 +2825,20 @@
       "P06-001及P07-001 immutable candidate contract",
       "已认证scope、old/new minor价、evidence、version、TTL；注入candidate port"
     ],
-    "produces": [
-      "仅创建单SKU候选的工具registration及非授权结果"
-    ],
+    "produces": ["仅创建单SKU候选的工具registration及非授权结果"],
     "files": [
       "apps/api/src/ai/tools/price-candidate.tool.ts",
       "apps/api/src/ai/tools/price-candidate.tool.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001",
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P09-004",
-      "P07-014"
-    ],
+    "dependsOn": ["P06-001", "P07-001"],
+    "integrationDependsOn": ["P09-004", "P07-014"],
     "acceptance": [
       "候选返回proposal/revision ref，不返回APPROVED/EXECUTING",
       "approvedBy/execution fields/批量越界payload被拒",
       "缺fresh evidence或expectedVersion拒绝；记录request/run/evidence链"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/tools/price-candidate.tool.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/tools/price-candidate.tool.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3243,26 +2861,20 @@
       "P06-001工具facts及用户/商品/平台备注不可信文本",
       "允许字段白名单、文本/token长度上限、脱敏规则"
     ],
-    "produces": [
-      "独立DATA序列化器，trusted policy仅来自版本化代码"
-    ],
+    "produces": ["独立DATA序列化器，trusted policy仅来自版本化代码"],
     "files": [
       "apps/api/src/ai/agent/data-envelope.ts",
       "apps/api/src/ai/agent/data-envelope.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "商品含ignore previous instructions仍只在DATA字段",
       "token/手机号/客户姓名/raw prompt不进入外发facts",
       "超长嵌套/非法schema拒绝且错误不回显PII"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/agent/data-envelope.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/agent/data-envelope.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3285,26 +2897,20 @@
       "P06-001structured claims、tool结果同snapshot evidence refs",
       "复用numeric-grounding思想，仅域服务提供数值分解"
     ],
-    "produces": [
-      "sku/date/metric/unit/value/version逐项核对与拒绝原因"
-    ],
+    "produces": ["sku/date/metric/unit/value/version逐项核对与拒绝原因"],
     "files": [
       "apps/api/src/ai/agent/evidence-claims.ts",
       "apps/api/src/ai/agent/evidence-claims.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "捏造数字/商品/日期/evidenceId拒绝",
       "同值但单位/定义version/window错误拒绝",
       "事实、相关性、假设标签分开；相关性不可称因果"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/agent/evidence-claims.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/agent/evidence-claims.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3327,26 +2933,20 @@
       "P06-001及注入safe tools/evidence；无网络transport",
       "同用户任意合法问题范围，非固定FAQ答案"
     ],
-    "produces": [
-      "mode=OFFLINE_RULE_SUMMARY的结构化摘要及原因"
-    ],
+    "produces": ["mode=OFFLINE_RULE_SUMMARY的结构化摘要及原因"],
     "files": [
       "apps/api/src/ai/agent/offline-rule-summary.ts",
       "apps/api/src/ai/agent/offline-rule-summary.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "同tool数据生成period/quality/evidence refs而非硬编码数字",
       "无证据返回不足，明确规则摘要不称模型推理",
       "库存/退款/任意范围询问通过safe tools取证且无客户PII"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/agent/offline-rule-summary.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/agent/offline-rule-summary.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3369,27 +2969,20 @@
       "P06-001及P04-002provider boundary；已核验region/retention/trainingUse/crossBorder配置",
       "环境secret引用，不凭key存在自动切换provider"
     ],
-    "produces": [
-      "strict配置校验及默认OFFLINE选择决策"
-    ],
+    "produces": ["strict配置校验及默认OFFLINE选择决策"],
     "files": [
       "apps/api/src/ai/policy/provider-policy.ts",
       "apps/api/src/ai/policy/provider-policy.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001",
-      "P04-002"
-    ],
+    "dependsOn": ["P06-001", "P04-002"],
     "integrationDependsOn": [],
     "acceptance": [
       "未核验地区/保留期/训练用途策略拒绝远端资格",
       "仅有API key不触发provider切换",
       "非法配置fail-closed且不打印secret；合法offline不需要key"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/policy/provider-policy.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/policy/provider-policy.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3412,28 +3005,20 @@
       "P06-010eligibility结果及P06-007净化payload",
       "注入测试transport；登记destination/region、redirect与超时policy"
     ],
-    "produces": [
-      "无真实fetch的gateway wrapper及目的地/redirect检查"
-    ],
+    "produces": ["无真实fetch的gateway wrapper及目的地/redirect检查"],
     "files": [
       "apps/api/src/ai/policy/egress-gateway.ts",
       "apps/api/src/ai/policy/egress-gateway.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001",
-      "P06-007",
-      "P06-010"
-    ],
+    "dependsOn": ["P06-001", "P06-007", "P06-010"],
     "integrationDependsOn": [],
     "acceptance": [
       "未登记host/IP/private目的地/redirect拒绝且transport零调用",
       "已登记目的地仍必须符合region policy与净化信封",
       "abort/deadline后迟到结果不入run；错误无secret回显"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/policy/egress-gateway.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/policy/egress-gateway.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3457,17 +3042,13 @@
       "显式每run/tenant预算、已核验价表版本，token usage允许未知",
       "已核验rateTable version及整数CNY minor保守向上舍入，未知usage不转0且quota不低估"
     ],
-    "produces": [
-      "reserve/settle/release算法与超额停止、未知费用状态"
-    ],
+    "produces": ["reserve/settle/release算法与超额停止、未知费用状态"],
     "files": [
       "apps/api/src/ai/policy/agent-budget.ts",
       "apps/api/src/ai/policy/agent-budget.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "两run争同余额只有一个reservation成功（port CAS）",
@@ -3475,9 +3056,7 @@
       "timeout/cancel按reservation id最多结算一次且超预算停后续tool",
       "亚分单次费用按契约向上预留/结算；不同价表version不静默重算旧run"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/policy/agent-budget.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/policy/agent-budget.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3507,12 +3086,8 @@
       "packages/database/prisma/migrations/20261004060100_agent_run_ledger/migration.sql",
       "packages/database/test/agent-run-ledger.test.mjs"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma"
-    ],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma"],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "migration静态检查scope复合FK及RLS default-deny",
@@ -3545,9 +3120,7 @@
       "P06-001与现有assistant-run NDJSON、authenticated tenant context",
       "注入SafeToolInvoker/ProviderPort/ClaimVerifier/RunRepository/BudgetPort，测试fake ports"
     ],
-    "produces": [
-      "安全问答service和控制器兼容stream事件，清楚区分rejected/offline/completed"
-    ],
+    "produces": ["安全问答service和控制器兼容stream事件，清楚区分rejected/offline/completed"],
     "files": [
       "apps/api/src/ai/agent/ask-store.service.ts",
       "apps/api/src/ai/agent/ask-store.controller.ts",
@@ -3555,9 +3128,7 @@
       "apps/api/src/ai/agent/ask-store.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001"
-    ],
+    "dependsOn": ["P06-001"],
     "integrationDependsOn": [
       "P06-002",
       "P06-008",
@@ -3572,9 +3143,7 @@
       "cancel/timeout只发一个终态，迟到claims不覆盖fallback",
       "tool预算超额停止且记录脱敏reason，不自动重复创建候选"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/agent/ask-store.service.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/agent/ask-store.service.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3597,29 +3166,20 @@
       "P06-001AgentAnswer与run状态；P05-001 evidence navigation refs",
       "复用assistant/conversation、assistant-markdown和现有tokens"
     ],
-    "produces": [
-      "独立问答evidence/period/quality/offline标注组件与cost未知显示"
-    ],
+    "produces": ["独立问答evidence/period/quality/offline标注组件与cost未知显示"],
     "files": [
       "apps/web/src/app/assistant/grounded-answer.tsx",
       "apps/web/src/app/assistant/grounded-answer.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-001",
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P05-010"
-    ],
+    "dependsOn": ["P06-001", "P05-001"],
+    "integrationDependsOn": ["P05-010"],
     "acceptance": [
       "OFFLINE_RULE_SUMMARY清晰显示规则摘要；未知cost不显示0",
       "事实/相关性/假设分栏标签并链接授权scope证据",
       "375px/loading/empty/error及拒绝回答可读；恶意Markdown无执行脚本"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/assistant/grounded-answer.test.tsx"
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/assistant/grounded-answer.test.tsx"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3642,18 +3202,13 @@
       "P06全部组件及P03/P04/P07真实ports、P2 source gate",
       "已完成P09审计writer；默认provider=offline无外网"
     ],
-    "produces": [
-      "DI module/allowlist注册、已有assistant endpoint兼容和grounded answer嵌入"
-    ],
+    "produces": ["DI module/allowlist注册、已有assistant endpoint兼容和grounded answer嵌入"],
     "files": [
       "apps/api/src/ai/agent/safe-agent.module.ts",
       "apps/api/test/safe-agent-wiring.integration.spec.ts",
       "apps/web/src/app/assistant/grounded-answer-integration.test.tsx"
     ],
-    "sharedFiles": [
-      "apps/api/src/app.module.ts",
-      "apps/web/src/app/assistant/conversation.tsx"
-    ],
+    "sharedFiles": ["apps/api/src/app.module.ts", "apps/web/src/app/assistant/conversation.tsx"],
     "dependsOn": [
       "P06-002",
       "P06-003",
@@ -3714,25 +3269,17 @@
       "P06-016本地离线runtime；受控恶意用户/商品/平台备注fixture",
       "包括scope替换、SQL/approval工具要求、secret外发请求"
     ],
-    "produces": [
-      "端到端安全回归集，统计tool/transport零未授权调用"
-    ],
-    "files": [
-      "apps/api/test/safe-agent-security.integration.spec.ts"
-    ],
+    "produces": ["端到端安全回归集，统计tool/transport零未授权调用"],
+    "files": ["apps/api/test/safe-agent-security.integration.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-016"
-    ],
+    "dependsOn": ["P06-016"],
     "integrationDependsOn": [],
     "acceptance": [
       "ignore-policy注入不能改变trusted policy或调用未登记tool",
       "不同org/workspace/store/evidence scope请求全部拒绝",
       "手机号/token/prompt全文不进入metadata/response/egress"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- test/safe-agent-security.integration.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- test/safe-agent-security.integration.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3755,18 +3302,13 @@
       "P06-016真实read runtime和P05 evidence page",
       "三类不同问法/范围及无cost、stale、取消fixture"
     ],
-    "produces": [
-      "数值/period/quality/claims API回归与375px UI截图"
-    ],
+    "produces": ["数值/period/quality/claims API回归与375px UI截图"],
     "files": [
       "apps/api/test/safe-agent-grounding.integration.spec.ts",
       "tests/e2e/safe-agent-answer.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-016",
-      "P05-010"
-    ],
+    "dependsOn": ["P06-016", "P05-010"],
     "integrationDependsOn": [],
     "acceptance": [
       "销量涨利润降问题从同数据discount/spend/mix服务取证；不写死百分比",
@@ -3799,27 +3341,20 @@
       "P06-013 schema与P06-001 metadata，既有tenant transaction API",
       "P09-004 audit append writer；ledger CAS与request唯一约束"
     ],
-    "produces": [
-      "参数化run/ToolCall元数据与budget reserve/settle仓库，所有mutation同事务写audit"
-    ],
+    "produces": ["参数化run/ToolCall元数据与budget reserve/settle仓库，所有mutation同事务写audit"],
     "files": [
       "apps/api/src/ai/agent/agent-run.repository.ts",
       "apps/api/src/ai/agent/agent-run.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P06-013",
-      "P09-004"
-    ],
+    "dependsOn": ["P06-013", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "run/reservation/audit失败任一发生都整体回滚",
       "受限身份跨scope拒绝；未知token/cost维持null",
       "并发相同request仅一个run/reservation，取消最多settle一次"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/ai/agent/agent-run.repository.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/ai/agent/agent-run.repository.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -3850,9 +3385,7 @@
       "packages/contracts/src/actions/proposal.schema.ts",
       "packages/contracts/src/actions/proposal.schema.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
     "dependsOn": [],
     "integrationDependsOn": [],
     "acceptance": [
@@ -3885,18 +3418,13 @@
       "已验证ProposalPayload；作用域/connection generation/sourceVersion/证据版本/有效期",
       "node:crypto SHA-256；禁止hash依赖未规范化任意JSON"
     ],
-    "produces": [
-      "稳定序列化及hash纯函数",
-      "hash覆盖执行相关字段且不随展示字段变化"
-    ],
+    "produces": ["稳定序列化及hash纯函数", "hash覆盖执行相关字段且不随展示字段变化"],
     "files": [
       "apps/api/src/actions/proposal-hash.ts",
       "apps/api/src/actions/proposal-hash.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
+    "dependsOn": ["P07-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "对象键顺序变化不改变hash",
@@ -3937,13 +3465,8 @@
       "apps/api/src/actions/price-risk-policy.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P03-001",
-      "P13-001"
-    ],
+    "dependsOn": ["P07-001"],
+    "integrationDependsOn": ["P03-001", "P13-001"],
     "acceptance": [
       "59→62得到可审批风险且保留ruleVersion",
       "10%/30%边界、旧价0与unsafe integer可复算且拒绝/升级",
@@ -3983,9 +3506,7 @@
       "apps/api/src/actions/proposal-transition.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
+    "dependsOn": ["P07-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "DRAFT→PROPOSED→PENDING_APPROVAL及人工拒绝合法",
@@ -4013,10 +3534,7 @@
     "kind": "integration",
     "priority": "P0",
     "contract": "ProposalPersistenceV1",
-    "consumes": [
-      "现有tenant复合FK/RLS迁移样例",
-      "ActionProposalV1与不可变revision/hash结构"
-    ],
+    "consumes": ["现有tenant复合FK/RLS迁移样例", "ActionProposalV1与不可变revision/hash结构"],
     "produces": [
       "additive Prisma ActionProposal/ProposalRevision、同org/store复合FK及查询索引",
       "独立migration与离线模型契约测试"
@@ -4029,9 +3547,7 @@
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/migrations/20261005070100_action_proposals/migration.sql"
     ],
-    "dependsOn": [
-      "P07-001"
-    ],
+    "dependsOn": ["P07-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "schema validate及空库/升级路径迁移SQL定义可审阅",
@@ -4075,10 +3591,7 @@
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/migrations/20261005070200_action_approvals/migration.sql"
     ],
-    "dependsOn": [
-      "P07-001",
-      "P07-005"
-    ],
+    "dependsOn": ["P07-001", "P07-005"],
     "integrationDependsOn": [],
     "acceptance": [
       "审批只能关联同org/store已存在revision",
@@ -4119,12 +3632,7 @@
       "apps/api/src/actions/proposal.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-002",
-      "P07-004",
-      "P07-005",
-      "P09-004"
-    ],
+    "dependsOn": ["P07-002", "P07-004", "P07-005", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "同scope创建/读取保留hash及revision",
@@ -4165,14 +3673,7 @@
       "apps/api/src/actions/approval.service.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-004",
-      "P07-006",
-      "P07-007",
-      "P07-009",
-      "P09-004",
-      "P07-019"
-    ],
+    "dependsOn": ["P07-004", "P07-006", "P07-007", "P07-009", "P09-004", "P07-019"],
     "integrationDependsOn": [],
     "acceptance": [
       "合法人工approve绑定org/store/action/revision/hash且无自动执行",
@@ -4213,9 +3714,7 @@
       "apps/api/src/actions/human-approval-policy.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
+    "dependsOn": ["P07-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "actions:approve+store products:write且可信近期人工认证允许",
@@ -4256,14 +3755,8 @@
       "apps/api/src/actions/proposal.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P07-003",
-      "P07-007",
-      "P07-009"
-    ],
+    "dependsOn": ["P07-001"],
+    "integrationDependsOn": ["P07-003", "P07-007", "P07-009"],
     "acceptance": [
       "匿名/Viewer/跨store/注入tenant请求拒绝",
       "合法单SKU提案返回revision/hash/risk和待审批状态",
@@ -4303,13 +3796,8 @@
       "apps/api/src/actions/approval.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P07-008",
-      "P07-009"
-    ],
+    "dependsOn": ["P07-001"],
+    "integrationDependsOn": ["P07-008", "P07-009"],
     "acceptance": [
       "伪造approvedBy/authenticatedAt及额外权限字段400",
       "匿名/跨组织/未近期重认证403或明确AUTH_REQUIRED",
@@ -4340,21 +3828,14 @@
       "WHAT/WHY/EVIDENCE/OLD/NEW/SCOPE/RISK/IMPACT完整view-model",
       "现有Card/证据链接/金额格式；不可用影响显示未知"
     ],
-    "produces": [
-      "独立预览组件与展示fixture",
-      "375px/桌面且loading/empty/error状态完整"
-    ],
+    "produces": ["独立预览组件与展示fixture", "375px/桌面且loading/empty/error状态完整"],
     "files": [
       "apps/web/src/app/actions/proposal-preview.tsx",
       "apps/web/src/app/actions/proposal-preview.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P05-001"
-    ],
+    "dependsOn": ["P07-001"],
+    "integrationDependsOn": ["P05-001"],
     "acceptance": [
       "旧新价、作用域、风险版本、证据截至时间清晰显示",
       "缺成本/影响未知不显示准确利润或0；不可信商品标题仅text呈现",
@@ -4385,30 +3866,20 @@
       "注入approve/reject client、current authorization view和preview组件",
       "固定revision/hash/TTL；需重认证/二次确认策略"
     ],
-    "produces": [
-      "无默认勾选的审批/拒绝UI",
-      "权限不足、过期和内容更新强制刷新确认"
-    ],
+    "produces": ["无默认勾选的审批/拒绝UI", "权限不足、过期和内容更新强制刷新确认"],
     "files": [
       "apps/web/src/app/actions/approval-form.tsx",
       "apps/web/src/app/actions/approval-form.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P07-011",
-      "P07-012"
-    ],
+    "dependsOn": ["P07-001"],
+    "integrationDependsOn": ["P07-011", "P07-012"],
     "acceptance": [
       "明确确认旧新值后发送当前revision/hash，不发送actor",
       "Viewer禁用且错误403可恢复；409/410撤销旧确认并刷新",
       "二次确认可取消无请求；375px键盘可达与提交loading/错误态"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web exec vitest run src/app/actions/approval-form.test.tsx"
-    ],
+    "tests": ["pnpm --filter @shopmate/web exec vitest run src/app/actions/approval-form.test.tsx"],
     "outOfScope": [
       "真实平台或LLM网络调用",
       "部署或线上迁移",
@@ -4493,29 +3964,16 @@
       "真实PostgreSQL FK/RLS/CAS/audit rollback证明",
       "将新suite纳入强制隔离数据库runner且不可silent skip"
     ],
-    "files": [
-      "packages/database/test/integration/action-approval.test.mjs"
-    ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P07-005",
-      "P07-006",
-      "P07-007",
-      "P07-008",
-      "P09-004",
-      "P07-019"
-    ],
+    "files": ["packages/database/test/integration/action-approval.test.mjs"],
+    "sharedFiles": ["scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P07-005", "P07-006", "P07-007", "P07-008", "P09-004", "P07-019"],
     "integrationDependsOn": [],
     "acceptance": [
       "跨tenant/store审批关联与missing scope被DB拒绝",
       "并行批准/拒绝、修订/批准只有一个有效状态；旧approval不生效",
       "audit故障回滚approval与proposal状态；空库/升级迁移验证且0 skipped"
     ],
-    "tests": [
-      "pnpm test:tenant"
-    ],
+    "tests": ["pnpm test:tenant"],
     "outOfScope": [
       "真实平台或LLM网络调用",
       "部署或线上迁移",
@@ -4551,9 +4009,7 @@
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/migrations/20261005070300_human_sessions/migration.sql"
     ],
-    "dependsOn": [
-      "P07-001"
-    ],
+    "dependsOn": ["P07-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "tokenHash唯一且raw token不入库",
@@ -4596,10 +4052,7 @@
       "apps/api/src/auth/human-session.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-016",
-      "P09-004"
-    ],
+    "dependsOn": ["P07-016", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "有效session映射subject并读取当前membership权限",
@@ -4650,12 +4103,7 @@
       "apps/api/src/auth/access/merchant-scope.guard.ts",
       "apps/api/src/auth/contracts/auth-context.ts"
     ],
-    "dependsOn": [
-      "P07-017",
-      "P07-009",
-      "P09-004",
-      "P07-020"
-    ],
+    "dependsOn": ["P07-017", "P07-009", "P09-004", "P07-020"],
     "integrationDependsOn": [],
     "acceptance": [
       "旧cookie读接口兼容但没有近期认证证明不得审批",
@@ -4697,26 +4145,15 @@
       "packages/database/test/integration/human-approval-auth.test.mjs",
       "apps/api/test/human-approval-auth.e2e-spec.ts"
     ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs",
-      "apps/api/vitest.tenant.config.ts"
-    ],
-    "dependsOn": [
-      "P07-016",
-      "P07-017",
-      "P07-018",
-      "P09-004",
-      "P07-020"
-    ],
+    "sharedFiles": ["scripts/test-tenant-database.mjs", "apps/api/vitest.tenant.config.ts"],
+    "dependsOn": ["P07-016", "P07-017", "P07-018", "P09-004", "P07-020"],
     "integrationDependsOn": [],
     "acceptance": [
       "本地合法登录/reauth可建立真实human审批身份",
       "复制cookie在logout后被拒；撤销member后approval与worker reader均拒",
       "模拟时钟advance不延长session/approval；旧cookie/伪造body/AI candidate不得获得身份"
     ],
-    "tests": [
-      "pnpm test:tenant"
-    ],
+    "tests": ["pnpm test:tenant"],
     "outOfScope": [
       "外部身份Provider/MFA供应商接入",
       "完整生产密码重置/身份上线验收",
@@ -4743,16 +4180,9 @@
       "近期重认证POST的strict Origin/CSRF check与session-scoped bounded尝试计数",
       "原子持久attempt budget使用P07-016 session metadata；配置缺失默认拒绝，不信任客户端proxy header"
     ],
-    "files": [
-      "apps/api/src/auth/reauth-safety.ts",
-      "apps/api/src/auth/reauth-safety.spec.ts"
-    ],
+    "files": ["apps/api/src/auth/reauth-safety.ts", "apps/api/src/auth/reauth-safety.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P07-001",
-      "P07-016",
-      "P07-017"
-    ],
+    "dependsOn": ["P07-001", "P07-016", "P07-017"],
     "integrationDependsOn": [],
     "acceptance": [
       "同源有效CSRF请求允许验证，foreign/missing-invalid origin/token按明确策略拒绝",
@@ -4792,9 +4222,7 @@
       "packages/contracts/src/actions/execution.schema.ts",
       "packages/contracts/src/actions/execution.schema.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
     "dependsOn": [],
     "integrationDependsOn": [],
     "acceptance": [
@@ -4839,11 +4267,7 @@
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/migrations/20261005080100_action_executions/migration.sql"
     ],
-    "dependsOn": [
-      "P08-001",
-      "P07-006",
-      "P10-002"
-    ],
+    "dependsOn": ["P08-001", "P07-006", "P10-002"],
     "integrationDependsOn": [],
     "acceptance": [
       "同tenant key重复创建被唯一约束拒绝",
@@ -4885,12 +4309,7 @@
       "apps/api/src/actions/execution.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-002",
-      "P07-008",
-      "P09-004",
-      "P10-003"
-    ],
+    "dependsOn": ["P08-002", "P07-008", "P09-004", "P10-003"],
     "integrationDependsOn": [],
     "acceptance": [
       "两个相同key竞争只一条execution/job/audit有效转移",
@@ -4931,14 +4350,8 @@
       "apps/api/src/actions/execution-preflight.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001",
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P07-019",
-      "P2-GATE"
-    ],
+    "dependsOn": ["P08-001", "P07-001"],
+    "integrationDependsOn": ["P07-019", "P2-GATE"],
     "acceptance": [
       "session过期/revoke、店铺删除/disconnect/generation变化任一阻断dispatch",
       "同价但源版本已变仍冲突，不覆盖商家手动更新",
@@ -4978,10 +4391,7 @@
       "apps/api/src/actions/price-command-builder.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001",
-      "P07-001"
-    ],
+    "dependsOn": ["P08-001", "P07-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "59→62产出5900→6200且携带当前expectedVersion",
@@ -5022,16 +4432,8 @@
       "apps/api/src/actions/price-dispatch.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001",
-      "P08-005"
-    ],
-    "integrationDependsOn": [
-      "P08-004",
-      "P08-003",
-      "P2-GATE",
-      "P08-009"
-    ],
+    "dependsOn": ["P08-001", "P08-005"],
+    "integrationDependsOn": ["P08-004", "P08-003", "P2-GATE", "P08-009"],
     "acceptance": [
       "ACCEPTED不标成功，安排验证",
       "timeout-after-write不重新调用updatePrice；UNKNOWN也安排验证",
@@ -5071,9 +4473,7 @@
       "apps/api/src/actions/execution-verification.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001"
-    ],
+    "dependsOn": ["P08-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "正确sku/store/currency/value的独立回读才成功",
@@ -5114,16 +4514,8 @@
       "apps/api/src/actions/verification-scheduler.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001",
-      "P08-007"
-    ],
-    "integrationDependsOn": [
-      "P08-009",
-      "P09-004",
-      "P10-003",
-      "P2-GATE"
-    ],
+    "dependsOn": ["P08-001", "P08-007"],
+    "integrationDependsOn": ["P08-009", "P09-004", "P10-003", "P2-GATE"],
     "acceptance": [
       "短暂PENDING按retryAfter受上限安排readback",
       "超deadline停止调度、UI状态待核实、无write调用",
@@ -5165,11 +4557,7 @@
       "apps/api/src/actions/execution-lease.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-002",
-      "P09-004",
-      "P10-003"
-    ],
+    "dependsOn": ["P08-002", "P09-004", "P10-003"],
     "integrationDependsOn": [],
     "acceptance": [
       "并行claim仅一个取得有效lease",
@@ -5211,14 +4599,8 @@
       "apps/api/src/actions/execution-recovery.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001"
-    ],
-    "integrationDependsOn": [
-      "P08-009",
-      "P08-008",
-      "P08-006"
-    ],
+    "dependsOn": ["P08-001"],
+    "integrationDependsOn": ["P08-009", "P08-008", "P08-006"],
     "acceptance": [
       "写后崩溃/receipt丢失重启只verify且write计数不增",
       "过期lease使用新fencing token；旧worker结果不覆盖",
@@ -5258,15 +4640,8 @@
       "apps/api/src/actions/price-compensation.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001",
-      "P07-001"
-    ],
-    "integrationDependsOn": [
-      "P07-003",
-      "P07-007",
-      "P08-007"
-    ],
+    "dependsOn": ["P08-001", "P07-001"],
+    "integrationDependsOn": ["P07-003", "P07-007", "P08-007"],
     "acceptance": [
       "当前仍为原目标可生成恢复旧价候选且不执行",
       "商家后续改价/无新鲜源版本拒绝补偿候选",
@@ -5306,12 +4681,8 @@
       "apps/web/src/app/actions/execution-status.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-001"
-    ],
-    "integrationDependsOn": [
-      "P07-012"
-    ],
+    "dependsOn": ["P08-001"],
+    "integrationDependsOn": ["P07-012"],
     "acceptance": [
       "ACCEPTED/PENDING显示EXECUTING，独立VERIFIED才成功",
       "deadline UNKNOWN显示平台状态待核实已停止自动写重试",
@@ -5351,10 +4722,7 @@
       "apps/api/src/actions/execution.module.ts",
       "apps/api/src/actions/execution.module.spec.ts"
     ],
-    "sharedFiles": [
-      "apps/api/src/app.module.ts",
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["apps/api/src/app.module.ts", "packages/contracts/src/index.ts"],
     "dependsOn": [
       "P08-003",
       "P08-004",
@@ -5402,32 +4770,17 @@
       "isolated-postgres受限角色与两组织fixtures",
       "并发claim/reserve、故障注入audit/outbox/commit"
     ],
-    "produces": [
-      "真实DB同key唯一、fencing及rollback证明",
-      "强制isolated runner注册且0 skipped"
-    ],
-    "files": [
-      "packages/database/test/integration/action-execution.test.mjs"
-    ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P08-002",
-      "P08-003",
-      "P08-009",
-      "P09-004",
-      "P10-003"
-    ],
+    "produces": ["真实DB同key唯一、fencing及rollback证明", "强制isolated runner注册且0 skipped"],
+    "files": ["packages/database/test/integration/action-execution.test.mjs"],
+    "sharedFiles": ["scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P08-002", "P08-003", "P08-009", "P09-004", "P10-003"],
     "integrationDependsOn": [],
     "acceptance": [
       "同key20个并发reserve仅一execution/job有效",
       "旧lease持有人无法更新新token记录，跨tenant FK/RLS拒绝",
       "outbox/audit失败proposal不入EXECUTING；空库/升级migration均可跑"
     ],
-    "tests": [
-      "pnpm test:tenant"
-    ],
+    "tests": ["pnpm test:tenant"],
     "outOfScope": [
       "真实平台调用/生产部署/线上迁移",
       "库存相对增量及批量执行",
@@ -5454,18 +4807,9 @@
       "59→62单SKU成功及UNKNOWN恢复HTTP/connector证明",
       "经营DB仅通过同步收敛；完整action/approval/execution/audit链"
     ],
-    "files": [
-      "apps/api/test/single-sku-execution.e2e-spec.ts"
-    ],
+    "files": ["apps/api/test/single-sku-execution.e2e-spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P08-013",
-      "P08-014",
-      "P08-012",
-      "P2-GATE",
-      "P08-017",
-      "P08-018"
-    ],
+    "dependsOn": ["P08-013", "P08-014", "P08-012", "P2-GATE", "P08-017", "P08-018"],
     "integrationDependsOn": [],
     "acceptance": [
       "正常流程人工批准→一次write→独立VERIFIED成功；租户B不可见",
@@ -5510,10 +4854,7 @@
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/migrations/20261005080200_mock_action_receipts/migration.sql"
     ],
-    "dependsOn": [
-      "P08-001",
-      "P2-GATE"
-    ],
+    "dependsOn": ["P08-001", "P2-GATE"],
     "integrationDependsOn": [],
     "acceptance": [
       "tenant/connection/generation+key唯一且不同payload复用key冲突",
@@ -5524,11 +4865,7 @@
       "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/command-model.test.mjs",
       "pnpm --filter @shopmate/database prisma:validate"
     ],
-    "outOfScope": [
-      "真实平台调用/部署/线上迁移",
-      "相对库存变更/采购到货模拟",
-      "UNKNOWN自动再次写"
-    ],
+    "outOfScope": ["真实平台调用/部署/线上迁移", "相对库存变更/采购到货模拟", "UNKNOWN自动再次写"],
     "risk": "回执与经营规范库混写",
     "parallelGroup": "p08-mock-price-source-16",
     "note": "拟新增文件独占；复用P2 handoff已获批source/control事务锁和受限身份，不读取scenario oracle；4小时内含验证/PR。独立commit/PR、最新CI+审查合并才Done。与P08-002持同Prisma协调锁；真实源事务证明归P08-015。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。"
@@ -5554,27 +4891,16 @@
       "packages/database/src/mock-actions/set-price.ts",
       "packages/database/test/integration/mock-price-write.test.mjs"
     ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P08-016",
-      "P2-GATE"
-    ],
+    "sharedFiles": ["scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P08-016", "P2-GATE"],
     "integrationDependsOn": [],
     "acceptance": [
       "5900→6200只变指定sourceSKU且版本推进一次",
       "同key同hash重复无二次变更；不同hash或旧sourceVersion拒绝",
       "timeout-after-write fixture显示源已写；reset/disconnect竞争在锁后重查并拒绝，rollback无部分回执"
     ],
-    "tests": [
-      "pnpm test:tenant"
-    ],
-    "outOfScope": [
-      "真实平台调用/部署/线上迁移",
-      "相对库存变更/采购到货模拟",
-      "UNKNOWN自动再次写"
-    ],
+    "tests": ["pnpm test:tenant"],
+    "outOfScope": ["真实平台调用/部署/线上迁移", "相对库存变更/采购到货模拟", "UNKNOWN自动再次写"],
     "risk": "源价格写与reset/disconnect竞争",
     "parallelGroup": "p08-mock-price-source-17",
     "note": "拟新增文件独占；复用P2 handoff已获批source/control事务锁和受限身份，不读取scenario oracle；4小时内含验证/PR。独立commit/PR、最新CI+审查合并才Done。只单SKUsource transaction；故障信号来自已批准P2端口。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。"
@@ -5604,11 +4930,7 @@
       "apps/api/src/integrations/mock/mock-commerce-connector.ts",
       "apps/api/src/integrations/mock/mock-connector-factory.ts"
     ],
-    "dependsOn": [
-      "P08-017",
-      "P08-007",
-      "P2-GATE"
-    ],
+    "dependsOn": ["P08-017", "P08-007", "P2-GATE"],
     "integrationDependsOn": [],
     "acceptance": [
       "正常sourceprice readback带correct binding/execution/SKU/version",
@@ -5618,11 +4940,7 @@
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/integrations/mock/mock-price-actions.spec.ts src/integrations/mock/mock-commerce-connector.spec.ts --maxWorkers 1"
     ],
-    "outOfScope": [
-      "真实平台调用/部署/线上迁移",
-      "相对库存变更/采购到货模拟",
-      "UNKNOWN自动再次写"
-    ],
+    "outOfScope": ["真实平台调用/部署/线上迁移", "相对库存变更/采购到货模拟", "UNKNOWN自动再次写"],
     "risk": "用command旧target伪造回读",
     "parallelGroup": "p08-mock-price-source-18",
     "note": "拟新增文件独占；复用P2 handoff已获批source/control事务锁和受限身份，不读取scenario oracle；4小时内含验证/PR。独立commit/PR、最新CI+审查合并才Done。持mock-connector wiring锁；只有此卡修改既有adapter/factory价格write wiring。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。"
@@ -5650,9 +4968,7 @@
       "packages/contracts/src/audit/audit.schema.ts",
       "packages/contracts/src/audit/audit.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
     "dependsOn": [],
     "integrationDependsOn": [],
     "acceptance": [
@@ -5660,9 +4976,7 @@
       "未知metadata/PII/prompt字段拒绝且query limit/date范围有上限",
       "TENANT scope必需；未知login主体只可ANONYMOUS_AUTH_SECURITY且不能伪造scope/actor；source time不能代security occurredAt，hash不宣称不可抵赖"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/contracts test -- src/audit/audit.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/contracts test -- src/audit/audit.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -5685,26 +4999,17 @@
       "P09-001各event family允许字段白名单",
       "actor必要内部id，值before/after仅保留审核需要的非PII字段"
     ],
-    "produces": [
-      "纯函数allowlist redactor及版本化脱敏结果"
-    ],
-    "files": [
-      "apps/api/src/audit/audit-redactor.ts",
-      "apps/api/src/audit/audit-redactor.spec.ts"
-    ],
+    "produces": ["纯函数allowlist redactor及版本化脱敏结果"],
+    "files": ["apps/api/src/audit/audit-redactor.ts", "apps/api/src/audit/audit-redactor.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001"
-    ],
+    "dependsOn": ["P09-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "token/手机号/姓名/raw prompt/嵌套secret均剔除或拒绝",
       "action old/new price和必要link ids保留",
       "非法/超大metadata拒绝，error不回显原始payload"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/audit/audit-redactor.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/audit/audit-redactor.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -5735,12 +5040,8 @@
       "packages/database/prisma/migrations/20261004090100_audit_append_foundation/migration.sql",
       "packages/database/test/audit-migration.test.mjs"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma"
-    ],
-    "dependsOn": [
-      "P09-001"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma"],
+    "dependsOn": ["P09-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "migration检查app role无UPDATE/DELETE且scope FK正确",
@@ -5784,12 +5085,7 @@
       "apps/api/src/audit/audit-append.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001",
-      "P09-002",
-      "P09-003",
-      "P09-005"
-    ],
+    "dependsOn": ["P09-001", "P09-002", "P09-003", "P09-005"],
     "integrationDependsOn": [],
     "acceptance": [
       "business mutation与audit任一失败时整体rollback",
@@ -5797,9 +5093,7 @@
       "重复occurrence不重复写，权限丢失/非法scope拒绝；元数据脱敏",
       "未知login主体记录anonymous事件不伪造org/actor；tenant query不可查询该sink且失败事件无密码/cookie/raw email"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/audit/audit-append.repository.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/audit/audit-append.repository.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -5822,26 +5116,17 @@
       "P09-001redacted entry字段、prevHash和version",
       "无独立signer/外部immutable anchor；checkpoint来自只读port"
     ],
-    "produces": [
-      "稳定key序规范化、hash计算和gap/mismatch/unsupported结果"
-    ],
-    "files": [
-      "apps/api/src/audit/audit-hash.ts",
-      "apps/api/src/audit/audit-hash.spec.ts"
-    ],
+    "produces": ["稳定key序规范化、hash计算和gap/mismatch/unsupported结果"],
+    "files": ["apps/api/src/audit/audit-hash.ts", "apps/api/src/audit/audit-hash.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001"
-    ],
+    "dependsOn": ["P09-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "相同字段不同key顺序hash相等，改变metadata/hash则mismatch",
       "FULL链缺sequence/错prevHash/未知version返回可辨原因；PARTIAL授权切片只显示可见性不足，不误报篡改",
       "未有external signed checkpoint只称本地完整性检查，不能verified nonrepudiation"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/audit/audit-hash.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/audit/audit-hash.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -5864,29 +5149,20 @@
       "P09-001严格filter/cursor，P09-003审计模型",
       "注入受限tenant DB transaction；occurredAt+sequence稳定排序"
     ],
-    "produces": [
-      "参数化分页/actor/action/resource/time/run/action/execution链查询"
-    ],
+    "produces": ["参数化分页/actor/action/resource/time/run/action/execution链查询"],
     "files": [
       "apps/api/src/audit/audit-query.repository.ts",
       "apps/api/src/audit/audit-query.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001",
-      "P09-003"
-    ],
-    "integrationDependsOn": [
-      "P09-004"
-    ],
+    "dependsOn": ["P09-001", "P09-003"],
+    "integrationDependsOn": ["P09-004"],
     "acceptance": [
       "恶意SQLfilter只作参数且不改变query结构",
       "不同scope游标拒绝；同时间多entry不跳漏/重复",
       "limit/date上限、未知cursor和无结果返回明确状态"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/audit/audit-query.repository.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/audit/audit-query.repository.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -5909,28 +5185,20 @@
       "P09-001与现有认证及TenantScopeService.resolve（严格header/path scope），注入query port",
       "审计read权限由server membership resolver判定，不接受body角色"
     ],
-    "produces": [
-      "GET audit list/trace控制器及脱敏错误码"
-    ],
+    "produces": ["GET audit list/trace控制器及脱敏错误码"],
     "files": [
       "apps/api/src/audit/audit-query.controller.ts",
       "apps/api/src/audit/audit-query.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001"
-    ],
-    "integrationDependsOn": [
-      "P09-006"
-    ],
+    "dependsOn": ["P09-001"],
+    "integrationDependsOn": ["P09-006"],
     "acceptance": [
       "无session401、缺read授权403、跨scope禁止",
       "非法filter/cursor400且不调用port",
       "合法分页响应strict schema；超时非empty；无raw metadata导出"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/audit/audit-query.controller.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/audit/audit-query.controller.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -5953,26 +5221,17 @@
       "P09-001 schema，注入fetch；复用现有web session API错误映射",
       "query scope、filter和cursor strict编码"
     ],
-    "produces": [
-      "审计transport、AbortSignal、按scope隔离的分页state"
-    ],
-    "files": [
-      "apps/web/src/app/audit/audit-api.ts",
-      "apps/web/src/app/audit/audit-api.test.ts"
-    ],
+    "produces": ["审计transport、AbortSignal、按scope隔离的分页state"],
+    "files": ["apps/web/src/app/audit/audit-api.ts", "apps/web/src/app/audit/audit-api.test.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001"
-    ],
+    "dependsOn": ["P09-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "401/403不转换为空审计列表",
       "切店后迟到分页结果被丢弃",
       "非法server schema/error保留可重试code，日志不打印entry全文"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/audit/audit-api.test.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/audit/audit-api.test.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -5991,31 +5250,22 @@
     "kind": "component",
     "priority": "P1",
     "contract": "AuditListProps / AuditFilterState",
-    "consumes": [
-      "P09-001items及注入query/retry回调",
-      "复用现有dashboard range、tokens和键盘交互"
-    ],
-    "produces": [
-      "审计列表、时间/action/result过滤与模块内样式"
-    ],
+    "consumes": ["P09-001items及注入query/retry回调", "复用现有dashboard range、tokens和键盘交互"],
+    "produces": ["审计列表、时间/action/result过滤与模块内样式"],
     "files": [
       "apps/web/src/app/audit/audit-list.tsx",
       "apps/web/src/app/audit/audit-list.test.tsx",
       "apps/web/src/app/audit/audit-list.css"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001"
-    ],
+    "dependsOn": ["P09-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "375px折行/分页可聚焦无横向溢出",
       "loading/empty/error可区分且filter范围校验",
       "actor/resource脱敏呈现，恶意metadata纯文本，无删除审计按钮"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/audit/audit-list.test.tsx"
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/audit/audit-list.test.tsx"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6038,18 +5288,13 @@
       "P09-001 trace view与P05-001 evidence refs",
       "run→proposal revision→approval→execution→readback关联状态"
     ],
-    "produces": [
-      "完整链时间线、missing link提示及hash检查限界展示"
-    ],
+    "produces": ["完整链时间线、missing link提示及hash检查限界展示"],
     "files": [
       "apps/web/src/app/audit/audit-trace.tsx",
       "apps/web/src/app/audit/audit-trace.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P09-001",
-      "P05-001"
-    ],
+    "dependsOn": ["P09-001", "P05-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "UNKNOWN verification显待核实，不因HTTP200称成功",
@@ -6057,9 +5302,7 @@
       "375px/loading/empty/error和键盘证据入口可用；未独立签名不称不可抵赖",
       "权限过滤的PARTIAL链不判tampered或完整一致；只显示可见片段与检查边界"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/audit/audit-trace.test.tsx"
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/audit/audit-trace.test.tsx"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6082,19 +5325,14 @@
       "P09-006..010及真实append writer；现有authenticated app shell",
       "P05证据route已接线"
     ],
-    "produces": [
-      "API query module和审计page绑定，复用现有导航"
-    ],
+    "produces": ["API query module和审计page绑定，复用现有导航"],
     "files": [
       "apps/api/src/audit/audit.module.ts",
       "apps/web/src/app/audit/page.tsx",
       "apps/web/src/app/audit/audit-page.test.tsx",
       "apps/api/test/audit-query.integration.spec.ts"
     ],
-    "sharedFiles": [
-      "apps/api/src/app.module.ts",
-      "apps/web/src/app/dashboard-navigation.tsx"
-    ],
+    "sharedFiles": ["apps/api/src/app.module.ts", "apps/web/src/app/dashboard-navigation.tsx"],
     "dependsOn": [
       "P09-004",
       "P09-006",
@@ -6168,9 +5406,7 @@
       "受限app身份禁止UPDATE/DELETE/跨scope SELECT；查询脱敏且PARTIAL授权片段不假称全链完整",
       "未知login主体失败事件写隔离安全sink，tenant audit UI不曝光跨域失败尝试，不含token/密码/raw email"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- test/audit-chain.integration.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- test/audit-chain.integration.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6202,23 +5438,15 @@
       "packages/contracts/src/notifications/delivery.schema.ts",
       "packages/contracts/src/notifications/delivery.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
-    "dependsOn": [
-      "P03-001",
-      "P04-001",
-      "P04-002"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
+    "dependsOn": ["P03-001", "P04-001", "P04-002"],
     "integrationDependsOn": [],
     "acceptance": [
       "非法recipient/scope/timezone/oversize通知拒绝",
       "唯一意图由event-state-version+recipient+channel生成，UNKNOWN不当delivered",
       "daily brief版本绑定evidenceHash，未知profit不能写0；EventSeverity不授权action"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/contracts test -- src/notifications/delivery.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/contracts test -- src/notifications/delivery.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6241,19 +5469,13 @@
       "P10-001状态/intent唯一键和既有tenant recipient membership模型",
       "单渠道IN_APP与SecurityClock nextAttemptAt；payload仅ref及脱敏摘要"
     ],
-    "produces": [
-      "planned outbox/inbox schema、recipient复合scope/RLS/唯一delivery key"
-    ],
+    "produces": ["planned outbox/inbox schema、recipient复合scope/RLS/唯一delivery key"],
     "files": [
       "packages/database/prisma/migrations/20261004100100_notification_outbox/migration.sql",
       "packages/database/test/notification-outbox-migration.test.mjs"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma"
-    ],
-    "dependsOn": [
-      "P10-001"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma"],
+    "dependsOn": ["P10-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "event-version/user/channel唯一键阻止重复意图与收件记录",
@@ -6286,19 +5508,13 @@
       "P10-001/P10-002及P09-004 audit append；前置event mutation tx句柄",
       "validated effective routing结果，不接受provider直接授权"
     ],
-    "produces": [
-      "参数化enqueue repository与稳定intent重复返回"
-    ],
+    "produces": ["参数化enqueue repository与稳定intent重复返回"],
     "files": [
       "apps/api/src/notifications/notification-enqueue.repository.ts",
       "apps/api/src/notifications/notification-enqueue.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001",
-      "P10-002",
-      "P09-004"
-    ],
+    "dependsOn": ["P10-001", "P10-002", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "event状态和outbox任一失败整体回滚不出现漏通知",
@@ -6330,21 +5546,14 @@
       "P10-001/P10-002 schema与注入clock/受限worker tenant resolver",
       "claim SQL参数化，lease token与generation/scope"
     ],
-    "produces": [
-      "SKIP LOCKED claim/renew/reclaim repository和并发回归"
-    ],
+    "produces": ["SKIP LOCKED claim/renew/reclaim repository和并发回归"],
     "files": [
       "apps/api/src/notifications/notification-lease.repository.ts",
       "apps/api/src/notifications/notification-lease.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001",
-      "P10-002"
-    ],
-    "integrationDependsOn": [
-      "P10-003"
-    ],
+    "dependsOn": ["P10-001", "P10-002"],
+    "integrationDependsOn": ["P10-003"],
     "acceptance": [
       "两个worker同job只能一持lease；不同job可并发",
       "进程退出后过期lease可重领，旧token不能ack",
@@ -6385,14 +5594,8 @@
       "apps/api/src/notifications/in-app-delivery.repository.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001"
-    ],
-    "integrationDependsOn": [
-      "P10-003",
-      "P10-004",
-      "P09-004"
-    ],
+    "dependsOn": ["P10-001"],
+    "integrationDependsOn": ["P10-003", "P10-004", "P09-004"],
     "acceptance": [
       "inbox upsert与outbox delivered同事务，crash后重复不会多一通知",
       "临时失败指数退避/jitter有上限，耗尽进入DLQ不无限重试",
@@ -6423,20 +5626,14 @@
       "P10-001 effective routing及状态version、recipient prefs",
       "注入cooldown CAS port；same evidenceHash/request key避免重复深LLM"
     ],
-    "produces": [
-      "确定性首次/升级/恢复/需人工介入规则与有界合并bucket"
-    ],
+    "produces": ["确定性首次/升级/恢复/需人工介入规则与有界合并bucket"],
     "files": [
       "apps/api/src/notifications/notification-eligibility.ts",
       "apps/api/src/notifications/notification-eligibility.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001"
-    ],
-    "integrationDependsOn": [
-      "P10-007"
-    ],
+    "dependsOn": ["P10-001"],
+    "integrationDependsOn": ["P10-007"],
     "acceptance": [
       "unchanged事件在cooldown内不再发送或重复申请深LLM",
       "严重度显著升级/恢复按policy打破冷却并保留因果ref",
@@ -6467,21 +5664,14 @@
       "P10-001 prefs/quiet-hours schema及server scope，P09-004 writer",
       "真实UTC时钟与用户timezone换算；冷却state/version CAS"
     ],
-    "produces": [
-      "planned preference/cooldown表和参数化read/update/CAS repository"
-    ],
+    "produces": ["planned preference/cooldown表和参数化read/update/CAS repository"],
     "files": [
       "packages/database/prisma/migrations/20261004100200_notification_preferences/migration.sql",
       "apps/api/src/notifications/notification-preference.repository.ts",
       "apps/api/src/notifications/notification-preference.repository.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma"
-    ],
-    "dependsOn": [
-      "P10-001",
-      "P09-004"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma"],
+    "dependsOn": ["P10-001", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "偏好strict校验timezone/quiet interval/cooldown上限，非法不写",
@@ -6513,17 +5703,13 @@
       "P10-001及注入metric/event/proposal summary ports",
       "同businessDate/window/watermark版本快照，无外部LLM"
     ],
-    "produces": [
-      "简短重要变化/风险/机会/待决策列表与as-of/quality/evidence refs"
-    ],
+    "produces": ["简短重要变化/风险/机会/待决策列表与as-of/quality/evidence refs"],
     "files": [
       "apps/api/src/daily-brief/daily-brief-builder.ts",
       "apps/api/src/daily-brief/daily-brief-builder.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001"
-    ],
+    "dependsOn": ["P10-001"],
     "integrationDependsOn": [
       "P03-001",
       "P04-001",
@@ -6538,9 +5724,7 @@
       "missing cost/stale/insufficient明示质量不生成精确利润",
       "无变化给简短no-change摘要；无数据给empty且每claim有evidence"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/daily-brief/daily-brief-builder.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/daily-brief/daily-brief-builder.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6563,33 +5747,21 @@
       "P10-001/P10-008输入及P09-004 audit/transaction ports",
       "org/store/businessDate/evidenceHash/version唯一，注入clock"
     ],
-    "produces": [
-      "planned daily_briefs schema与参数化保存/按日查询/生成CAS"
-    ],
+    "produces": ["planned daily_briefs schema与参数化保存/按日查询/生成CAS"],
     "files": [
       "packages/database/prisma/migrations/20261004100300_daily_briefs/migration.sql",
       "apps/api/src/daily-brief/daily-brief.repository.ts",
       "apps/api/src/daily-brief/daily-brief.repository.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/database/prisma/schema.prisma"
-    ],
-    "dependsOn": [
-      "P10-001",
-      "P09-004"
-    ],
-    "integrationDependsOn": [
-      "P10-008",
-      "P2-GATE"
-    ],
+    "sharedFiles": ["packages/database/prisma/schema.prisma"],
+    "dependsOn": ["P10-001", "P09-004"],
+    "integrationDependsOn": ["P10-008", "P2-GATE"],
     "acceptance": [
       "重复同日同evidenceHash只一版本；新证据生成新version",
       "并发worker只有一个生成claim；重启过期lease可恢复",
       "跨scope拒绝，brief与audit保存原子，旧版evidence refs保留"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/daily-brief/daily-brief.repository.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/daily-brief/daily-brief.repository.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6612,9 +5784,7 @@
       "P10-001 contract及现有认证及TenantScopeService.resolve，注入各read/mutation port",
       "server recipient userId与strict pagination/businessDate/notificationId"
     ],
-    "produces": [
-      "只读brief/inbox/count控制器和幂等mark-read端点"
-    ],
+    "produces": ["只读brief/inbox/count控制器和幂等mark-read端点"],
     "files": [
       "apps/api/src/notifications/inbox-read.controller.ts",
       "apps/api/src/notifications/inbox-read.controller.spec.ts",
@@ -6622,14 +5792,8 @@
       "apps/api/src/daily-brief/daily-brief.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001"
-    ],
-    "integrationDependsOn": [
-      "P10-002",
-      "P10-009",
-      "P09-004"
-    ],
+    "dependsOn": ["P10-001"],
+    "integrationDependsOn": ["P10-002", "P10-009", "P09-004"],
     "acceptance": [
       "无session401，其他recipient/scope通知拒绝",
       "非法date/cursor/id返回400；无brief与服务失败分别empty/error",
@@ -6660,31 +5824,21 @@
       "P10-001brief和注入transport；P05-001证据导航",
       "复用dashboard report card和现有设计tokens"
     ],
-    "produces": [
-      "每日brief卡片、版本/as-of/quality/证据入口及transport校验"
-    ],
+    "produces": ["每日brief卡片、版本/as-of/quality/证据入口及transport校验"],
     "files": [
       "apps/web/src/app/daily-brief/daily-brief-card.tsx",
       "apps/web/src/app/daily-brief/daily-brief-card.test.tsx",
       "apps/web/src/app/daily-brief/daily-brief-api.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001",
-      "P05-001"
-    ],
-    "integrationDependsOn": [
-      "P10-009",
-      "P05-010"
-    ],
+    "dependsOn": ["P10-001", "P05-001"],
+    "integrationDependsOn": ["P10-009", "P05-010"],
     "acceptance": [
       "375px关键变化/风险/待决策可读且证据入口可聚焦",
       "loading/empty/error明确且retry不重复创建brief",
       "stale/unknown显示质量、version/as-of而非当前时间；不显示未验证利润"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/daily-brief/daily-brief-card.test.tsx"
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/daily-brief/daily-brief-card.test.tsx"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6707,29 +5861,21 @@
       "P10-001与既有notification-center visual/keyboard patterns",
       "读取count/list和mark-read注入port，页面打开不负责监控sync"
     ],
-    "produces": [
-      "新delivery inbox组件与transport；加载/错误/read mutation状态"
-    ],
+    "produces": ["新delivery inbox组件与transport；加载/错误/read mutation状态"],
     "files": [
       "apps/web/src/app/notifications/delivery-inbox.tsx",
       "apps/web/src/app/notifications/delivery-inbox.test.tsx",
       "apps/web/src/app/notifications/inbox-api.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001"
-    ],
-    "integrationDependsOn": [
-      "P10-010"
-    ],
+    "dependsOn": ["P10-001"],
+    "integrationDependsOn": ["P10-010"],
     "acceptance": [
       "375px/loading/empty/error与键盘关闭/聚焦恢复均有效",
       "read失败不假减unread；重复点击只发一次pending mutation",
       "切店取消旧请求，打开面板无sync/worker side effect"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web test -- src/app/notifications/delivery-inbox.test.tsx"
-    ],
+    "tests": ["pnpm --filter @shopmate/web test -- src/app/notifications/delivery-inbox.test.tsx"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6752,9 +5898,7 @@
       "P10-003..012/P10-017组件与P03/P04/P07真实ports，P2 gate",
       "backend启动/停止scheduler、受限tenant workers，不依赖页面访问"
     ],
-    "produces": [
-      "模块DI、生命周期定时worker、brief生成调度和通知中心入口接线"
-    ],
+    "produces": ["模块DI、生命周期定时worker、brief生成调度和通知中心入口接线"],
     "files": [
       "apps/api/src/notifications/notifications.module.ts",
       "apps/api/src/daily-brief/daily-brief.module.ts",
@@ -6821,25 +5965,17 @@
       "P10-013真实后台binding与隔离本地DB fixtures",
       "crash前后outbox/inbox/receipt、两worker与security clock"
     ],
-    "produces": [
-      "真实事务+并发+进程重启可靠配送定向集成测试"
-    ],
-    "files": [
-      "apps/api/test/notification-delivery.integration.spec.ts"
-    ],
+    "produces": ["真实事务+并发+进程重启可靠配送定向集成测试"],
+    "files": ["apps/api/test/notification-delivery.integration.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-013"
-    ],
+    "dependsOn": ["P10-013"],
     "integrationDependsOn": [],
     "acceptance": [
       "event tx rollback无孤立outbox；receipt写后crash重启不重复inbox",
       "两worker race/旧lease ack拒绝；temporary fail重试到DLQ可观测",
       "first/upgrade/recovery能发，unchanged冷却内不发；quiet-hours/DST正确"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- test/notification-delivery.integration.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- test/notification-delivery.integration.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -6862,9 +5998,7 @@
       "已批准J demo story与P05/P06/P07/P08/P09/P10本地runtime",
       "现有受控demo advance/fault controls，数字来自当前dataset"
     ],
-    "produces": [
-      "五分钟步骤/时间分配、数据refs、失败注入与预期界面验收脚本"
-    ],
+    "produces": ["五分钟步骤/时间分配、数据refs、失败注入与预期界面验收脚本"],
     "files": [
       "docs/demo/five-minute-operating-loop.md",
       "docs/demo/five-minute-operating-loop-checklist.md"
@@ -6914,9 +6048,7 @@
       "P10-013及P10-015脚本，P05/P06/P07/P08/P09本地路线",
       "375px/desktop和正常/unknown/write-response-loss fixture"
     ],
-    "produces": [
-      "Playwright定向UI截图和本地五分钟演练证据"
-    ],
+    "produces": ["Playwright定向UI截图和本地五分钟演练证据"],
     "files": [
       "tests/e2e/daily-brief-notifications.spec.ts",
       "docs/qa/five-minute-demo-rehearsal.md"
@@ -6966,9 +6098,7 @@
       "P10-001/P10-002收件表及P10-007偏好port，P09-004事务审计",
       "server recipient范围，计数/list/单条mark-read和设置strict参数"
     ],
-    "produces": [
-      "参数化inbox仓库和偏好controller；不实现UI设置页"
-    ],
+    "produces": ["参数化inbox仓库和偏好controller；不实现UI设置页"],
     "files": [
       "apps/api/src/notifications/inbox.repository.ts",
       "apps/api/src/notifications/inbox.repository.spec.ts",
@@ -6976,22 +6106,14 @@
       "apps/api/src/notifications/notification-preference.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P10-001",
-      "P10-002",
-      "P09-004"
-    ],
-    "integrationDependsOn": [
-      "P10-007"
-    ],
+    "dependsOn": ["P10-001", "P10-002", "P09-004"],
+    "integrationDependsOn": ["P10-007"],
     "acceptance": [
       "只有同scope本人能读/list/count/mark-read；读态audit同事务",
       "分页稳定、重复mark-read保持同readAt且unread不负",
       "quiet/cooldown设置非法400、无session401、跨user403，不改变硬floor"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/api test -- src/notifications/inbox.repository.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/api test -- src/notifications/inbox.repository.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
@@ -7022,9 +6144,7 @@
       "packages/contracts/src/goals/goal.schema.ts",
       "packages/contracts/src/goals/goal.schema.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
     "dependsOn": [],
     "integrationDependsOn": [],
     "acceptance": [
@@ -7032,9 +6152,7 @@
       "未知constraint、approval/execute/permissionOverride字段拒绝",
       "deadline含timezone、revision缺失/跨scope evidence拒绝；目标绝不产生授权"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/contracts exec vitest run src/goals/goal.schema.spec.ts"
-    ],
+    "tests": ["pnpm --filter @shopmate/contracts exec vitest run src/goals/goal.schema.spec.ts"],
     "outOfScope": [
       "目标授予权限或自动审批执行",
       "真实LLM/Connector网络调用",
@@ -7057,21 +6175,11 @@
       "GoalV1与同store同period/window evidence snapshot",
       "metric definition version/coverage/status/watermark及business Clock"
     ],
-    "produces": [
-      "进度、deadline结果与evidence references",
-      "未知/不足/过期评估明确不可下确定结论"
-    ],
-    "files": [
-      "apps/api/src/goals/goal-evaluator.ts",
-      "apps/api/src/goals/goal-evaluator.spec.ts"
-    ],
+    "produces": ["进度、deadline结果与evidence references", "未知/不足/过期评估明确不可下确定结论"],
+    "files": ["apps/api/src/goals/goal-evaluator.ts", "apps/api/src/goals/goal-evaluator.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P11-001"
-    ],
-    "integrationDependsOn": [
-      "P03-001"
-    ],
+    "dependsOn": ["P11-001"],
+    "integrationDependsOn": ["P03-001"],
     "acceptance": [
       "同口径目标进度可由fixture整数值复算",
       "STALE/INSUFFICIENT/UNAVAILABLE与缺成本不输出达成或精确0",
@@ -7111,13 +6219,8 @@
       "apps/api/src/goals/goal-constraint-guard.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P11-001"
-    ],
-    "integrationDependsOn": [
-      "P07-001",
-      "P07-003"
-    ],
+    "dependsOn": ["P11-001"],
+    "integrationDependsOn": ["P07-001", "P07-003"],
     "acceptance": [
       "预算/最低毛利/allowed action scope违反时拒绝",
       "未知成本/无法测算影响不能判约束满足",
@@ -7160,9 +6263,7 @@
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/migrations/20261005110100_goals/migration.sql"
     ],
-    "dependsOn": [
-      "P11-001"
-    ],
+    "dependsOn": ["P11-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "跨tenant/store目标关联与缺scope RLS明确拒绝",
@@ -7204,10 +6305,7 @@
       "apps/api/src/goals/goal.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P11-004",
-      "P09-004"
-    ],
+    "dependsOn": ["P11-004", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "同store目标可建改并保留旧revision/evidence",
@@ -7248,14 +6346,8 @@
       "apps/api/src/goals/goal.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P11-001"
-    ],
-    "integrationDependsOn": [
-      "P11-005",
-      "P11-002",
-      "P11-003"
-    ],
+    "dependsOn": ["P11-001"],
+    "integrationDependsOn": ["P11-005", "P11-002", "P11-003"],
     "acceptance": [
       "匿名/Viewer写/跨tenant/store请求拒绝",
       "合法目标输入校验后保存；旧revision409",
@@ -7290,19 +6382,10 @@
       "有证据引用的少量候选步骤/停止原因",
       "过期或不足先取证；规则摘要显式标注非模型推理"
     ],
-    "files": [
-      "apps/api/src/goals/goal-planner.ts",
-      "apps/api/src/goals/goal-planner.spec.ts"
-    ],
+    "files": ["apps/api/src/goals/goal-planner.ts", "apps/api/src/goals/goal-planner.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P11-001"
-    ],
-    "integrationDependsOn": [
-      "P11-002",
-      "P11-003",
-      "P06-001"
-    ],
+    "dependsOn": ["P11-001"],
+    "integrationDependsOn": ["P11-002", "P11-003", "P06-001"],
     "acceptance": [
       "同dataset非固定问题产生可复算证据引用计划",
       "缺证据只补证据不虚构目标达成，取消/预算耗尽停止",
@@ -7337,21 +6420,10 @@
       "只读取目标/evaluate/生成待审批候选的tool adapter",
       "统一tool budget、evidence refs、auth/current goal revision检查"
     ],
-    "files": [
-      "apps/api/src/ai/goals/goal-tools.ts",
-      "apps/api/src/ai/goals/goal-tools.spec.ts"
-    ],
+    "files": ["apps/api/src/ai/goals/goal-tools.ts", "apps/api/src/ai/goals/goal-tools.spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P11-003",
-      "P11-007",
-      "P06-001"
-    ],
-    "integrationDependsOn": [
-      "P07-010",
-      "P11-006",
-      "P06-001"
-    ],
+    "dependsOn": ["P11-003", "P11-007", "P06-001"],
+    "integrationDependsOn": ["P07-010", "P11-006", "P06-001"],
     "acceptance": [
       "Analyzer可生成候选但没有approve/execute/token/SQL工具",
       "读取目标后被archive/permission撤销时拒绝新候选",
@@ -7391,20 +6463,14 @@
       "apps/web/src/app/goals/goal-workspace.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P11-001"
-    ],
-    "integrationDependsOn": [
-      "P11-006"
-    ],
+    "dependsOn": ["P11-001"],
+    "integrationDependsOn": ["P11-006"],
     "acceptance": [
       "单位/deadline/约束校验且不宣称目标自动执行",
       "缺证据/过期显示未知进度；evidence点击定位版本",
       "403/409可恢复；archive取消不发请求；375px无溢出"
     ],
-    "tests": [
-      "pnpm --filter @shopmate/web exec vitest run src/app/goals/goal-workspace.test.tsx"
-    ],
+    "tests": ["pnpm --filter @shopmate/web exec vitest run src/app/goals/goal-workspace.test.tsx"],
     "outOfScope": [
       "目标授予权限或自动审批执行",
       "真实LLM/Connector网络调用",
@@ -7431,10 +6497,7 @@
       "Nest goal module、Agent只读/候选工具注册及Web route接桥",
       "目标→证据→候选→已有P7审批runtime链"
     ],
-    "files": [
-      "apps/api/src/goals/goals.module.ts",
-      "apps/api/src/goals/goals.module.spec.ts"
-    ],
+    "files": ["apps/api/src/goals/goals.module.ts", "apps/api/src/goals/goals.module.spec.ts"],
     "sharedFiles": [
       "apps/api/src/app.module.ts",
       "packages/contracts/src/index.ts",
@@ -7488,27 +6551,16 @@
       "RLS/FK/CAS/audit rollback证明",
       "goal→candidate仍需真人approval，禁止权限提升的集成回归"
     ],
-    "files": [
-      "packages/database/test/integration/goal-authority.test.mjs"
-    ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P11-004",
-      "P11-005",
-      "P11-010",
-      "P09-004"
-    ],
+    "files": ["packages/database/test/integration/goal-authority.test.mjs"],
+    "sharedFiles": ["scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P11-004", "P11-005", "P11-010", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "跨tenant/store FK/RLS及匿名/Viewer目标写被拒",
       "并发修订只有一个生效；audit故障回滚CRUD",
       "含execute/approve要求的目标或商品文本仅不可信数据；候选从未自动批准/dispatch"
     ],
-    "tests": [
-      "pnpm test:tenant"
-    ],
+    "tests": ["pnpm test:tenant"],
     "outOfScope": [
       "目标授予权限或自动审批执行",
       "真实LLM/Connector网络调用",
@@ -7539,9 +6591,7 @@
       "packages/contracts/src/listings/listing.schema.ts",
       "packages/contracts/src/listings/listing.schema.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
     "dependsOn": [],
     "integrationDependsOn": [],
     "acceptance": [
@@ -7583,9 +6633,7 @@
       "apps/api/src/listings/import-storage.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-001"
-    ],
+    "dependsOn": ["P12-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "合法CSV保存随机名并保持scope引用",
@@ -7626,9 +6674,7 @@
       "apps/api/src/listings/listing-csv-parser.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-001"
-    ],
+    "dependsOn": ["P12-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "带合法引号/换行CSV映射同一ListingInput且金额精确",
@@ -7672,9 +6718,7 @@
       "packages/database/prisma/schema.prisma",
       "packages/database/prisma/migrations/20261005120100_listing_drafts/migration.sql"
     ],
-    "dependsOn": [
-      "P12-001"
-    ],
+    "dependsOn": ["P12-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "跨tenant/store import→draft关联拒绝策略明确",
@@ -7716,10 +6760,7 @@
       "apps/api/src/listings/listing-draft.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-004",
-      "P09-004"
-    ],
+    "dependsOn": ["P12-004", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "合法草稿保留source provenance和当前revision",
@@ -7760,9 +6801,7 @@
       "apps/api/src/listings/listing-validation-policy.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-001"
-    ],
+    "dependsOn": ["P12-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "支持类目合法内容通过结构校验并留ruleVersion",
@@ -7803,13 +6842,8 @@
       "apps/api/src/listings/listing-copy-draft.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-001"
-    ],
-    "integrationDependsOn": [
-      "P06-001",
-      "P12-006"
-    ],
+    "dependsOn": ["P12-001"],
+    "integrationDependsOn": ["P06-001", "P12-006"],
     "acceptance": [
       "合法合成输入生成有界title/description并注明Mock/规则草稿",
       "注入文本要求approve/取secret不进入policy；provider非法输出拒绝",
@@ -7849,16 +6883,8 @@
       "apps/api/src/listings/listing.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-001"
-    ],
-    "integrationDependsOn": [
-      "P12-002",
-      "P12-003",
-      "P12-005",
-      "P12-006",
-      "P12-007"
-    ],
+    "dependsOn": ["P12-001"],
+    "integrationDependsOn": ["P12-002", "P12-003", "P12-005", "P12-006", "P12-007"],
     "acceptance": [
       "匿名/Viewer写/跨tenant对象及未知body字段拒绝",
       "合法CSV得到草稿+row错误，不触发发布；编辑expectedRevision CAS",
@@ -7898,13 +6924,8 @@
       "apps/web/src/app/listings/listing-workspace.test.tsx"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-001"
-    ],
-    "integrationDependsOn": [
-      "P12-008",
-      "P07-012"
-    ],
+    "dependsOn": ["P12-001"],
+    "integrationDependsOn": ["P12-008", "P07-012"],
     "acceptance": [
       "错误定位row/field，可修正并看到新revision",
       "预览全部SKU价格/类目/正文/证据来源与发布scope；渲染untrusted text无HTML执行",
@@ -7944,16 +6965,8 @@
       "apps/api/src/listings/listing-publish-proposal.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-001"
-    ],
-    "integrationDependsOn": [
-      "P12-005",
-      "P12-006",
-      "P07-002",
-      "P07-003",
-      "P07-008"
-    ],
+    "dependsOn": ["P12-001"],
+    "integrationDependsOn": ["P12-005", "P12-006", "P07-002", "P07-003", "P07-008"],
     "acceptance": [
       "同draft可建立待审批完整snapshot，绝不写source",
       "编辑任一文字/SKU/金额/类目变revision/hash，旧approval失效",
@@ -7992,23 +7005,15 @@
       "packages/database/src/mock-actions/create-listing.ts",
       "packages/database/test/integration/mock-listing-write.test.mjs"
     ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P12-001",
-      "P08-016",
-      "P2-GATE"
-    ],
+    "sharedFiles": ["scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P12-001", "P08-016", "P2-GATE"],
     "integrationDependsOn": [],
     "acceptance": [
       "同key/hash只新建一个product及SKU集，resolver返回实际关联id",
       "同key不同listing、跨tenant/generation、重复SKU拒绝并整体回滚",
       "publish和reset/disconnect锁后重查，丢包保留实际源结果；不写规范经营DB"
     ],
-    "tests": [
-      "pnpm test:tenant"
-    ],
+    "tests": ["pnpm test:tenant"],
     "outOfScope": [
       "真实平台发布/LLM网络调用/部署线上迁移",
       "消费者PII导入、公开上传目录或任意URL抓取",
@@ -8043,11 +7048,7 @@
       "apps/api/src/integrations/mock/mock-commerce-connector.ts",
       "apps/api/src/integrations/mock/mock-connector-factory.ts"
     ],
-    "dependsOn": [
-      "P12-011",
-      "P08-007",
-      "P08-018"
-    ],
+    "dependsOn": ["P12-011", "P08-007", "P08-018"],
     "integrationDependsOn": [],
     "acceptance": [
       "新商品独立readback完整listing匹配才VERIFIED",
@@ -8143,28 +7144,16 @@
       "RLS/FK、object归属、draft CAS及audit rollback证明",
       "空库/升级migration必跑suite与upload cleanup断言"
     ],
-    "files": [
-      "packages/database/test/integration/listing-import.test.mjs"
-    ],
-    "sharedFiles": [
-      "scripts/test-tenant-database.mjs"
-    ],
-    "dependsOn": [
-      "P12-002",
-      "P12-004",
-      "P12-005",
-      "P12-008",
-      "P09-004"
-    ],
+    "files": ["packages/database/test/integration/listing-import.test.mjs"],
+    "sharedFiles": ["scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P12-002", "P12-004", "P12-005", "P12-008", "P09-004"],
     "integrationDependsOn": [],
     "acceptance": [
       "跨tenant/store import-draft FK与private-object读取拒绝",
       "超限/伪类型/path traversal拒绝且临时root外无写入",
       "并发revision仅一有效；audit异常草稿与登记回滚，orphan对象清理有据"
     ],
-    "tests": [
-      "pnpm test:tenant"
-    ],
+    "tests": ["pnpm test:tenant"],
     "outOfScope": [
       "真实平台发布/LLM网络调用/部署线上迁移",
       "消费者PII导入、公开上传目录或任意URL抓取",
@@ -8191,17 +7180,9 @@
       "import/draft/preview/approve/publish/verify真实集成链证明",
       "同key一次create与完整audit关联；同步后规范库才见新listing"
     ],
-    "files": [
-      "apps/api/test/listing-publish.e2e-spec.ts"
-    ],
+    "files": ["apps/api/test/listing-publish.e2e-spec.ts"],
     "sharedFiles": [],
-    "dependsOn": [
-      "P12-013",
-      "P12-014",
-      "P07-019",
-      "P08-014",
-      "P2-GATE"
-    ],
+    "dependsOn": ["P12-013", "P12-014", "P07-019", "P08-014", "P2-GATE"],
     "integrationDependsOn": [],
     "acceptance": [
       "合法草稿完整预览+人工批准后只create一次，readback匹配才成功",
@@ -8241,9 +7222,7 @@
       "packages/contracts/src/integrations/readiness.schema.ts",
       "packages/contracts/src/integrations/readiness.schema.spec.ts"
     ],
-    "sharedFiles": [
-      "packages/contracts/src/index.ts"
-    ],
+    "sharedFiles": ["packages/contracts/src/index.ts"],
     "dependsOn": [],
     "integrationDependsOn": [],
     "acceptance": [
@@ -8285,9 +7264,7 @@
       "docs/integrations/douyin-evidence-sources.json"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P13-001"
-    ],
+    "dependsOn": ["P13-001"],
     "integrationDependsOn": [],
     "acceptance": [
       "每项有来源、核验日、范围与未决项，旧报告日期不得冒充当前核验",
@@ -8329,12 +7306,8 @@
       "apps/api/src/integrations/preparation/money-version-normalizer.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P13-001"
-    ],
-    "integrationDependsOn": [
-      "P13-002"
-    ],
+    "dependsOn": ["P13-001"],
+    "integrationDependsOn": ["P13-002"],
     "acceptance": [
       "字符串59.00元在已核验单位规则下变5900分",
       "未知币种/单位/超safe integer/多余小数拒绝，不补0",
@@ -8374,12 +7347,8 @@
       "apps/api/src/integrations/preparation/time-status-normalizer.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P13-001"
-    ],
-    "integrationDependsOn": [
-      "P13-002"
-    ],
+    "dependsOn": ["P13-001"],
+    "integrationDependsOn": ["P13-002"],
     "acceptance": [
       "已核验Asia/Shanghai时间映射保留对应instant与原字段语义",
       "PENDING不得计PAID，退款申请不当settledAt",
@@ -8420,12 +7389,8 @@
       "apps/api/test/connector-preparation-fixtures.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P13-001"
-    ],
-    "integrationDependsOn": [
-      "P13-002"
-    ],
+    "dependsOn": ["P13-001"],
+    "integrationDependsOn": ["P13-002"],
     "acceptance": [
       "fixture manifest标SYNTHETIC，不能声称实测vendor响应",
       "联系人/phone/token字段在最小化输出及error/log fixture均不出现",
@@ -8465,12 +7430,7 @@
       "apps/api/src/integrations/preparation/conformance.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P13-001",
-      "P13-003",
-      "P13-004",
-      "P13-005"
-    ],
+    "dependsOn": ["P13-001", "P13-003", "P13-004", "P13-005"],
     "integrationDependsOn": [],
     "acceptance": [
       "synthetic已证规则映射满足strict connector DTO且可复算",
@@ -8511,15 +7471,8 @@
       "docs/integrations/connector-migration-acceptance.md"
     ],
     "sharedFiles": [],
-    "dependsOn": [
-      "P13-002",
-      "P13-006"
-    ],
-    "integrationDependsOn": [
-      "P07-019",
-      "P08-015",
-      "P12-015"
-    ],
+    "dependsOn": ["P13-002", "P13-006"],
+    "integrationDependsOn": ["P07-019", "P08-015", "P12-015"],
     "acceptance": [
       "文档明确PREPARATION ONLY与哪些能力未经实店授权/transport核验",
       "列出未来独立批准后才允许OAuth、真实写、真实golden/签名和平台权限验证",

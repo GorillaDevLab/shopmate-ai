@@ -47,7 +47,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/contracts test -- src/overview/overview-view.spec.ts 
+- pnpm --filter @shopmate/contracts test -- src/overview/overview-view.spec.ts
 
 **不包含：**
 
@@ -98,7 +98,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/web test -- src/app/overview/metric-presentation.test.ts 
+- pnpm --filter @shopmate/web test -- src/app/overview/metric-presentation.test.ts
 
 **不包含：**
 
@@ -150,7 +150,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/web test -- src/app/overview/important-events.test.tsx 
+- pnpm --filter @shopmate/web test -- src/app/overview/important-events.test.tsx
 
 **不包含：**
 
@@ -201,7 +201,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/web test -- src/app/overview/pending-decisions.test.tsx 
+- pnpm --filter @shopmate/web test -- src/app/overview/pending-decisions.test.tsx
 
 **不包含：**
 
@@ -252,7 +252,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/web test -- src/app/overview/scope-freshness.test.tsx 
+- pnpm --filter @shopmate/web test -- src/app/overview/scope-freshness.test.tsx
 
 **不包含：**
 
@@ -304,7 +304,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/web test -- src/app/evidence/evidence-detail.test.tsx 
+- pnpm --filter @shopmate/web test -- src/app/evidence/evidence-detail.test.tsx
 
 **不包含：**
 
@@ -355,7 +355,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/web test -- src/app/overview/overview-transport.test.ts 
+- pnpm --filter @shopmate/web test -- src/app/overview/overview-transport.test.ts
 
 **不包含：**
 
@@ -410,7 +410,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- src/overview/overview-read.service.spec.ts 
+- pnpm --filter @shopmate/api test -- src/overview/overview-read.service.spec.ts
 - pnpm --filter @shopmate/api test -- src/overview/overview-read.controller.spec.ts
 
 **不包含：**
@@ -463,7 +463,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- src/evidence/evidence-read.controller.spec.ts 
+- pnpm --filter @shopmate/api test -- src/evidence/evidence-read.controller.spec.ts
 
 **不包含：**
 
