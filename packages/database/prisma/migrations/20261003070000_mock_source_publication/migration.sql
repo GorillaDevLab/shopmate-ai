@@ -473,10 +473,11 @@ CREATE FUNCTION mock_platform.require_lease_statement() RETURNS trigger
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
 BEGIN
   PERFORM demo.lock_source_control(current_setting('demo.control_session_id',true));
-  IF current_setting('mock.source_op',true) IS NULL OR current_setting('mock.source_op',true) NOT IN ('CLAIM','RENEW','FAIL','APPEND') THEN
+  IF current_setting('mock.source_op',true) IS NULL OR current_setting('mock.source_op',true) NOT IN ('CLAIM','RENEW','FAIL','APPEND','PUBLISH') THEN
     RAISE EXCEPTION 'Invalid source control protocol' USING ERRCODE='SM002';
   END IF;
   IF current_setting('mock.source_op',true)='APPEND' THEN PERFORM mock_platform.append_declaration(); END IF;
+  IF current_setting('mock.source_op',true)='PUBLISH' THEN PERFORM mock_platform.publish_declaration(); END IF;
   RETURN NULL;
 END $$;
 CREATE FUNCTION mock_platform.deny_source_fact_insert() RETURNS trigger
@@ -565,6 +566,7 @@ BEGIN
   IF old_job.state='PUBLISHED' THEN PERFORM mock_platform.source_conflict(); END IF;
   PERFORM mock_platform.integrity(old_job."mutationXid"<>pg_current_xact_id());
   IF op='APPEND' THEN RETURN mock_platform.append_job(old_job,proposal); END IF;
+  IF op='PUBLISH' THEN RETURN mock_platform.publish_job(old_job,proposal); END IF;
   IF (to_jsonb(proposal)-ARRAY['state','leaseOwner','failureCode']) IS DISTINCT FROM (to_jsonb(old_job)-ARRAY['state','leaseOwner','failureCode']) THEN
     PERFORM mock_platform.source_conflict();
   END IF;
@@ -609,6 +611,7 @@ BEGIN
   IF TG_OP='UPDATE' AND NEW.checkpoint IS DISTINCT FROM OLD.checkpoint THEN
     PERFORM mock_platform.check_final_append(OLD,NEW);
   END IF;
+  IF TG_OP='UPDATE' AND NEW.state='PUBLISHED' THEN PERFORM mock_platform.check_final_publish(OLD,NEW); END IF;
   IF final."leaseGrantId" IS DISTINCT FROM current_setting('mock.grant_id',true) OR final."leaseUntil"<=clock_timestamp() THEN
     RAISE EXCEPTION 'Source lease fence rejected' USING ERRCODE='SM003';
   END IF;
@@ -935,5 +938,118 @@ GRANT EXECUTE ON FUNCTION mock_platform.append_declaration(),mock_platform.pendi
   mock_platform.require_event_version(mock_platform."SourceEvent"),mock_platform.append_range(mock_platform."BuildJob",mock_platform."BuildJob",INTEGER),
   mock_platform.append_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.check_final_append(mock_platform."BuildJob",mock_platform."BuildJob"),
   mock_platform.check_final_fact(),mock_platform.saved_append_matches(mock_platform."BuildJob",JSONB) TO shopmate_mock_source_worker;
+
+CREATE FUNCTION mock_platform.publish_declaration() RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE hash TEXT:=current_setting('mock.expected_checkpoint_hash',true); base TEXT:=current_setting('mock.expected_base_revision',true);
+BEGIN
+  PERFORM mock_platform.integrity(hash IS NOT NULL AND octet_length(hash)=64 AND hash ~ '^[a-f0-9]{64}$'
+    AND base IS NOT NULL AND octet_length(base)<=19);
+  PERFORM mock_platform.source_uint(base);
+  PERFORM mock_platform.lease_reference();
+END $$;
+CREATE FUNCTION mock_platform.require_publish_context(job mock_platform."BuildJob") RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE runtime mock_platform."Runtime"; head mock_platform."BuildJob"; target TIMESTAMP; clock_revision INTEGER;
+BEGIN
+  PERFORM mock_platform.publish_declaration();
+  PERFORM mock_platform.require_live_lease(job);
+  IF job.state IS DISTINCT FROM 'BUILDING' OR job.checkpoint->'sealed' IS DISTINCT FROM 'true'::jsonb
+    OR job."processedThrough" IS DISTINCT FROM job."targetTime" OR job."checkpointHash" IS DISTINCT FROM current_setting('mock.expected_checkpoint_hash',true)
+    OR job."baseRevision"::text IS DISTINCT FROM current_setting('mock.expected_base_revision',true) THEN PERFORM mock_platform.source_conflict(); END IF;
+  SELECT r.* INTO runtime FROM mock_platform."Runtime" r WHERE r."sessionId"=job."sessionId" AND r.generation=job.generation;
+  SELECT j.* INTO head FROM mock_platform."BuildJob" j WHERE j."sessionId"=job."sessionId" AND j.generation=job.generation AND j.state='PUBLISHED' AND j.revision<>job.revision ORDER BY j.revision DESC LIMIT 1;
+  SELECT d."clockNow",d."clockRevision" INTO target,clock_revision FROM demo."DemoCommerceSession" d WHERE d.id=job."sessionId";
+  PERFORM mock_platform.integrity(runtime."sessionId" IS NOT NULL AND mock_platform.source_scope(to_jsonb(runtime))=mock_platform.source_scope(to_jsonb(job))
+    AND runtime."generatorVersion"=job."generatorVersion" AND runtime."runtimeVersion"=job."runtimeVersion" AND job.codec='source-snapshot-v1'
+    AND target>=job."targetTime" AND clock_revision>=job."targetClockRevision" AND job."targetTime">=runtime."openingAt"
+    AND job."baseRevision"=coalesce(head.revision,0) AND job."baseHighEventSeq"=coalesce(head."highEventSeq",0)
+    AND job."baseProcessedThrough"=coalesce(head."processedThrough",runtime."openingAt") AND job.revision::numeric=job."baseRevision"::numeric+1);
+  PERFORM mock_platform.require_fields(job.checkpoint,ARRAY['codec','chunkIndex','highEventSeq','processedThrough','lastEvent','sealed']);
+  PERFORM mock_platform.integrity(job.checkpoint->>'codec'='source-checkpoint-v1' AND jsonb_typeof(job.checkpoint->'chunkIndex')='string'
+    AND mock_platform.source_uint(job.checkpoint->>'chunkIndex')>0 AND job.checkpoint->'highEventSeq'=to_jsonb(job."highEventSeq"::text)
+    AND job.checkpoint->'processedThrough'=to_jsonb(mock_platform.canonical_utc(job."targetTime"))
+    AND job."checkpointHash"=mock_platform.hash_jsonb(jsonb_build_object('codec','source-checkpoint-hash-v1','scope',mock_platform.source_scope(to_jsonb(job)),
+      'revision',job.revision::text,'checkpoint',job.checkpoint)));
+END $$;
+CREATE FUNCTION mock_platform.publish_event_matches(event mock_platform."SourceEvent",version mock_platform."EntityVersion",job mock_platform."BuildJob",hash TEXT) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE SECURITY INVOKER SET search_path=pg_catalog AS $$
+  SELECT (event."releaseRevision"=job.revision AND version."releaseRevision"=job.revision
+    AND mock_platform.source_scope(to_jsonb(event))=mock_platform.source_scope(to_jsonb(job)) AND mock_platform.source_scope(to_jsonb(version))=mock_platform.source_scope(to_jsonb(job))
+    AND version.kind=event.kind AND version."entityKey"=event."entityKey" AND version."occurredAt"=event."occurredAt" AND version.payload=event.payload AND version."versionHash"=hash
+    AND event."eventSeq">job."baseHighEventSeq" AND event."eventSeq"<=job."highEventSeq" AND event."acceptedFence" BETWEEN 1 AND job.fence
+    AND event."appendIndex" BETWEEN 1 AND mock_platform.source_uint(job.checkpoint->>'chunkIndex')
+    AND event."occurredAt"<=job."targetTime" AND CASE WHEN job."baseRevision"=0 THEN event."occurredAt">=job."baseProcessedThrough" ELSE event."occurredAt">job."baseProcessedThrough" END
+    AND event."phaseRank"=mock_platform.phase_rank(event.kind) AND event."entityKey"=mock_platform.entity_key(event.kind,event.payload)
+    AND event.payload->'externalStoreId'=to_jsonb(job."externalStoreId") AND event.payload->'source'->'updatedAt'=to_jsonb(mock_platform.canonical_utc(event."occurredAt"))
+    AND event.payload->'source'->'version'=to_jsonb('mock-runtime-v2:g:'||job.generation::text||':e:'||event."eventSeq"::text)
+    AND event."eventId"=mock_platform.hash_jsonb(jsonb_build_object('codec','source-event-id-v1','scope',mock_platform.source_scope(to_jsonb(event)),
+      'kind',event.kind,'occurredAt',mock_platform.canonical_utc(event."occurredAt"),'entityKey',event."entityKey"::jsonb,'ordinal',event.ordinal::text))
+    AND event.manifest=jsonb_build_array(jsonb_build_object('kind',event.kind,'entityKey',event."entityKey"::jsonb,'eventSeq',event."eventSeq"::text,'versionHash',hash))
+    AND event."envelopeHash"=mock_platform.hash_jsonb(mock_platform.event_envelope(event))) IS TRUE
+$$;
+CREATE FUNCTION mock_platform.require_publish_range(job mock_platform."BuildJob") RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE valid BOOLEAN; last_cursor JSONB; head_cursor JSONB;
+BEGIN
+  -- One joined whole-job proof; immutable payloads do not need another generic codec traversal.
+  WITH events AS MATERIALIZED (SELECT e.*,e AS fact,lag(e."eventSeq") OVER w AS prior_seq,lag(e."occurredAt") OVER w AS prior_time,
+    lag(e."phaseRank") OVER w AS prior_phase,lag(e."entityKey") OVER w AS prior_key,lag(e.ordinal) OVER w AS prior_ordinal,
+    lag(e."appendIndex") OVER w AS prior_chunk,lag(e."acceptedFence") OVER w AS prior_fence FROM mock_platform."SourceEvent" e
+    WHERE e."sessionId"=job."sessionId" AND e.generation=job.generation AND (e."releaseRevision"=job.revision OR e."eventSeq">job."baseHighEventSeq") WINDOW w AS (ORDER BY e."eventSeq")),
+  versions AS MATERIALIZED (SELECT v.* FROM mock_platform."EntityVersion" v WHERE v."sessionId"=job."sessionId" AND v.generation=job.generation
+    AND (v."releaseRevision"=job.revision OR v."eventSeq">job."baseHighEventSeq")),
+  joined AS (SELECT e."eventSeq" AS seq,v."eventSeq" AS version_seq,
+    mock_platform.publish_event_matches(e.fact,v,job,mock_platform.hash_jsonb(mock_platform.version_envelope(e.fact)))
+    AND CASE WHEN e.prior_seq IS NULL THEN true ELSE e.prior_seq::numeric+1=e."eventSeq"::numeric
+      AND ROW(e.prior_time,e.prior_phase,e.prior_key COLLATE "C",e.prior_ordinal)<ROW(e."occurredAt",e."phaseRank",e."entityKey" COLLATE "C",e.ordinal)
+      AND e.prior_chunk<=e."appendIndex" AND e.prior_fence<=e."acceptedFence" AND (e.prior_chunk<>e."appendIndex" OR e.prior_fence=e."acceptedFence") END AS matches
+    FROM events e FULL JOIN versions v ON v."eventSeq"=e."eventSeq")
+  SELECT count(seq)=job."eventCount" AND count(version_seq)=job."versionCount" AND count(*)=job."eventCount"
+    AND coalesce(bool_and(matches IS TRUE),true) AND job."versionCount"=job."eventCount"
+    AND job."highEventSeq"::numeric=job."baseHighEventSeq"::numeric+job."eventCount"::numeric
+    AND (job."eventCount"=0 OR (min(seq)::numeric=job."baseHighEventSeq"::numeric+1 AND max(seq)=job."highEventSeq")) INTO valid FROM joined;
+  PERFORM mock_platform.integrity(valid);
+  SELECT mock_platform.event_cursor(e) INTO last_cursor FROM mock_platform."SourceEvent" e WHERE e."sessionId"=job."sessionId" AND e.generation=job.generation AND e."releaseRevision"=job.revision ORDER BY e."eventSeq" DESC LIMIT 1;
+  SELECT j.checkpoint->'lastEvent' INTO head_cursor FROM mock_platform."BuildJob" j WHERE j."sessionId"=job."sessionId" AND j.generation=job.generation AND j.revision=job."baseRevision" AND j.state='PUBLISHED';
+  PERFORM mock_platform.integrity(job.checkpoint->'lastEvent'=coalesce(last_cursor,head_cursor,'null'::jsonb));
+END $$;
+CREATE FUNCTION mock_platform.publication_certificate(job mock_platform."BuildJob") RETURNS JSONB
+LANGUAGE SQL IMMUTABLE SECURITY INVOKER SET search_path=pg_catalog AS $$
+  SELECT jsonb_build_object('scope',mock_platform.source_scope(to_jsonb(job)),'revision',job.revision::text,'targetClockRevision',job."targetClockRevision",
+    'targetTime',mock_platform.canonical_utc(job."targetTime"),'baseRevision',job."baseRevision"::text,'baseHighEventSeq',job."baseHighEventSeq"::text,
+    'highEventSeq',job."highEventSeq"::text,'eventCount',job."eventCount"::text,'versionCount',job."versionCount"::text,'processedThrough',mock_platform.canonical_utc(job."processedThrough"),
+    'generatorVersion',job."generatorVersion",'runtimeVersion',job."runtimeVersion",'codec',job.codec,'publishedAt',mock_platform.canonical_utc(job."publishedAt"))
+$$;
+CREATE FUNCTION mock_platform.publish_job(old_job mock_platform."BuildJob",proposal mock_platform."BuildJob") RETURNS mock_platform."BuildJob"
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE result mock_platform."BuildJob":=old_job;
+BEGIN
+  IF proposal.state IS DISTINCT FROM 'PUBLISHED' OR (to_jsonb(proposal)-'state') IS DISTINCT FROM (to_jsonb(old_job)-'state') THEN PERFORM mock_platform.source_conflict(); END IF;
+  PERFORM mock_platform.require_publish_context(old_job);
+  PERFORM mock_platform.require_publish_range(old_job);
+  result.state:='PUBLISHED'; result."publishedAt":=clock_timestamp(); result."mutationXid":=pg_current_xact_id();
+  result."certificateHash":=mock_platform.hash_jsonb(jsonb_build_object('codec','source-certificate-v1','certificate',mock_platform.publication_certificate(result)));
+  RETURN result;
+END $$;
+CREATE FUNCTION mock_platform.check_final_publish(old_job mock_platform."BuildJob",new_job mock_platform."BuildJob") RETURNS VOID
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+BEGIN
+  IF current_setting('mock.source_op',true) IS DISTINCT FROM 'PUBLISH' THEN PERFORM mock_platform.source_conflict(); END IF;
+  PERFORM mock_platform.require_publish_context(old_job);
+  PERFORM mock_platform.require_publish_range(old_job);
+  PERFORM mock_platform.integrity(new_job.state='PUBLISHED' AND new_job."publishedAt" IS NOT NULL AND new_job."mutationXid"=pg_current_xact_id()
+    AND (to_jsonb(new_job)-ARRAY['state','publishedAt','certificateHash','mutationXid']) IS NOT DISTINCT FROM (to_jsonb(old_job)-ARRAY['state','publishedAt','certificateHash','mutationXid'])
+    AND new_job."certificateHash"=mock_platform.hash_jsonb(jsonb_build_object('codec','source-certificate-v1','certificate',mock_platform.publication_certificate(new_job))));
+  PERFORM mock_platform.require_live_lease(new_job);
+END $$;
+REVOKE ALL ON FUNCTION mock_platform.publish_declaration(),mock_platform.require_publish_context(mock_platform."BuildJob"),
+  mock_platform.publish_event_matches(mock_platform."SourceEvent",mock_platform."EntityVersion",mock_platform."BuildJob",TEXT),mock_platform.require_publish_range(mock_platform."BuildJob"),
+  mock_platform.publication_certificate(mock_platform."BuildJob"),mock_platform.publish_job(mock_platform."BuildJob",mock_platform."BuildJob"),
+  mock_platform.check_final_publish(mock_platform."BuildJob",mock_platform."BuildJob") FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION mock_platform.publish_declaration(),mock_platform.require_publish_context(mock_platform."BuildJob"),
+  mock_platform.publish_event_matches(mock_platform."SourceEvent",mock_platform."EntityVersion",mock_platform."BuildJob",TEXT),mock_platform.require_publish_range(mock_platform."BuildJob"),
+  mock_platform.publication_certificate(mock_platform."BuildJob"),mock_platform.publish_job(mock_platform."BuildJob",mock_platform."BuildJob"),
+  mock_platform.check_final_publish(mock_platform."BuildJob",mock_platform."BuildJob") TO shopmate_mock_source_worker;
 COMMIT;
 

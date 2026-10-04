@@ -361,12 +361,12 @@ for (const [label, options] of [
       sqlError(label === "count mismatch" ? "SM005" : "SM004"),
     );
   });
-test("PUBLISH remains unconditionally closed after a sealed append", async () => {
+test("PUBLISH requires a declaration even after a sealed append", async () => {
   const context = await fresh("publish-closed");
   const job = (await append(worker, context, [], nextFor(context.job, true))).rows[0];
   await assert.rejects(
     change(worker, context, job, "PUBLISH", { state: "PUBLISHED" }),
-    sqlError("SM002"),
+    sqlError("SM005"),
   );
   assert.deepEqual(await jobFor(admin, context), job);
 });

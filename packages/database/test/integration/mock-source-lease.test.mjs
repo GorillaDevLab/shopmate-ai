@@ -231,7 +231,7 @@ for (const op of ["APPEND", "PUBLISH", "BOGUS"])
     const context = await fresh(`closed-${op.toLowerCase()}`);
     await assert.rejects(
       change(worker, context, context.job, op, { state: "PUBLISHED" }),
-      sqlError(op === "APPEND" ? "SM005" : "SM002"),
+      sqlError(op === "BOGUS" ? "SM002" : "SM005"),
     );
     assert.deepEqual(await jobFor(admin, context), context.job);
   });
