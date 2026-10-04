@@ -130,6 +130,140 @@ test("declared legitimate empty initial seal commits without physical rows", asy
   assert.match(job.lastAppendHash, /^[a-f0-9]{64}$/u);
   assert.deepEqual((await snapshot(admin, context)).events, []);
 });
+async function rawCountAppend(context, spelling, events, next) {
+  return sourceTransaction(
+    worker,
+    context.scope,
+    "APPEND",
+    async () => {
+      await appendSettings(worker, context.job, events, next);
+      await worker.query("SELECT set_config('mock.source_append',$1,true)", [
+        `{"eventCount":${spelling},"next":${JSON.stringify(next)}}`,
+      ]);
+      const raw = await worker.query(
+        "SELECT (current_setting('mock.source_append')::jsonb->'eventCount')::text AS spelling",
+      );
+      assert.equal(raw.rows[0].spelling, spelling);
+      for (const event of events) {
+        const inserted = await insertEvent(worker, context, event);
+        await insertVersion(worker, context, inserted.rows[0].eventSeq);
+      }
+      return updateAppend(worker, context, next);
+    },
+    leaseOf(context.job),
+    context.grant,
+  );
+}
+function assertDecimalProgress(job, previous, count, next, lastEvent = null) {
+  assert.equal(job.highEventSeq, String(count));
+  assert.equal(job.eventCount, String(count));
+  assert.equal(job.versionCount, String(count));
+  assert.deepEqual(job.checkpoint, {
+    codec: "source-checkpoint-v1",
+    chunkIndex: "1",
+    highEventSeq: String(count),
+    processedThrough: next.processedThrough,
+    lastEvent,
+    sealed: next.sealed,
+  });
+  assert.equal(utc(job.processedThrough), next.processedThrough);
+  assert.equal(job.lastAppendExpectedHash, previous.checkpointHash);
+  assert.equal(job.lastAppendStartSeq, "1");
+  assert.equal(job.lastAppendEventCount, count);
+  assert.notEqual(job.checkpointHash, previous.checkpointHash);
+  assert.equal(job.leaseOwner, previous.leaseOwner);
+  assert.equal(job.fence, previous.fence);
+  assert.equal(job.state, "BUILDING");
+}
+async function decimalHashes(context, job, next) {
+  const result = await admin.query(
+    `SELECT mock_platform.hash_jsonb(jsonb_build_object('codec','source-checkpoint-hash-v1','scope',mock_platform.source_scope(to_jsonb(j)),
+      'revision',j.revision::text,'checkpoint',j.checkpoint)) AS checkpoint,
+      mock_platform.hash_jsonb(jsonb_build_object('codec','source-chunk-v1','scope',mock_platform.source_scope(to_jsonb(j)),
+      'revision',j.revision::text,'expectedCheckpointHash',$2::text,'next',$3::jsonb,
+      'eventEnvelopeHashes',coalesce((SELECT jsonb_agg(e."envelopeHash" ORDER BY e."eventSeq") FROM mock_platform."SourceEvent" e WHERE e."sessionId"=j."sessionId"),'[]'::jsonb))) AS chunk,
+      coalesce((SELECT jsonb_agg(jsonb_build_object('eventId',mock_platform.hash_jsonb(jsonb_build_object('codec','source-event-id-v1',
+        'scope',mock_platform.source_scope(to_jsonb(e)),'kind',e.kind,'occurredAt',mock_platform.canonical_utc(e."occurredAt"),'entityKey',e."entityKey"::jsonb,'ordinal',e.ordinal::text)),
+        'versionHash',mock_platform.hash_jsonb(mock_platform.version_envelope(e)),
+        'envelopeHash',mock_platform.hash_jsonb(mock_platform.event_envelope(e))) ORDER BY e."eventSeq")
+        FROM mock_platform."SourceEvent" e WHERE e."sessionId"=j."sessionId"),'[]'::jsonb) AS facts
+      FROM mock_platform."BuildJob" j WHERE j."sessionId"=$1`,
+    [context.scope.sessionId, context.job.checkpointHash, JSON.stringify(next)],
+  );
+  assert.equal(job.checkpointHash, result.rows[0].checkpoint);
+  assert.equal(job.lastAppendHash, result.rows[0].chunk);
+  return result.rows[0].facts;
+}
+function assertDecimalFacts(context, event, rows, hashes) {
+  assert.equal(rows.events.length, 1);
+  assert.equal(rows.versions.length, 1);
+  const stored = rows.events[0],
+    hash = hashes[0],
+    payload = globalThis.structuredClone(event.after),
+    entityKey = ["STORE", context.scope.externalStoreId];
+  assert.equal(utc(stored.occurredAt + "Z"), event.occurredAt);
+  payload.source.version = "mock-runtime-v2:g:0:e:1";
+  const common = {
+    ...context.scope,
+    releaseRevision: 1,
+    eventSeq: 1,
+    kind: "STORE",
+    entityKey: stored.entityKey,
+    occurredAt: stored.occurredAt,
+    payload,
+  };
+  assert.deepEqual(JSON.parse(stored.entityKey), entityKey);
+  assert.deepEqual(rows.versions[0], { ...common, versionHash: hash.versionHash });
+  assert.deepEqual(stored, {
+    ...common,
+    eventId: hash.eventId,
+    appendIndex: 1,
+    acceptedFence: 1,
+    phaseRank: 0,
+    ordinal: 0,
+    envelopeHash: hash.envelopeHash,
+    manifest: [{ kind: "STORE", entityKey, eventSeq: "1", versionHash: hash.versionHash }],
+  });
+}
+test("raw integral JSONB eventCount 0.0 commits an exact empty seal", async () => {
+  const context = await fresh("decimal-empty"),
+    next = nextFor(context.job, true),
+    job = (await rawCountAppend(context, "0.0", [], next)).rows[0];
+  assertDecimalProgress(job, context.job, 0, next);
+  assert.deepEqual(await jobFor(admin, context), job);
+  const rows = await snapshot(admin, context);
+  assert.deepEqual(rows.events, []);
+  assert.deepEqual(rows.versions, []);
+  assert.deepEqual(await decimalHashes(context, job, next), []);
+});
+test("raw integral JSONB eventCount 1.0 commits exact event version and progress", async () => {
+  const context = await fresh("decimal-nonempty"),
+    event = eventFor(context),
+    next = nextFor(context.job),
+    job = (await rawCountAppend(context, "1.0", [event], next)).rows[0];
+  assertDecimalProgress(job, context.job, 1, next, {
+    kind: event.kind,
+    occurredAt: event.occurredAt,
+    entityKey: ["STORE", context.scope.externalStoreId],
+    ordinal: event.ordinal,
+  });
+  assert.deepEqual(await jobFor(admin, context), job);
+  assertDecimalFacts(
+    context,
+    event,
+    await snapshot(admin, context),
+    await decimalHashes(context, job, next),
+  );
+});
+test("raw fractional JSONB eventCount 1.5 rejects with fixed integrity and exact rollback", async () => {
+  const context = await fresh("decimal-fraction"),
+    before = await snapshot(admin, context);
+  await assert.rejects(
+    rawCountAppend(context, "1.5", [eventFor(context)], nextFor(context.job)),
+    (error) => error.code === "SM005" && error.message === "Invalid source integrity",
+  );
+  assert.deepEqual(await snapshot(admin, context), before);
+});
 for (const [label, options] of [
   ["event-only", { versions: false, update: false }],
   ["missing version", { versions: false }],

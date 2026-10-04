@@ -851,7 +851,7 @@ BEGIN
   result."processedThrough":=(declaration->'next'->>'processedThrough')::timestamp;
   IF result."processedThrough"<old_job."processedThrough" OR result."processedThrough">old_job."targetTime"
     OR ((declaration->'next'->>'sealed')::boolean AND result."processedThrough"<>old_job."targetTime") THEN PERFORM mock_platform.source_conflict(); END IF;
-  count_events:=(declaration->>'eventCount')::integer;
+  count_events:=(declaration->>'eventCount')::numeric::integer;
   range:=mock_platform.append_range(old_job,result,count_events);
   IF count_events=0 AND result."processedThrough"=old_job."processedThrough" AND declaration->'next'->'sealed'='false'::jsonb THEN PERFORM mock_platform.source_conflict(); END IF;
   result."highEventSeq":=mock_platform.source_uint(range->>'highEventSeq');
