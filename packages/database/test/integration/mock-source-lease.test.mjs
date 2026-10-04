@@ -272,6 +272,10 @@ test("undeclared session and repeatable-read INSERT fail statement CONTROL", asy
   );
   await worker.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
   try {
+    await worker.query(
+      "SELECT set_config('app.user_id',$1,true),set_config('app.merchant_id',$2,true),set_config('mock.grant_id',$3,true),set_config('demo.control_session_id',$4,true)",
+      ["source-worker", "source-merchant-a", context.grant, context.scope.sessionId],
+    );
     await assert.rejects(
       worker.query(claimSql, [...scopeValues(context.scope), randomUUID()]),
       sqlError("SM002"),
