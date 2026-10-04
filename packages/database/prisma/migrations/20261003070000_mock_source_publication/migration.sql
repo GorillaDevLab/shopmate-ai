@@ -617,10 +617,23 @@ BEGIN
   END IF;
   RETURN NULL;
 END $$;
+-- Reserved separately from CONTROL: actual mutations consume one transaction slot.
+-- Existing ownership only denies; settings and session unlocks cannot prove/reset it.
+CREATE FUNCTION mock_platform.guard_job_transaction() RETURNS trigger
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE backend INTEGER:=pg_catalog.pg_backend_pid();
+BEGIN
+  PERFORM mock_platform.integrity(NOT EXISTS (SELECT 1 FROM pg_catalog.pg_locks l
+    WHERE l.pid=backend AND l.locktype='advisory' AND l.granted
+      AND l.classid=1397575509::oid AND l.objsubid=2));
+  PERFORM mock_platform.integrity(pg_catalog.pg_try_advisory_xact_lock(1397575509,backend));
+  RETURN NULL;
+END $$;
 CREATE TRIGGER source_job_control_insert BEFORE INSERT ON mock_platform."BuildJob" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.require_lease_statement();
 CREATE TRIGGER source_job_control_update BEFORE UPDATE ON mock_platform."BuildJob" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.require_lease_statement();
 CREATE TRIGGER source_job_insert BEFORE INSERT ON mock_platform."BuildJob" FOR EACH ROW EXECUTE FUNCTION mock_platform.guard_job_insert();
 CREATE TRIGGER source_job_update BEFORE UPDATE ON mock_platform."BuildJob" FOR EACH ROW EXECUTE FUNCTION mock_platform.guard_job_update();
+CREATE TRIGGER source_job_0_transaction AFTER INSERT OR UPDATE ON mock_platform."BuildJob" FOR EACH ROW EXECUTE FUNCTION mock_platform.guard_job_transaction();
 CREATE CONSTRAINT TRIGGER source_job_final_lease AFTER INSERT OR UPDATE ON mock_platform."BuildJob" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION mock_platform.check_final_job_lease();
 CREATE TRIGGER source_job_destructive BEFORE DELETE OR TRUNCATE ON mock_platform."BuildJob" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.deny_source_mutation();
 CREATE TRIGGER source_event_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON mock_platform."SourceEvent" FOR EACH STATEMENT EXECUTE FUNCTION mock_platform.deny_source_mutation();
@@ -656,11 +669,11 @@ GRANT SELECT ON mock_platform."EntityVersion" TO shopmate_mock_source_reader;
 REVOKE ALL ON FUNCTION mock_platform.source_scope(JSONB),mock_platform.source_conflict(),mock_platform.require_source_scope(JSONB),mock_platform.require_lease_statement(),
   mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.lease_reference(),mock_platform.require_live_lease(mock_platform."BuildJob"),
   mock_platform.initial_job(mock_platform."BuildJob",mock_platform."Runtime",mock_platform."BuildJob"),mock_platform.guard_job_insert(),
-  mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease() FROM PUBLIC;
+  mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease(),mock_platform.guard_job_transaction() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION mock_platform.source_scope(JSONB),mock_platform.source_conflict(),mock_platform.require_source_scope(JSONB),mock_platform.require_lease_statement(),
   mock_platform.deny_source_fact_insert(),mock_platform.deny_source_mutation(),mock_platform.require_lease_owner(TEXT),mock_platform.lease_reference(),mock_platform.require_live_lease(mock_platform."BuildJob"),
   mock_platform.initial_job(mock_platform."BuildJob",mock_platform."Runtime",mock_platform."BuildJob"),mock_platform.guard_job_insert(),
-  mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease() TO shopmate_mock_source_worker;
+  mock_platform.transition_job(mock_platform."BuildJob",mock_platform."BuildJob"),mock_platform.guard_job_update(),mock_platform.check_final_job_lease(),mock_platform.guard_job_transaction() TO shopmate_mock_source_worker;
 -- Protocol settings are bounded declarations. None confers authority or lock ownership.
 CREATE FUNCTION mock_platform.append_declaration() RETURNS JSONB
 LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog AS $$
