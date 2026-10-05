@@ -50,6 +50,9 @@ try {
   await run("packages/database", "test/integration/mock-source-append.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/mock-source-append-ports.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/mock-source-publish.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });

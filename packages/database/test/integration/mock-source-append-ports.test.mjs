@@ -27,7 +27,7 @@ import pg from "pg";
 const source = await import("../../dist/src/mock-platform/index.js");
 let context;
 test.before(async () => {
-  context = await leasePortDatabase(source);
+  context = await leasePortDatabase(source, "append");
 });
 test.after(async () => closeLeasePortDatabase(context));
 

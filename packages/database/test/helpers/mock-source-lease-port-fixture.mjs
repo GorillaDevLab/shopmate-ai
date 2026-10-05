@@ -5,13 +5,26 @@ import { isolatedPostgres } from "./isolated-postgres.mjs";
 import { loginUrl, migrateSource, sourceEnv, sourceFixtures } from "./mock-platform-fixture.mjs";
 import { maintenanceClient } from "./mock-source-control-fixture.mjs";
 
-export async function leasePortDatabase(source) {
+const portDatabases = {
+  lease: {
+    name: "shopmate_tenant_test_lease_ports",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_lease_ports"',
+  },
+  append: {
+    name: "shopmate_tenant_test_append_ports",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_append_ports"',
+  },
+};
+
+export async function leasePortDatabase(source, suite = "lease") {
+  assert.ok(Object.hasOwn(portDatabases, suite), "Known isolated source port suite required");
+  const database = portDatabases[suite];
   const server = await isolatedPostgres();
   const operator = new pg.Client({ connectionString: server.url });
   await operator.connect();
-  await operator.query('CREATE DATABASE "shopmate_tenant_test_lease_ports"');
+  await operator.query(database.sql);
   const url = new URL(server.url);
-  url.pathname = "/shopmate_tenant_test_lease_ports";
+  url.pathname = `/${database.name}`;
   const rawAdmin = new pg.Client({ connectionString: url.toString() });
   const rawWorker = new pg.Client({
     connectionString: loginUrl(url.toString(), "source_worker_login"),
