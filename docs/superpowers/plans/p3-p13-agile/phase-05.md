@@ -543,12 +543,13 @@
 
 **输入：**
 
-- P05-010本地路由和fixture-mode transport
+- P05-010 Web route及P05-013独立Web-only fixture runner；API response仅测试内限定合成deterministic routes
 - 375px/桌面、五种quality、键盘和三态测试用例
 
 **输出：**
 
 - 定向Playwright截图/可访问性断言与验收记录
+- 截图/三态/键盘证明仅限fixture UI，真实API数据由P05-012单独证明
 
 **独占文件（新路径为计划创建）：**
 
@@ -559,7 +560,7 @@
 
 - 无
 
-**硬依赖：** P05-010
+**硬依赖：** P05-010, P05-013
 
 **实际接线依赖：** 无
 
@@ -568,15 +569,17 @@
 - [ ] 375px无横向溢出且证据入口可聚焦
 - [ ] loading/empty/error截屏对比现有tokens并检查retry
 - [ ] 屏幕读出watermark/period/status；跨店后旧证据不可见
+- [ ] 指定browser target选择/执行>0、0 skipped；零选择/零执行/skip失败，本次runner finally停止所有拥有server；禁止默认playwright.config.ts/.env/开发DATABASE_URL或复用server
 
 **测试：**
 
-- pnpm exec playwright test tests/e2e/overview-evidence.spec.ts
+- pnpm test:browser:fixture -- tests/e2e/overview-evidence.spec.ts
 
 **不包含：**
 
 - 不进行真实供应商/LLM/Jev网络调用、部署或live迁移
 - 不改整站设计或未列出的共享文件
+- 不把test-only route fixture结果当作实际auth/source/approval/execution runtime证明
 
 **风险：** 截图证据只能证明测试viewport
 
@@ -637,3 +640,57 @@
 **并行分组：** `overview-012`
 
 **执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
+
+<a id="p05-013"></a>
+
+## P05-013：建立仅Web合成夹具浏览器配置
+
+**工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** qa · **类型：** component · **优先级：** P0
+
+**契约：** FixtureBrowserConfig / test:browser:fixture
+
+**输入：**
+
+- P05-001界面契约和现有Next dev启动；只消费测试内合成fixture transport
+- 当前默认playwright.config.ts会读开发DATABASE_URL/.env，fixture配置必须独立且不启动API
+
+**输出：**
+
+- 拟新增playwright.fixture.config.ts与pnpm test:browser:fixture脚本；只启动Web，reuseExistingServer=false，testMatch仅overview-evidence.spec.ts
+- runner只接受指定目标，解析JSON报告逐目标校验执行>0与0 skipped；loading/empty/error/跨店拒绝由测试限定route fulfillment合成响应
+
+**独占文件（新路径为计划创建）：**
+
+- `playwright.fixture.config.ts`
+- `scripts/test-browser-fixture.mjs`
+- `tests/browser-fixture-harness.test.mjs`
+
+**共享文件锁（协调集成修改）：**
+
+- `package.json`
+
+**硬依赖：** P05-001
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] pnpm test:browser:fixture -- tests/e2e/overview-evidence.spec.ts无需DATABASE_URL/.env/API/数据库即可选择并执行目标
+- [ ] 未知目标、零选择、零执行、skip或Web失败均非零退出；Web由本次启动且finally停止
+- [ ] fixture interception只对测试声明的合成deterministic routes生效，未匹配外部请求拒绝；只证明UI，不宣称真实身份/源/审批
+
+**测试：**
+
+- node --test tests/browser-fixture-harness.test.mjs
+- pnpm typecheck
+
+**不包含：**
+
+- 真实vendor/LLM调用、部署、线上迁移或身份供应商上线
+- 不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进
+
+**风险：** 默认浏览器配置意外启用开发数据库
+
+**并行分组：** `p05-013-boundary`
+
+**执行边界：** 拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 3h仅独立Web配置、报告守卫与script注册；不更改产品API或注入生产fixture模式。

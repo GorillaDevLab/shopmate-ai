@@ -73,6 +73,7 @@
 
 - 已验证ProposalPayload；作用域/connection generation/sourceVersion/证据版本/有效期
 - node:crypto SHA-256；禁止hash依赖未规范化任意JSON
+- P08-051 PRICE_SET compensation metadata是immutable执行payload，所有parent/candidate/restore/version字段纳入canonical hash
 
 **输出：**
 
@@ -88,7 +89,7 @@
 
 - 无
 
-**硬依赖：** P07-001
+**硬依赖：** P07-001, P08-051
 
 **实际接线依赖：** 无
 
@@ -97,6 +98,7 @@
 - [ ] 对象键顺序变化不改变hash
 - [ ] 旧新价/源版本/证据版本/店铺/TTL任一变更改变hash
 - [ ] 非法金额及未知执行字段先校验拒绝
+- [ ] 逐个修改compensation parentExecutionId/parentRevision/parentPayloadHash/candidateId/verifiedSourceVersion/restorePriceMinor改变hash，旧approval不能沿用
 
 **测试：**
 
@@ -393,6 +395,7 @@
 
 - HumanApprovalIdentity由current-authority reader核验；expectedRevision/hash
 - tenant transaction及security clock；策略规定risk权限和actor分离
+- P08-055完成关联仓库port：typed compensation candidate approve/reject同normal approval tx校验parent/candidate/hash；reject同步终止关联，不写parent回滚成功
 
 **输出：**
 
@@ -408,7 +411,7 @@
 
 - 无
 
-**硬依赖：** P07-004, P07-006, P07-007, P07-009, P09-004, P07-019
+**硬依赖：** P07-004, P07-006, P07-007, P07-009, P09-004, P07-019, P08-055
 
 **实际接线依赖：** 无
 
@@ -417,6 +420,7 @@
 - [ ] 合法人工approve绑定org/store/action/revision/hash且无自动执行
 - [ ] 同时批准/拒绝或双批准只有一个有效决策
 - [ ] Viewer、body冒充actor、过期/重认证缺失/critical拒绝；audit失败全部回滚
+- [ ] PRICE_SET compensation approval绑定完整metadata/hash；错parent/旧approval拒绝；normal reject与association REJECTED/audit同tx，原执行仍保持已核实事实
 
 **测试：**
 

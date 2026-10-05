@@ -923,6 +923,7 @@
 
 - P06-016真实read runtime和P05 evidence page
 - 三类不同问法/范围及无cost、stale、取消fixture
+- P08-042同一disposable DB/API/Web存活生命周期；只用受控合成种子/P2故障规则，不拦截runtime API response伪造结果
 
 **输出：**
 
@@ -940,7 +941,7 @@
 - `apps/api/vitest.tenant.config.ts`
 - `apps/api/vitest.config.ts`
 
-**硬依赖：** P06-016, P05-010
+**硬依赖：** P06-016, P05-010, P08-042
 
 **实际接线依赖：** 无
 
@@ -950,10 +951,11 @@
 - [ ] 退款与库存自由问法仍调用tools并呈现口径/unknown
 - [ ] 375px离线、loading/empty/error、evidence导航可见；timeout不假成功
 - [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
+- [ ] 指定browser target选择/执行>0、0 skipped；零选择/零执行/skip失败，本次runner finally停止所有拥有server；禁止默认playwright.config.ts/.env/开发DATABASE_URL或复用server
 
 **测试：**
 
-- pnpm exec playwright test tests/e2e/safe-agent-answer.spec.ts
+- pnpm test:browser:isolated -- tests/e2e/safe-agent-answer.spec.ts
 - pnpm test:tenant
 
 **不包含：**
@@ -961,6 +963,7 @@
 - 不进行真实供应商/LLM/Jev网络调用、部署或live迁移
 - 不改整站设计或未列出的共享文件
 - 不暴露SQL、token、Connector write、approve/execute tools
+- 不把test-only route fixture结果当作实际auth/source/approval/execution runtime证明
 
 **风险：** 因果分解服务不可由模型心算代替
 

@@ -571,7 +571,7 @@
 - `scripts/test-tenant-database.mjs`
 - `packages/database/src/index.ts`
 
-**硬依赖：** P12-001, P08-016, P2-GATE, P08-036, P08-038, P08-039
+**硬依赖：** P12-001, P08-016, P2-GATE, P08-036, P08-038, P08-039, P08-056
 
 **实际接线依赖：** 无
 
@@ -582,6 +582,7 @@
 - [ ] publish和reset/disconnect锁后重查，丢包保留实际源结果；不写规范经营DB
 - [ ] consumer只从@shopmate/database root import；数据库build和API typecheck验证公共类型，禁止私有src路径import
 - [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
+- [ ] 资源tuple与stable key/hash同tx占位，pending distinct命令不可覆盖相同新商品ref；original key/hash返回原receipt，新generation不能继承旧占位
 
 **测试：**
 
@@ -631,7 +632,7 @@
 - `apps/api/src/integrations/mock/mock-commerce-connector.ts`
 - `apps/api/src/integrations/mock/mock-connector-factory.ts`
 
-**硬依赖：** P12-011, P08-007, P08-018, P08-038, P08-039
+**硬依赖：** P12-011, P08-007, P08-018, P08-038, P08-039, P08-046, P08-047, P08-049
 
 **实际接线依赖：** 无
 
@@ -796,7 +797,7 @@
 - `apps/api/vitest.tenant.config.ts`
 - `apps/api/vitest.config.ts`
 
-**硬依赖：** P12-013, P12-014, P07-019, P08-014, P2-GATE, P12-021
+**硬依赖：** P12-013, P12-014, P07-019, P08-014, P2-GATE, P12-021, P08-050
 
 **实际接线依赖：** 无
 

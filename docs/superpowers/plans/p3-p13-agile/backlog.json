@@ -2586,23 +2586,28 @@
     "priority": "P1",
     "contract": "OverviewUI acceptance matrix",
     "consumes": [
-      "P05-010本地路由和fixture-mode transport",
+      "P05-010 Web route及P05-013独立Web-only fixture runner；API response仅测试内限定合成deterministic routes",
       "375px/桌面、五种quality、键盘和三态测试用例"
     ],
-    "produces": ["定向Playwright截图/可访问性断言与验收记录"],
+    "produces": [
+      "定向Playwright截图/可访问性断言与验收记录",
+      "截图/三态/键盘证明仅限fixture UI，真实API数据由P05-012单独证明"
+    ],
     "files": ["tests/e2e/overview-evidence.spec.ts", "docs/qa/overview-evidence-ui.md"],
     "sharedFiles": [],
-    "dependsOn": ["P05-010"],
+    "dependsOn": ["P05-010", "P05-013"],
     "integrationDependsOn": [],
     "acceptance": [
       "375px无横向溢出且证据入口可聚焦",
       "loading/empty/error截屏对比现有tokens并检查retry",
-      "屏幕读出watermark/period/status；跨店后旧证据不可见"
+      "屏幕读出watermark/period/status；跨店后旧证据不可见",
+      "指定browser target选择/执行>0、0 skipped；零选择/零执行/skip失败，本次runner finally停止所有拥有server；禁止默认playwright.config.ts/.env/开发DATABASE_URL或复用server"
     ],
-    "tests": ["pnpm exec playwright test tests/e2e/overview-evidence.spec.ts"],
+    "tests": ["pnpm test:browser:fixture -- tests/e2e/overview-evidence.spec.ts"],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
-      "不改整站设计或未列出的共享文件"
+      "不改整站设计或未列出的共享文件",
+      "不把test-only route fixture结果当作实际auth/source/approval/execution runtime证明"
     ],
     "risk": "截图证据只能证明测试viewport",
     "parallelGroup": "overview-011",
@@ -2647,6 +2652,45 @@
     "risk": "验证不能读取oracle绕过真实read路径",
     "parallelGroup": "overview-012",
     "note": "工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。"
+  },
+  {
+    "id": "P05-013",
+    "phase": 5,
+    "title": "建立仅Web合成夹具浏览器配置",
+    "hours": 3,
+    "lane": "qa",
+    "kind": "component",
+    "priority": "P0",
+    "contract": "FixtureBrowserConfig / test:browser:fixture",
+    "consumes": [
+      "P05-001界面契约和现有Next dev启动；只消费测试内合成fixture transport",
+      "当前默认playwright.config.ts会读开发DATABASE_URL/.env，fixture配置必须独立且不启动API"
+    ],
+    "produces": [
+      "拟新增playwright.fixture.config.ts与pnpm test:browser:fixture脚本；只启动Web，reuseExistingServer=false，testMatch仅overview-evidence.spec.ts",
+      "runner只接受指定目标，解析JSON报告逐目标校验执行>0与0 skipped；loading/empty/error/跨店拒绝由测试限定route fulfillment合成响应"
+    ],
+    "files": [
+      "playwright.fixture.config.ts",
+      "scripts/test-browser-fixture.mjs",
+      "tests/browser-fixture-harness.test.mjs"
+    ],
+    "sharedFiles": ["package.json"],
+    "dependsOn": ["P05-001"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "pnpm test:browser:fixture -- tests/e2e/overview-evidence.spec.ts无需DATABASE_URL/.env/API/数据库即可选择并执行目标",
+      "未知目标、零选择、零执行、skip或Web失败均非零退出；Web由本次启动且finally停止",
+      "fixture interception只对测试声明的合成deterministic routes生效，未匹配外部请求拒绝；只证明UI，不宣称真实身份/源/审批"
+    ],
+    "tests": ["node --test tests/browser-fixture-harness.test.mjs", "pnpm typecheck"],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "默认浏览器配置意外启用开发数据库",
+    "parallelGroup": "p05-013-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 3h仅独立Web配置、报告守卫与script注册；不更改产品API或注入生产fixture模式。"
   },
   {
     "id": "P06-001",
@@ -3346,7 +3390,8 @@
     "contract": "AskYourStore grounded response acceptance",
     "consumes": [
       "P06-016真实read runtime和P05 evidence page",
-      "三类不同问法/范围及无cost、stale、取消fixture"
+      "三类不同问法/范围及无cost、stale、取消fixture",
+      "P08-042同一disposable DB/API/Web存活生命周期；只用受控合成种子/P2故障规则，不拦截runtime API response伪造结果"
     ],
     "produces": [
       "数值/period/quality/claims API回归与375px UI截图",
@@ -3361,19 +3406,24 @@
       "apps/api/vitest.tenant.config.ts",
       "apps/api/vitest.config.ts"
     ],
-    "dependsOn": ["P06-016", "P05-010"],
+    "dependsOn": ["P06-016", "P05-010", "P08-042"],
     "integrationDependsOn": [],
     "acceptance": [
       "销量涨利润降问题从同数据discount/spend/mix服务取证；不写死百分比",
       "退款与库存自由问法仍调用tools并呈现口径/unknown",
       "375px离线、loading/empty/error、evidence导航可见；timeout不假成功",
-      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败"
+      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败",
+      "指定browser target选择/执行>0、0 skipped；零选择/零执行/skip失败，本次runner finally停止所有拥有server；禁止默认playwright.config.ts/.env/开发DATABASE_URL或复用server"
     ],
-    "tests": ["pnpm exec playwright test tests/e2e/safe-agent-answer.spec.ts", "pnpm test:tenant"],
+    "tests": [
+      "pnpm test:browser:isolated -- tests/e2e/safe-agent-answer.spec.ts",
+      "pnpm test:tenant"
+    ],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
-      "不暴露SQL、token、Connector write、approve/execute tools"
+      "不暴露SQL、token、Connector write、approve/execute tools",
+      "不把test-only route fixture结果当作实际auth/source/approval/execution runtime证明"
     ],
     "risk": "因果分解服务不可由模型心算代替",
     "parallelGroup": "ask-agent-18",
@@ -3467,7 +3517,8 @@
     "contract": "CanonicalProposalHash",
     "consumes": [
       "已验证ProposalPayload；作用域/connection generation/sourceVersion/证据版本/有效期",
-      "node:crypto SHA-256；禁止hash依赖未规范化任意JSON"
+      "node:crypto SHA-256；禁止hash依赖未规范化任意JSON",
+      "P08-051 PRICE_SET compensation metadata是immutable执行payload，所有parent/candidate/restore/version字段纳入canonical hash"
     ],
     "produces": ["稳定序列化及hash纯函数", "hash覆盖执行相关字段且不随展示字段变化"],
     "files": [
@@ -3475,12 +3526,13 @@
       "apps/api/src/actions/proposal-hash.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P07-001"],
+    "dependsOn": ["P07-001", "P08-051"],
     "integrationDependsOn": [],
     "acceptance": [
       "对象键顺序变化不改变hash",
       "旧新价/源版本/证据版本/店铺/TTL任一变更改变hash",
-      "非法金额及未知执行字段先校验拒绝"
+      "非法金额及未知执行字段先校验拒绝",
+      "逐个修改compensation parentExecutionId/parentRevision/parentPayloadHash/candidateId/verifiedSourceVersion/restorePriceMinor改变hash，旧approval不能沿用"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/proposal-hash.spec.ts --maxWorkers 1"
@@ -3713,7 +3765,8 @@
     "contract": "ApproveProposal / RejectProposal / ApprovalRepository",
     "consumes": [
       "HumanApprovalIdentity由current-authority reader核验；expectedRevision/hash",
-      "tenant transaction及security clock；策略规定risk权限和actor分离"
+      "tenant transaction及security clock；策略规定risk权限和actor分离",
+      "P08-055完成关联仓库port：typed compensation candidate approve/reject同normal approval tx校验parent/candidate/hash；reject同步终止关联，不写parent回滚成功"
     ],
     "produces": [
       "批准/拒绝原子CAS、approval append及audit",
@@ -3724,12 +3777,13 @@
       "apps/api/src/actions/approval.service.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P07-004", "P07-006", "P07-007", "P07-009", "P09-004", "P07-019"],
+    "dependsOn": ["P07-004", "P07-006", "P07-007", "P07-009", "P09-004", "P07-019", "P08-055"],
     "integrationDependsOn": [],
     "acceptance": [
       "合法人工approve绑定org/store/action/revision/hash且无自动执行",
       "同时批准/拒绝或双批准只有一个有效决策",
-      "Viewer、body冒充actor、过期/重认证缺失/critical拒绝；audit失败全部回滚"
+      "Viewer、body冒充actor、过期/重认证缺失/critical拒绝；audit失败全部回滚",
+      "PRICE_SET compensation approval绑定完整metadata/hash；错parent/旧approval拒绝；normal reject与association REJECTED/audit同tx，原执行仍保持已核实事实"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/approval.service.spec.ts --maxWorkers 1"
@@ -4440,7 +4494,8 @@
     "contract": "ExecutionRepository.reserveApproved / ActionJobEnqueuePort",
     "consumes": [
       "已批准immutable revision/hash和当前authority recheck",
-      "tenant transaction、稳定execution key、typed ACTION_DISPATCH与P08-021入队；不使用通知recipient key"
+      "tenant transaction、稳定execution key、typed ACTION_DISPATCH与P08-021入队；不使用通知recipient key",
+      "P08-055关联port：PRICE_SET补偿正常reserve同tx bind独立child，persistent parent/candidate/revision/hash/approval逐字段匹配后才预约"
     ],
     "produces": [
       "CAS APPROVED→EXECUTING、execution insert、独立动作job job和audit同事务",
@@ -4451,12 +4506,13 @@
       "apps/api/src/actions/execution.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P08-002", "P07-008", "P09-004", "P08-021", "P08-022"],
+    "dependsOn": ["P08-002", "P07-008", "P09-004", "P08-021", "P08-022", "P08-055"],
     "integrationDependsOn": [],
     "acceptance": [
       "两个相同key竞争只一条execution/job/audit有效转移",
       "新revision/hash、过期approval或撤销权限拒绝",
-      "独立动作job或audit异常使APPROVED状态及执行记录全部回滚"
+      "独立动作job或audit异常使APPROVED状态及执行记录全部回滚",
+      "补偿reserve绑定独立child/new key/new approval与persistent candidate同tx；错parent/hash或重复复用原execution拒绝，association/audit/job异常全rollback"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/execution.repository.spec.ts --maxWorkers 1"
@@ -4533,12 +4589,13 @@
       "apps/api/src/actions/price-command-builder.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P08-001", "P07-001"],
+    "dependsOn": ["P08-001", "P07-001", "P08-051"],
     "integrationDependsOn": [],
     "acceptance": [
       "59→62产出5900→6200且携带当前expectedVersion",
       "跨SKU/币种/hash/revision/sourceVersion变化拒绝",
-      "inventory +100/批量/未知动作不构建命令；同execution重建完全一致"
+      "inventory +100/批量/未知动作不构建命令；同execution重建完全一致",
+      "合法typed compensation PRICE_SET经strict schema后构建普通absolute SetPriceCommand；metadata留在signed proposal/execution binding，不注入Connector未知字段，篡改parent binding拒绝"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/price-command-builder.spec.ts --maxWorkers 1"
@@ -4775,14 +4832,15 @@
     ],
     "produces": [
       "新revision独立候选ROLLBACK_PENDING引用",
-      "重新风险评估/人工审批及current-version检查；verify后才ROLLED_BACK"
+      "重新风险评估/人工审批及current-version检查；verify后才ROLLED_BACK",
+      "只产PRICE_SET+PriceSetCompensationMetadataV1；所有parent/candidate/restore/version字段进入新payload/hash；关联port来自P08-051，持久实现来自P08-055"
     ],
     "files": [
       "apps/api/src/actions/price-compensation.ts",
       "apps/api/src/actions/price-compensation.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P08-001", "P07-001"],
+    "dependsOn": ["P08-001", "P07-001", "P08-051"],
     "integrationDependsOn": ["P07-003", "P07-007", "P08-007"],
     "acceptance": [
       "当前仍为原目标可生成恢复旧价候选且不执行",
@@ -4856,7 +4914,8 @@
       "首期单SKU价格policy；strict execution HTTP body只引用已审批id/hash/revision",
       "TenantScopeService.resolve与strict scope header/path+route DTO，不复用拒绝body/query的只读guard",
       "P08-019..022独立动作任务实际实现；dispatchIntent一次派发/UNKNOWN只回读，通知独立动作job不用于执行",
-      "P08-032完成的default-deny registry/shared authority facade，仅注册PRICE_SET；其他kind直到专属runtime gate仍UNSUPPORTED"
+      "P08-032完成的default-deny registry/shared authority facade，仅注册PRICE_SET；其他kind直到专属runtime gate仍UNSUPPORTED",
+      "P08-049单独完成source publisher host注册/启动恢复；P08-046/047普通read/cursor/sync真实request扩展，本卡只执行API与action worker DI"
     ],
     "produces": [
       "拟新增POST /v1/actions/:id/execute authenticated入口及持久worker注册",
@@ -4884,7 +4943,10 @@
       "P08-021",
       "P08-022",
       "P08-029",
-      "P08-032"
+      "P08-032",
+      "P08-049",
+      "P08-046",
+      "P08-047"
     ],
     "integrationDependsOn": [],
     "acceptance": [
@@ -5041,7 +5103,7 @@
       "SetPriceCommand strict DTO；immutable key+hash及expectedVersion"
     ],
     "produces": [
-      "同source/control受限事务按当前published source version核对绝对价CAS，append typed request+durable receipt+requestRevision；由P08-037发布新的source snapshot/version，不直接UPDATE immutable entity",
+      "单SKU映射调用P08-036：stable key/hash原receipt优先，当前published version CAS且durable resource pending占位原子检查，append request+receipt；P08-037经新certificate发布，禁止直接UPDATE immutable entity",
       "相同command重复返回原receipt，不产生第二source mutation",
       "在同PR经database-index共享锁从现有@shopmate/database root发布typed store/resolver公共导出；不新增未拥有的subpath",
       "本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/mock-price-write.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/*.test.mjs"
@@ -5051,14 +5113,15 @@
       "packages/database/test/integration/mock-price-write.test.mjs"
     ],
     "sharedFiles": ["scripts/test-tenant-database.mjs", "packages/database/src/index.ts"],
-    "dependsOn": ["P08-016", "P2-GATE", "P08-036", "P08-038", "P08-039"],
+    "dependsOn": ["P08-016", "P2-GATE", "P08-036", "P08-038", "P08-039", "P08-056"],
     "integrationDependsOn": [],
     "acceptance": [
       "5900→6200只为指定sourceSKU append请求，requestRevision推进一次；source发布certificate追上后独立读见6200才验证成功",
       "同key同hash重复无二次变更；不同hash或旧sourceVersion拒绝",
       "timeout-after-write fixture显示源已写；reset/disconnect竞争在锁后重查并拒绝，rollback无部分回执",
       "consumer只从@shopmate/database root import；数据库build和API typecheck验证公共类型，禁止私有src路径import",
-      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败"
+      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败",
+      "不同key同SKU/旧expectedVersion在pending时RESOURCE_PENDING且无第二请求；first publication后使用fresh sourceVersion同clock可accepted，不能仅比较未变published version"
     ],
     "tests": [
       "pnpm --filter @shopmate/database build",
@@ -5097,7 +5160,7 @@
       "apps/api/src/integrations/mock/mock-commerce-connector.ts",
       "apps/api/src/integrations/mock/mock-connector-factory.ts"
     ],
-    "dependsOn": ["P08-017", "P08-007", "P2-GATE", "P08-038", "P08-039"],
+    "dependsOn": ["P08-017", "P08-007", "P2-GATE", "P08-038", "P08-039", "P08-046"],
     "integrationDependsOn": [],
     "acceptance": [
       "正常sourceprice readback带correct binding/execution/SKU/version",
@@ -5410,15 +5473,16 @@
       "当前server human/actions:propose+products:write、fresh source readback/evidence"
     ],
     "produces": [
-      "只建立新PRICE_COMPENSATION proposal、parentExecutionId与旧新价；新revision/hash、approval TTL、execution key由正常链生成",
-      "候选创建/audit同tx，原execution只记录ROLLBACK_PENDING关联，不批准不执行"
+      "只建立PRICE_SET proposal+P08-051 strict compensation metadata（完整parent/candidate/恢复值/verified source version）；新revision/hash、approval TTL、execution key由正常链生成",
+      "候选创建/audit同tx，原execution只记录ROLLBACK_PENDING关联，不批准不执行",
+      "同controller拥有拟新增POST /v1/executions/:id/compensation-candidate/:candidateId/cancel认证入口，仅委托typed cancelCandidate port；child已经accepted则409，reject沿正常审批服务"
     ],
     "files": [
       "apps/api/src/actions/compensation.controller.ts",
       "apps/api/src/actions/compensation.controller.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P08-011", "P07-001"],
+    "dependsOn": ["P08-011", "P07-001", "P08-051"],
     "integrationDependsOn": [
       "P07-007",
       "P07-002",
@@ -5426,7 +5490,8 @@
       "P09-004",
       "P08-018",
       "P07-019",
-      "P08-041"
+      "P08-041",
+      "P08-055"
     ],
     "acceptance": [
       "当前价格仍为原target且fresh version可生成恢复旧值候选；不调用write",
@@ -5455,11 +5520,13 @@
     "contract": "CompensationRuntimeBindings / NewApprovalBinding",
     "consumes": [
       "P08-026候选controller、P08-011 builder；P08-018真实source read/current version",
-      "P07-014真实proposal/hash/risk/approval与P08-013 execution；P08-029关联outcome"
+      "P07-014真实proposal/hash/risk/approval与P08-013 execution；P08-029关联outcome",
+      "P08-051 PRICE_SET metadata strict/export与P08-054/055 actual association，P07-008批准拒绝/P08-003 reserve已拥有关联hook，candidate cancel hook只绑定完成仓库"
     ],
     "produces": [
       "compensation API DI registration与price proposal branch绑定；新的approval/key必经正常执行路径",
-      "已验证原execution关联pending compensation；当前有效human重新明确审批后才可执行"
+      "已验证原execution关联pending compensation；当前有效human重新明确审批后才可执行",
+      "register CompensationAssociationPort/read/outcome并绑定正常PRICE_SET branch与取消候选认证入口；只调用已完成cancelCandidate，reject沿正常审批路径，禁止新kind/fallback"
     ],
     "files": [
       "apps/api/src/actions/compensation.module.ts",
@@ -5478,13 +5545,17 @@
       "P08-013",
       "P08-029",
       "P09-004",
-      "P08-041"
+      "P08-041",
+      "P08-051",
+      "P08-054",
+      "P08-055"
     ],
     "integrationDependsOn": [],
     "acceptance": [
       "真实read→新proposal→新hash/revision链可调用，原approval/key拒绝",
       "原approval不能替代新补偿human审批；当前身份/权限/近期证明缺失或过期拒绝，既有actor separation规则保持",
-      "仅新compensation readback VERIFIED才把原execution标ROLLED_BACK；UNKNOWN留pending"
+      "仅新compensation readback VERIFIED才把原execution标ROLLED_BACK；UNKNOWN留pending",
+      "取消尚未执行candidate或normal reject持久终止关联，parent保持真实验证状态；已accepted child UNKNOWN不能cancel，一律无成功回滚声明"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/compensation.module.spec.ts --maxWorkers 1"
@@ -5526,7 +5597,8 @@
     "acceptance": [
       "UNKNOWN/无权限不能发补偿；conflict409显示重新取证而非重试write",
       "补偿二次确认显示新hash/key/审批人要求；没有自动批准或直接execute",
-      "375px/键盘loading/empty/error，新的human批准后导航新execution，VERIFIED才呈现ROLLED_BACK"
+      "375px/键盘loading/empty/error，新的human批准后导航新execution，VERIFIED才呈现ROLLED_BACK",
+      "取消调用认证candidate cancel端口，拒绝走normal reject；重新读取CANCELLED/REJECTED relation，原execution不显示ROLLED_BACK，unknown child不能取消"
     ],
     "tests": [
       "pnpm --filter @shopmate/web exec vitest run src/app/actions/compensation-api.test.ts src/app/actions/compensation-binding.test.tsx"
@@ -5550,24 +5622,27 @@
     "contract": "CompensationOutcomePort / ParentExecutionTransition",
     "consumes": [
       "typed compensation parentExecutionId、distinct revision/hash/key、fresh approval",
-      "真实子execution验证outcome、同scope fenced tenant tx和audit append端口"
+      "真实子execution验证outcome、同scope fenced tenant tx和audit append端口",
+      "P08-051 public CompensationAssociationPort；P08-055实际parameterized repository实现，P08-054持久relation/status约束"
     ],
     "produces": [
       "仅子补偿VERIFIED后原execution ROLLBACK_PENDING→ROLLED_BACK；同tx持久关联与audit",
       "UNKNOWN/PENDING保持pending；MISMATCH显示补偿冲突，不伪造原成功",
-      "bindParentCompensationCandidate同tx关联独立候选并置ROLLBACK_PENDING；后续新approval/key子execution经真实VERIFIED才完成，audit异常rollback"
+      "bindParentCompensationCandidate同tx关联独立候选并置ROLLBACK_PENDING；后续新approval/key子execution经真实VERIFIED才完成，audit异常rollback",
+      "bind candidate通过P08-055保存原parent Action status并置ROLLBACK_PENDING；cancel/reject由同repo原子恢复已验证prior状态，child已accepted则不可取消；只child真实VERIFIED后parent Action ROLLED_BACK"
     ],
     "files": [
       "apps/api/src/actions/compensation-outcome.ts",
       "apps/api/src/actions/compensation-outcome.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P08-001", "P07-001"],
-    "integrationDependsOn": ["P08-009", "P09-004"],
+    "dependsOn": ["P08-001", "P07-001", "P08-051"],
+    "integrationDependsOn": ["P08-009", "P09-004", "P08-055"],
     "acceptance": [
       "真实VERIFIED与父子scope/hash绑定才ROLLED_BACK，同outcome重复幂等",
       "ACCEPTED/UNKNOWN/PENDING不完成回滚；错parent/旧fence拒绝",
-      "原状态与子结果及audit任一异常全部rollback；不能复用原approval或key"
+      "原状态与子结果及audit任一异常全部rollback；不能复用原approval或key",
+      "cancel/reject尚未执行candidate仅终止association并释放active pending，保留parent原VERIFIED状态，不能ROLLED_BACK；CHILD_PENDING/UNKNOWN不得通过cancel抹除未知结果"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/compensation-outcome.spec.ts --maxWorkers 1"
@@ -5591,7 +5666,8 @@
     "contract": "J2 StatusAndCompensationProof",
     "consumes": [
       "P08-025/027/028真实HTTP+web binding；认证human、本地Mock/isolated DB，tenant B负例",
-      "原59→62、UNKNOWN恢复、商家改价冲突及新的补偿revision/hash/key"
+      "原59→62、UNKNOWN恢复、商家改价冲突及新的补偿revision/hash/key",
+      "P08-042同一disposable DB/API/Web存活生命周期；只用受控合成种子/P2故障规则，不拦截runtime API response伪造结果"
     ],
     "produces": [
       "聚焦status read/UI与补偿审批/readback集成证明，复用已有execution故障fixture",
@@ -5606,21 +5682,26 @@
       "apps/api/vitest.tenant.config.ts",
       "apps/api/vitest.config.ts"
     ],
-    "dependsOn": ["P08-028", "P08-015", "P08-023", "P07-019"],
+    "dependsOn": ["P08-028", "P08-015", "P08-023", "P07-019", "P08-042"],
     "integrationDependsOn": [],
     "acceptance": [
       "UNKNOWN/PENDING状态API与375px UI一致且无retry write；readback后才成功",
       "新hash/key/approval且human重新明确批准后恢复59，独立readback VERIFIED才ROLLED_BACK",
       "商家改价/原approval重放/无近期human proof/跨tenant拒绝，补偿outcome/audit故障rollback，0 skipped",
-      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败"
+      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败",
+      "指定browser target选择/执行>0、0 skipped；零选择/零执行/skip失败，本次runner finally停止所有拥有server；禁止默认playwright.config.ts/.env/开发DATABASE_URL或复用server",
+      "实际DB从candidate create读回完整parent/candidate/revision/hash，再normal approve→strict PRICE_SET registry→new child reserve读回FK关联；错parent/旧approval/key拒绝且无孤儿关系",
+      "分别cancel/reject尚未执行候选后持久CANCELLED/REJECTED并无child mutation，parent保留原已验证状态；UNKNOWN child禁止cancel；真实child VERIFIED才VERIFIED_ROLLBACK/ROLLED_BACK",
+      "candidate cancel/reject后读回parent已恢复prior SUCCEEDED、association CANCELLED/REJECTED、source仍6200且child为空；原VERIFIED事实不变，无假ROLLBACK_PENDING/ROLLED_BACK"
     ],
     "tests": [
-      "pnpm exec playwright test tests/e2e/execution-compensation.spec.ts",
+      "pnpm test:browser:isolated -- tests/e2e/execution-compensation.spec.ts",
       "pnpm test:tenant"
     ],
     "outOfScope": [
       "真实供应商/LLM网络调用、部署或线上迁移",
-      "自动审批、UNKNOWN后再次写入或自动补偿"
+      "自动审批、UNKNOWN后再次写入或自动补偿",
+      "不把test-only route fixture结果当作实际auth/source/approval/execution runtime证明"
     ],
     "risk": "J2遗漏可见状态或补偿运行链",
     "parallelGroup": "p08-030-execution-compensation",
@@ -5648,12 +5729,13 @@
       "packages/contracts/src/actions/action-strategy.schema.spec.ts"
     ],
     "sharedFiles": ["packages/contracts/src/index.ts"],
-    "dependsOn": ["P07-001", "P08-001"],
+    "dependsOn": ["P07-001", "P08-001", "P08-051"],
     "integrationDependsOn": [],
     "acceptance": [
       "未知kind或错payload schema拒绝；registry重复kind拒绝",
       "任何策略都必须先得到当前共享authority proof，AI/失效approval不能造proof",
-      "price保留absolute SetPriceCommand；publish CreateProductCommand不能调用updatePrice分支"
+      "price保留absolute SetPriceCommand；publish CreateProductCommand不能调用updatePrice分支",
+      "精确PRICE_SET compensation metadata走同strict union和共享authority；不注册新PRICE_COMPENSATION kind，不允许额外字段fallback"
     ],
     "tests": [
       "pnpm --filter @shopmate/contracts exec vitest run src/actions/action-strategy.schema.spec.ts"
@@ -5690,12 +5772,13 @@
       "apps/api/src/actions/price-execution-strategy.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P08-031", "P08-004", "P08-005", "P08-006", "P08-007"],
+    "dependsOn": ["P08-031", "P08-004", "P08-005", "P08-006", "P08-007", "P08-051"],
     "integrationDependsOn": ["P08-003", "P08-009", "P08-018", "P07-019"],
     "acceptance": [
       "59→62依旧只构建一次absolute价命令；receipt/UNKNOWN/readback行为不变",
       "proof缺失/revoked/TTL/generation漂移先拒绝，kind adapter无机会dispatch",
-      "registry只默认price，未注册publish/unknown拒绝；接口可接typed fixture publish策略但不runtime注册"
+      "registry只默认price，未注册publish/unknown拒绝；接口可接typed fixture publish策略但不runtime注册",
+      "带P08-051完整compensation metadata的PRICE_SET仍经正常schema/registry/shared authority与独立approval/key，错parent/hash或旧approval拒绝"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/action-strategy-registry.spec.ts src/actions/price-execution-strategy.spec.ts --maxWorkers 1"
@@ -5716,14 +5799,16 @@
     "lane": "contract",
     "kind": "contract",
     "priority": "P0",
-    "contract": "SourceCommandRequestV1 / RequestPinnedPublication / CommandReceiptRequestRevision",
+    "contract": "SourceCommandRequestV1 / RequestPinnedPublication / CommandReceiptRequestRevision / DurablePendingRequestReader / RequestPinnedPublicReadPort",
     "consumes": [
       "P2-GATE公共publication/CONTROL，P2 publication-plan lines170–180明确clock-only BUILD不支持command writes",
       "P08-016 durable command receipt与strict PRICE_SET/PRODUCT_PUBLISH批准payload"
     ],
     "produces": [
       "requestRevision独立于clockRevision，CONTROL下accepted mutation/clock request递增并同tx durable receipt；新的SourceCommandRequest typed记录",
-      "jobs冻结targetRequestRevision与business clock；chronology=(occurredAt,requestRevision,phaseRank,entityKey,ordinal)，receipt-backed同tick例外；certificate/read要求requestRevision>=receipt且pinned旧证书不变"
+      "jobs冻结targetRequestRevision与business clock；chronology=(occurredAt,requestRevision,phaseRank,entityKey,ordinal)，receipt-backed同tick例外；certificate/read要求requestRevision>=receipt且pinned旧证书不变",
+      "typed read-only pending head/open-job enumeration与CLOCK请求codec/allocator签名供宿主；普通public read/scan/cursor与sync pin按full scope+generation+publication/request/certificate绑定，v1只读兼容",
+      "明确pending mutation admission政策：full scope/generation/resource tuple尚有accepted未published请求时拒绝第二distinct key/hash为RESOURCE_PENDING；相同key/hash返回原receipt，发布后fresh version允许下一请求"
     ],
     "files": [
       "packages/database/src/mock-actions/source-command-types.ts",
@@ -5736,7 +5821,8 @@
     "acceptance": [
       "两次同clock accepted price命令requestRevision严格递增，无1ms advance/Runtime rewrite",
       "v1原>base frontier规则只对有效receipt-backed更高request same-tick例外；任意更早time拒绝",
-      "合同区分ACCEPTED/待发布和VERIFIED；public source reader必须等receipt要求的certificate，不承诺同步规范DB已更新"
+      "合同区分ACCEPTED/待发布和VERIFIED；public source reader必须等receipt要求的certificate，不承诺同步规范DB已更新",
+      "两distinct keys同expectedVersion在第一publication前竞争只可接受一个；allocator串行本身不是CAS证明；资源占位持久化及publish/reset原子清除/隔离归P08-052/053"
     ],
     "tests": [
       "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/source-command-types.test.mjs",
@@ -5766,7 +5852,8 @@
     ],
     "produces": [
       "additive requestRevision allocator/head+SourceCommandRequest schema、receipt绑定、targetRequestRevision certificate列",
-      "唯一/idleness由requestRevision代替clock-only targetClockRevision；clockRevision仍metadata，open job冻结前缀，旧certificate版本兼容明确"
+      "唯一/idleness由requestRevision代替clock-only targetClockRevision；clockRevision仍metadata，open job冻结前缀，旧certificate版本兼容明确",
+      "CLOCK typed request与COMMAND共用allocator/head；pending index支持有限scope batch读取，不能只靠进程内wake；actual clock hook归P08-043"
     ],
     "files": [
       "packages/database/src/mock-actions/source-request-model.ts",
@@ -5841,7 +5928,7 @@
     "id": "P08-036",
     "phase": 8,
     "title": "实现受限源命令请求与回执事务端口",
-    "hours": 3,
+    "hours": 4,
     "lane": "database",
     "kind": "integration",
     "priority": "P0",
@@ -5851,20 +5938,22 @@
       "P2 source actual-login事务+CONTROL/fresh access；不传pool/sql/principal override"
     ],
     "produces": [
-      "参数化append-only acceptCommandRequest：当前version/hash/generation CAS、stable key、requestRevision/receipt同tx",
-      "公共root导出typed request store，price/listing业务store调用此口，暂未publish返回ACCEPTED"
+      "参数化acceptCommandRequest先stable key/hash receipt查重，再同CONTROL/tenant tx调用P08-053 durable resource占位+published expectedVersion CAS；request/receipt/head/reservation原子提交，RESOURCE_PENDING不分配新请求",
+      "公共root导出typed request store，price/listing业务store调用此口，暂未publish返回ACCEPTED",
+      "public DurablePendingRequestReader有限scope枚举request head/open job供P08-044 startup/poll，只读不触发publisher；已accepted请求持久可在重启后拾取"
     ],
     "files": [
       "packages/database/src/mock-actions/source-command-requests.ts",
       "packages/database/test/mock-actions/source-command-requests.test.mjs"
     ],
     "sharedFiles": ["packages/database/src/index.ts"],
-    "dependsOn": ["P08-035"],
+    "dependsOn": ["P08-035", "P08-053"],
     "integrationDependsOn": [],
     "acceptance": [
       "同key/hash重试返回原request/receipt，无第二requestRevision；changed hash/旧version拒绝",
       "receipt+request+head任一失败全部rollback；reset/disconnect锁后fresh check拒绝",
-      "仅批准typed command且不写immutable entity行；source限制actual-login保持，公共root import/build可验证"
+      "仅批准typed command且不写immutable entity行；source限制actual-login保持，公共root import/build可验证",
+      "两distinct keys同resource/同expectedVersion在publication前至多一accept，其余RESOURCE_PENDING；same key/hash在pending期间仍返回原receipt；restart不能丢占位"
     ],
     "tests": [
       "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/source-command-requests.test.mjs",
@@ -5891,7 +5980,8 @@
     "consumes": [
       "P08-036 durable command request/receipt和P2 reviewed public claim/append/publish operations",
       "P08-035新codec/time guards；只有限typed price/product命令prefix，不做一般generator",
-      "P08-040已完成公开request-aware worker方法；原v1 claim/append/publish不能假定接受requestRevision，修改归属明确由P08-040负责"
+      "P08-040已完成公开request-aware worker方法；原v1 claim/append/publish不能假定接受requestRevision，修改归属明确由P08-040负责",
+      "P08-053公开publish同tx资源clearance：fence/scope/frozen prefix约束，失败/restart不能提前释放；publisher不再次accept业务命令"
     ],
     "produces": [
       "冻结request prefix转bounded immutable snapshot events与one-to-one versions，经已有fenced publication协议增量发布",
@@ -5905,7 +5995,7 @@
     "dependsOn": ["P08-036", "P08-040"],
     "integrationDependsOn": [],
     "acceptance": [
-      "相同clock先价62再63形成更高request/publication revisions；不rewrite Runtime/旧events/旧certificate",
+      "相同clock先62完成publication/占位clearance，再以fresh sourceVersion accepted63形成更高request/publication；pending第二distinct旧version请求必须拒绝，无Runtime/旧certificate rewrite",
       "open job中后来accepted请求不混进冻结prefix；finish后新job，无放弃revision/同步全量history",
       "崩溃/丢ack沿用最新receipt/fence恢复，不重新accept command；未sealed/published不声称visible source success"
     ],
@@ -5937,7 +6027,7 @@
     ],
     "produces": [
       "公共root导出独立reader：certificate.requestRevision>=receipt.requestRevision且own certificate/source actual read通过才返回可验证snapshot",
-      "certificate未达、source未可见PENDING/UNKNOWN；同步handoff附request pin/version，只同步后规范DB可见"
+      "certificate未达、source未可见PENDING/UNKNOWN；本卡只action独立回读，普通read/cursor由P08-045/046、sync持久pin/adapter由P08-048/047拥有"
     ],
     "files": [
       "packages/database/src/mock-actions/source-command-readback.ts",
@@ -5949,7 +6039,7 @@
     "acceptance": [
       "同clock新命令certificate落后时PENDING，追上且独立读到实际完整source snapshot才可VERIFIED",
       "先前pinned certificate数据/hash不变，不混入后来的same-tick请求；错scope/request/execution/generation拒绝",
-      "延迟publication/read失败不猜值，no source success不更新规范DB；正常sync必须携带新request/version才能收敛"
+      "延迟publication/read失败不猜值，no source success不更新规范DB；只返回真实certificate/source ref，normal sync依P08-045..048消费request pin收敛"
     ],
     "tests": [
       "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/source-command-readback.test.mjs",
@@ -5978,7 +6068,7 @@
       "typed price/product command request fixtures，不依赖P08-017/P12-011业务store避免互相锁死"
     ],
     "produces": [
-      "真实DB同clock两次mutation、frozen prefix、immutable old certificate与即时独立readback证明",
+      "真实DB同clock sequential fresh-version mutations、frozen prefix、immutable old certificate与独立readback；pending two-key admission/reset/restart竞争由P08-056独立证明",
       "必跑runner注册，source角色无额外Runtime/control更新权限；reset/disconnect/revoke锁后检查",
       "本卡持runner共享锁显式注册必跑目标：packages/database/test/integration/source-command-publication.test.mjs；nested目标显式调用，不依赖test/*.test.mjs"
     ],
@@ -5987,7 +6077,7 @@
     "dependsOn": ["P08-038"],
     "integrationDependsOn": [],
     "acceptance": [
-      "business clock不变的62/63请求revision递增，certificate追上时立即读最新价；旧pin/hash/content保持不变",
+      "business clock不变：key A expected v1→62先accepted并published/clearance后，key B fresh v2→63方可accepted；revision递增，旧pin/hash/content不变",
       "open prefix外新请求留后继job；receipt-backed same-tick允许，旧时刻/未绑定receipt/跨tenant/旧fence拒绝",
       "0 skipped；命令/receipt/request/发布失败不部分commit；source reader不能写、source worker不能改Runtime/旧source rows，规范DB仅sync后可见",
       "pnpm test:tenant仅isolatedPostgres新建/stop disposable数据库，清除继承开发DATABASE_URL，仅runner注入TEST_DATABASE_URL/runtime DATABASE_URL；注册集非空，每目标执行>0且0 skipped，零选择或skip失败"
@@ -6061,7 +6151,8 @@
     "contract": "ExecutionStatusReadPort / ExecutionParentChildReadPort",
     "consumes": [
       "P08-001 strict status DTO、P08-002持久execution/receipt/verification/deadline模型",
-      "trusted完整tenant tx与server actions:read context；参数化executionId查询，audit refs只给可见片段"
+      "trusted完整tenant tx与server actions:read context；参数化executionId查询，audit refs只给可见片段",
+      "P08-054 durable relation与P08-055 scoped CompensationReadPort；原execution verification和association terminal状态分别读取"
     ],
     "produces": [
       "parameterized status read repository：实际receipt/readback state/deadline/fence/publication refs，不从command target合成结果",
@@ -6072,12 +6163,13 @@
       "apps/api/src/actions/execution-status.repository.spec.ts"
     ],
     "sharedFiles": [],
-    "dependsOn": ["P08-001", "P08-002", "P09-001"],
+    "dependsOn": ["P08-001", "P08-002", "P09-001", "P08-054", "P08-055"],
     "integrationDependsOn": [],
     "acceptance": [
       "same-scope execution返回当前持久UNKNOWN/PENDING/MISMATCH/VERIFIED及真实source ref，ACCEPTED不success",
       "跨tenant/store或恶意id只作参数且拒绝读取；受限tenant事务未scope默认拒绝",
-      "parent/child关联只读取同scope；timeout/error不转换empty，缺readback未生成source target snapshot"
+      "parent/child关联只读取同scope；timeout/error不转换empty，缺readback未生成source target snapshot",
+      "cancel/reject后关联终止且parent Action恢复保存的真实原状态，original receipt/verification未变；展示明确“补偿已取消/拒绝，未恢复旧价”，不能留虚假ROLLBACK_PENDING"
     ],
     "tests": [
       "pnpm --filter @shopmate/api exec vitest run src/actions/execution-status.repository.spec.ts --maxWorkers 1"
@@ -6089,6 +6181,661 @@
     "risk": "status endpoint只有fixture read port没有真实查询实现",
     "parallelGroup": "p08-status-read-repository-41",
     "note": "拟新增路径，3h含参数化read adapter、定向验证/PR；函数/回调<40行、TS无any、strict输入/完整scope/env密钥；独立commit/PR review/latest CI/main后Done。真实RLS/API读取由P08-030隔离证明，本卡不重做execute reserve/lease仓库。"
+  },
+  {
+    "id": "P08-042",
+    "phase": 8,
+    "title": "建立一次性数据库与API浏览器生命周期",
+    "hours": 4,
+    "lane": "qa",
+    "kind": "component",
+    "priority": "P0",
+    "contract": "IsolatedBrowserHarness / test:browser:isolated",
+    "consumes": [
+      "现有isolated-postgres.mjs/tenant-api-fixture.mjs提供disposable DB与受限runtime URL；不复用pnpm test:tenant结束后的生命周期",
+      "现有Playwright/Next/Nest启动方式；三个精确目标safe-agent-answer.spec.ts、execution-compensation.spec.ts、daily-brief-notifications.spec.ts"
+    ],
+    "produces": [
+      "拟新增playwright.isolated.config.ts与pnpm test:browser:isolated脚本；harness自己新建/准备DB，再注入唯一受限runtime DATABASE_URL至API，Web只拿本次API_BASE_URL，operator URL仅留准备进程",
+      "拥有API+Web+DB同一生命周期；清除继承DATABASE_URL/TEST_DATABASE_URL、vendor keys和服务URL，不加载任何.env；本次随机空闲端口/不复用已启动server，测试认证凭据与session secret仅本次合成env注入",
+      "JSON reporter逐指定目标检查选择>0/执行>0/0 skipped，未知目标或目标缺失失败；所有异常/信号在finally停止API/Web子进程树及server.stop()"
+    ],
+    "files": [
+      "scripts/test-browser-isolated.mjs",
+      "playwright.isolated.config.ts",
+      "tests/browser-isolated-harness.test.mjs"
+    ],
+    "sharedFiles": ["package.json"],
+    "dependsOn": ["P08-001"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "污染继承开发DATABASE_URL、现有3000/3001服务或packages/database/.env均不能被读取/复用；API仅收到runner生成受限runtime URL",
+      "DB准备失败、API/Web启动失败、Playwright失败、零选择/零执行/skip均非零退出并finally stop全部本次server/DB",
+      "pnpm test:browser:isolated -- tests/e2e/execution-compensation.spec.ts在同一存活disposable DB+真实API/Web中执行；合成数据只经受控DB种子/现有P2故障规则，runtime API响应不可route替换",
+      "运行目标allowlist精确覆盖三张runtime浏览器卡；test-only process doubles证明cleanup/report守卫，不冒充真实浏览器证明"
+    ],
+    "tests": ["node --test tests/browser-isolated-harness.test.mjs", "pnpm typecheck"],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "浏览器进程脱离tenant runner后意外连接开发库",
+    "parallelGroup": "p08-042-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 4h复用现有DB准备helpers，只新增生命周期封装/独立config/报告守卫及PR；实际目标验证由消费卡完成，不能把这些未实现测试宣称已运行。"
+  },
+  {
+    "id": "P08-043",
+    "phase": 8,
+    "title": "扩展已批准时钟推进的请求修订分配",
+    "hours": 3,
+    "lane": "database",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "AcceptedClockRequestAllocator / SourceRequestRevisionPersistence",
+    "consumes": [
+      "P08-033/034分配器与P2-GATE最终公开CONTROL advance/create/reset协议；现有demo-commerce.mutations.ts是适配入口",
+      "clockRevision仍int32业务metadata；requestRevision为单调UInt字符串，CLOCK请求与typed命令共用同一head"
+    ],
+    "produces": [
+      "现有授权ADVANCE事务同CONTROL锁更新clock并追加CLOCK请求+requestRevision，记录真实clockRevision/generation；拒绝/无变化重试不重复分配",
+      "初始化/重置新generation按P2基础协议建立首个CLOCK请求；只补请求allocator hook，不再实现P2 clock/runtime/generator"
+    ],
+    "files": [
+      "packages/database/src/mock-actions/source-clock-requests.ts",
+      "packages/database/test/mock-actions/source-clock-requests.test.mjs"
+    ],
+    "sharedFiles": [
+      "packages/database/src/demo-commerce.mutations.ts",
+      "packages/database/src/index.ts"
+    ],
+    "dependsOn": ["P08-034", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "只有clock advance无业务命令也提高request head，request-aware worker下一轮不误IDLE；clock事实和请求任一失败全回滚",
+      "同clock已发布后先接受命令再真实clock advance，冻结旧prefix可完成，下轮消费更高clock/request；无+1ms或Runtime rewrite",
+      "advance/reset/disconnect竞争在CONTROL后fresh check；旧generation请求不可复用，overflow fail closed"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/source-clock-requests.test.mjs",
+      "pnpm --filter @shopmate/database build"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "idleness改用requestRevision后纯时钟进度失效",
+    "parallelGroup": "p08-043-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 P2-GATE完成后核对最终public advance owner，同PR更新确切handoff路径；只增加请求分配同tx hook，3h不重建P2 control基础。"
+  },
+  {
+    "id": "P08-044",
+    "phase": 8,
+    "title": "实现持久源请求发布宿主与重启拾取",
+    "hours": 3,
+    "lane": "backend",
+    "kind": "component",
+    "priority": "P0",
+    "contract": "SourcePublicationHost / DurablePendingRequestReader / SourceCommandPublicationAdapter",
+    "consumes": [
+      "P08-033公开pending request/clock prefix与P08-037有界publisher端口；完整source scope及实际worker身份",
+      "与action dispatch/verification jobs分离；实时bounded poll/启动恢复读取持久head/open job，不以进程内队列为唯一触发"
+    ],
+    "produces": [
+      "拟新增host在启动及bounded poll扫描受限pending request/open job并驱动已有publisher；接受写入后的可选wake仅加速，丢wake仍能进展",
+      "旧open job沿lease/fence/checkpoint/latest-ack恢复；关停取消本次loop，publisher failure保留durable pending及诊断，禁止重新accept/dispatch业务命令"
+    ],
+    "files": [
+      "apps/api/src/integrations/mock/source-publication.host.ts",
+      "apps/api/src/integrations/mock/source-publication.host.spec.ts"
+    ],
+    "sharedFiles": [],
+    "dependsOn": ["P08-033"],
+    "integrationDependsOn": ["P08-037", "P08-043", "P08-040", "P2-GATE"],
+    "acceptance": [
+      "不发送wake时启动/poll仍拾取已接受未发布请求；假端口测试有界批次和backoff，不伪称runtime已注册",
+      "process recreation只沿持久request/open job续发；acceptCommand/updatePrice/createProduct计数保持不增",
+      "两host竞争服从DB lease/fence，旧host不发布；stop/abort无悬挂loop，读端口不会触发写入"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/api exec vitest run src/integrations/mock/source-publication.host.spec.ts --maxWorkers 1"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "没有宿主驱动时accepted请求永久PENDING",
+    "parallelGroup": "p08-044-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 3h只实现调度loop与生命周期组件，可按已合并契约注入测试端口；DB pending扫描由P08-036、真实注册由P08-049，不重做publisher。"
+  },
+  {
+    "id": "P08-045",
+    "phase": 8,
+    "title": "扩展普通源读取和游标的请求证书边界",
+    "hours": 3,
+    "lane": "database",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "RequestPinnedPublicReadPort / RequestPinnedScanCursor",
+    "consumes": [
+      "P2-GATE最终公开source read/scan/pagination契约与P08-033/034 request certificate；P2 clock-only v1不能假定已有request字段",
+      "P08-040公开certificate/request typed边界；read actor与worker身份分离"
+    ],
+    "produces": [
+      "拟新增public read wrapper把scope/generation/publicationRevision/requestRevision/certificateHash完整绑定至新scan和opaque cursor；旧v1 pins只读兼容",
+      "同clock新scan选择最新已发布request pin；续页只读原certificate及其eventSeq范围，不隐式调用claim/append/publish；root公共导出在同PR完成",
+      "本卡shared source-read.ts/source-cursor.ts（明确拟定P2 handoff路径）扩展公开读取参数/证书返回及cursor codec验证；source request reader wrapper不假设v1自动支持新pin"
+    ],
+    "files": [
+      "packages/database/src/mock-actions/source-request-read.ts",
+      "packages/database/test/mock-actions/source-request-read.test.mjs"
+    ],
+    "sharedFiles": [
+      "packages/database/src/mock-platform/types.ts",
+      "packages/database/src/mock-platform/index.ts",
+      "packages/database/src/index.ts",
+      "packages/database/src/mock-platform/source-read.ts",
+      "packages/database/src/mock-platform/source-cursor.ts"
+    ],
+    "dependsOn": ["P08-034", "P08-040", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "旧scan续页在同clock更高request发布后仍保持原内容/hash/排序；新scan读更高request，未发布请求不可见",
+      "伪造cursor、错scope/query/generation/certificate或未published ref拒绝；request UInt不Number转换",
+      "普通point/read/list均保留certificate/sourceVersion，read进程无worker grant且写调用计数0；public root import/build验证"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/source-request-read.test.mjs",
+      "pnpm --filter @shopmate/database build"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "新请求只被action回读看见而普通扫描仍停旧clock",
+    "parallelGroup": "p08-045-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 source-read.ts/source-cursor.ts为明确拟定P2-GATE公共point/scan/cursor适配文件，已登记shared锁；最终handoff命名不同则领取前同PR更名卡上路径。3h只给已完成P2 SQL read/scan增加request certificate pin与continuation验证，不重做P2扫描/生成。"
+  },
+  {
+    "id": "P08-046",
+    "phase": 8,
+    "title": "传播Mock普通读取和分页的请求固定证书",
+    "hours": 4,
+    "lane": "integration",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "RequestPinnedMockReadAdapter / CommerceConnectorReadCursor",
+    "consumes": [
+      "P08-045实际普通read/scan port与P2-GATE最终Mock SQL读适配器；现有mock-page/mock-cursor-store/connector/factory/host是读取边界",
+      "只扩P2 merged read adapter支持request pin，复用当前scope/auth/deadline，普通read不驱动publisher"
+    ],
+    "produces": [
+      "拟新增Mock read bridge让getProduct/listProducts及其余source reads携带public certificate/request pin；续页继续旧pin，新scan读取最新published pin",
+      "同PR把bridge绑定至Mock connector/factory/host与pagination/cursor owners；已有P2 SQL read实现保持，禁止读未发布source/场景oracle"
+    ],
+    "files": [
+      "apps/api/src/integrations/mock/source-request-read.adapter.ts",
+      "apps/api/src/integrations/mock/source-request-read.adapter.spec.ts"
+    ],
+    "sharedFiles": [
+      "apps/api/src/integrations/mock/mock-page.ts",
+      "apps/api/src/integrations/mock/mock-cursor-store.ts",
+      "apps/api/src/integrations/mock/mock-commerce-connector.ts",
+      "apps/api/src/integrations/mock/mock-connector-factory.ts",
+      "apps/api/src/demo-commerce/demo-commerce-connector.host.ts"
+    ],
+    "dependsOn": ["P08-045", "P08-038", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "同business clock source publication更新后getProduct与新list scan见最新version，原cursor续页内容/hash仍不变",
+      "cursor跨tenant/generation/query或cert失败fail closed；PENDING/read timeout不能变成功/空零值",
+      "read-only factory/host调用不accept/dispatch/publish；existing Mock read回归与public @shopmate/database root import/typecheck通过"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/api exec vitest run src/integrations/mock/source-request-read.adapter.spec.ts src/integrations/mock/mock-commerce-connector.spec.ts --maxWorkers 1",
+      "pnpm --filter @shopmate/api typecheck"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "分页隐式升级证书而混入后来的same-tick事实",
+    "parallelGroup": "p08-046-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 4h只适配已合并P2 read/scan的request字段与connector绑定，非重新开发SQL reader；P2-GATE核对实际路径并更新同锁，不把此行为塞进价格writer wiring。"
+  },
+  {
+    "id": "P08-047",
+    "phase": 8,
+    "title": "接入请求固定读取到正常同步路径",
+    "hours": 3,
+    "lane": "integration",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "RequestPinnedSyncAdapter / NormalSyncTrigger",
+    "consumes": [
+      "P08-046普通Mock read/cursor与P08-048真实facts/cursor/pin事务；P2-GATE已合并普通sync入口",
+      "同clock新scan/旧scan续页和source version正常归一化；沿现有正常sync调度，不从action outcome直接写facts"
+    ],
+    "produces": [
+      "拟新增request-aware sync adapter并绑定现有正常sync调用点，增量判定消费publication/request pin而不只比较clockWatermark",
+      "归一化仅消费真实source snapshot；每页facts/cursor/pin同tx，旧scan完成后新scan收敛higher request"
+    ],
+    "files": [
+      "apps/api/src/sync/request-pinned-sync.adapter.ts",
+      "apps/api/src/sync/request-pinned-sync.adapter.spec.ts"
+    ],
+    "sharedFiles": ["apps/api/src/sync/sync.service.ts", "apps/api/src/sync/sync.module.ts"],
+    "dependsOn": ["P08-046", "P08-048", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "真实normal sync触发同clock新扫描更新规范价及sourceVersion，未发布请求绝不提前写入",
+      "途中新publication不改变旧scan页；完成后下一scan见新request，restart沿durable cursor/pin恢复",
+      "sync失败/错tenant/ref/过期generation回滚facts+cursor，api read/publisher/action verification不写规范facts"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/api exec vitest run src/sync/request-pinned-sync.adapter.spec.ts --maxWorkers 1",
+      "pnpm --filter @shopmate/api typecheck"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "动作回读成功但普通同步永远跳过相同clock",
+    "parallelGroup": "p08-047-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 sync.service/module为明确拟定P2 handoff接线文件，当前未存在；P2-GATE核对后同PR更新卡到实际路径，3h仅新增request-pin传播，不重做P2 normalizer/scheduler。"
+  },
+  {
+    "id": "P08-048",
+    "phase": 8,
+    "title": "持久化正常同步的请求固定扫描状态",
+    "hours": 3,
+    "lane": "database",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "RequestPinnedSyncState / NormalizedFactsCursorCommit",
+    "consumes": [
+      "P2-GATE最终normalized sync state/cursor事务端口与P08-045 request-pinned public read contract",
+      "同tenant/store/connection/generation的扫描状态；同clock仍以request/publication区分新事实"
+    ],
+    "produces": [
+      "拟新增request sync state扩展及独立migration，保存publicationRevision/requestRevision/certificateHash与cursor，旧v1状态按codec只读兼容",
+      "在现有normalized facts+cursor同tx端口增加pin写入/CAS；仅sync角色可提交，writer/publisher/readback均无规范库写权限；root导出明确",
+      "shared sync-state.repository.ts（明确拟定P2 handoff路径）拥有现有facts/cursor事务口新增request pin原子参数/CAS，不让API接线卡补数据库存储逻辑"
+    ],
+    "files": [
+      "packages/database/src/mock-actions/request-sync-state.ts",
+      "packages/database/test/mock-actions/request-sync-state.test.mjs"
+    ],
+    "sharedFiles": [
+      "packages/database/prisma/schema.prisma",
+      "packages/database/prisma/migrations/20261005080800_request_sync_state/migration.sql",
+      "packages/database/src/index.ts",
+      "packages/database/src/sync/sync-state.repository.ts"
+    ],
+    "dependsOn": ["P08-045", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "规范facts/cursor/pin任一写失败整体rollback；请求pin倒退或跨scope/generation拒绝",
+      "同clock更高已发布request允许下一轮同步，旧进行中的scan只按旧pin提交；restart恢复原pin/cursor而不混页",
+      "旧clock-only sync状态不伪造新request cert；数据更新必须走P2同步事务，SQL参数化/RLS默认拒绝"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/request-sync-state.test.mjs",
+      "pnpm --filter @shopmate/database prisma:validate",
+      "pnpm --filter @shopmate/database build"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "游标只按时钟去重遗漏同刻源变化",
+    "parallelGroup": "p08-048-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 只新增pin状态与现有事务端口适配；sync-state.repository.ts为明确拟定P2 normalized state owner且已登记shared锁，最终handoff命名不同则领取前同PR更名卡上路径，不复制P2同步存储实现。"
+  },
+  {
+    "id": "P08-049",
+    "phase": 8,
+    "title": "注册源发布宿主及其启动恢复触发",
+    "hours": 2,
+    "lane": "integration",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "SourcePublicationRuntimeRegistration",
+    "consumes": [
+      "P08-044 host、P08-036持久pending扫描、P08-037真实publisher、P08-043 clock allocator均已完成",
+      "P2 source实际worker grant/config与现有DemoCommerceModule启动/关停；普通reads/sync有独立owners"
+    ],
+    "produces": [
+      "拟新增SourcePublicationModule在API正常bootstrap注册host启动/poll/restart和shutdown；worker作用域由受限配置/当前授权解析，不伪造管理员",
+      "只DI绑定已有pending reader/publisher/clock hooks；业务write只accept请求，read没有发布副作用"
+    ],
+    "files": [
+      "apps/api/src/integrations/mock/source-publication.module.ts",
+      "apps/api/src/integrations/mock/source-publication.module.spec.ts"
+    ],
+    "sharedFiles": [
+      "apps/api/src/app.module.ts",
+      "apps/api/src/demo-commerce/demo-commerce.module.ts"
+    ],
+    "dependsOn": ["P08-044", "P08-036", "P08-037", "P08-040", "P08-043", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "正常API启动注册host且已有未发布请求自行推进；不调用测试手动publisher方法",
+      "API重建沿持久lease/checkpoint恢复且accept/dispatch计数不增加；shutdown停止有界loop",
+      "禁用demo/缺worker资格/connection撤销失败明确；root/module无循环依赖，scope不由HTTP caller覆盖"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/api exec vitest run src/integrations/mock/source-publication.module.spec.ts --maxWorkers 1",
+      "pnpm --filter @shopmate/api typecheck"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "数据库publisher有实现但API根模块未启动",
+    "parallelGroup": "p08-049-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 2h只宿主DI注册与生命周期smoke，不实现scheduler/reader/publisher或command策略。"
+  },
+  {
+    "id": "P08-050",
+    "phase": 8,
+    "title": "证明正常审批执行到源发布与同步收敛",
+    "hours": 4,
+    "lane": "qa",
+    "kind": "verification",
+    "priority": "P0",
+    "contract": "ApprovedHttpToPublishedReadAndSyncProof",
+    "consumes": [
+      "P08-013真实已批准执行API、P08-049正常启动host、P08-046普通read/cursor及P08-047 normal sync",
+      "isolated DB/真实human login，两tenant，受控已有P2故障规则；没有手动驱动publisher"
+    ],
+    "produces": [
+      "聚焦公开路径证明：approve→execute HTTP→durable accepted→host publication→independent read→normal sync，仅测试setup用operator种子",
+      "本卡持runner/config共享锁显式注册必跑目标：apps/api/test/source-publication-runtime.e2e-spec.ts；API目标tenant config include且default config exclude"
+    ],
+    "files": ["apps/api/test/source-publication-runtime.e2e-spec.ts"],
+    "sharedFiles": [
+      "scripts/test-tenant-database.mjs",
+      "apps/api/vitest.tenant.config.ts",
+      "apps/api/vitest.config.ts"
+    ],
+    "dependsOn": ["P08-013", "P08-049", "P08-046", "P08-047", "P07-019", "P2-GATE", "P08-056"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "正常execute HTTP返回ACCEPTED后本次host自动发布，独立point read见6200/sourceVersion；只有normal sync后规范库从5900变6200，test从不直接调用publisher/claim/append/publish",
+      "接受后publication前重建API进程，恢复未发布prefix且updatePrice/accept计数不增；旧pinned cursor/hash内容不变，新scan在同clock见higher request，0 skipped",
+      "首次published后新proposal批准fresh version→6300可在同clock执行；纯clock advance也通过allocator被普通host拾取，规范cursor/pin与facts原子收敛",
+      "错tenant/generation/revoked/read lag与sync tx failure不伪造VERIFIED/规范事实；pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库；清除继承开发DATABASE_URL，不读.env，仅runner生成TEST_DATABASE_URL/runtime DATABASE_URL；注册集非空，每目标执行>0、0 skipped，零选择或skip失败，finally stop"
+    ],
+    "tests": ["pnpm test:tenant"],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "底层proof手动发布掩盖正常运行PENDING",
+    "parallelGroup": "p08-050-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 4h只此公路由集成证明及PR；复用已完成源DB低层/审批/并发fixtures，不另写浏览器全故事；poll等待观察事实，有界deadline，无sleep替代锁证据。"
+  },
+  {
+    "id": "P08-051",
+    "phase": 8,
+    "title": "定义绑定审批哈希的价格补偿元数据契约",
+    "hours": 3,
+    "lane": "contract",
+    "kind": "contract",
+    "priority": "P0",
+    "contract": "PriceSetCompensationMetadataV1 / CompensationAssociationPort / CompensationReadPort",
+    "consumes": [
+      "P07-001 proposal/approval与P08-001 execution基础strict契约；补偿复用PRICE_SET绝对价分支",
+      "P08-011只补偿已核实原PRICE_SET execution，新的candidate id/revision/hash/key/approval"
+    ],
+    "produces": [
+      "选定PRICE_SET payload带strict compensation:{parentExecutionId,parentProposalId,parentRevision,parentPayloadHash,candidateId,verifiedSourceVersion,restorePriceMinor}；全部执行相关元数据进入不可变payload canonicalHash并被新human approval绑定，非展示字段",
+      "public typed association/read ports：bindCandidate/cancelCandidate/rejectCandidate/bindChild/commitVerifiedOutcome；状态CANDIDATE_PENDING/CANCELLED/REJECTED/CHILD_PENDING/CONFLICT/VERIFIED_ROLLBACK；无未拥有PRICE_COMPENSATION kind",
+      "同PR持contracts-index锁root导出schema/ports，并在proposal/execution strict schemas挂PRICE_SET可选补偿分支与status关联DTO；普通PRICE_SET没有metadata也保持兼容",
+      "candidate关联时锁定parent Action状态并保存parentPriorActionStatus（已独立验证SUCCEEDED）与原verification引用；cancel/reject只在本active candidate且child未accepted时恢复该真实原状态，绝不写ROLLED_BACK或改原receipt/readback"
+    ],
+    "files": [
+      "packages/contracts/src/actions/price-compensation.schema.ts",
+      "packages/contracts/src/actions/price-compensation.schema.spec.ts",
+      "packages/contracts/src/actions/compensation-association.ports.ts"
+    ],
+    "sharedFiles": [
+      "packages/contracts/src/index.ts",
+      "packages/contracts/src/actions/proposal.schema.ts",
+      "packages/contracts/src/actions/execution.schema.ts"
+    ],
+    "dependsOn": ["P07-001", "P08-001"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "精确补偿payload通过正常strict PRICE_SET schema；未知metadata/key/kind、unsafe money或缺完整parent binding拒绝",
+      "metadata修改必改变审批绑定hash；parent/candidate/child同scope、不同proposal revision/approval/execution key；旧approval不能授权",
+      "cancel/reject仅终止尚未执行候选关联，清除active pending并保留原execution真实验证结果；CHILD_PENDING/UNKNOWN不能取消来掩盖未知写，也不称ROLLED_BACK"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/contracts exec vitest run src/actions/price-compensation.schema.spec.ts src/actions/proposal.schema.spec.ts src/actions/execution.schema.spec.ts",
+      "pnpm --filter @shopmate/contracts typecheck"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "builder产生策略registry未注册的动作kind",
+    "parallelGroup": "p08-051-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 3h只选定metadata/ports与existing strict schema挂接；签名含义为可信human对不可变revision/hash审批绑定，不引入新加密密钥或新动作kind。"
+  },
+  {
+    "id": "P08-052",
+    "phase": 8,
+    "title": "新增持久资源待发布变更占位约束",
+    "hours": 3,
+    "lane": "database",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "PendingSourceResourceMutation / ResourceReservationPersistence",
+    "consumes": [
+      "P08-033 request protocol与P08-034 scoped immutable requests/receipts；资源key为规范tuple(kind,externalResourceId)",
+      "选定策略：同resource accepted unpublished期间拒绝第二distinct key/hash；同key/hash重试返回原receipt"
+    ],
+    "produces": [
+      "拟新增PendingSourceResourceMutation模型/独立migration，full scope+generation+resource tuple唯一active reservation，绑定request/receipt/expectedVersion/command hash",
+      "composite FK、RLS/column grants与状态约束保护accepted请求身份；发布清除只由同scope有效publish fence触发，不准进程内锁替代DB占位"
+    ],
+    "files": [
+      "packages/database/src/mock-actions/source-resource-reservation-model.ts",
+      "packages/database/test/mock-actions/source-resource-reservation-model.test.mjs"
+    ],
+    "sharedFiles": [
+      "packages/database/prisma/schema.prisma",
+      "packages/database/prisma/migrations/20261005080600_pending_source_mutations/migration.sql"
+    ],
+    "dependsOn": ["P08-034", "P08-033"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "数据库唯一active reservation阻止两个distinct key同resource pending；资源tuple不使用易碰撞字符串拼接",
+      "scope/generation/request/receipt/hash FK错误及未授权clear失败，rollback不留下孤儿占位",
+      "reset/disconnect按CONTROL原子隔离old generation占位；旧请求/receipt不可在新generation复活，restart仍保留active占位"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/source-resource-reservation-model.test.mjs",
+      "pnpm --filter @shopmate/database prisma:validate"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "published version未改变时接受两个旧版本命令",
+    "parallelGroup": "p08-052-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 3h仅持久占位模型/约束/权限；实际admission与原子publication clearance由P08-053/036，真实two-client证明由P08-056，不扩大P08-034已有4h基础。"
+  },
+  {
+    "id": "P08-053",
+    "phase": 8,
+    "title": "实现资源占位与发布原子释放端口",
+    "hours": 3,
+    "lane": "database",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "SourceResourceReservationPort / FencedPublicationReservationClearance",
+    "consumes": [
+      "P08-052实际占位模型与P08-040公开request-aware worker/publish；P08-033 admitted mutation policy",
+      "P2 CONTROL/fresh source access和publication事务边界，immutable receipt/request不得删除"
+    ],
+    "produces": [
+      "typed reserve/check/clear helpers：stable key/hash receipt查重先于pending拒绝；对distinct命令以资源占位+published expectedVersion一次原子检查，返回RESOURCE_PENDING conflict且不分配receipt/request",
+      "existing publish事务在certificate完整提交时依fence+scope+request prefix原子清除其已发布资源占位；失败/ack loss/restart仍阻止第二旧version写，publish retry幂等",
+      "reset/disconnect原事务使旧generation占位无效并保留历史receipt/request；公开root导出且pending request不会被读查询释放"
+    ],
+    "files": [
+      "packages/database/src/mock-actions/source-resource-reservations.ts",
+      "packages/database/test/mock-actions/source-resource-reservations.test.mjs"
+    ],
+    "sharedFiles": [
+      "packages/database/src/mock-platform/publication.ts",
+      "packages/database/src/demo-commerce.mutations.ts",
+      "packages/database/src/index.ts",
+      "packages/database/prisma/migrations/20261005080700_source_mutation_reservations/migration.sql"
+    ],
+    "dependsOn": ["P08-052", "P08-040", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "same key/hash pending重试仍原receipt；distinct key同resource pending返回RESOURCE_PENDING且请求/allocator/receipt均不变",
+      "publication完成+资源clearance同tx；旧fence/错prefix/失败不能提前释放，process recreation占位仍在",
+      "发布后只允许fresh sourceVersion新命令，同clock可续下一request；reset旧scope/current access必须锁后重查"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/database exec node --import tsx --test test/mock-actions/source-resource-reservations.test.mjs",
+      "pnpm --filter @shopmate/database build"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "host崩溃或旧fence错误释放accepted占位",
+    "parallelGroup": "p08-053-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 publication.ts为已知P2拟定公开publisher owner，P2-GATE核对最终路径。3h只实现占位helper+publish/reset hooks，P08-036只调用此port，不把F4行为藏进connector或重写P2 publication。"
+  },
+  {
+    "id": "P08-054",
+    "phase": 8,
+    "title": "新增补偿父候选子执行持久关系约束",
+    "hours": 3,
+    "lane": "database",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "CompensationAssociationPersistenceV1",
+    "consumes": [
+      "P08-051 typed PRICE_SET metadata/association states，P08-002 execution及P07-005/006 proposal/approval模型",
+      "parent是已独立验证原PRICE_SET，candidate不可变新提案，child是新的执行与approval，完整同scope"
+    ],
+    "produces": [
+      "拟新增CompensationAssociation Prisma model及独立migration：parentExecutionId/candidateProposalId+revision/hash/childExecutionId+approvalId/associationStatus；保存parentPriorActionStatus与originalVerifiedRef供未执行cancel/reject原子恢复，原execution verification事实不变",
+      "composite scope FK、candidate唯一、child唯一、parent最多一个active pending association；child不得等parent，candidate/approval/key不得复用原值；CHECK states和nullable-child组合，取消拒绝保留关联历史"
+    ],
+    "files": [
+      "packages/database/src/actions/compensation-association-model.ts",
+      "packages/database/test/actions/compensation-association-model.test.mjs"
+    ],
+    "sharedFiles": [
+      "packages/database/prisma/schema.prisma",
+      "packages/database/prisma/migrations/20261005080900_compensation_associations/migration.sql"
+    ],
+    "dependsOn": ["P08-051", "P08-002", "P07-005", "P07-006"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "跨tenant/store/generation parent/candidate/child/approval FK与同execution/key/revision复用拒绝",
+      "同时bind同parent active candidate最多一条；CANCELLED/REJECTED child=null可终止候选，CHILD_PENDING/VERIFIED必须有合法child",
+      "migration/model契约可独立验证，真实persisted association与constraints由P08-030隔离API证明；未知结果不能记VERIFIED_ROLLBACK"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/database exec node --import tsx --test test/actions/compensation-association-model.test.mjs",
+      "pnpm --filter @shopmate/database prisma:validate"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "补偿controller只在内存记录parent而无数据库约束",
+    "parallelGroup": "p08-054-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 3h仅关系schema/约束契约；执行结果仍保留原record与association分开读取，SQL/仓库状态mutation归P08-055/029。"
+  },
+  {
+    "id": "P08-055",
+    "phase": 8,
+    "title": "实现补偿候选与子执行关联事务仓库",
+    "hours": 4,
+    "lane": "backend",
+    "kind": "integration",
+    "priority": "P0",
+    "contract": "CompensationAssociationPort / CompensationReadPort implementation",
+    "consumes": [
+      "P08-051 public typed ports与P08-054实际模型；现有trusted tenant tx、P09-004 audit、proposal/approval/execution读写端口",
+      "P08-029只reduce真实child outcome；normal PRICE_SET批准及reserve通过本仓库关联child"
+    ],
+    "produces": [
+      "parameterized repository实现bindCandidate/cancelCandidate/rejectCandidate/bindChild/commitVerifiedOutcome及scoped reads；不实现新的approval policy/执行策略",
+      "candidate create/关联/audit同tx；normal approve/reject/cancel与execution reserve按typed关联port原子更新child/association，immutable metadata比对persistent parent/candidate；取消拒绝仅在锁定本active candidate且child未accepted时恢复保存的parentPriorActionStatus（原SUCCEEDED），不称回滚成功、不改原execution receipt/readback"
+    ],
+    "files": [
+      "apps/api/src/actions/compensation-association.repository.ts",
+      "apps/api/src/actions/compensation-association.repository.spec.ts"
+    ],
+    "sharedFiles": [],
+    "dependsOn": ["P08-054", "P08-051", "P09-004"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "persist/read完整parent→candidate→approval→child关联roundtrip；同binding重试幂等，错parent/hash/revision/old approval/key/fence拒绝",
+      "candidate未执行cancel或normal reject后状态CANCELLED/REJECTED、active pending释放，parent原真实VERIFIED结果保留且不称ROLLED_BACK；已dispatch UNKNOWN不能cancel",
+      "audit/关联/child任一失败全rollback；only真实child VERIFIED可完成关联，跨scope读默认拒绝",
+      "parent Action进入ROLLBACK_PENDING和prior状态保存同关联/audit事务；cancel/reject同tx恢复prior SUCCEEDED并释放active association，错active候选/旧fence不能恢复或覆盖较新状态，原source仍执行后价"
+    ],
+    "tests": [
+      "pnpm --filter @shopmate/api exec vitest run src/actions/compensation-association.repository.spec.ts --maxWorkers 1",
+      "pnpm --filter @shopmate/api typecheck"
+    ],
+    "outOfScope": [
+      "真实vendor/LLM调用、部署、线上迁移或身份供应商上线",
+      "不重做P2基础实现，不修改immutable Runtime/旧source/history/certificate，不假造时间推进"
+    ],
+    "risk": "关系修改游离正常审批和execution reserve事务",
+    "parallelGroup": "p08-055-boundary",
+    "note": "拟新增路径；人工工时包含实现、定向验证和PR准备，超过4h先拆独立卡；每个独立改动单独commit/分支/PR，经review、latest CI及main合并后Done。函数/回调/SQL体<40行，TS无any；严格输入/sanitize、参数化SQL、完整可信scope、密钥仅env。fixture仅测试目录合成，不能替代runtime证明。 4h只仓库/关联事务实现与聚焦端口验证及PR；P08-027注册，P07-008/P08-003调用已经完成的typed port，P08-030负责真实DB roundtrip。"
+  },
+  {
+    "id": "P08-056",
+    "phase": 8,
+    "title": "证明待发布资源占位的双键并发安全",
+    "hours": 3,
+    "lane": "qa",
+    "kind": "verification",
+    "priority": "P0",
+    "contract": "PendingSourceMutationTwoKeyProof",
+    "consumes": [
+      "P08-036/037/053真实admission/publish clearance与P08-052占位schema；P2-GATE actual source/control logins",
+      "isolatedPostgres两真实client、barrier/pg_locks；仅低层协议，不依赖业务connector避免循环"
+    ],
+    "produces": [
+      "真实DB确定性交错证明两个distinct keys同resource/同expectedVersion在publication前最多一mutation；exact-key receipt retry保持幂等",
+      "本卡持runner共享锁显式注册必跑目标：packages/database/test/integration/source-resource-reservations.test.mjs；nested目标由runner显式调用，不依赖test/*.test.mjs"
+    ],
+    "files": ["packages/database/test/integration/source-resource-reservations.test.mjs"],
+    "sharedFiles": ["scripts/test-tenant-database.mjs"],
+    "dependsOn": ["P08-037", "P08-053", "P2-GATE"],
+    "integrationDependsOn": [],
+    "acceptance": [
+      "两真实client用barrier/pg_locks确定交错：distinct key A/B同resource/同expected v1、A未published时B进入；至多一个accepted并最终mutation=1，B RESOURCE_PENDING无receipt/request；identical key/hash仍原receipt",
+      "在accepted未published间重建store/worker，持久占位仍阻止distinct stale命令；旧fence/发布失败不clear，成功certificate/clear同tx；reset/disconnect锁后旧scope请求不能复活，fresh v2在sameclock允许下一请求",
+      "不同resource不被误拒；RESOURCE_PENDING不分配request/receipt/head，changed hash同key冲突；actual-login reader无release能力且worker不能改Runtime/immutable旧行",
+      "pnpm test:tenant仅isolatedPostgres新建/stop disposable数据库，清除继承开发DATABASE_URL，仅runner注入TEST_DATABASE_URL/runtime DATABASE_URL；注册集非空，每目标执行>0且0 skipped，零选择或skip失败"
+    ],
+    "tests": ["pnpm test:tenant"],
+    "outOfScope": [
+      "真实vendor/LLM、部署/线上迁移",
+      "修改immutable P2历史、Runtime或伪造时间推进1ms",
+      "一般场景生成器、全量同步重放、扩大source权限"
+    ],
+    "risk": "同CONTROL分配request仍未约束accepted旧版本竞争",
+    "parallelGroup": "p08-056-source-resource-race",
+    "note": "拟新增路径；3h仅上述资源admission/clearance/restart/reset真实DB证明，复用P08-039 setup/fixtures。函数/测试回调/SQL体<40行、TS无any、strict输入/参数化SQL/完整scope/env密钥；独立commit/PR review/latest CI/main后Done。0 skipped，测试以锁/barrier观察证明交错，不以sleep或process-local lock冒充DB safety。"
   },
   {
     "id": "P09-001",
@@ -7222,7 +7969,8 @@
     "contract": "BriefInboxUX / LocalDemo acceptance",
     "consumes": [
       "P10-013及P10-015脚本，P05/P06/P07/P08/P09本地路线",
-      "375px/desktop和正常/unknown/write-response-loss fixture"
+      "375px/desktop和正常/unknown/write-response-loss fixture",
+      "P08-042同一disposable DB/API/Web存活生命周期；只用受控合成种子/P2故障规则，不拦截runtime API response伪造结果"
     ],
     "produces": ["Playwright定向UI截图和本地五分钟演练证据"],
     "files": [
@@ -7240,22 +7988,25 @@
       "P07-001",
       "P08-001",
       "P07-015",
-      "P08-015"
+      "P08-015",
+      "P08-042"
     ],
     "integrationDependsOn": [],
     "acceptance": [
       "375px/桌面brief/inbox loading/empty/error无横向溢出，生效quiet/cooldown策略可观察",
       "脚本可在5分钟内完成并所有数字追到evidence；权限不足审批不可执行",
-      "write-response-loss只一execution，无假成功；重开页面通知不重复"
+      "write-response-loss只一execution，无假成功；重开页面通知不重复",
+      "指定browser target选择/执行>0、0 skipped；零选择/零执行/skip失败，本次runner finally停止所有拥有server；禁止默认playwright.config.ts/.env/开发DATABASE_URL或复用server"
     ],
     "tests": [
-      "pnpm exec playwright test tests/e2e/daily-brief-notifications.spec.ts",
+      "pnpm test:browser:isolated -- tests/e2e/daily-brief-notifications.spec.ts",
       "手动：本地按docs/demo/five-minute-operating-loop-checklist.md计时并记录evidence/run/action/execution IDs"
     ],
     "outOfScope": [
       "不进行真实供应商/LLM/Jev网络调用、部署或live迁移",
       "不改整站设计或未列出的共享文件",
-      "首期只站内配送；不发email/SMS/平台消息"
+      "首期只站内配送；不发email/SMS/平台消息",
+      "不把test-only route fixture结果当作实际auth/source/approval/execution runtime证明"
     ],
     "risk": "演练必须另gate实际approval/execution runtime集成卡",
     "parallelGroup": "brief-notifications-16",
@@ -8192,14 +8943,15 @@
       "packages/database/test/integration/mock-listing-write.test.mjs"
     ],
     "sharedFiles": ["scripts/test-tenant-database.mjs", "packages/database/src/index.ts"],
-    "dependsOn": ["P12-001", "P08-016", "P2-GATE", "P08-036", "P08-038", "P08-039"],
+    "dependsOn": ["P12-001", "P08-016", "P2-GATE", "P08-036", "P08-038", "P08-039", "P08-056"],
     "integrationDependsOn": [],
     "acceptance": [
       "同key/hash只新建一个product及SKU集，resolver返回实际关联id",
       "同key不同listing、跨tenant/generation、重复SKU拒绝并整体回滚",
       "publish和reset/disconnect锁后重查，丢包保留实际源结果；不写规范经营DB",
       "consumer只从@shopmate/database root import；数据库build和API typecheck验证公共类型，禁止私有src路径import",
-      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败"
+      "pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败",
+      "资源tuple与stable key/hash同tx占位，pending distinct命令不可覆盖相同新商品ref；original key/hash返回原receipt，新generation不能继承旧占位"
     ],
     "tests": [
       "pnpm --filter @shopmate/database build",
@@ -8242,7 +8994,16 @@
       "apps/api/src/integrations/mock/mock-commerce-connector.ts",
       "apps/api/src/integrations/mock/mock-connector-factory.ts"
     ],
-    "dependsOn": ["P12-011", "P08-007", "P08-018", "P08-038", "P08-039"],
+    "dependsOn": [
+      "P12-011",
+      "P08-007",
+      "P08-018",
+      "P08-038",
+      "P08-039",
+      "P08-046",
+      "P08-047",
+      "P08-049"
+    ],
     "integrationDependsOn": [],
     "acceptance": [
       "新商品独立readback完整listing匹配才VERIFIED",
@@ -8391,7 +9152,7 @@
       "apps/api/vitest.tenant.config.ts",
       "apps/api/vitest.config.ts"
     ],
-    "dependsOn": ["P12-013", "P12-014", "P07-019", "P08-014", "P2-GATE", "P12-021"],
+    "dependsOn": ["P12-013", "P12-014", "P07-019", "P08-014", "P2-GATE", "P12-021", "P08-050"],
     "integrationDependsOn": [],
     "acceptance": [
       "合法草稿完整预览+人工批准后只create一次，readback匹配才成功",

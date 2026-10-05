@@ -826,6 +826,7 @@
 
 - P10-013及P10-015脚本，P05/P06/P07/P08/P09本地路线
 - 375px/desktop和正常/unknown/write-response-loss fixture
+- P08-042同一disposable DB/API/Web存活生命周期；只用受控合成种子/P2故障规则，不拦截runtime API response伪造结果
 
 **输出：**
 
@@ -840,7 +841,7 @@
 
 - 无
 
-**硬依赖：** P10-013, P10-014, P10-015, P05-010, P06-016, P09-011, P07-001, P08-001, P07-015, P08-015
+**硬依赖：** P10-013, P10-014, P10-015, P05-010, P06-016, P09-011, P07-001, P08-001, P07-015, P08-015, P08-042
 
 **实际接线依赖：** 无
 
@@ -849,10 +850,11 @@
 - [ ] 375px/桌面brief/inbox loading/empty/error无横向溢出，生效quiet/cooldown策略可观察
 - [ ] 脚本可在5分钟内完成并所有数字追到evidence；权限不足审批不可执行
 - [ ] write-response-loss只一execution，无假成功；重开页面通知不重复
+- [ ] 指定browser target选择/执行>0、0 skipped；零选择/零执行/skip失败，本次runner finally停止所有拥有server；禁止默认playwright.config.ts/.env/开发DATABASE_URL或复用server
 
 **测试：**
 
-- pnpm exec playwright test tests/e2e/daily-brief-notifications.spec.ts
+- pnpm test:browser:isolated -- tests/e2e/daily-brief-notifications.spec.ts
 - 手动：本地按docs/demo/five-minute-operating-loop-checklist.md计时并记录evidence/run/action/execution IDs
 
 **不包含：**
@@ -860,6 +862,7 @@
 - 不进行真实供应商/LLM/Jev网络调用、部署或live迁移
 - 不改整站设计或未列出的共享文件
 - 首期只站内配送；不发email/SMS/平台消息
+- 不把test-only route fixture结果当作实际auth/source/approval/execution runtime证明
 
 **风险：** 演练必须另gate实际approval/execution runtime集成卡
 
