@@ -37,6 +37,7 @@ export async function transaction<T>(
     if (discard) throw new SourceStorageError("SOURCE_STORAGE");
     await client.query(rollbackWhen(result) ? "ROLLBACK" : "COMMIT");
     begun = false;
+    if (discard) throw new SourceStorageError("SOURCE_STORAGE");
     return result;
   } catch (error) {
     discard = (await rollbackFailed(client, begun)) || discard;
