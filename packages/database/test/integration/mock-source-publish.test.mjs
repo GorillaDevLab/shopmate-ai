@@ -504,9 +504,16 @@ test("frozen earlier target publishes after authorized advance and next claim fr
   await seal(worker, context, [eventFor(context)]);
   const published = (await publish(worker, context)).rows[0];
   assert.equal(published.targetTime.toISOString(), frozen);
+  assert.equal(published.targetClockRevision, context.job.targetClockRevision);
+  const certified = await snapshot(admin, context);
   const second = (await claim(worker, context)).rows[0];
   assert.equal(second.targetTime.toISOString(), "2026-01-02T16:00:00.000Z");
+  assert.equal(second.targetClockRevision, published.targetClockRevision + 1);
   assert.equal(second.baseRevision, published.revision);
+  const afterClaim = await snapshot(admin, context);
+  assert.deepEqual(afterClaim.jobs[0], certified.jobs[0]);
+  assert.deepEqual(afterClaim.events, certified.events);
+  assert.deepEqual(afterClaim.versions, certified.versions);
   assert.deepEqual(
     (
       await admin.query(
