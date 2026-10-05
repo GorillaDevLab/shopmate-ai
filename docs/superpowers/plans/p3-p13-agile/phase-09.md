@@ -555,18 +555,22 @@
 **输出：**
 
 - API query module和审计page绑定，复用现有导航
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/audit-query.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
 - `apps/api/src/audit/audit.module.ts`
 - `apps/web/src/app/audit/page.tsx`
 - `apps/web/src/app/audit/audit-page.test.tsx`
-- `apps/api/test/audit-query.integration.spec.ts`
+- `apps/api/test/audit-query.e2e-spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
 - `apps/api/src/app.module.ts`
 - `apps/web/src/app/dashboard-navigation.tsx`
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P09-004, P09-006, P09-007, P09-008, P09-009, P09-010, P05-010, P07-019
 
@@ -578,13 +582,14 @@
 - [ ] 无数据/500/partial链分别显示empty/error/missing
 - [ ] 真实router不会注册测试fixture或未授权导出入口
 - [ ] 实际受限query port分页/RLS及PARTIAL trace只展示已授权片段，缺link明确可见性不足
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
 - pnpm --filter @shopmate/web test -- src/app/audit/audit-page.test.tsx
 - pnpm --filter @shopmate/api typecheck
 - pnpm --filter @shopmate/web typecheck
-- pnpm --filter @shopmate/api test -- test/audit-query.integration.spec.ts
+- pnpm test:tenant
 
 **不包含：**
 
@@ -596,7 +601,7 @@
 
 **并行分组：** `audit-11`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p09-012"></a>
 
@@ -616,15 +621,18 @@
 
 - 复用前置各domain失败fixture的审计查询/关联回归，聚焦chain完整性与脱敏，不重复执行整套状态机测试
 - 审计event family→实际入口owner→本地测试映射coverage matrix
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/audit-chain.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
-- `apps/api/test/audit-chain.integration.spec.ts`
+- `apps/api/test/audit-chain.e2e-spec.ts`
 - `docs/qa/audit-mutation-coverage.md`
 
 **共享文件锁（协调集成修改）：**
 
-- 无
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P09-011, P06-016, P07-018, P07-019, P07-014, P08-013, P08-015, P2-GATE, P07-020
 
@@ -636,10 +644,11 @@
 - [ ] 实际login/logout/re-auth授权桥接及已实现role/credential/export/disconnect/delete入口都有domain同事务审计；尚未实现入口明确不适用
 - [ ] 受限app身份禁止UPDATE/DELETE/跨scope SELECT；查询脱敏且PARTIAL授权片段不假称全链完整
 - [ ] 未知login主体失败事件写隔离安全sink，tenant audit UI不曝光跨域失败尝试，不含token/密码/raw email
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- test/audit-chain.integration.spec.ts
+- pnpm test:tenant
 
 **不包含：**
 
@@ -652,4 +661,4 @@
 
 **并行分组：** `audit-coverage-proof`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 仅核对前置mutation产生的audit可查询关联与脱敏；域内状态机/重启/撤销正确性复用既有P7/P8验证。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 仅核对前置mutation产生的audit可查询关联与脱敏；域内状态机/重启/撤销正确性复用既有P7/P8验证。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。

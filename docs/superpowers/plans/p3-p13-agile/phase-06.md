@@ -811,17 +811,21 @@
 **输出：**
 
 - DI module/allowlist注册、已有assistant endpoint兼容和grounded answer嵌入
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/safe-agent-wiring.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
 - `apps/api/src/ai/agent/safe-agent.module.ts`
-- `apps/api/test/safe-agent-wiring.integration.spec.ts`
+- `apps/api/test/safe-agent-wiring.e2e-spec.ts`
 - `apps/web/src/app/assistant/grounded-answer-integration.test.tsx`
 
 **共享文件锁（协调集成修改）：**
 
 - `apps/api/src/app.module.ts`
 - `apps/web/src/app/assistant/conversation.tsx`
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P06-002, P06-003, P06-004, P06-005, P06-006, P06-007, P06-008, P06-009, P06-010, P06-011, P06-012, P06-013, P06-014, P06-015, P03-001, P04-001, P07-001, P09-004, P2-GATE, P06-019, P03-018, P04-029, P07-014, P07-019, P05-010
 
@@ -832,12 +836,13 @@
 - [ ] 注册名单无SQL/Connector write/approve/execute/token工具
 - [ ] 默认离线的全部数据来自真实同scope read ports，网络transport零调用
 - [ ] 既有assistant请求保留取消/error事件，候选mutation有audit
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- test/safe-agent-wiring.integration.spec.ts
 - pnpm --filter @shopmate/web test -- src/app/assistant/grounded-answer-integration.test.tsx
 - pnpm --filter @shopmate/api typecheck
+- pnpm test:tenant
 
 **不包含：**
 
@@ -849,7 +854,7 @@
 
 **并行分组：** `ask-agent-16`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p06-017"></a>
 
@@ -867,14 +872,17 @@
 **输出：**
 
 - 端到端安全回归集，统计tool/transport零未授权调用
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/safe-agent-security.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
-- `apps/api/test/safe-agent-security.integration.spec.ts`
+- `apps/api/test/safe-agent-security.e2e-spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
-- 无
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P06-016
 
@@ -885,10 +893,11 @@
 - [ ] ignore-policy注入不能改变trusted policy或调用未登记tool
 - [ ] 不同org/workspace/store/evidence scope请求全部拒绝
 - [ ] 手机号/token/prompt全文不进入metadata/response/egress
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- test/safe-agent-security.integration.spec.ts
+- pnpm test:tenant
 
 **不包含：**
 
@@ -900,7 +909,7 @@
 
 **并行分组：** `ask-agent-17`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p06-018"></a>
 
@@ -918,15 +927,18 @@
 **输出：**
 
 - 数值/period/quality/claims API回归与375px UI截图
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/safe-agent-grounding.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
-- `apps/api/test/safe-agent-grounding.integration.spec.ts`
+- `apps/api/test/safe-agent-grounding.e2e-spec.ts`
 - `tests/e2e/safe-agent-answer.spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
-- 无
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P06-016, P05-010
 
@@ -937,11 +949,12 @@
 - [ ] 销量涨利润降问题从同数据discount/spend/mix服务取证；不写死百分比
 - [ ] 退款与库存自由问法仍调用tools并呈现口径/unknown
 - [ ] 375px离线、loading/empty/error、evidence导航可见；timeout不假成功
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- test/safe-agent-grounding.integration.spec.ts
 - pnpm exec playwright test tests/e2e/safe-agent-answer.spec.ts
+- pnpm test:tenant
 
 **不包含：**
 
@@ -953,7 +966,7 @@
 
 **并行分组：** `ask-agent-18`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p06-019"></a>
 

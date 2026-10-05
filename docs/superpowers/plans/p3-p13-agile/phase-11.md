@@ -499,6 +499,7 @@
 
 - 已实现metrics/evidence/tools/action candidate ports
 - 既有auth/current tenant reader与goal contract exports
+- 实际gates：P11-002 evaluator/P11-003 guard、P03-018 metric runtime、P06-016 safeAgent runtime、P07-014候选审批；契约P03/P06-001不能替代这些实现
 
 **输出：**
 
@@ -517,7 +518,7 @@
 - `apps/api/src/ai/ai.module.ts`
 - `apps/web/src/app/page.tsx`
 
-**硬依赖：** P11-005, P11-006, P11-007, P11-008, P11-009, P03-001, P06-001, P07-014, P09-004, P2-GATE
+**硬依赖：** P11-005, P11-006, P11-007, P11-008, P11-009, P03-001, P06-001, P07-014, P09-004, P2-GATE, P11-002, P11-003, P03-018, P06-016
 
 **实际接线依赖：** 无
 
@@ -541,7 +542,7 @@
 
 **并行分组：** `p11-goals.module`
 
-**执行边界：** 拟新增路径、独占本卡文件；命名端口+测试专用合成fixture可并行实现，runtime wiring满足integrationDependsOn；1–4小时包含验证/PR、独立commit/PR及最新CI+审查合并才Done。四个聚合文件分别持协调合并锁；只接桥完成组件。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增路径、独占本卡文件；命名端口+测试专用合成fixture可并行实现，runtime wiring满足integrationDependsOn；1–4小时包含验证/PR、独立commit/PR及最新CI+审查合并才Done。四个聚合文件分别持协调合并锁；只接桥完成组件。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p11-011"></a>
 
@@ -560,6 +561,7 @@
 
 - RLS/FK/CAS/audit rollback证明
 - goal→candidate仍需真人approval，禁止权限提升的集成回归
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/goal-authority.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -578,6 +580,7 @@
 - [ ] 跨tenant/store FK/RLS及匿名/Viewer目标写被拒
 - [ ] 并发修订只有一个生效；audit故障回滚CRUD
 - [ ] 含execute/approve要求的目标或商品文本仅不可信数据；候选从未自动批准/dispatch
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
@@ -593,4 +596,4 @@
 
 **并行分组：** `p11-goal-authority`
 
-**执行边界：** 拟新增路径、独占本卡文件；命名端口+测试专用合成fixture可并行实现，runtime wiring满足integrationDependsOn；1–4小时包含验证/PR、独立commit/PR及最新CI+审查合并才Done。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增路径、独占本卡文件；命名端口+测试专用合成fixture可并行实现，runtime wiring满足integrationDependsOn；1–4小时包含验证/PR、独立commit/PR及最新CI+审查合并才Done。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。

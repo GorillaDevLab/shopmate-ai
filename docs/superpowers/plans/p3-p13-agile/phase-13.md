@@ -243,7 +243,7 @@
 
 - `apps/api/test/fixtures/connector-preparation/golden.json`
 - `apps/api/test/fixtures/connector-preparation/manifest.json`
-- `apps/api/test/connector-preparation-fixtures.spec.ts`
+- `apps/api/test/connector-preparation-fixtures.e2e-spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
@@ -261,7 +261,7 @@
 
 **测试：**
 
-- pnpm --filter @shopmate/api exec vitest run test/connector-preparation-fixtures.spec.ts --maxWorkers 1
+- pnpm --filter @shopmate/api exec vitest run test/connector-preparation-fixtures.e2e-spec.ts --maxWorkers 1
 
 **不包含：**
 

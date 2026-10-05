@@ -531,7 +531,7 @@
 
 **并行分组：** `overview-010`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p05-011"></a>
 
@@ -600,14 +600,17 @@
 **输出：**
 
 - overview API与evidence API一致性定向集成测试
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/overview-evidence.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
-- `apps/api/test/overview-evidence.integration.spec.ts`
+- `apps/api/test/overview-evidence.e2e-spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
-- 无
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P05-010
 
@@ -618,10 +621,11 @@
 - [ ] 同window/definition/watermark的money与证据一一对应
 - [ ] 缺cost/stale样本不产生verified profit或虚假比较
 - [ ] 伪造tenant和未知evidenceId不能获取他店快照
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- test/overview-evidence.integration.spec.ts
+- pnpm test:tenant
 
 **不包含：**
 
@@ -632,4 +636,4 @@
 
 **并行分组：** `overview-012`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。

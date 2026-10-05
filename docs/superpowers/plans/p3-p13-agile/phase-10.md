@@ -54,6 +54,7 @@
 - 不进行真实供应商/LLM/Jev网络调用、部署或live迁移
 - 不改整站设计或未列出的共享文件
 - 首期只站内配送；不发email/SMS/平台消息
+- ACTION_DISPATCH/ACTION_VERIFY任务及其幂等键；仅通知收件人IN_APP语义
 
 **风险：** 事件稳定身份不得用标题文本fingerprint替代
 
@@ -107,6 +108,7 @@
 - 不进行真实供应商/LLM/Jev网络调用、部署或live迁移
 - 不改整站设计或未列出的共享文件
 - 首期只站内配送；不发email/SMS/平台消息
+- ACTION_DISPATCH/ACTION_VERIFY任务及其幂等键；仅通知收件人IN_APP语义
 
 **风险：** worker更新权限不得扩大普通用户跨scope权限
 
@@ -159,6 +161,7 @@
 - 不进行真实供应商/LLM/Jev网络调用、部署或live迁移
 - 不改整站设计或未列出的共享文件
 - 首期只站内配送；不发email/SMS/平台消息
+- ACTION_DISPATCH/ACTION_VERIFY任务及其幂等键；仅通知收件人IN_APP语义
 
 **风险：** 所有前置event mutation接线必须hard依赖此锚点
 
@@ -658,18 +661,22 @@
 **输出：**
 
 - 模块DI、生命周期定时worker、brief生成调度和通知中心入口接线
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/notification-wiring.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
 - `apps/api/src/notifications/notifications.module.ts`
 - `apps/api/src/daily-brief/daily-brief.module.ts`
-- `apps/api/test/notification-wiring.integration.spec.ts`
+- `apps/api/test/notification-wiring.e2e-spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
 - `apps/api/src/app.module.ts`
 - `apps/web/src/app/notification-center.tsx`
 - `apps/web/src/app/overview/overview-page.tsx`
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P10-003, P10-004, P10-005, P10-006, P10-007, P10-008, P10-009, P10-010, P10-011, P10-012, P10-017, P03-001, P04-001, P07-001, P09-004, P2-GATE, P03-018, P04-029, P07-014, P07-019, P05-010
 
@@ -680,12 +687,13 @@
 - [ ] 无打开页面时due events仍持久配送且brief按日生成
 - [ ] 停启worker恢复lease/outbox且shutdown停止新claim
 - [ ] scope gate未齐保持disabled，模块不含test-only oracle或外发transport
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- test/notification-wiring.integration.spec.ts
 - pnpm --filter @shopmate/api typecheck
 - pnpm --filter @shopmate/web typecheck
+- pnpm test:tenant
 
 **不包含：**
 
@@ -697,7 +705,7 @@
 
 **并行分组：** `brief-notifications-13`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 所有consumes中的实际runtime实现必须已合入；contract ID只锁接口，不代表实现可用，协调者需补全提供方integration卡硬依赖。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p10-014"></a>
 
@@ -715,14 +723,17 @@
 **输出：**
 
 - 真实事务+并发+进程重启可靠配送定向集成测试
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/notification-delivery.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
-- `apps/api/test/notification-delivery.integration.spec.ts`
+- `apps/api/test/notification-delivery.e2e-spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
-- 无
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P10-013
 
@@ -733,10 +744,11 @@
 - [ ] event tx rollback无孤立outbox；receipt写后crash重启不重复inbox
 - [ ] 两worker race/旧lease ack拒绝；temporary fail重试到DLQ可观测
 - [ ] first/upgrade/recovery能发，unchanged冷却内不发；quiet-hours/DST正确
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test -- test/notification-delivery.integration.spec.ts
+- pnpm test:tenant
 
 **不包含：**
 
@@ -748,7 +760,7 @@
 
 **并行分组：** `brief-notifications-14`
 
-**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。
+**执行边界：** 工时含实现、定向验证及PR准备；每卡独立commit/分支/PR，经review、latest CI并合入main才Done。新增路径均为planned；组件仅用测试目录合成fixture/注入port，禁止runtime读取场景oracle。函数/回调/测试体<40行、TS无any、密钥仅环境变量。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p10-015"></a>
 

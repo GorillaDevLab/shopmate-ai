@@ -711,8 +711,9 @@
 
 - 当前scope/connection/evidence实现与受信auth adapter
 - 已完成提案API/UI组件；现有AI candidate不具审批权限
-- P07-018本地可吊销session+近期认证适配器；P07-019真实身份证明
+- P07-018持久login/logout/current identity + P07-021显式reauth + P07-022失败audit routing均完成，P07-019组合真实身份证明
 - 新Actions POST/filtered route用TenantScopeService.resolve+validated header/path scope，不直接套只读TenantContextGuard
+- 实际gates：P03-001/P03-018质量/证据runtime，P13-001 capability manifest，P05-001预览UI契约；所有叶子integrationDependsOn纳入硬闭包
 
 **输出：**
 
@@ -730,7 +731,7 @@
 - `packages/contracts/src/index.ts`
 - `apps/web/src/app/page.tsx`
 
-**硬依赖：** P07-003, P07-007, P07-008, P07-010, P07-011, P07-012, P07-013, P09-004, P2-GATE, P07-019
+**硬依赖：** P07-003, P07-007, P07-008, P07-010, P07-011, P07-012, P07-013, P09-004, P2-GATE, P07-019, P03-001, P13-001, P05-001, P03-018
 
 **实际接线依赖：** 无
 
@@ -754,7 +755,7 @@
 
 **并行分组：** `p07-actions.module`
 
-**执行边界：** 路径为拟新增；独占本卡文件。1–4小时含实现、定向验证和PR准备；函数/测试回调<40行、无any；独立commit，feat/add/fix分支及PR审查+最新CI通过并合并才Done。组件仅依赖命名端口和测试专用合成fixture；集成依赖满足后才接真实实现。聚合文件分别持API-registration/contracts-export/Web-root协调锁；本卡新文件可按app边界拆辅助仅属此卡，不新增认证系统。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 路径为拟新增；独占本卡文件。1–4小时含实现、定向验证和PR准备；函数/测试回调<40行、无any；独立commit，feat/add/fix分支及PR审查+最新CI通过并合并才Done。组件仅依赖命名端口和测试专用合成fixture；集成依赖满足后才接真实实现。聚合文件分别持API-registration/contracts-export/Web-root协调锁；本卡新文件可按app边界拆辅助仅属此卡，不新增认证系统。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p07-015"></a>
 
@@ -773,6 +774,7 @@
 
 - 真实PostgreSQL FK/RLS/CAS/audit rollback证明
 - 将新suite纳入强制隔离数据库runner且不可silent skip
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/action-approval.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -791,6 +793,7 @@
 - [ ] 跨tenant/store审批关联与missing scope被DB拒绝
 - [ ] 并行批准/拒绝、修订/批准只有一个有效状态；旧approval不生效
 - [ ] audit故障回滚approval与proposal状态；空库/升级迁移验证且0 skipped
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
@@ -806,7 +809,7 @@
 
 **并行分组：** `p07-action-approval`
 
-**执行边界：** 路径为拟新增；独占本卡文件。1–4小时含实现、定向验证和PR准备；函数/测试回调<40行、无any；独立commit，feat/add/fix分支及PR审查+最新CI通过并合并才Done。组件仅依赖命名端口和测试专用合成fixture；集成依赖满足后才接真实实现。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 路径为拟新增；独占本卡文件。1–4小时含实现、定向验证和PR准备；函数/测试回调<40行、无any；独立commit，feat/add/fix分支及PR审查+最新CI通过并合并才Done。组件仅依赖命名端口和测试专用合成fixture；集成依赖满足后才接真实实现。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p07-016"></a>
 
@@ -920,29 +923,26 @@
 
 <a id="p07-018"></a>
 
-## P07-018：接入登录登出与显式近期重认证
+## P07-018：接入持久登录登出与当前身份兼容
 
 **工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** integration · **优先级：** P0
 
-**契约：** HumanApprovalIdentityAdapter / ReauthenticateHttp
+**契约：** PersistedLoginLogoutBridge / HumanApprovalIdentityAdapter
 
 **输入：**
 
-- 现有本地登录凭证校验与session cookie实现；不新增供应商/硬编码密钥
-- server session repository、strict本地reauth body、现有sameSite=Lax cookie，仅此不足以证明CSRF/限流；需P07-020安全边界
-- AuditAppendPort由P09-004提供；login/logout/reauth的session/auth-event及audit在同一数据库transaction提交
+- 现有本地Demo/数据库账号凭据校验与cookie；P07-017 session mint/read/revoke、P07-020同源安全check
+- P07-022 typed auth audit router；所有成功session突变与audit同tx，失败事件最小脱敏
+- legacyDemo只兼容既有read session，不把旧cookie/object.values权限升级为近期认证proof；可信identity读取当前membership
 
 **输出：**
 
-- 成功本地登录mint持久session关联；登出先revoke再clear cookie
-- 显式reauth核验本地凭据后记录authenticatedAt/authMethod；guard建立server-only human identity
-- 可信login/logout/reauth审计最小actor/session reference，不记密码/token/raw prompt；legacy synthetic登录兼容
-- 成功与失败login、logout、reauth均通过AuditAppendPort记录脱敏结果；未知登录subject使用明确anonymous security event，绝不伪造tenant/actor，不存密码/cookie/token
+- 新本地login持久mint，logout revoke成功后clear cookie；请求guard经current session/authority建立server-only identity
+- 旧auth/me响应和legacy synthetic只读流程兼容；缺持久/近期proof不能approve/execute；explicit reauth由P07-021负责
 
 **独占文件（新路径为计划创建）：**
 
 - `apps/api/src/auth/human-approval-auth.service.ts`
-- `apps/api/src/auth/human-approval-auth.controller.ts`
 - `apps/api/src/auth/human-approval-auth.spec.ts`
 
 **共享文件锁（协调集成修改）：**
@@ -952,18 +952,17 @@
 - `apps/api/src/auth/demo-auth.controller.ts`
 - `apps/api/src/auth/access/merchant-scope.guard.ts`
 - `apps/api/src/auth/contracts/auth-context.ts`
+- `apps/api/test/auth-login.e2e-spec.ts`
 
-**硬依赖：** P07-017, P07-009, P09-004, P07-020
+**硬依赖：** P07-017, P07-009, P09-004, P07-020, P07-022
 
 **实际接线依赖：** 无
 
 **验收：**
 
-- [ ] 旧cookie读接口兼容但没有近期认证证明不得审批
-- [ ] 登出复制cookie重放被拒绝；客户端伪造authenticatedAt不可生效
-- [ ] reauth错误/限流/CSRF拒绝，成功绑定同subject与session且不刷新旧approval TTL
-- [ ] audit append失败不mint/续证/吊销半提交；无可信身份的拒绝尝试采用脱敏安全事件记录
-- [ ] 失败login/reauth有resultCode与requestId，audit无密码/cookie/token/完整email；匿名失败按P09契约安全事件记录，不冒充已认证actor
+- [ ] 合法本地login mint/session+audit同tx，logout revoke后复制cookie立即拒绝；审计失败不发新cookie或部分revoke
+- [ ] auth/me旧格式及legacyDemo读流程兼容，旧cookie无recent proof不能审批；body伪造authenticatedAt/role无效
+- [ ] known/anonymous失败调用P07-022路由且无密码/token/raw email；current会员撤销即时拒绝，real SecurityClock不被业务模拟时钟推进
 
 **测试：**
 
@@ -979,7 +978,7 @@
 
 **并行分组：** `p07-human-auth-18`
 
-**执行边界：** 拟新增文件独占；共享auth/schema/runner需协调合并锁。估时包含定向验证、PR，独立commit；安全时钟真实时间。持auth-adapter协调锁，改动只做会话/近期认证接桥；CRITICAL仍禁用，需MFA策略若无MFA证明fail closed，不声称生产身份完整。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 P09 AuditAppendPort需支持未知subject的脱敏安全事件，若tenant未建立保持显式无scope security event；此能力与audit契约作者协调，不通过body提供tenant。
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。 持auth-adapter协调锁；仅login/logout/current identity兼容，不新增reauth endpoint、不实现失败审计router；4h含定向回归/PR。legacyDemo不作为生产身份上线证明。
 
 <a id="p07-019"></a>
 
@@ -998,6 +997,7 @@
 
 - 必跑数据库+HTTP集成证明及runner注册
 - expiry/revoke/member撤销/近期auth证明回归
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/human-approval-auth.test.mjs, apps/api/test/human-approval-auth.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -1008,8 +1008,9 @@
 
 - `scripts/test-tenant-database.mjs`
 - `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
-**硬依赖：** P07-016, P07-017, P07-018, P09-004, P07-020
+**硬依赖：** P07-016, P07-017, P07-018, P09-004, P07-020, P07-021, P07-022
 
 **实际接线依赖：** 无
 
@@ -1018,6 +1019,8 @@
 - [ ] 本地合法登录/reauth可建立真实human审批身份
 - [ ] 复制cookie在logout后被拒；撤销member后approval与worker reader均拒
 - [ ] 模拟时钟advance不延长session/approval；旧cookie/伪造body/AI candidate不得获得身份
+- [ ] combined isolated proof覆盖login/logout/current identity、reauth Origin/CSRF/budget并发、匿名/已知失败audit及rollback；审批/执行current-authority reader复用真实proof，0 skipped
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
@@ -1033,7 +1036,7 @@
 
 **并行分组：** `p07-human-auth-19`
 
-**执行边界：** 拟新增文件独占；共享auth/schema/runner需协调合并锁。估时包含定向验证、PR，独立commit；安全时钟真实时间。只隔离本地数据库；关联approval API最终安全验收在P07-015，必须先完成本卡。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增文件独占；共享auth/schema/runner需协调合并锁。估时包含定向验证、PR，独立commit；安全时钟真实时间。只隔离本地数据库；关联approval API最终安全验收在P07-015，必须先完成本卡。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p07-020"></a>
 
@@ -1087,3 +1090,108 @@
 **并行分组：** `p07-reauth-safety`
 
 **执行边界：** 拟新增独占文件；仅近期重认证安全边界，复用真实session store并以原子UPDATE完成session-scoped attempt budget，不另建广域限流服务。3小时包含实现/验证/PR；独立commit，最新CI/审查并合并才Done。函数/回调/SQL体<40行、无any；配置和secret仅env。
+
+<a id="p07-021"></a>
+
+## P07-021：接入显式重认证与近期证明刷新
+
+**工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** integration · **优先级：** P0
+
+**契约：** ReauthenticateHttp / RecentAuthenticationProof
+
+**输入：**
+
+- P07-018当前持久session/本地credential verifier；P07-020 Origin/CSRF与atomic attempt budget
+- P07-022 typed失败/成功审计router；real SecurityClock；strict credential body，不收actor/authenticatedAt
+
+**输出：**
+
+- 独立POST reauth controller/service，验证同subject后写新的auth event/recent proof与audit同tx
+- 429/401/CSRF拒绝均无proof刷新，不改变已签approval TTL；无需MFA provider
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/auth/reauthentication.service.ts`
+- `apps/api/src/auth/reauthentication.controller.ts`
+- `apps/api/src/auth/reauthentication.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/src/auth/demo-auth.module.ts`
+
+**硬依赖：** P07-018, P07-020, P07-022
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] 同session合法同源CSRF+正确凭据才刷新真实authenticatedAt，当前会员/subject变化拒绝
+- [ ] 错误密码/并发budget耗尽429/Origin-CSRF异常不刷新proof；尝试预算持久跨实例有效
+- [ ] audit失败proof+auth event回滚；真实时钟advance只按SecurityClock，旧approval TTL不延长，MFA需求无证明fail closed
+
+**测试：**
+
+- pnpm --filter @shopmate/api exec vitest run src/auth/reauthentication.spec.ts --maxWorkers 1
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** 近期认证变成持cookie自动续授权
+
+**并行分组：** `p07-021-reauthentication`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。
+
+<a id="p07-022"></a>
+
+## P07-022：实现已知和匿名认证审计路由
+
+**工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** AuthAuditRouter / AnonymousAuthSecurityEvent
+
+**输入：**
+
+- P09-001 strict tenant/anonymous union、P09-004安全sink/tenant writer；server可信身份状态
+- login/logout/reauth最小resultCode/requestId/sessionRef，发生时间来自SecurityClock
+
+**输出：**
+
+- 认证事件typed路由：可信已有session/current scope用tenant tx；未知或未认证credential主体只用ANONYMOUS_AUTH_SECURITY安全sink
+- 成功mint/revoke/reauth审计复用业务tx；失败attempt与安全audit原子持久，不信任客户端tenant/actor
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/auth/auth-audit-router.ts`
+- `apps/api/src/auth/auth-audit-router.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P09-004, P07-001
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] 未知login及仅查到email账号但未认证均anonymous null scope/actor，不伪造tenant；tenant reader看不到安全sink
+- [ ] 已有可信session的reauth拒绝记录最小tenant actor/session result；logout无session保持anonymous幂等拒绝语义
+- [ ] 密码/cookie/token/raw email剔除；writer失败不半提交session/attempt，requestId去重且不把失败密码输入落盘
+
+**测试：**
+
+- pnpm --filter @shopmate/api exec vitest run src/auth/auth-audit-router.spec.ts --maxWorkers 1
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** 账号存在性被当作可信认证主体
+
+**并行分组：** `p07-022-auth-audit-router`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。

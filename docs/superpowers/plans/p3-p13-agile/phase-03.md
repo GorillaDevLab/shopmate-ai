@@ -720,6 +720,7 @@
 
 - 拟新增metric_definitions/metric_snapshots迁移，org/store/key/definitionVersion/period/inputRevision唯一与安全money/status约束
 - RLS默认deny、tenant/store复合FK与受限角色授权；旧数据迁移路径说明
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/metric-storage.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -741,11 +742,12 @@
 - [ ] pnpm test:tenant强制运行新表越租户/缺scope拒绝案例，0skipped
 - [ ] 同revision重复插入拒绝；新revision允许追加，历史值不可覆盖
 - [ ] 全新库与已有tenant库应用迁移成功，负利润允许但unsafe integer拒绝
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
 - pnpm --filter @shopmate/database prisma:validate
-- pnpm test:tenant（新目标packages/database/test/integration/metric-storage.test.mjs）
+- pnpm test:tenant
 
 **不包含：**
 
@@ -756,7 +758,7 @@
 
 **并行分组：** `metric-014`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 本卡只拥有新迁移与存储测试，shared:prisma及shared:tenant-runner需协调锁；测试复用本地isolatedPostgres。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 本卡只拥有新迁移与存储测试，shared:prisma及shared:tenant-runner需协调锁；测试复用本地isolatedPostgres。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p03-015"></a>
 
@@ -935,6 +937,7 @@
 
 - MetricSourceReader真实normalized只读adapter及MetricsModule依赖注入/受保护路由
 - source->metric->persist->GET闭环，历史定义/version可重放；不新增P2事实推断
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/metrics-database.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -946,6 +949,8 @@
 
 - `apps/api/src/app.module.ts`
 - `apps/api/vitest.tenant.config.ts`
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P2-GATE, P03-002, P03-003, P03-004, P03-005, P03-006, P03-007, P03-008, P03-009, P03-010, P03-011, P03-012, P03-013, P03-014, P03-015, P03-016, P03-017
 
@@ -956,12 +961,13 @@
 - [ ] 已支付/次日退款/缺成本因果fixture通过真实adapter得到G4同一结果及状态
 - [ ] 晚到事实产生新inputRevision与证据，旧快照可按旧定义复算
 - [ ] current membership撤销后拒绝读取，advance前不暴露未来数据，源失败不会返回正常0
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm test:tenant（新目标apps/api/test/metrics-database.e2e-spec.ts）
 - pnpm --filter @shopmate/api test src/metrics
 - pnpm --filter @shopmate/api typecheck
+- pnpm test:tenant
 
 **不包含：**
 
@@ -972,4 +978,4 @@
 
 **并行分组：** `metric-018`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 真正接线必须所有dependsOn合并；shared:app-module与shared:tenant-vitest协调锁。测试仅本地隔离数据库，不执行线上migration。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 真正接线必须所有dependsOn合并；shared:app-module与shared:tenant-vitest协调锁。测试仅本地隔离数据库，不执行线上migration。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。

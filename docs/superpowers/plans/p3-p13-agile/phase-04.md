@@ -833,6 +833,7 @@
 
 - 拟新增events/event_evidence迁移，活动fingerprint partial unique与evidenceRevision/event唯一
 - 跨scope metric/evidence关联FK拒绝、历史证据append-only与默认deny RLS/受限角色授权
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/event-storage.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -854,11 +855,12 @@
 - [ ] 两个并发同fingerprint活动事件最多1条；RESOLVED后允许新发生事件
 - [ ] 跨org/store metricSnapshot关联及缺scope读写被DB拒绝
 - [ ] evidence revision可追加但禁止UPDATE/DELETE旧版本；全新/升级库迁移可验证
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
 - pnpm --filter @shopmate/database prisma:validate
-- pnpm test:tenant（新目标packages/database/test/integration/event-storage.test.mjs）
+- pnpm test:tenant
 
 **不包含：**
 
@@ -869,7 +871,7 @@
 
 **并行分组：** `event-decision-016`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:prisma与shared:tenant-runner协调锁；仅本地isolatedPostgres迁移验证。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:prisma与shared:tenant-runner协调锁；仅本地isolatedPostgres迁移验证。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p04-017"></a>
 
@@ -1371,6 +1373,7 @@
 
 - 拟新增decision_runs/records/comparisons迁移与RLS，fallbackOf/primary/shadow复合scope FK
 - 同run/decisionType唯一、普通用户不可改历史结果，same-scope/hash比较校验约束与claim/commit幂等键
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/decision-storage.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -1392,11 +1395,12 @@
 - [ ] 同run/type重复拒绝，跨tenant fallbackOf或comparison关联拒绝
 - [ ] 不同evidenceHash不能建立comparison；PRIMARY/SHADOW字段保持区分
 - [ ] 未认证scope读写默认deny，旧记录UPDATE/DELETE拒绝；未知confidence语义不得伪存概率
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
 - pnpm --filter @shopmate/database prisma:validate
-- pnpm test:tenant（新目标packages/database/test/integration/decision-storage.test.mjs）
+- pnpm test:tenant
 
 **不包含：**
 
@@ -1407,7 +1411,7 @@
 
 **并行分组：** `event-decision-026`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:prisma、shared:tenant-runner协调锁；迁移仅本地隔离库验证，不新增供应商payload表。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:prisma、shared:tenant-runner协调锁；迁移仅本地隔离库验证，不新增供应商payload表。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p04-027"></a>
 
@@ -1533,6 +1537,7 @@
 - 模块注册与真实依赖注入，Metric→Event→Rules PRIMARY→validated effective route→持久决策链
 - 一个事务commit events/evidence/decision records/audit/notification delivery intent；当前membership重新校验，失败整体rollback
 - 受保护查询/状态controller可调用，默认Rule注册表不含Jev/LLM；历史证据与决策可查询
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/event-decisions.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -1545,6 +1550,8 @@
 
 - `apps/api/src/app.module.ts`
 - `apps/api/vitest.tenant.config.ts`
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P2-GATE, P03-018, P04-003, P04-004, P04-005, P04-006, P04-007, P04-008, P04-009, P04-010, P04-011, P04-012, P04-013, P04-014, P04-015, P04-016, P04-017, P04-018, P04-019, P04-020, P04-021, P04-022, P04-023, P04-024, P04-025, P04-026, P04-027, P09-004, P10-003, P04-028
 
@@ -1555,12 +1562,13 @@
 - [ ] 真实同scope快照触发event+Rules+effective route，查询保留所有版本与overrideReason
 - [ ] audit/outbox写入失败让事件/evidence/decision全部回滚，不留下已生效但未入队通知
 - [ ] 当前membership撤销或跨scope请求拒绝；只offline Rules运行，不产生任何Jev/抖店/LLM egress
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm test:tenant（新目标apps/api/test/event-decisions.e2e-spec.ts）
 - pnpm --filter @shopmate/api test src/events src/decisions
 - pnpm --filter @shopmate/api typecheck
+- pnpm test:tenant
 
 **不包含：**
 
@@ -1571,7 +1579,7 @@
 
 **并行分组：** `event-decision-029`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:app-module及shared:tenant-vitest协调锁；只负责DI与事务适配，所有叶实现/表由前卡提供；本地isolatedPostgres验证。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:app-module及shared:tenant-vitest协调锁；只负责DI与事务适配，所有叶实现/表由前卡提供；本地isolatedPostgres验证。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p04-030"></a>
 
@@ -1590,6 +1598,7 @@
 
 - 数据库/API并发证明：一条活动event、唯一有效decision、唯一delivery intent以及对应audit
 - 故障回滚/升级恢复打破cooldown/旧版本拒绝与late-fallback winner证据
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/event-decision-concurrency.test.mjs, apps/api/test/event-route-atomicity.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -1600,6 +1609,7 @@
 
 - `scripts/test-tenant-database.mjs`
 - `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P04-029
 
@@ -1610,11 +1620,12 @@
 - [ ] 同事件十次/并发评估只有一条活动事实与一次即时通知intent，无重复DEEP授权
 - [ ] 旧source/evidence revision晚到不能覆盖新证据；升级可产生新合法route而不重复旧key
 - [ ] outbox或audit故障无半提交；真实SecurityClock超时后late result不能再提交effective decision
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm test:tenant（新目标packages/database/test/integration/event-decision-concurrency.test.mjs、apps/api/test/event-route-atomicity.e2e-spec.ts）
 - pnpm --filter @shopmate/api typecheck
+- pnpm test:tenant
 
 **不包含：**
 
@@ -1625,7 +1636,7 @@
 
 **并行分组：** `event-decision-030`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 测试卡无生产改动；shared:tenant-runner/shared:tenant-vitest协调锁。0skipped强制本地隔离PostgreSQL，发现问题返回对应实现卡修复。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 测试卡无生产改动；shared:tenant-runner/shared:tenant-vitest协调锁。0skipped强制本地隔离PostgreSQL，发现问题返回对应实现卡修复。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p04-031"></a>
 
@@ -1644,6 +1655,7 @@
 
 - 仅QA夹具001..008 expected/forbiddenEvents、expectedEvidence、allowed/forbiddenDecisionLabels与baseline/label版本
 - 通过真实metric/event/rules链收集same-evidenceHash结果并生成差异断言；不往运行provider传答案
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/scenarios/event-detection-001-008.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -1654,6 +1666,8 @@
 **共享文件锁（协调集成修改）：**
 
 - `apps/api/vitest.tenant.config.ts`
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P2-GATE, P03-018, P04-029
 
@@ -1664,11 +1678,11 @@
 - [ ] 001售罄优先即时通知、002退款SKU集中、003利润贡献复算、004ROAS/花费、005转换、006滞销、007延期、008机会逐一匹配可接受集合
 - [ ] 充足库存、新上市1-2单、缺归因/成本、涨价前窗口等forbidden事件/高置信决策均不出现
 - [ ] Day3/Day5只使用各观察点可见事实；隐藏batch真因不在输入；provider看不到expected/forbidden/oracle字段
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test test/scenarios/event-detection-001-008.e2e-spec.ts
-- pnpm test:tenant（必要真实DB运行由shared:tenant-vitest注册该目标）
+- pnpm test:tenant
 
 **不包含：**
 
@@ -1679,7 +1693,7 @@
 
 **并行分组：** `event-decision-031`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 本卡复用已完成源与模块，不新增generator/业务检测；helper仅test目录，8个场景共享同一固定capture/assert机制，避免重复手写实现。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 本卡复用已完成源与模块，不新增generator/业务检测；helper仅test目录，8个场景共享同一固定capture/assert机制，避免重复手写实现。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p04-032"></a>
 
@@ -1698,16 +1712,19 @@
 
 - QA-only009..015预期/禁止集合及baseline/label/oracle版本
 - 同步故障、十次重复乱序、大折扣、取消、季节性、低量、多问题聚合负例报告；运行代码依赖图无test oracle
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/scenarios/event-detection-009-015.e2e-spec.ts, apps/api/test/event-oracle-isolation.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
 - `apps/api/test/scenarios/event-detection-009-015.e2e-spec.ts`
 - `apps/api/test/fixtures/events/scenario-009-015.expectations.ts`
-- `apps/api/test/event-oracle-isolation.spec.ts`
+- `apps/api/test/event-oracle-isolation.e2e-spec.ts`
 
 **共享文件锁（协调集成修改）：**
 
 - `apps/api/vitest.tenant.config.ts`
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.config.ts`
 
 **硬依赖：** P2-GATE, P04-029, P04-030, P04-031
 
@@ -1718,11 +1735,11 @@
 - [ ] 009只有SYNC_FAILURE不能用stale sales报REVENUE_DROP；010十次只有一条事实且旧版不覆盖；011折扣只扣一次；012pending取消不是退款
 - [ ] 013同weekday/hour正常波动禁止无依据HIGH/REVENUE_DROP；014低量禁止SUFFICIENT与DEEP填数据；配套真实同窗营收下降正例必须检出，证明负例不是恒不报警
 - [ ] 015同一窗口多问题排序稳定并满足通知聚合限额，重复推进不重复intent；修改/删除expected答案不改生产provider输入或输出
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api test test/scenarios/event-detection-009-015.e2e-spec.ts test/event-oracle-isolation.spec.ts
-- pnpm test:tenant（必要真实DB运行由shared:tenant-vitest注册场景目标）
+- pnpm test:tenant
 
 **不包含：**
 
@@ -1733,4 +1750,4 @@
 
 **并行分组：** `event-decision-032`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 仅QA expected数据，不实现Jev benchmark网络调用；本卡不新增Phase7提案功能，015仅证明事件与delivery-intent幂等，提案幂等由后续阶段负责。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 仅QA expected数据，不实现Jev benchmark网络调用；本卡不新增Phase7提案功能，015仅证明事件与delivery-intent幂等，提案幂等由后续阶段负责。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。

@@ -334,17 +334,17 @@
 
 **工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P1
 
-**契约：** ListingCopyDraftPort
+**契约：** DeterministicLocalListingCopyPort / LocalRulesVersion
 
 **输入：**
 
-- structured DATA envelope与strict provider output port；商品原文不可信
-- 已有approved provider policy及本地Mock/规则摘要模式，运行budget/cancel
+- P12-001 strict listing fields/provenance；sanitize不可信原文，不解析指令
+- 版本化自包含本地规则：仅已提供属性拼接有界title/description，不调用Agent/provider/LLM；AbortSignal+行数/字数上限
 
 **输出：**
 
-- 候选文案draft与source provenance/生成方式标签
-- 生成后仍走ListingValidationPolicy及人工预览，不改批准内容
+- 可复算local-rules draft、ruleVersion与每字段source refs；无法验证属性保留原文/缺失
+- 输出仍由P12-006校验并人工预览，编辑生成均不批准/发布
 
 **独占文件（新路径为计划创建）：**
 
@@ -357,13 +357,13 @@
 
 **硬依赖：** P12-001
 
-**实际接线依赖：** P06-001, P12-006
+**实际接线依赖：** P12-006
 
 **验收：**
 
-- [ ] 合法合成输入生成有界title/description并注明Mock/规则草稿
-- [ ] 注入文本要求approve/取secret不进入policy；provider非法输出拒绝
-- [ ] timeout/cancel/预算耗尽保留原草稿无虚构成功；无法验证功效不自动编造
+- [ ] 相同输入/ruleVersion输出稳定，字段长度有界且标LOCAL_RULES；无虚构功效/来源
+- [ ] 注入要求approve/secret仅当sanitized DATA，无工具/网络调用且无假LLM标签
+- [ ] cancel/超字符或行数上限返回错误保留原draft，validator拒绝则不提交新revision
 
 **测试：**
 
@@ -374,6 +374,7 @@
 - 真实平台发布/LLM网络调用/部署线上迁移
 - 消费者PII导入、公开上传目录或任意URL抓取
 - AI审批发布、自动重试未知publish或未经审批覆盖商品
+- Agent/LLM gateway接入、provider budget policy与生成模型调用；本卡选择自包含deterministic local rules
 
 **风险：** 文案生成捏造功效/自动发布
 
@@ -498,7 +499,7 @@
 **输入：**
 
 - 当前已校验draft revision+content hash+validation rule version
-- P7通用审批绑定、listing capability与P12完整snapshot；不复用price低风险
+- P12-016完整typed发布提案、P12-017发布专属hash/risk、P7通用审批绑定；绝不复用price风险
 
 **输出：**
 
@@ -514,9 +515,9 @@
 
 - 无
 
-**硬依赖：** P12-001
+**硬依赖：** P12-001, P12-016
 
-**实际接线依赖：** P12-005, P12-006, P07-002, P07-003, P07-008
+**实际接线依赖：** P12-005, P12-006, P12-017, P07-007, P07-008
 
 **验收：**
 
@@ -550,13 +551,15 @@
 
 **输入：**
 
-- 现有Mock source/control transaction与受限source身份、command receipt/pending visibility
+- P08-036公共SourceCommandRequestStore/P08-038独立request-pinned readback，P08-039同clock真实发布proof；P2-GATE只提供immutable read publication基础，不假设提供writers
 - CreateProductCommand strict listing；stable execution key/hash
 
 **输出：**
 
-- source生成新product/SKU映射并同事务持久command receipt/ref/visibility
+- append typed create-product request，同tx durable receipt/requestRevision/可信product+SKU ref；P08-037在新published source中可见，不直接写immutable旧行
 - 内部executionId→externalProductId可信resolver；合法重复返回原result
+- 在同PR经database-index共享锁从现有@shopmate/database root发布typed store/resolver公共导出；不新增未拥有的subpath
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/mock-listing-write.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -566,8 +569,9 @@
 **共享文件锁（协调集成修改）：**
 
 - `scripts/test-tenant-database.mjs`
+- `packages/database/src/index.ts`
 
-**硬依赖：** P12-001, P08-016, P2-GATE
+**硬依赖：** P12-001, P08-016, P2-GATE, P08-036, P08-038, P08-039
 
 **实际接线依赖：** 无
 
@@ -576,9 +580,13 @@
 - [ ] 同key/hash只新建一个product及SKU集，resolver返回实际关联id
 - [ ] 同key不同listing、跨tenant/generation、重复SKU拒绝并整体回滚
 - [ ] publish和reset/disconnect锁后重查，丢包保留实际源结果；不写规范经营DB
+- [ ] consumer只从@shopmate/database root import；数据库build和API typecheck验证公共类型，禁止私有src路径import
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
+- pnpm --filter @shopmate/database build
+- pnpm --filter @shopmate/api typecheck
 - pnpm test:tenant
 
 **不包含：**
@@ -591,7 +599,7 @@
 
 **并行分组：** `p12-create-listing`
 
-**执行边界：** 拟新增文件独占；复用P08-016 typed externalResourceRef列与P2受限source/control事务，不读取scenario oracle。4小时含验证/PR；独立commit、最新CI/审查并合并才Done。只source新建+实际ref关联，不改通用schema，不执行规范库同步。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增文件独占；复用P08-016 typed externalResourceRef列与P2受限source/control事务，不读取scenario oracle。4小时含验证/PR；独立commit、最新CI/审查并合并才Done。只source新建+实际ref关联，不改通用schema，不执行规范库同步。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 源命令前置P08-033..039覆盖requestRevision/receipt-backed same-tick chronology/固定prefix/publication/readback；本卡仅单动作映射+request事务，不实现通用source publication扩展。
 
 <a id="p12-012"></a>
 
@@ -605,6 +613,8 @@
 
 - trusted MockPublishedRefResolver及source商品读/visibility端口
 - 原ListingInput snapshot/hash、CommerceConnector.createProduct/verifyAction PRODUCT
+- store/resolver通过已合并@shopmate/database root公共导出；当前package只有root与mock-platform，不使用mock-actions私有路径
+- P08-038 public CommandPublicationReadPort以certificate.requestRevision>=command receipt gate独立source read；publication前PENDING，currentMock其余writes显式UNSUPPORTED
 
 **输出：**
 
@@ -621,7 +631,7 @@
 - `apps/api/src/integrations/mock/mock-commerce-connector.ts`
 - `apps/api/src/integrations/mock/mock-connector-factory.ts`
 
-**硬依赖：** P12-011, P08-007, P08-018
+**硬依赖：** P12-011, P08-007, P08-018, P08-038, P08-039
 
 **实际接线依赖：** 无
 
@@ -645,25 +655,26 @@
 
 **并行分组：** `p12-mock-listing-actions`
 
-**执行边界：** 拟新增路径独占；fixture合成且仅测试，命名端口支持组件并行，runtime integration按依赖接线；1–4小时含定向验证/PR，每卡独立commit/PR、最新CI+审查合并才Done。继P08-018后持同mock-connector wiring锁，只添加PRODUCT分支。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增路径独占；fixture合成且仅测试，命名端口支持组件并行，runtime integration按依赖接线；1–4小时含定向验证/PR，每卡独立commit/PR、最新CI+审查合并才Done。继P08-018后持同mock-connector wiring锁，只添加PRODUCT分支。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p12-013"></a>
 
-## P12-013：接入商品工作区、发布审批和worker
+## P12-013：注册发布策略和商品后端运行模块
 
 **工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** integration · **类型：** integration · **优先级：** P1
 
-**契约：** ListingsModuleWiring / PublishExecutionStrategy
+**契约：** ListingsModuleWiring / RegisteredProductPublishExecutionStrategy
 
 **输入：**
 
-- 已有P7 human approval/real TTL与P8 execution/outbox/lease/readback
-- published ref resolver、完整listing snapshot，current权限/connection generation guard
+- P12-002私有upload/P12-003 bounded CSV/P12-005 repository/P12-006 validator/P12-007确定性local rules/P12-008 controller完成
+- P12-016/017完整publish proposal/hash/risk与P12-018/019/020真实策略；P12-012 Mock public source adapter
+- P07-014/019 human approval runtime、P08-013/021/022 durable dispatch-once/readback worker、P09-004 audit；scope/current authority和P2 causal source gate
 
 **输出：**
 
-- listing routes、审批与已有execution strategy接桥
-- PRODUCT_PUBLISH只人批准后排入outbox，未verified仍EXECUTING
+- 仅注册listing HTTP/repository/local rules、PRODUCT_PUBLISH完成策略及正常审批/worker接口
+- 真实发布仍human批准→一次dispatch→独立readback；web client/page绑定由P12-021负责
 
 **独占文件（新路径为计划创建）：**
 
@@ -673,20 +684,18 @@
 **共享文件锁（协调集成修改）：**
 
 - `apps/api/src/app.module.ts`
-- `packages/contracts/src/index.ts`
-- `apps/web/src/app/page.tsx`
-- `packages/contracts/src/actions/proposal.schema.ts`
+- `apps/api/src/actions/actions.module.ts`
 - `apps/api/src/actions/execution.module.ts`
 
-**硬依赖：** P12-005, P12-006, P12-007, P12-008, P12-009, P12-010, P12-012, P07-014, P08-013, P09-004, P10-003, P2-GATE
+**硬依赖：** P12-002, P12-003, P12-005, P12-006, P12-007, P12-008, P12-010, P12-012, P12-016, P12-017, P12-018, P12-019, P12-020, P07-014, P07-019, P08-013, P08-021, P08-022, P09-004, P13-001, P2-GATE
 
 **实际接线依赖：** 无
 
 **验收：**
 
-- [ ] 真实component连线后import→draft→preview→human approval→一次create可调用
-- [ ] draft revision/hash变化、revoked权限/expired TTL执行前阻断
-- [ ] publish receipt ACCEPTED/UNKNOWN不会SUCCEEDED；无AI approve/execute工具
+- [ ] 实际upload/parser/local rules/controller接线smoke，无fixture/provider冒充真实依赖
+- [ ] registry仅在完成策略与Mock adapter gate后允许PRODUCT_PUBLISH；当前身份/版本/hash/TTL漂移执行前阻断
+- [ ] 一次create后ACCEPTED/UNKNOWN保持待验证，readback才SUCCEEDED；PRICE_SET现有回归不变
 
 **测试：**
 
@@ -702,7 +711,7 @@
 
 **并行分组：** `p12-listings.module`
 
-**执行边界：** 拟新增路径独占；fixture合成且仅测试，命名端口支持组件并行，runtime integration按依赖接线；1–4小时含定向验证/PR，每卡独立commit/PR、最新CI+审查合并才Done。分别持聚合协调锁；P7 action schema listing扩展只在P07-014之后且独立commit，动作policy仍deny-by-default；不重写executor。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。 3h只DI注册+smoke与PR，不扩schema/hash/risk/执行叶子、不实现upload/parser/UI绑定；API roots按锁短时串行合并。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
 
 <a id="p12-014"></a>
 
@@ -721,6 +730,7 @@
 
 - RLS/FK、object归属、draft CAS及audit rollback证明
 - 空库/升级migration必跑suite与upload cleanup断言
+- 本卡持runner/config共享锁显式注册必跑目标：packages/database/test/integration/listing-import.test.mjs；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -739,6 +749,7 @@
 - [ ] 跨tenant/store import-draft FK与private-object读取拒绝
 - [ ] 超限/伪类型/path traversal拒绝且临时root外无写入
 - [ ] 并发revision仅一有效；audit异常草稿与登记回滚，orphan对象清理有据
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
@@ -754,7 +765,7 @@
 
 **并行分组：** `p12-listing-import`
 
-**执行边界：** 拟新增路径独占；fixture合成且仅测试，命名端口支持组件并行，runtime integration按依赖接线；1–4小时含定向验证/PR，每卡独立commit/PR、最新CI+审查合并才Done。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增路径独占；fixture合成且仅测试，命名端口支持组件并行，runtime integration按依赖接线；1–4小时含定向验证/PR，每卡独立commit/PR、最新CI+审查合并才Done。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
 <a id="p12-015"></a>
 
@@ -773,6 +784,7 @@
 
 - import/draft/preview/approve/publish/verify真实集成链证明
 - 同key一次create与完整audit关联；同步后规范库才见新listing
+- 本卡持runner/config共享锁显式注册必跑目标：apps/api/test/listing-publish.e2e-spec.ts；API目标tenant config include且default config exclude，DB nested目标由runner显式调用，不依赖test/\*.test.mjs
 
 **独占文件（新路径为计划创建）：**
 
@@ -780,9 +792,11 @@
 
 **共享文件锁（协调集成修改）：**
 
-- 无
+- `scripts/test-tenant-database.mjs`
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
 
-**硬依赖：** P12-013, P12-014, P07-019, P08-014, P2-GATE
+**硬依赖：** P12-013, P12-014, P07-019, P08-014, P2-GATE, P12-021
 
 **实际接线依赖：** 无
 
@@ -791,10 +805,11 @@
 - [ ] 合法草稿完整预览+人工批准后只create一次，readback匹配才成功
 - [ ] timeout-after-create/restart/延迟可见保留UNKNOWN/PENDING，无二次create
 - [ ] 编辑/过期/撤销/connection generation漂移阻断，B租户无对象/审批可见
+- [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
 
 **测试：**
 
-- pnpm --filter @shopmate/api exec vitest run test/listing-publish.e2e-spec.ts --maxWorkers 1
+- pnpm test:tenant
 
 **不包含：**
 
@@ -806,4 +821,322 @@
 
 **并行分组：** `p12-listing-publish.e2e`
 
-**执行边界：** 拟新增路径独占；fixture合成且仅测试，命名端口支持组件并行，runtime integration按依赖接线；1–4小时含定向验证/PR，每卡独立commit/PR、最新CI+审查合并才Done。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。
+**执行边界：** 拟新增路径独占；fixture合成且仅测试，命名端口支持组件并行，runtime integration按依赖接线；1–4小时含定向验证/PR，每卡独立commit/PR、最新CI+审查合并才Done。 所有函数/回调/SQL体<40行、TypeScript无any；金额/时间不默认为0/now，用户文本严格校验并sanitize；密钥仅env。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
+
+<a id="p12-016"></a>
+
+## P12-016：扩展完整商品发布提案契约
+
+**工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** contract · **类型：** contract · **优先级：** P0
+
+**契约：** ProductPublishProposalV1 / ActionStrategyV1 PRODUCT_PUBLISH
+
+**输入：**
+
+- P12-001完整listing snapshot、全部SKU/类目/正文/价格/provenance/validation version
+- P07-001 immutable revision/hash/approval绑定与P08-031 typed strategy boundary
+
+**输出：**
+
+- strict PRODUCT_PUBLISH proposal branch与approval payload schema公共root导出
+- 完整listing hash输入及独立listing risk version；PRICE_SET字段与行为保持兼容
+
+**独占文件（新路径为计划创建）：**
+
+- `packages/contracts/src/listings/publish-proposal.schema.ts`
+- `packages/contracts/src/listings/publish-proposal.schema.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `packages/contracts/src/actions/proposal.schema.ts`
+- `packages/contracts/src/index.ts`
+
+**硬依赖：** P12-001, P07-001, P08-031
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] 任一SKU/金额/正文/类目/provenance/validationVersion缺失或未知执行字段拒绝
+- [ ] price原schema回归兼容；PRODUCT与PRICE branch交叉payload拒绝
+- [ ] 包含connection/generation/TTL/evidence refs，approval仍server human绑定，不由草稿自动获得
+
+**测试：**
+
+- pnpm --filter @shopmate/contracts exec vitest run src/listings/publish-proposal.schema.spec.ts src/actions/proposal.schema.spec.ts
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** listing union字段未纳入批准边界
+
+**并行分组：** `p12-016-publish-proposal`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。
+
+<a id="p12-017"></a>
+
+## P12-017：实现商品发布完整哈希和专属风险
+
+**工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ProductPublishHash / ListingPublishRiskPolicy
+
+**输入：**
+
+- P12-016完整immutable snapshot；P12-006 validation结果/ruleVersion与P13-001 capability
+- canonical hashing接口复用P07-002，金额仍CNY integer，不复用PriceRiskPolicy阈值
+
+**输出：**
+
+- typed listing canonical bytes/hash与publish-specific deterministic risk/reasons
+- 完整内容/全部SKU/source version/provenance进入hash，未知校验/capability默认拒绝
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/listings/listing-publish-policy.ts`
+- `apps/api/src/listings/listing-publish-policy.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P12-016, P07-002
+
+**实际接线依赖：** P12-006, P13-001
+
+**验收：**
+
+- [ ] 改变任意正文/SKU/金额/类目/source版本/validation规则/hash变；key顺序不影响结果
+- [ ] 无publishProduct/未知校验/当前scope漂移拒绝，CRITICAL禁止且不沿用price低风险
+- [ ] 合法合成listing返回可复算risk+ruleVersion；新hash必须新的human approval，无直接publish
+
+**测试：**
+
+- pnpm --filter @shopmate/api exec vitest run src/listings/listing-publish-policy.spec.ts --maxWorkers 1
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** 发布内容部分哈希或错套价格风险
+
+**并行分组：** `p12-017-listing-publish-policy`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。
+
+<a id="p12-018"></a>
+
+## P12-018：实现发布前核验和绝对商品命令构建
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** PublishExecutionPreflight / ApprovedProductCommandBuilder
+
+**输入：**
+
+- P08-031 shared current-authority proof；P12-016/017批准完整listing revision/hash/risk
+- fresh draft/source versions、当前identity/权限/feature/store/connection generation/publish capability；CreateProductCommand DTO
+
+**输出：**
+
+- kind-specific preflight与strict absolute CreateProductCommand；executionId/key/hash绑定全部listing
+- freshness/validation/identity/version漂移停止并要求新预览审批，禁止覆盖已存在商品
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/listings/publish-execution-preflight.ts`
+- `apps/api/src/listings/publish-execution-preflight.spec.ts`
+- `apps/api/src/listings/publish-command-builder.ts`
+- `apps/api/src/listings/publish-command-builder.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P12-016, P12-017, P08-031
+
+**实际接线依赖：** P07-019, P12-005, P12-006, P12-012, P08-032
+
+**验收：**
+
+- [ ] 完整合法批准snapshot构建全部SKU一次create命令，key/hash/id稳定
+- [ ] identity撤销/recent proof缺失/TTL/store/feature/generation变化先拒绝，当前draft version不符重新审批
+- [ ] 未知/CRITICAL风险、publish unsupported、半snapshot或price命令混入拒绝；共享授权proof不能被publish绕过
+
+**测试：**
+
+- pnpm --filter @shopmate/api exec vitest run src/listings/publish-execution-preflight.spec.ts src/listings/publish-command-builder.spec.ts --maxWorkers 1
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** 发布策略绕过执行前最新状态
+
+**并行分组：** `p12-018-publish-execution-preflight`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。
+
+<a id="p12-019"></a>
+
+## P12-019：实现一次发布回执与完整商品回读策略
+
+**工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ProductPublishDispatch / ProductPublishVerificationReducer
+
+**输入：**
+
+- P12-018 approved CreateProductCommand；注入createProduct/PRODUCT verifyAction、trusted publishedRef resolver
+- P08-019 typed jobs、fenced outcome tx、real readback deadline；原完整snapshot
+
+**输出：**
+
+- 一次createProduct dispatch与ACCEPTED/UNKNOWN→readback-only；完整listing readback reducer
+- PRODUCT ref必须绑定same tenant/execution/generation，全部SKU/类目/正文/价格匹配才VERIFIED
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/listings/publish-dispatch-verification.ts`
+- `apps/api/src/listings/publish-dispatch-verification.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P12-016, P12-018, P08-019
+
+**实际接线依赖：** P12-012, P08-009, P08-021, P08-022, P09-004
+
+**验收：**
+
+- [ ] ACCEPTED不成功；timeout-after-create只能恢复可信ref并排VERIFY，不再次create
+- [ ] 真实source全字段匹配才成功；缺ref/尚未可见PENDING/UNKNOWN，不猜external id或读规范DB
+- [ ] wrong execution/scope/generation/mismatch拒绝；旧fence/audit-job失败整体rollback，deadline停止自动工作
+
+**测试：**
+
+- pnpm --filter @shopmate/api exec vitest run src/listings/publish-dispatch-verification.spec.ts --maxWorkers 1
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** publish timeout导致第二次新建商品
+
+**并行分组：** `p12-019-publish-dispatch-verification`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。
+
+<a id="p12-020"></a>
+
+## P12-020：组合可注册的商品发布策略
+
+**工时：** 2h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ProductPublishExecutionStrategy / ActionStrategyRegistry
+
+**输入：**
+
+- P08-031/032策略registry接口；P12-018 preflight/builder与P12-019 dispatch/verify
+- 共享authority facade在kind preflight之前执行；注入端口尚不登记真实模块
+
+**输出：**
+
+- typed PRODUCT_PUBLISH strategy adapter；只组合完成的发布叶子，不重写price executor
+- runtime registration留P12-013，fixture证明price与publish kind选择隔离
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/listings/product-publish-strategy.ts`
+- `apps/api/src/listings/product-publish-strategy.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P12-018, P12-019, P08-032
+
+**实际接线依赖：** P12-012, P08-013
+
+**验收：**
+
+- [ ] adapter依顺序共享authority→publish preflight→build→dispatch→verify且完整snapshot不丢
+- [ ] 价格仍走PRICE_SET adapter；unknown kind/default/duplicate registration拒绝
+- [ ] 未获得shared proof或UNKNOWN dispatch时无第二write；fixture completion不声称runtime可发布
+
+**测试：**
+
+- pnpm --filter @shopmate/api exec vitest run src/listings/product-publish-strategy.spec.ts --maxWorkers 1
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** DI登记先于发布策略实现
+
+**并行分组：** `p12-020-product-publish-strategy`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。
+
+<a id="p12-021"></a>
+
+## P12-021：绑定商品工作区客户端和发布状态页面
+
+**工时：** 3h（实现 + 定向验证 + PR 准备） · **轨道：** integration · **类型：** integration · **优先级：** P0
+
+**契约：** ListingWorkspaceClient / ListingRoute / ExecutionStatusRoute
+
+**输入：**
+
+- P12-013真实listing routes、P12-009 props workspace、P07-014完整审批preview
+- P08-025 execution status client/page；draft revision/hash与PRODUCT_PUBLISH proposal id
+
+**输出：**
+
+- listing typed HTTP client与page绑定，完整草稿预览→新提案→人工审批→execution status链接
+- upload/edit/generate错误保持原draft，generation明示LOCAL_RULES
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/web/src/app/listings/listing-api.ts`
+- `apps/web/src/app/listings/listing-api.test.ts`
+- `apps/web/src/app/listings/page.tsx`
+- `apps/web/src/app/listings/listing-page.test.tsx`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/web/src/app/page.tsx`
+
+**硬依赖：** P12-013, P12-009, P07-014, P08-025
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] 真实导入/编辑/本地生成/完整预览走API，版本冲突409需重新读取，不自动publish
+- [ ] 人工批准后新execution链接显示UNKNOWN/PENDING；独立PRODUCT VERIFIED才成功
+- [ ] 375px/桌面loading/empty/error、upload取消/切店丢迟到结果；不沿用旧approval，破坏性确认明确
+
+**测试：**
+
+- pnpm --filter @shopmate/web exec vitest run src/app/listings/listing-api.test.ts src/app/listings/listing-page.test.tsx
+- pnpm --filter @shopmate/web typecheck
+
+**不包含：**
+
+- 真实供应商/LLM网络调用、部署或线上迁移
+- 自动审批、UNKNOWN后再次写入或自动补偿
+
+**风险：** 模块注册没有实际商品UI入口
+
+**并行分组：** `p12-021-listing-api`
+
+**执行边界：** 拟新增路径；只交付本卡文件，fixture仅在测试目录，组件按已合并契约注入端口并行实现。工时包含实现、聚焦验证和PR准备；函数/回调/SQL体<40行，TS无any，输入strict校验/sanitize、SQL参数化、密钥仅env；独立commit/分支/PR，经独立review、latest CI并合并main才Done。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
