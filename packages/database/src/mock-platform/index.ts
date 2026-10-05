@@ -3,14 +3,17 @@ import { SourceAccessDenied, SourceDomainFailure } from "./errors.js";
 import { findGeneration, initializeGeneration } from "./generations.js";
 import { findGrant, listGrants, matchesGrant } from "./grants.js";
 import { assertFailureCode, claimJob, failJob, renewJob } from "./jobs.js";
+import { appendChunk } from "./journal.js";
 import type {
   ClaimResult,
+  AppendResult,
+  ChunkInput,
   FailResult,
   LeaseRef,
   RenewResult,
   SourceFailureCode,
 } from "./publication-types.js";
-import { validateLeaseInput } from "./publication-validation.js";
+import { validateChunk, validateLeaseInput } from "./publication-validation.js";
 import {
   currentAccess,
   lockControl,
@@ -61,8 +64,25 @@ export function createMockSourceWorker(env: SourceEnvironment): MockSourceWorker
     claim: (actor, scope) => claimControlled(pool, actor, scope),
     renew: (actor, lease) => renewControlled(pool, actor, lease),
     fail: (actor, lease, code) => failControlled(pool, actor, lease, code),
+    appendChunk: (actor, lease, input) => appendControlled(pool, actor, lease, input),
     close: () => pool.end(),
   };
+}
+async function appendControlled(
+  pool: SourcePool,
+  actor: SourceWorkerActor,
+  lease: LeaseRef,
+  input: ChunkInput,
+): Promise<AppendResult> {
+  validateWorkerActor(actor);
+  validateLeaseInput(lease);
+  validateChunk(input, lease.scope);
+  try {
+    return await appendChunk(pool, actor, lease, input);
+  } catch (error) {
+    if (error instanceof SourceDomainFailure) return { status: error.status };
+    throw error;
+  }
 }
 async function claimControlled(
   pool: SourcePool,

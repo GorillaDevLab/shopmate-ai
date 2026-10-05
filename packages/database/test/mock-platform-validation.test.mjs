@@ -30,10 +30,42 @@ test("source worker exposes bounded lease operations", async () => {
     MOCK_PLATFORM_WORKER_DATABASE_URL: "postgresql://source@127.0.0.1:1/test",
   });
   try {
-    for (const method of ["claim", "renew", "fail"])
+    for (const method of ["claim", "renew", "fail", "appendChunk"])
       assert.equal(typeof worker[method], "function", method);
-    for (const method of ["appendChunk", "publish", "findPublication"])
+    for (const method of ["publish", "findPublication"])
       assert.equal(Object.hasOwn(worker, method), false, method);
+  } finally {
+    await worker.close();
+  }
+});
+
+test("append inputs reject before an unreachable database is contacted", async () => {
+  const worker = source.createMockSourceWorker({
+    MOCK_PLATFORM_WORKER_DATABASE_URL: "postgresql://source@127.0.0.1:1/test",
+  });
+  const actor = { grantId: "g" };
+  const lease = {
+    scope,
+    revision: "1",
+    fence: "1",
+    ownerId: "123e4567-e89b-42d3-a456-426614174000",
+  };
+  const input = {
+    expectedCheckpointHash: "a".repeat(64),
+    next: { processedThrough: "2026-01-01T00:00:00.000Z", sealed: true },
+    events: [],
+  };
+  try {
+    await assert.rejects(worker.appendChunk({}, lease, input), { code: "SOURCE_INPUT" });
+    await assert.rejects(worker.appendChunk(actor, null, input), { code: "SOURCE_INPUT" });
+    for (const bad of [
+      null,
+      {},
+      { ...input, extra: true },
+      { ...input, events: [null] },
+      { ...input, next: { ...input.next, extra: true } },
+    ])
+      await assert.rejects(worker.appendChunk(actor, lease, bad), { code: "SOURCE_INPUT" });
   } finally {
     await worker.close();
   }

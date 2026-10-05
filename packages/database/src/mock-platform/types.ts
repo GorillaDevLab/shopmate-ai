@@ -1,5 +1,7 @@
 import type {
   ClaimResult,
+  AppendResult,
+  ChunkInput,
   FailResult,
   LeaseRef,
   RenewResult,
@@ -52,6 +54,7 @@ export interface MockSourceWorker {
   claim(actor: SourceWorkerActor, scope: SourceScope): Promise<ClaimResult>;
   renew(actor: SourceWorkerActor, lease: LeaseRef): Promise<RenewResult>;
   fail(actor: SourceWorkerActor, lease: LeaseRef, code: SourceFailureCode): Promise<FailResult>;
+  appendChunk(actor: SourceWorkerActor, lease: LeaseRef, input: ChunkInput): Promise<AppendResult>;
   close(): Promise<void>;
 }
 export type SourceEnvironment = Readonly<Record<string, string | undefined>>;
