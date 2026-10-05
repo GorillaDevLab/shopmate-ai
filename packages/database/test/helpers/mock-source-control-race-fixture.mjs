@@ -182,3 +182,159 @@ export async function oldOperation(worker, context, op, event) {
     await worker.query("ROLLBACK");
   }
 }
+
+export async function installControlBarrier(admin, barrier) {
+  // AFTER UPDATE proves the connection change exists uncommitted before the worker starts.
+  await admin.query(`CREATE FUNCTION demo.test_publication_control_barrier() RETURNS trigger
+    LANGUAGE plpgsql SECURITY INVOKER AS $$ BEGIN
+      IF NEW.generation IS DISTINCT FROM OLD.generation+1 THEN
+        RAISE EXCEPTION 'Control race fixture did not change generation';
+      END IF;
+      PERFORM pg_catalog.pg_advisory_xact_lock(77224499,1);
+      RETURN NEW;
+    END $$`);
+  await admin.query(`CREATE TRIGGER test_publication_control_barrier AFTER UPDATE
+    ON public."PlatformConnection" FOR EACH ROW EXECUTE FUNCTION demo.test_publication_control_barrier()`);
+  await barrier.query("BEGIN");
+  await barrier.query("SELECT pg_advisory_xact_lock($1,1)", [BARRIER]);
+}
+
+export async function removeControlBarrier(admin) {
+  await admin.query(
+    'DROP TRIGGER IF EXISTS test_publication_control_barrier ON public."PlatformConnection"',
+  );
+  await admin.query("DROP FUNCTION IF EXISTS demo.test_publication_control_barrier()");
+}
+
+export async function controlBarrierWitness(admin, barrier, context) {
+  const rows = await waitLock(admin, BARRIER, false);
+  assert.equal(rows.length, 1);
+  const pid = rows[0].pid;
+  const locks = (
+    await admin.query(
+      `SELECT l.pid,l.classid::text AS namespace,l.objid::text AS key,l.objsubid,l.mode,l.granted,a.usename AS login
+    FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid
+    WHERE l.locktype='advisory' AND l.classid=$1::oid AND l.objsubid=2 ORDER BY l.granted DESC`,
+      [BARRIER],
+    )
+  ).rows;
+  assert.equal(locks.length, 2);
+  assert.deepEqual(locks, [
+    {
+      pid: barrier.processID,
+      namespace: String(BARRIER),
+      key: "1",
+      objsubid: 2,
+      mode: "ExclusiveLock",
+      granted: true,
+      login: barrier.user,
+    },
+    {
+      pid,
+      namespace: String(BARRIER),
+      key: "1",
+      objsubid: 2,
+      mode: "ExclusiveLock",
+      granted: false,
+      login: "source_control_login",
+    },
+  ]);
+  const held = await exactLock(admin, context, CONTROL, true, pid);
+  return { barrier: locks, held };
+}
+
+export async function prepareRaw(worker, context, entrypoint, event) {
+  const op = entrypoint === "PUBLISH UPDATE" ? "PUBLISH" : "APPEND";
+  await beginOperation(worker, context, op);
+  if (op === "PUBLISH") await publishSettings(worker, context.job);
+  else
+    await appendSettings(
+      worker,
+      context.job,
+      entrypoint === "event VALUES" ? [event] : [],
+      nextFor(context.job, entrypoint === "APPEND UPDATE"),
+    );
+}
+
+export function rawStatement(worker, context, entrypoint, event) {
+  if (entrypoint === "event VALUES") return insertEvent(worker, context, event);
+  if (entrypoint === "APPEND UPDATE")
+    return updateAppend(worker, context, nextFor(context.job, true));
+  return updatePublish(worker, context);
+}
+
+export function assertRawDenial(settled, entrypoint) {
+  assert.ok(settled.error, `Pre-wait ${entrypoint} must reach the fresh row authorization guard`);
+  assert.equal(settled.error.code, "SM001");
+  assert.equal(settled.error.message, "Source control access denied");
+  assert.equal(settled.error.detail, undefined);
+  assert.equal(settled.error.hint, undefined);
+  assert.match(settled.error.where, /require_source_scope\(jsonb\)/u);
+  assert.match(
+    settled.error.where,
+    entrypoint === "event VALUES" ? /pending_job\(jsonb,bigint\)/u : /guard_job_update\(\)/u,
+  );
+}
+
+export async function proveRawCandidate(worker, context, entrypoint, event) {
+  // A successful physical proof before rollback rules out malformed proposals as the race's cause.
+  try {
+    await prepareRaw(worker, context, entrypoint, event);
+    const result = await rawStatement(worker, context, entrypoint, event);
+    assert.equal(result.rowCount, 1);
+    if (entrypoint === "event VALUES") {
+      assert.equal((await insertVersion(worker, context, result.rows[0].eventSeq)).rowCount, 1);
+      assert.equal((await updateAppend(worker, context, nextFor(context.job))).rowCount, 1);
+    }
+    await worker.query("SET CONSTRAINTS ALL IMMEDIATE");
+  } finally {
+    await worker.query("ROLLBACK");
+  }
+}
+
+export async function noMutationMarker(admin, worker) {
+  const rows = await admin.query(
+    "SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND classid=$2::oid AND objsubid=2",
+    [worker.processID, MUTATION],
+  );
+  assert.equal(rows.rowCount, 0);
+}
+
+export async function cleanupSchedule(worker, barrier, admin, changed, pending, hooked) {
+  // Queue worker rollback as well as releasing the barrier, so either schedule unwinds on failure.
+  const results = await Promise.allSettled([
+    worker.query("ROLLBACK"),
+    barrier.query("ROLLBACK"),
+    changed,
+    pending,
+  ]);
+  if (hooked) results.push(...(await Promise.allSettled([removeControlBarrier(admin)])));
+  const failures = results
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason);
+  if (failures.length) throw new AggregateError(failures, "Control race cleanup failed");
+}
+
+export async function assertNoResidue(admin, worker, barrier) {
+  const hooks = await admin.query(
+    "SELECT 1 FROM pg_proc WHERE proname='test_publication_control_barrier' UNION ALL SELECT 1 FROM pg_trigger WHERE tgname='test_publication_control_barrier'",
+  );
+  assert.equal(hooks.rowCount, 0);
+  const locks = await admin.query(
+    "SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid WHERE locktype='advisory' AND classid=ANY($1::oid[]) AND objsubid=2 AND (l.pid=ANY($2::integer[]) OR a.usename='source_control_login')",
+    [
+      [CONTROL, MUTATION, BARRIER],
+      [worker.processID, barrier.processID],
+    ],
+  );
+  assert.equal(locks.rowCount, 0);
+  const roles = await admin.query(
+    "SELECT rolname,rolsuper,rolbypassrls FROM pg_roles WHERE rolname=ANY($1::text[]) ORDER BY rolname",
+    [["source_worker_login", "source_read_login", "source_control_login"]],
+  );
+  assert.equal(roles.rowCount, 3);
+  for (const role of roles.rows) {
+    assert.equal(role.rolsuper, false);
+    assert.equal(role.rolbypassrls, false);
+  }
+}
