@@ -16,11 +16,12 @@
 - 输入严格验证并 sanitize；环境变量存储密钥；SQL 参数化；API 默认认证，完整租户 scope 来自可信身份与严格解析。
 - UI 最小断点 375px；加载、空、错误三态；破坏性操作二次确认；保持现有设计系统。
 - P2 尚未交付的实际数据、同步和因果夹具用外部 `P2-GATE` 表示，不能假设已经存在。固定公共契约和运行手册合并后才能关闭该门槛。
+- P2 publication 基础关闭已发布 inclusive frontier，未提供 command writers。P8 Mock 写入必须等待 P08-033..040 的独立 requestRevision、receipt-backed same-tick chronology、冻结前缀/immutable certificate 与 readback gate；P2-GATE 不能代替这些动作扩展。禁止直接 UPDATE immutable source/Runtime、假造时间或推进 1ms，规范库仅经同步收敛。
 - 当前只用合成数据。真实 Douyin/Jev/LLM 调用、服务器部署、线上迁移、真实商家数据接入不在本任务池执行授权内。
 - 钱使用币种明确的最小单位整数；时区、期间、定义版本、质量状态和证据不能省略。缺数据不能显示为精确零。
 - 人类审批绑定可信、可撤销的会话与不可变提案版本/哈希/TTL。Agent、Rules、目标均无审批权限。
 - UNKNOWN 写入结果先查询回执/实际状态，禁止盲重试；补偿作为新提案重新审批。
-- 审计在实际业务变更原事务写入；通知依赖 outbox/dedup/cooldown。QA 预期答案不可进入生产推理或决策。
+- 审计在实际业务变更原事务写入；通知依赖仅 IN_APP 收件人 outbox/dedup/cooldown。ACTION_DISPATCH/ACTION_VERIFY 使用独立 typed durable job 契约、表和幂等键；reservation/outcome/job/audit 同事务，dispatchIntent 一次派发，UNKNOWN 只回读，有限 attempt/deadline/lease/fence。QA 预期答案不可进入生产推理或决策。
 
 ## 阅读入口
 
@@ -36,7 +37,7 @@
 2. 在 Issue 自分配，刷新确认 Assignee 只有自己，再将状态改为 In progress、标签改为 `agile:in-progress`。每人同时最多一张。
 3. Issue 留下领取记录：负责人、起始 main SHA、分支、预计完成时间、锁定文件。若同时领取形成多个 Assignee，先由协调人确认一个负责人；其他人换卡，确认前都不开工。原生 Assignee 不是原子抢锁，本协议靠确认避免撞任务。
 4. 组件可使用已合并契约与本地测试夹具交付；`integrationDependsOn` 仅规定真实接线的门槛，不能被夹具“通过”替代。组件 PR 需明确其验证范围。
-5. `files` 是当前卡拥有的文件；`sharedFiles` 是共享变更锁。共享 schema、根导出、模块注册、页面入口同一时间只有一个集成 PR 修改。新文件名为拟定路径，可在保持归属范围后更名，并同步任务卡。
+5. `files` 是当前卡拥有的文件；`sharedFiles` 是共享变更锁。共享 schema、根导出、模块注册、页面入口均按对应文件锁短时串行合并。每张契约卡必须在同一 PR 持 contracts-index（packages/contracts/src/index.ts）共享锁发布公共 root exports，不能推迟到运行集成卡；不同契约文件的设计/编辑/fixture验证仍可并行。运行时根模块与路由注册由指定 integration 卡负责。数据库 store 公共导出同理在 producer PR 持 database-index 锁发布。新文件名为拟定路径，可在保持归属范围后更名，并同步任务卡。
 6. 后续卡必须基于最新 main。发现范围超过 4 小时，先把独立剩余交付拆为后续卡并更新依赖，不能扩大本卡验收或静默积累大 PR。
 7. 卡片数据是初始计划，实际 PR 发生契约/路径调整时同 PR 更新任务池，协调人重新校验受影响依赖和归属。删除需求需先记录产品理由。
 
@@ -54,7 +55,7 @@
 
 ## Ready 与完成门槛
 
-`dependsOn` 表示开始和独立验收前必须合并的任务；`integrationDependsOn` 表示实际连接生产路径前必须合并的任务。`P2-GATE` 由 P2 完成验收关闭。初始仅无硬依赖的卡标 Ready；依赖合并后由协调人检查文件锁，再将后继卡放 Ready。此版本不声称自动解析依赖或自动原子领取。
+`dependsOn` 表示开始和独立验收前必须合并的任务；`integrationDependsOn` 表示实际连接生产路径前必须合并的任务。`P2-GATE` 由 P2 完成验收关闭。真实接线卡的硬依赖闭包必须包含已消费叶子的全部 integrationDependsOn，以及明确的实际 metric/Agent/auth/upload/parser/strategy/source 实现门槛；缺少任一实现不能 Ready。组件用 fixture Done 只代表接口交付。初始仅无硬依赖的卡标 Ready；依赖合并后由协调人检查文件锁，再将后继卡放 Ready。此版本不声称自动解析依赖或自动原子领取。
 
 每卡的统一交付步骤：
 
@@ -82,7 +83,7 @@
 
 **Security / Privacy:** 不发布密码、连接串、真实商家经营数据；不改变仓库/Project 的 private 可见性、不邀请或赋权协作者。
 
-**Tests / Manual:** 校验唯一 ID、Phase 3–13 覆盖、1–4h、依赖存在/无环、文件归属、验收和测试字段；核对 GitHub Issue 数、标签、milestone、Project 自动加入和 Ready 队列。
+**Tests / Manual:** 计划阶段仅静态验证。未来真实 PostgreSQL 证明必须由每张拥有测试的卡持 runner/config 锁注册精确 nested DB 或 API 目标；API 使用 `test/**/*.e2e-spec.ts`，tenant include/default exclude。pnpm test:tenant 清除继承开发 DATABASE_URL，仅注入 isolatedPostgres disposable lifecycle 产生的 TEST_DATABASE_URL/runtime DATABASE_URL；零选择、零执行或 skip 均失败并确保 finally stop。嵌套 DB 测试不能依赖默认 test/\*.test.mjs。校验唯一 ID、Phase 3–13 覆盖、1–4h、依赖存在/无环、文件归属、验收和测试字段；核对 GitHub Issue 数、标签、milestone、Project 自动加入和 Ready 队列。
 
 **Risks:** 契约卡完成前叶子组件不能假装已有真实接口。1–4h 为单卡估算；数据库隔离/并发证明可能暴露新工作，应重新拆卡。手动领取必须刷新确认唯一负责人。
 
