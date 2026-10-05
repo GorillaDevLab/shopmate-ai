@@ -541,6 +541,16 @@ test("lease references reject invalid revisions, fences, owners and extra keys",
   ])
     inputError(() => codec.validateLeaseRef(value));
 });
+test("lease references require canonical lowercase RFC 4122 v4 owners", () => {
+  assert.doesNotThrow(() => codec.validateLeaseRef(leaseFixture));
+  for (const ownerId of [
+    leaseFixture.ownerId.toUpperCase(),
+    "123e4567-e89b-12d3-a456-426614174000",
+    "123e4567-e89b-42d3-7456-426614174000",
+    "00000000-0000-0000-0000-000000000000",
+  ])
+    inputError(() => codec.validateLeaseRef({ ...leaseFixture, ownerId }));
+});
 test("publication rejects inconsistent stored sequence, counts and fields", () => {
   for (const value of [
     { ...publicationFixture, highEventSeq: "7" },
@@ -780,6 +790,17 @@ test("stored build lease rejects invalid bounds and checkpoint mismatch", () => 
     { baseHighEventSeq: "2" },
   ])
     assert.throws(() => codec.validateBuildLease({ ...storedLeaseFixture, ...patch }), {
+      code: "SOURCE_INTEGRITY",
+    });
+});
+test("stored build lease maps malformed owner UUIDs to source integrity", () => {
+  for (const ownerId of [
+    storedLeaseFixture.ownerId.toUpperCase(),
+    "123e4567-e89b-12d3-a456-426614174000",
+    "123e4567-e89b-42d3-7456-426614174000",
+    "00000000-0000-0000-0000-000000000000",
+  ])
+    assert.throws(() => codec.validateBuildLease({ ...storedLeaseFixture, ownerId }), {
       code: "SOURCE_INTEGRITY",
     });
 });
