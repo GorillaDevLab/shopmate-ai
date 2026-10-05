@@ -1,3 +1,11 @@
+import type {
+  ClaimResult,
+  FailResult,
+  LeaseRef,
+  RenewResult,
+  SourceFailureCode,
+} from "./publication-types.js";
+
 export interface SourceScope {
   readonly organizationId: string;
   readonly workspaceId: string;
@@ -41,6 +49,9 @@ export interface MockSourceReader {
 export interface MockSourceWorker {
   listGrants(): Promise<readonly SourceWorkerGrant[]>;
   initializeGeneration(actor: SourceWorkerActor, scope: SourceScope): Promise<SourceInitialization>;
+  claim(actor: SourceWorkerActor, scope: SourceScope): Promise<ClaimResult>;
+  renew(actor: SourceWorkerActor, lease: LeaseRef): Promise<RenewResult>;
+  fail(actor: SourceWorkerActor, lease: LeaseRef, code: SourceFailureCode): Promise<FailResult>;
   close(): Promise<void>;
 }
 export type SourceEnvironment = Readonly<Record<string, string | undefined>>;

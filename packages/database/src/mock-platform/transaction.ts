@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { verifyCredentials, type SourceMode, type SourcePool } from "./clients.js";
-import { isGuardDenial, sanitized, SourceAccessDenied, SourceStorageError } from "./errors.js";
+import { SourceStorageError, transactionFailure, type SourceFailureStatus } from "./errors.js";
 import type { SourceReadActor, SourceScope, SourceWorkerGrant } from "./types.js";
 
 async function rollbackFailed(client: pg.PoolClient | undefined, begun: boolean): Promise<boolean> {
@@ -17,6 +17,7 @@ export async function transaction<T>(
   mode: SourceMode,
   action: (client: pg.PoolClient) => Promise<T>,
   rollbackWhen: (result: T) => boolean = () => false,
+  failures: readonly SourceFailureStatus[] = ["DENIED"],
 ): Promise<T> {
   let client: pg.PoolClient | undefined;
   let begun = false;
@@ -39,8 +40,8 @@ export async function transaction<T>(
     return result;
   } catch (error) {
     discard = (await rollbackFailed(client, begun)) || discard;
-    if (isGuardDenial(error) && !discard) throw new SourceAccessDenied();
-    throw sanitized(error);
+    if (discard) throw new SourceStorageError("SOURCE_STORAGE");
+    throw transactionFailure(error, failures);
   } finally {
     client?.off("error", onError);
     client?.release(discard);

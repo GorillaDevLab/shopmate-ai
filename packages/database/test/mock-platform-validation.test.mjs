@@ -25,6 +25,20 @@ test("dedicated source factories exist without normal index exports", async () =
   );
 });
 
+test("source worker exposes bounded lease operations", async () => {
+  const worker = source.createMockSourceWorker({
+    MOCK_PLATFORM_WORKER_DATABASE_URL: "postgresql://source@127.0.0.1:1/test",
+  });
+  try {
+    for (const method of ["claim", "renew", "fail"])
+      assert.equal(typeof worker[method], "function", method);
+    for (const method of ["appendChunk", "publish", "findPublication"])
+      assert.equal(Object.hasOwn(worker, method), false, method);
+  } finally {
+    await worker.close();
+  }
+});
+
 test("missing, fallback and malformed source URLs fail without leaking secrets", () => {
   assert.ok(source, "source port must exist");
   for (const env of [
@@ -39,6 +53,34 @@ test("missing, fallback and malformed source URLs fail without leaking secrets",
   }
 });
 
+async function rejectBadReaderActors(reader) {
+  for (const bad of [
+    null,
+    [],
+    { userId: "u" },
+    { userId: "bad space", merchantId: "m" },
+    { userId: "u", merchantId: "m", bypass: true },
+  ])
+    await assert.rejects(reader.findGeneration(bad, scope), { code: "SOURCE_INPUT" });
+}
+
+async function rejectBadScopes(reader) {
+  for (const bad of [
+    null,
+    [],
+    { ...scope, generation: -1 },
+    { ...scope, generation: 2147483648 },
+    { ...scope, generation: 1.1 },
+    { ...scope, organizationId: "bad space" },
+    { ...scope, externalStoreId: "\n" },
+    { ...scope, externalStoreId: "x".repeat(201) },
+    { ...scope, extra: true },
+  ])
+    await assert.rejects(reader.findGeneration({ userId: "u", merchantId: "m" }, bad), {
+      code: "SOURCE_INPUT",
+    });
+}
+
 test("strict invalid inputs fail before an unreachable database is contacted", async () => {
   assert.ok(source, "source port must exist");
   const env = {
@@ -48,29 +90,8 @@ test("strict invalid inputs fail before an unreachable database is contacted", a
   const reader = source.createMockSourceReader(env);
   const worker = source.createMockSourceWorker(env);
   try {
-    for (const bad of [
-      null,
-      [],
-      { userId: "u" },
-      { userId: "bad space", merchantId: "m" },
-      { userId: "u", merchantId: "m", bypass: true },
-    ])
-      await assert.rejects(reader.findGeneration(bad, scope), (e) => e.code === "SOURCE_INPUT");
-    for (const bad of [
-      null,
-      [],
-      { ...scope, generation: -1 },
-      { ...scope, generation: 2147483648 },
-      { ...scope, generation: 1.1 },
-      { ...scope, organizationId: "bad space" },
-      { ...scope, externalStoreId: "\n" },
-      { ...scope, externalStoreId: "x".repeat(201) },
-      { ...scope, extra: true },
-    ])
-      await assert.rejects(
-        reader.findGeneration({ userId: "u", merchantId: "m" }, bad),
-        (e) => e.code === "SOURCE_INPUT",
-      );
+    await rejectBadReaderActors(reader);
+    await rejectBadScopes(reader);
     for (const actor of [{}, { grantId: "g", userId: "u" }, { grantId: "bad space" }])
       await assert.rejects(
         worker.initializeGeneration(actor, scope),
@@ -78,6 +99,33 @@ test("strict invalid inputs fail before an unreachable database is contacted", a
       );
   } finally {
     await reader.close();
+    await worker.close();
+  }
+});
+
+test("lease inputs reject before an unreachable database is contacted", async () => {
+  const worker = source.createMockSourceWorker({
+    MOCK_PLATFORM_WORKER_DATABASE_URL: "postgresql://source@127.0.0.1:1/test",
+  });
+  const actor = { grantId: "g" };
+  const lease = {
+    scope,
+    revision: "1",
+    fence: "1",
+    ownerId: "123e4567-e89b-42d3-a456-426614174000",
+  };
+  try {
+    await assert.rejects(worker.claim({}, scope), { code: "SOURCE_INPUT" });
+    await assert.rejects(worker.claim(actor, null), { code: "SOURCE_INPUT" });
+    for (const bad of [null, [], {}, { ...lease, extra: true }, { ...lease, scope: null }]) {
+      await assert.rejects(worker.renew(actor, bad), { code: "SOURCE_INPUT" });
+      await assert.rejects(worker.fail(actor, bad, "INTERRUPTED"), { code: "SOURCE_INPUT" });
+    }
+    await assert.rejects(worker.renew(actor, { ...lease, ownerId: "bad" }), {
+      code: "SOURCE_INPUT",
+    });
+    await assert.rejects(worker.fail(actor, lease, "PRIVATE_MESSAGE"), { code: "SOURCE_INPUT" });
+  } finally {
     await worker.close();
   }
 });

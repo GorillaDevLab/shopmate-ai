@@ -197,6 +197,7 @@ export type AppendResult =
     }
   | { readonly status: "FENCED" | "CONFLICT" | "DENIED" };
 export type FailResult = { readonly status: "FAILED" } | { readonly status: "FENCED" | "DENIED" };
+export type SourceFailureCode = "INTERRUPTED" | "GENERATOR_INVALID";
 export type PublishResult =
   | { readonly status: "PUBLISHED" | "ALREADY_PUBLISHED"; readonly publication: Publication }
   | { readonly status: "FENCED" | "CONFLICT" | "DENIED" };

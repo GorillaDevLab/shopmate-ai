@@ -107,6 +107,19 @@ export function validateLeaseRef(value: unknown): asserts value is LeaseRef {
   validateDataBounds(value, 4096);
   leaseFields(fields(value, leaseKeys));
 }
+function accepted(run: () => void): boolean {
+  try {
+    run();
+    return true;
+  } catch (error) {
+    if (!(error instanceof SourceStorageError)) throw error;
+    return false;
+  }
+}
+export function validateLeaseInput(value: unknown): asserts value is LeaseRef {
+  if (accepted(() => validateLeaseRef(value)) || accepted(() => validateBuildLease(value))) return;
+  throw new SourceStorageError("SOURCE_INPUT");
+}
 function lastEvent(value: unknown): asserts value is LastEvent {
   const event = fields(value, ["occurredAt", "kind", "entityKey", "ordinal"]);
   requireInput(
