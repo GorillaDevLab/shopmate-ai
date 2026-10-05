@@ -67,7 +67,9 @@ export function maintenanceClient(client, user) {
 export async function grantControl(client, login) {
   // Locally fixed fixture login identifiers, never user input.
   assert.match(login, /^[a-z_]+$/u);
-  await client.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
+  // The mandatory harness shares cluster roles across disposable databases.
+  if (!(await client.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [login])).rowCount)
+    await client.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
   await client.query(`GRANT USAGE ON SCHEMA public,demo TO ${login}`);
   await client.query(
     `GRANT SELECT ON public."Organization",public."OrganizationMember",public."Workspace",public."WorkspaceMember",public."Store",public."DemoTenant",public."TenantBootstrapEnvironment" TO ${login}`,
