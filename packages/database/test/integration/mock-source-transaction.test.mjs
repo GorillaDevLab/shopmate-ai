@@ -60,10 +60,10 @@ before(async () => {
   worker2 = await login(url.toString(), "source_worker_login");
   barrier = await login(url.toString(), url.username);
   pair = await collisionPair(admin, worker);
-});
-test("authorized colliding RENEW scopes roll back both byte-equivalent committed leases", async () => {
   leases = await collisionPair(admin, worker, 1);
   await committedClaims(worker, leases);
+});
+test("authorized colliding RENEW scopes roll back both byte-equivalent committed leases", async () => {
   const before = await jobsText(admin, leases);
   try {
     await start(worker, leases[0], "RENEW", leases[0].job);
