@@ -15,8 +15,10 @@ import { freshAppend, eventFor } from "../helpers/mock-source-append-fixture.mjs
 import { seal } from "../helpers/mock-source-publish-fixture.mjs";
 import {
   CONTROL,
+  MUTATION,
   outcome,
   assertAuthorized,
+  mutateSource,
   fullSnapshot,
   sourceState,
   exactLock,
@@ -24,6 +26,7 @@ import {
   rawStatement,
   assertRawDenial,
   proveRawCandidate,
+  oldOperation,
   noMutationMarker,
   assertNoResidue,
 } from "../helpers/mock-source-control-race-fixture.mjs";
@@ -266,6 +269,77 @@ for (const variant of Object.keys(variants)) {
     );
   }
 }
+
+async function assertNoAuthRowLocks() {
+  const result = await admin.query(
+    `SELECT l.relation::regclass::text AS relation,l.mode FROM pg_locks l
+    WHERE l.pid=$1 AND l.granted AND l.relation=ANY($2::regclass[]) AND l.mode=ANY($3::text[])`,
+    [
+      worker.processID,
+      [
+        'demo."MockWorkerGrant"',
+        'public."OrganizationMember"',
+        'public."WorkspaceMember"',
+        'public."Workspace"',
+        'public."DemoTenant"',
+      ],
+      [
+        "RowShareLock",
+        "RowExclusiveLock",
+        "ShareRowExclusiveLock",
+        "ExclusiveLock",
+        "AccessExclusiveLock",
+      ],
+    ],
+  );
+  assert.deepEqual(result.rows, []);
+}
+
+async function commitGrantWithoutBarrier(context) {
+  const started = Date.now();
+  await operator.query("BEGIN");
+  await operator.query("SET LOCAL statement_timeout='2s'");
+  await changeAuth(operator, context, "grant");
+  await operator.query("COMMIT");
+  const operatorMs = Date.now() - started;
+  assert.ok(operatorMs < 2000);
+  return operatorMs;
+}
+
+async function freshLossAfterGuards(t, op) {
+  const context = await freshAppend(admin, worker, `authafter-${op.toLowerCase()}`);
+  const event = eventFor(context);
+  if (op === "PUBLISH") await seal(worker, context, [event]);
+  await assertAuthorized(worker, context);
+  const before = await fullSnapshot(admin, context);
+  const original = await authRow(admin, context, "grant");
+  try {
+    const result = await mutateSource(worker, context, op, event);
+    assert.equal(result.rowCount, 1);
+    const held = await exactLock(admin, context, CONTROL, true, worker.processID);
+    const marker = await exactLock(admin, context, MUTATION, true, worker.processID);
+    await assertNoAuthRowLocks();
+    const operatorMs = await commitGrantWithoutBarrier(context);
+    t.diagnostic(JSON.stringify({ op, held, marker, operatorMs }));
+    await assert.rejects(worker.query("COMMIT"), (error) => error.code === "SM001");
+    await worker.query("ROLLBACK");
+    assertOnlyAuthChanged(before, await fullSnapshot(admin, context), "grant", context.grant);
+    await assertRevoked(context, "grant", original);
+    await oldOperation(worker, context, "APPEND", event);
+    await oldOperation(worker, context, "PUBLISH", event);
+    await assertOtherScope();
+  } finally {
+    await releaseAndRestore(context, "grant", original);
+  }
+  assert.deepEqual(await fullSnapshot(admin, context), before);
+}
+
+for (const op of ["APPEND", "PUBLISH"])
+  test(
+    `${op} holds CONTROL and mutation marker while independent grant revocation commits`,
+    { timeout: 20000 },
+    (t) => freshLossAfterGuards(t, op),
+  );
 
 test("authorization race fixtures leave no locks, hooks or elevated logins", () =>
   assertNoResidue(admin, worker, operator));
