@@ -16,7 +16,11 @@
 - 输入严格验证并 sanitize；环境变量存储密钥；SQL 参数化；API 默认认证，完整租户 scope 来自可信身份与严格解析。
 - UI 最小断点 375px；加载、空、错误三态；破坏性操作二次确认；保持现有设计系统。
 - P2 尚未交付的实际数据、同步和因果夹具用外部 `P2-GATE` 表示，不能假设已经存在。固定公共契约和运行手册合并后才能关闭该门槛。
-- P2 publication 基础关闭已发布 inclusive frontier，未提供 command writers。P8 Mock 写入必须等待 P08-033..040 的独立 requestRevision、receipt-backed same-tick chronology、冻结前缀/immutable certificate 与 readback gate；P2-GATE 不能代替这些动作扩展。禁止直接 UPDATE immutable source/Runtime、假造时间或推进 1ms，规范库仅经同步收敛。
+- P2 publication 基础关闭已发布 inclusive frontier，未提供 command writers。P8 Mock 写入必须等待 P08-033..040 的独立 requestRevision、receipt-backed same-tick chronology、冻结前缀/immutable certificate 与 readback gate，以及 P08-043..050 的 clock allocator、正常 publisher host/read/cursor/sync 扩展和公开运行证明；P2-GATE 不能代替这些动作扩展。禁止直接 UPDATE immutable source/Runtime、假造时间或推进 1ms，规范库仅经同步收敛。
+- 源 CAS 除 published sourceVersion 外必须保留持久资源占位：P08-052/053/036 拒绝同资源 accepted 未 published 期间第二 distinct key/hash（RESOURCE_PENDING），exact key/hash retry 返回原 receipt。certificate 发布与匹配 scope/fence/prefix 的占位 clearance 同事务；restart 保留占位，reset/disconnect 原子隔离旧 generation。P08-056 证明两个 distinct keys 同 expectedVersion、publication 前的确定性交错至多一 mutation，发布后 fresh version 同 clock 可续下一请求。
+- 普通读取与同步不能偷偷驱动发布。P08-044/049 由正常 API bootstrap/startup/poll 驱动 durable publisher 并恢复旧 job；P08-043 将真实 accepted clock request 纳入同一 allocator。P08-045/046 拥有 request-aware public read/scan/cursor，P08-048/047 拥有 durable normalized sync pin 与普通 sync adapter；P08-050 从真实 approved execute HTTP 证明自动发布、独立回读及正常同步，测试不手动调用 publisher。旧 pinned pages 不变，新 scan 同 clock 看更高 request，规范 facts/cursor/pin 只由 sync 同事务提交。新增 reader/sync 路径明确为 P2-GATE 后适配的拟定路径，先登记真实 handoff 文件归属，不重新实现 P2 base。
+- 价格补偿选定 PRICE_SET 的 strict typed compensation metadata（P08-051），完整 parent/candidate/restore/sourceVersion 进入 immutable payload/hash 与新的 human approval；不新增 PRICE_COMPENSATION kind。P08-054/055 拥有 durable parent→candidate→new approval→child 模型/约束/事务端口。builder/outcome/read/runtime 均以其为门槛；cancel/reject 未执行候选只终止关联并原子恢复保存的 parent prior Action 状态（原 SUCCEEDED），保留原 verified execution/source事实，不能称恢复旧价或回滚成功；UNKNOWN child 不能取消掩盖未知 mutation。
+- 浏览器证明须使用显式拥有的生命周期：P05-013 的 `pnpm test:browser:fixture -- tests/e2e/overview-evidence.spec.ts` 只启动 Web 并在测试限定 routes 注入合成 deterministic fixtures，只证明 UI。P08-042 的 `pnpm test:browser:isolated -- <本卡精确目标>` 独立创建/准备 disposable DB，给 API 注入唯一 restricted runtime URL，Web 只连本次 API，finally 停止全部 API/Web/DB。它不读 `.env`、不继承开发 DATABASE_URL、不复用 server；选择/执行须非零且 0 skipped。P06-018/P08-030/P10-016 硬依赖它，真实 runtime API response 不能被浏览器 route fixture 替代；单独跑完 `pnpm test:tenant` 不能为后续 Playwright 提供数据库。
 - 当前只用合成数据。真实 Douyin/Jev/LLM 调用、服务器部署、线上迁移、真实商家数据接入不在本任务池执行授权内。
 - 钱使用币种明确的最小单位整数；时区、期间、定义版本、质量状态和证据不能省略。缺数据不能显示为精确零。
 - 人类审批绑定可信、可撤销的会话与不可变提案版本/哈希/TTL。Agent、Rules、目标均无审批权限。
@@ -83,7 +87,7 @@
 
 **Security / Privacy:** 不发布密码、连接串、真实商家经营数据；不改变仓库/Project 的 private 可见性、不邀请或赋权协作者。
 
-**Tests / Manual:** 计划阶段仅静态验证。未来真实 PostgreSQL 证明必须由每张拥有测试的卡持 runner/config 锁注册精确 nested DB 或 API 目标；API 使用 `test/**/*.e2e-spec.ts`，tenant include/default exclude。pnpm test:tenant 清除继承开发 DATABASE_URL，仅注入 isolatedPostgres disposable lifecycle 产生的 TEST_DATABASE_URL/runtime DATABASE_URL；零选择、零执行或 skip 均失败并确保 finally stop。嵌套 DB 测试不能依赖默认 test/\*.test.mjs。校验唯一 ID、Phase 3–13 覆盖、1–4h、依赖存在/无环、文件归属、验收和测试字段；核对 GitHub Issue 数、标签、milestone、Project 自动加入和 Ready 队列。
+**Tests / Manual:** 计划阶段仅静态验证。未来真实 PostgreSQL 证明必须由每张拥有测试的卡持 runner/config 锁注册精确 nested DB 或 API 目标；API 使用 `test/**/*.e2e-spec.ts`，tenant include/default exclude。pnpm test:tenant 清除继承开发 DATABASE_URL，仅注入 isolatedPostgres disposable lifecycle 产生的 TEST_DATABASE_URL/runtime DATABASE_URL；零选择、零执行或 skip 均失败并确保 finally stop。嵌套 DB 测试不能依赖默认 test/\*.test.mjs。浏览器 fixture 与 isolated 命令分别由 P05-013/P08-042 拥有，四张浏览器验收卡只用对应显式 config/lifecycle，不能调用默认 Playwright 开发库入口；真实 source runtime proof P08-050 不手动驱动 publisher。校验唯一 ID、Phase 3–13 覆盖、1–4h、依赖存在/无环、文件归属、验收和测试字段；核对 GitHub Issue 数、标签、milestone、Project 自动加入和 Ready 队列。
 
 **Risks:** 契约卡完成前叶子组件不能假装已有真实接口。1–4h 为单卡估算；数据库隔离/并发证明可能暴露新工作，应重新拆卡。手动领取必须刷新确认唯一负责人。
 
