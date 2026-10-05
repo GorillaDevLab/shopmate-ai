@@ -11,6 +11,7 @@ import {
   eventFor,
   appendSettings,
   insertEvent,
+  snapshot,
   nextFor,
 } from "../helpers/mock-source-append-fixture.mjs";
 import {
@@ -22,6 +23,7 @@ import {
 } from "../helpers/mock-source-publish-fixture.mjs";
 import {
   CONTROL,
+  MUTATION,
   beginOperation,
   assertAuthorized,
   proveRawCandidate,
@@ -29,6 +31,9 @@ import {
   rawStatement,
   mutateSource,
   fullSnapshot,
+  exactLock,
+  outcome,
+  noMutationMarker,
 } from "../helpers/mock-source-control-race-fixture.mjs";
 
 const state = isolationHarness();
@@ -214,3 +219,102 @@ test("published reader enforces workspace assignment with exact A B denied A act
     await rollbackAll(state);
   }
 });
+async function concurrentPair(op, collision) {
+  let ids = [];
+  if (collision) {
+    const result = await state.admin.query(
+      "SELECT array_agg(id ORDER BY id) AS ids FROM (SELECT 'iso-collision-'||n AS id,hashtext('iso-collision-'||n) AS hash FROM generate_series(1,300000) n) k GROUP BY hash HAVING count(*)>1 ORDER BY hash LIMIT 1 OFFSET $1",
+      [op === "APPEND" ? 0 : 1],
+    );
+    assert.ok(result.rows[0]);
+    ids = result.rows[0].ids;
+  }
+  const pair = [];
+  for (const [index, key] of ["a", "b"].entries())
+    pair.push(
+      await prepared(
+        `parallel-${op}-${collision}-${key}`,
+        op,
+        key,
+        ids.length ? { sessionId: ids[index] } : {},
+      ),
+    );
+  const hashes = await state.admin.query(
+    "SELECT hashtext($1)=hashtext($2) AS equal",
+    pair.map((context) => context.scope.sessionId),
+  );
+  assert.equal(hashes.rows[0].equal, collision);
+  return pair;
+}
+async function stagedMutation(worker, context, op, foreign) {
+  const result = await mutateSource(worker, context, op, eventFor(context));
+  assert.equal(result.rowCount, 1);
+  if (foreign)
+    assert.deepEqual(await snapshot(worker, foreign), { jobs: [], events: [], versions: [] });
+  return snapshot(worker, context);
+}
+async function assertCommitted(context, staged, before, op) {
+  const after = await fullSnapshot(state.admin, context);
+  assert.deepEqual(after, { ...before, ...staged });
+  for (const key of ["runtimes", "session", "connection", "audit", "grants"])
+    assert.deepEqual(after[key], before[key]);
+  assert.equal(after.events.length, 1);
+  assert.equal(after.versions.length, 1);
+  assert.equal(after.jobs[0].state, op === "PUBLISH" ? "PUBLISHED" : "BUILDING");
+  const visible = await readerRows(context);
+  assert.equal(visible.certs.length, op === "PUBLISH" ? 1 : 0);
+  assert.equal(visible.versions.length, op === "PUBLISH" ? 1 : 0);
+  for (const row of [...visible.certs, ...visible.versions])
+    for (const [key, value] of Object.entries(context.scope)) assert.equal(row[key], value);
+  assert.deepEqual(
+    await readerRows(
+      context,
+      "source-human",
+      context.scope.organizationId.endsWith("a") ? "source-merchant-b" : "source-merchant-a",
+    ),
+    { certs: [], versions: [] },
+  );
+}
+async function concurrency(t, op, collision) {
+  const pair = await concurrentPair(op, collision),
+    [a, b] = pair;
+  const before = [await fullSnapshot(state.admin, a), await fullSnapshot(state.admin, b)];
+  let pending;
+  try {
+    const first = await stagedMutation(state.worker, a, op, b);
+    const firstControl = await exactLock(state.admin, a, CONTROL, true, state.worker.processID);
+    const firstMarker = await exactLock(state.admin, a, MUTATION, true, state.worker.processID);
+    pending = outcome(stagedMutation(state.other, b, op, a));
+    if (collision) {
+      t.diagnostic(
+        JSON.stringify({
+          firstControl,
+          firstMarker,
+          waiting: await exactLock(state.admin, b, CONTROL, false, state.other.processID),
+        }),
+      );
+      await noMutationMarker(state.admin, state.other);
+      assert.equal(await snapshots(state, pair), JSON.stringify(before));
+      await state.worker.query("COMMIT");
+    }
+    const second = await pending;
+    assert.ifError(second.error);
+    const secondControl = await exactLock(state.admin, b, CONTROL, true, state.other.processID);
+    const secondMarker = await exactLock(state.admin, b, MUTATION, true, state.other.processID);
+    assert.notEqual(firstMarker.key, secondMarker.key);
+    t.diagnostic(JSON.stringify({ firstControl, firstMarker, secondControl, secondMarker }));
+    if (!collision) await state.worker.query("COMMIT");
+    await state.other.query("COMMIT");
+    await assertCommitted(a, first, before[0], op);
+    await assertCommitted(b, second.result, before[1], op);
+  } finally {
+    await rollbackAll(state, [pending]);
+  }
+}
+for (const op of ["APPEND", "PUBLISH"])
+  for (const collision of [false, true])
+    test(
+      `${op} distinct actual backends ${collision ? "serialize colliding" : "concurrently hold independent"} CONTROL scopes`,
+      { timeout: 25000 },
+      (t) => concurrency(t, op, collision),
+    );
