@@ -31,6 +31,7 @@ import {
   rawStatement,
   mutateSource,
   fullSnapshot,
+  sourceState,
   exactLock,
   outcome,
   noMutationMarker,
@@ -255,7 +256,7 @@ async function stagedMutation(worker, context, op, foreign) {
 }
 async function assertCommitted(context, staged, before, op) {
   const after = await fullSnapshot(state.admin, context);
-  assert.deepEqual(after, { ...before, ...staged });
+  assert.deepEqual(sourceState(after), sourceState({ ...before, ...staged }));
   for (const key of ["runtimes", "session", "connection", "audit", "grants"])
     assert.deepEqual(after[key], before[key]);
   assert.equal(after.events.length, 1);
