@@ -6,6 +6,9 @@ import type {
   LeaseRef,
   RenewResult,
   SourceFailureCode,
+  PublishInput,
+  PublishResult,
+  Publication,
 } from "./publication-types.js";
 
 export interface SourceScope {
@@ -45,6 +48,7 @@ export type SourceInitialization =
   | { readonly status: "CREATED" | "EXISTS"; readonly generation: SourceGeneration }
   | { readonly status: "DENIED" };
 export interface MockSourceReader {
+  findPublication(actor: SourceReadActor, scope: SourceScope): Promise<Publication | null>;
   findGeneration(actor: SourceReadActor, scope: SourceScope): Promise<SourceGeneration | null>;
   close(): Promise<void>;
 }
@@ -55,6 +59,7 @@ export interface MockSourceWorker {
   renew(actor: SourceWorkerActor, lease: LeaseRef): Promise<RenewResult>;
   fail(actor: SourceWorkerActor, lease: LeaseRef, code: SourceFailureCode): Promise<FailResult>;
   appendChunk(actor: SourceWorkerActor, lease: LeaseRef, input: ChunkInput): Promise<AppendResult>;
+  publish(actor: SourceWorkerActor, lease: LeaseRef, input: PublishInput): Promise<PublishResult>;
   close(): Promise<void>;
 }
 export type SourceEnvironment = Readonly<Record<string, string | undefined>>;

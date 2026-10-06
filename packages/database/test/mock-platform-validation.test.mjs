@@ -30,9 +30,9 @@ test("source worker exposes bounded lease operations", async () => {
     MOCK_PLATFORM_WORKER_DATABASE_URL: "postgresql://source@127.0.0.1:1/test",
   });
   try {
-    for (const method of ["claim", "renew", "fail", "appendChunk"])
+    for (const method of ["claim", "renew", "fail", "appendChunk", "publish"])
       assert.equal(typeof worker[method], "function", method);
-    for (const method of ["publish", "findPublication"])
+    for (const method of ["findPublication"])
       assert.equal(Object.hasOwn(worker, method), false, method);
   } finally {
     await worker.close();

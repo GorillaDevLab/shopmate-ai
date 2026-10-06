@@ -4,6 +4,8 @@ import { findGeneration, initializeGeneration } from "./generations.js";
 import { findGrant, listGrants, matchesGrant } from "./grants.js";
 import { assertFailureCode, claimJob, failJob, renewJob } from "./jobs.js";
 import { appendChunk } from "./journal.js";
+import { publish } from "./publication.js";
+import { findPublication } from "./publication-certificate.js";
 import type {
   ClaimResult,
   AppendResult,
@@ -12,8 +14,14 @@ import type {
   LeaseRef,
   RenewResult,
   SourceFailureCode,
+  PublishInput,
+  PublishResult,
 } from "./publication-types.js";
-import { validateChunk, validateLeaseInput } from "./publication-validation.js";
+import {
+  validateChunk,
+  validateLeaseInput,
+  validatePublishInput,
+} from "./publication-validation.js";
 import {
   currentAccess,
   lockControl,
@@ -38,6 +46,11 @@ export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
   return {
+    async findPublication(actor, scope) {
+      validateReadActor(actor);
+      validateScope(scope);
+      return findPublication(pool, actor, scope);
+    },
     async findGeneration(actor, scope) {
       validateReadActor(actor);
       validateScope(scope);
@@ -65,8 +78,25 @@ export function createMockSourceWorker(env: SourceEnvironment): MockSourceWorker
     renew: (actor, lease) => renewControlled(pool, actor, lease),
     fail: (actor, lease, code) => failControlled(pool, actor, lease, code),
     appendChunk: (actor, lease, input) => appendControlled(pool, actor, lease, input),
+    publish: (actor, lease, input) => publishControlled(pool, actor, lease, input),
     close: () => pool.end(),
   };
+}
+async function publishControlled(
+  pool: SourcePool,
+  actor: SourceWorkerActor,
+  lease: LeaseRef,
+  input: PublishInput,
+): Promise<PublishResult> {
+  validateWorkerActor(actor);
+  validateLeaseInput(lease);
+  validatePublishInput(input);
+  try {
+    return await publish(pool, actor, lease, input);
+  } catch (error) {
+    if (error instanceof SourceDomainFailure) return { status: error.status };
+    throw error;
+  }
 }
 async function appendControlled(
   pool: SourcePool,
