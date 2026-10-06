@@ -29,6 +29,7 @@ export async function lockJournal(
   client: pg.PoolClient,
   lease: LeaseRef,
 ): Promise<JournalState | null> {
+  // Even an empty committed chunk has a receipt; only the initial checkpoint lacks one.
   const result = await client.query<JournalState>(
     `SELECT state='BUILDING' AND fence::text=$9 AND "leaseOwner"=$10
        AND "leaseGrantId"=current_setting('mock.grant_id',true) AND "leaseUntil">clock_timestamp() AS matches,
@@ -36,6 +37,7 @@ export async function lockJournal(
        'codec','source-checkpoint-hash-v1','scope',mock_platform.source_scope(to_jsonb(j)),
        'revision',revision::text,'checkpoint',checkpoint)) AND checkpoint->>'highEventSeq'="highEventSeq"::text
        AND checkpoint->>'processedThrough'=mock_platform.canonical_utc("processedThrough")
+       AND (checkpoint->>'chunkIndex'='0')=("lastAppendHash" IS NULL)
        AND "eventCount"="versionCount" AND "highEventSeq"::numeric="baseHighEventSeq"::numeric+"eventCount"::numeric AS valid
      FROM mock_platform."BuildJob" j WHERE ${journalScopeWhere} AND revision=$8::bigint FOR UPDATE`,
     [...journalValues(lease), lease.fence, lease.ownerId],

@@ -491,6 +491,50 @@ test("NFC spelling cannot authorize an NFD namespace receipt", async () => {
   await unchangedAppend(context, state, input, { ...committed, status: "ALREADY_COMMITTED" });
 });
 
+test("committed checkpoint with its entire receipt cleared is malformed stored state", async () => {
+  const state = await preparedAppend(context);
+  const input = chunkFor(state);
+  const committed = await sdkAppend(context, state, input);
+  assert.equal(committed.status, "COMMITTED");
+  const next = chunkFor(state);
+  next.expectedCheckpointHash = committed.checkpointHash;
+  next.events[0].ordinal = "1";
+  await corruption(
+    context.admin,
+    state,
+    () =>
+      context.admin.query(
+        'UPDATE mock_platform."BuildJob" SET "lastAppendExpectedHash"=NULL,"lastAppendStartSeq"=NULL,"lastAppendEventCount"=NULL,"lastAppendHash"=NULL WHERE "sessionId"=$1',
+        [state.scope.sessionId],
+      ),
+    async () => {
+      await unchangedAppend(context, state, input, "SOURCE_INTEGRITY");
+      await unchangedAppend(context, state, next, "SOURCE_INTEGRITY");
+    },
+  );
+});
+
+test("initial checkpoint legitimately has no receipt and a wrong hash conflicts", async () => {
+  const state = await preparedAppend(context);
+  assert.equal(state.lease.checkpoint.chunkIndex, "0");
+  const rows = await snapshot(context.admin, state);
+  for (const field of [
+    "lastAppendExpectedHash",
+    "lastAppendStartSeq",
+    "lastAppendEventCount",
+    "lastAppendHash",
+  ])
+    assert.equal(rows.jobs[0][field], null);
+  const input = chunkFor(state);
+  await unchangedAppend(
+    context,
+    state,
+    { ...input, expectedCheckpointHash: "a".repeat(64) },
+    { status: "CONFLICT" },
+  );
+  assert.equal((await sdkAppend(context, state, input)).status, "COMMITTED");
+});
+
 test("malformed stored latest receipt hash raises integrity with exact rollback", async () => {
   const state = await preparedAppend(context);
   const input = chunkFor(state);
