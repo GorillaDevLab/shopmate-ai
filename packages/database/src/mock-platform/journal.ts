@@ -12,7 +12,7 @@ import {
   journalValues,
   lockJournal,
 } from "./journal-state.js";
-import { savedReceiptMatches } from "./journal-receipt.js";
+import { savedReceiptMatches, validateSavedReceipt } from "./journal-receipt.js";
 
 async function insertSnapshot(
   client: pg.PoolClient,
@@ -81,8 +81,11 @@ async function appendAction(
   const job = await lockJournal(client, lease);
   await requireCurrentWorkerAccess(client, lease.scope);
   if (!job?.matches) return { status: "FENCED" };
+  // Prove prior committed facts before a fresh append can overwrite their receipt.
+  const receipt = await validateSavedReceipt(client, lease);
   if (job.checkpointHash !== input.expectedCheckpointHash) {
-    if (!(await savedReceiptMatches(client, lease, input))) return { status: "CONFLICT" };
+    if (!receipt || !(await savedReceiptMatches(client, lease, input)))
+      return { status: "CONFLICT" };
     await finalJournalCheck(client, lease);
     return {
       status: "ALREADY_COMMITTED",

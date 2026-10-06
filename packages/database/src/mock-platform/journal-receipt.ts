@@ -35,10 +35,9 @@ const receiptRange = `WITH job AS MATERIALIZED (SELECT j FROM mock_platform."Bui
   AND (SELECT count(*)=(job.j)."lastAppendEventCount" AND count(event_seq)=count(*) AND count(version_seq)=count(*)
     AND coalesce(bool_and(valid IS TRUE),true) FROM matched)) FROM job`;
 
-export async function savedReceiptMatches(
+export async function validateSavedReceipt(
   client: pg.PoolClient,
   lease: LeaseRef,
-  input: ChunkInput,
 ): Promise<boolean> {
   const exists = await client.query<{ receipt: boolean }>(
     `SELECT "lastAppendHash" IS NOT NULL AS receipt
@@ -49,6 +48,14 @@ export async function savedReceiptMatches(
   if (!exists.rows[0].receipt) return false;
   const checked = await client.query(receiptRange, [...journalValues(lease)]);
   if (checked.rowCount !== 1) throw new SourceStorageError("SOURCE_INTEGRITY");
+  return true;
+}
+
+export async function savedReceiptMatches(
+  client: pg.PoolClient,
+  lease: LeaseRef,
+  input: ChunkInput,
+): Promise<boolean> {
   const result = await client.query<{ matches: boolean }>(
     `SELECT mock_platform.saved_append_matches(j,$9::jsonb) AS matches
     FROM mock_platform."BuildJob" j WHERE ${journalScopeWhere} AND revision=$8::bigint`,

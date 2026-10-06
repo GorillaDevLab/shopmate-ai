@@ -379,12 +379,19 @@ for (const [label, sql] of storedChanges)
   test(`official append rejects malformed stored ${label} with whole-state rollback`, async () => {
     const state = await preparedAppend(context);
     const input = chunkFor(state);
-    assert.equal((await sdkAppend(context, state, input)).status, "COMMITTED");
+    const committed = await sdkAppend(context, state, input);
+    assert.equal(committed.status, "COMMITTED");
+    const next = chunkFor(state);
+    next.expectedCheckpointHash = committed.checkpointHash;
+    next.events[0].ordinal = "1";
     await corruption(
       context.admin,
       state,
       () => context.admin.query(sql, [state.scope.sessionId]),
-      () => unchangedAppend(context, state, input, "SOURCE_INTEGRITY"),
+      async () => {
+        await unchangedAppend(context, state, input, "SOURCE_INTEGRITY");
+        await unchangedAppend(context, state, next, "SOURCE_INTEGRITY");
+      },
     );
   });
 
@@ -548,5 +555,24 @@ test("malformed stored latest receipt hash raises integrity with exact rollback"
         [state.scope.sessionId],
       ),
     () => unchangedAppend(context, state, input, "SOURCE_INTEGRITY"),
+  );
+});
+
+test("fresh current-hash append rejects a corrupted prior receipt before replacing it", async () => {
+  const state = await preparedAppend(context);
+  const committed = await sdkAppend(context, state, chunkFor(state));
+  assert.equal(committed.status, "COMMITTED");
+  const next = chunkFor(state);
+  next.expectedCheckpointHash = committed.checkpointHash;
+  next.events[0].ordinal = "1";
+  await corruption(
+    context.admin,
+    state,
+    () =>
+      context.admin.query(
+        'UPDATE mock_platform."BuildJob" SET "lastAppendHash"=repeat(\'a\',64) WHERE "sessionId"=$1',
+        [state.scope.sessionId],
+      ),
+    () => unchangedAppend(context, state, next, "SOURCE_INTEGRITY"),
   );
 });
