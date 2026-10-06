@@ -5,6 +5,7 @@ import pg from "pg";
 import { isolatedPostgres } from "../helpers/isolated-postgres.mjs";
 import { migrateSource, sourceFixtures, loginUrl } from "../helpers/mock-platform-fixture.mjs";
 import { waitLock } from "../helpers/mock-source-control-fixture.mjs";
+import { seal, publish } from "../helpers/mock-source-publish-fixture.mjs";
 import {
   claimSql,
   scopeValues,
@@ -88,6 +89,50 @@ after(async () => {
     }
     await server.stop();
   }
+});
+
+async function assertTimezoneSnapshot(context) {
+  try {
+    await admin.query("BEGIN");
+    await admin.query("SET LOCAL TIME ZONE 'UTC'");
+    await start(worker, context);
+    await worker.query("SET LOCAL TIME ZONE 'Pacific/Auckland'");
+    assert.equal((await admin.query("SHOW TIME ZONE")).rows[0].TimeZone, "UTC");
+    assert.equal((await worker.query("SHOW TIME ZONE")).rows[0].TimeZone, "Pacific/Auckland");
+    const raw = (
+      await admin.query(
+        'SELECT to_jsonb(j) AS job FROM mock_platform."BuildJob" j WHERE "sessionId"=$1',
+        [context.scope.sessionId],
+      )
+    ).rows[0].job;
+    const text = await jobsText(admin, [context]);
+    assert.equal(await jobsText(worker, [context]), text);
+    assert.deepEqual(JSON.parse(text), [
+      {
+        ...raw,
+        createdAt: new Date(raw.createdAt).toISOString(),
+        leaseUntil: new Date(raw.leaseUntil).toISOString(),
+        publishedAt: raw.publishedAt === null ? null : new Date(raw.publishedAt).toISOString(),
+      },
+    ]);
+  } finally {
+    await worker.query("ROLLBACK");
+    await admin.query("ROLLBACK");
+  }
+}
+
+test("full job snapshots preserve timestamps across UTC admin and Auckland worker sessions", async () => {
+  const context = {
+    ...(await newScope(admin, worker, "timezone-snapshot")),
+    principal: "source-worker",
+    owner: pair[0].owner,
+  };
+  await committedClaims(worker, [context]);
+  await assertTimezoneSnapshot(context);
+  await seal(worker, context);
+  context.job = (await publish(worker, context)).rows[0];
+  assert.equal(context.job.state, "PUBLISHED");
+  await assertTimezoneSnapshot(context);
 });
 
 test("authorized colliding CLAIM scopes cannot bypass one mutation with settings and immediate constraints", async () => {

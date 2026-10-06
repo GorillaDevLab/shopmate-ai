@@ -108,7 +108,12 @@ export async function mutate(client, context, job = null) {
 export async function jobsText(admin, contexts) {
   return (
     await admin.query(
-      'SELECT coalesce(jsonb_agg(to_jsonb(j) ORDER BY "sessionId",generation,revision),\'[]\'::jsonb)::text AS jobs FROM mock_platform."BuildJob" j WHERE "sessionId"=ANY($1::text[])',
+      `SELECT coalesce(jsonb_agg(to_jsonb(j)||jsonb_build_object(
+        'createdAt',mock_platform.canonical_utc(j."createdAt"),
+        'leaseUntil',mock_platform.canonical_utc(j."leaseUntil"),
+        'publishedAt',CASE WHEN j."publishedAt" IS NULL THEN NULL ELSE mock_platform.canonical_utc(j."publishedAt") END)
+        ORDER BY "sessionId",generation,revision),'[]'::jsonb)::text AS jobs
+        FROM mock_platform."BuildJob" j WHERE "sessionId"=ANY($1::text[])`,
       [contexts.map((c) => c.scope.sessionId)],
     )
   ).rows[0].jobs;
