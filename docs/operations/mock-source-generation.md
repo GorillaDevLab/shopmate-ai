@@ -1,13 +1,13 @@
-# Restricted Mock source generation foundation
+# Restricted Mock source journal and publication
 
-This unit stores immutable configuration and calendar boundaries for an approved demo session. It initializes no commerce facts and makes no publication claim. The normal database entry point exposes no source client; infrastructure imports the dedicated `@shopmate/database/mock-platform` subpath.
+This unit stores immutable configuration, accepted synthetic commerce snapshots and publication certificates for an approved demo session. Publication certifies the physical completeness of the accepted prefix. A future generator must establish causal and financial completeness. The normal database entry point exposes no source client; infrastructure imports the dedicated `@shopmate/database/mock-platform` subpath.
 
 ## Operator setup
 
-Deployment and online migrations remain deferred. For an approved future release, apply the complete migration history with the separate migration/provisioning identity, including `20261003050000_mock_source_generation`. The migration creates two NOLOGIN capability groups, no deployment logins or credentials:
+Deployment and online migrations remain deferred. For an approved future release, apply the complete migration history with the separate migration/provisioning identity, including `20261003050000_mock_source_generation`, `20261003060000_mock_source_control` and `20261003070000_mock_source_publication`. The migrations create two NOLOGIN capability groups, no deployment logins or credentials:
 
-- `shopmate_mock_source_reader`: SELECT Runtime plus the existing authorization reads and helper execution.
-- `shopmate_mock_source_worker`: SELECT/INSERT Runtime, SELECT its own active grants, and the necessary authorization reads and helpers.
+- `shopmate_mock_source_reader`: SELECT Runtime, public PUBLISHED certificate columns and versions with their own fully bound published certificate, plus existing authorization reads and helper execution. It cannot read source events or private job checkpoint, receipt, lease or failure fields.
+- `shopmate_mock_source_worker`: SELECT/INSERT Runtime, SELECT its own active grants, restricted job transitions and source fact insertion, plus necessary authorization reads and helpers. It cannot change authorization or immutable published certificates.
 
 Provision separate minimally privileged logins through the operator's credential-management process. For example, these statements establish capabilities without embedding passwords:
 
@@ -102,4 +102,12 @@ An append input contains exactly `expectedCheckpointHash`, `next: { processedThr
 
 The private unsealed frontier may equal the target while additional strictly later tuples at that same timestamp remain to be appended. An empty chunk requires frontier progress or sealing an already-equal target; unchanged empty progress conflicts. Seal only after the synthetic generator has supplied its intended prefix. These checks prove physical completeness of accepted facts, not causal or financial completeness of generated commerce. No generator or live platform/Jev integration is delivered by these ports.
 
-Official publication and certificate-reader ports remain the next delivery step. The existing SQL publication checks expose an inclusive published frontier; a private checkpoint does not establish reader coverage. An irreparable open revision requires an authorized reset rather than abandoning its revision. Unchanged-clock command writes still require the separate requestRevision/command-receipt extension. Deployment and online migration remain deferred.
+## Publish and read certificates
+
+Call `publish(actor, lease, { expectedBaseRevision, checkpointHash })` with the current reference after sealing. The worker validates the exact frozen base and checkpoint, complete dense accepted range, one derived version and manifest per event, current authority and live lease. PostgreSQL derives the immutable certificate, canonical UTC dates, decimal sequence/revision strings and certificate hash. The exact job update and deferred COMMIT checks are atomic. The returned `PUBLISHED` certificate exposes inclusive coverage through `processedThrough`, which equals the frozen target. Clock advance can leave that frozen target earlier than the current clock; the next claim targets the advanced clock.
+
+Explicitly retry an uncertain publication with the same reference and exact base/checkpoint expectations. `ALREADY_PUBLISHED` is read-only and remains valid after wall lease expiry, provided current grant, owner, fence, scope and access still match. A changed reference returns `FENCED`, changed expectations return `CONFLICT`, and denied access returns `DENIED`. The SDK never replays automatically and cannot repair an abandoned revision. An irreparable open revision requires an authorized reset; reset and disconnect hide prior-generation certificates without erasing history.
+
+The dedicated reader's `findPublication(actor, scope)` returns the latest own-scope PUBLISHED certificate or null when denied or unpublished. It takes CONTROL and checks current human/merchant access, without resolving a worker grant, locking a job or requiring a lease. It uses only granted public columns, independently verifies the PostgreSQL JSONB certificate hash and validates the stored DTO. Malformed public state raises sanitized `SOURCE_INTEGRITY`; private job state and source events are never returned. A later published head does not authorize versions belonging to an earlier unpublished revision.
+
+Version 1 keeps the existing bounds: at most 100 events and 2 MiB per chunk, at most 256 KiB per record, canonical unsigned bigint decimal strings and the fixed thirty-second database wall lease. The whole-job final publication proof is bounded by accepted data, with no throughput claim. A deliberately empty sealed prefix can be physically complete; it does not establish that a generator supplied all required business events. Unchanged-clock command writes still require the separate requestRevision/command-receipt extension. This delivery uses synthetic data only and includes no real platform, Jev or LLM calls, background generation, scans, connector replacement or full P2 completion. Deployment and online migration remain deferred.
