@@ -84,7 +84,12 @@ export async function fullSnapshot(admin, context) {
 export function sourceState(state) {
   return {
     runtimes: state.runtimes,
-    jobs: state.jobs,
+    jobs: state.jobs.map((job) => ({
+      ...job,
+      createdAt: new Date(job.createdAt).toISOString(),
+      leaseUntil: new Date(job.leaseUntil).toISOString(),
+      publishedAt: job.publishedAt === null ? null : new Date(job.publishedAt).toISOString(),
+    })),
     events: state.events,
     versions: state.versions,
   };

@@ -59,6 +59,8 @@ before(async () => {
   worker = await login(url.toString(), "source_worker_login");
   reader = await login(url.toString(), "source_read_login");
   barrier = await login(url.toString(), url.username);
+  await admin.query("SET TIME ZONE 'UTC'");
+  await worker.query("SET TIME ZONE 'Pacific/Auckland'");
   repo = await import("../../dist/src/index.js");
   await repo.disconnectPrismaClient();
   process.env.DATABASE_URL = loginUrl(url.toString(), "source_control_login");
@@ -94,7 +96,7 @@ async function workerFirst(t, kind, op) {
   try {
     const mutation = await mutateSource(worker, context, op, event);
     assert.equal(mutation.rowCount, 1);
-    const staged = { ...sourceState(before), ...(await snapshot(worker, context)) };
+    const staged = sourceState({ ...before, ...(await snapshot(worker, context)) });
     const held = await exactLock(admin, context, CONTROL, true, worker.processID);
     const marker = await exactLock(admin, context, MUTATION, true, worker.processID);
     changed = outcome(changeControl(repo, context, kind));
