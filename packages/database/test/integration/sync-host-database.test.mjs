@@ -27,6 +27,7 @@ test("generic sync host persists scoped fixed-window jobs under restricted worke
     await t.test("grant provisioning requires an exact active VIEWER workspace scope", () =>
       assertInvalidGrantDenied(database.admin),
     );
+    await t.test("dangerous owner membership denies provisioning and current access", () => assertDangerousRoleDenied(database));
     await t.test("worker claims one stream job and expired takeover preserves its cursor", () =>
       assertLeaseRecovery(database),
     );
@@ -102,6 +103,24 @@ async function assertPeerLeaseDenied(url, id) {
     await assert.rejects(peer.query('UPDATE sync_host."Job" SET "leaseUntil"=clock_timestamp() WHERE id=$1 AND fence=$2', [id, 1]), (e) => e.code === "23514");
     await assert.rejects(peer.query('UPDATE sync_host."Job" SET status=$1,"failureCode"=$2 WHERE id=$3 AND fence=$4', ["FAILED", "READ_TIMEOUT", id, 1]), (e) => e.code === "23514");
   } finally { await peer.end(); }
+}
+
+async function assertDangerousRoleDenied(database) {
+  await database.admin.query("CREATE ROLE sync_object_owner NOLOGIN NOSUPERUSER NOBYPASSRLS");
+  await database.admin.query("CREATE TABLE sync_host.owner_probe (id integer)");
+  await database.admin.query("ALTER TABLE sync_host.owner_probe OWNER TO sync_object_owner");
+  await database.admin.query("GRANT sync_object_owner TO sync_worker_login");
+  const worker = await connectSyncWorker(database.url);
+  try {
+    await assert.rejects(createSyncGrant(database.admin, syncScope(), "unsafe-owner-grant"), (e) => e.code === "23514");
+    assert.equal((await worker.query('SELECT id FROM sync_host."WorkerGrant"')).rowCount, 0);
+    await assert.rejects(insertJob(worker, "unsafe-owner-job", syncScope(), "PRODUCTS"), (e) => e.code === "42501");
+  } finally {
+    await worker.end();
+    await database.admin.query("REVOKE sync_object_owner FROM sync_worker_login");
+    await database.admin.query("DROP TABLE sync_host.owner_probe");
+    await database.admin.query("DROP ROLE sync_object_owner");
+  }
 }
 
 async function assertContinuity(database) {

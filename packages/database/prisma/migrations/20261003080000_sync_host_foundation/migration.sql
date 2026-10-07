@@ -60,14 +60,30 @@ RETURNS BOOLEAN LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog 
 $$;
 REVOKE ALL ON FUNCTION sync_host.authorized(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION sync_host.authorized(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER) TO shopmate_sync_worker;
+-- A login cannot inherit an operator or object-owner capability, including SET ROLE chains.
+CREATE FUNCTION sync_host.safe_login(login TEXT) RETURNS BOOLEAN LANGUAGE SQL STABLE SECURITY INVOKER SET search_path=pg_catalog AS $$
+ SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=login AND rolcanlogin)
+ AND pg_has_role(login,'shopmate_sync_worker','MEMBER') AND NOT EXISTS (
+  SELECT 1 FROM pg_roles r WHERE pg_has_role(login,r.oid,'MEMBER') AND
+   (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication
+    OR r.rolname IN ('pg_read_all_data','pg_write_all_data','pg_read_server_files','pg_write_server_files','pg_execute_server_program')
+    OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+     WHERE c.relowner=r.oid AND n.nspname IN ('public','demo','mock_platform','sync_host'))
+    OR EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspowner=r.oid AND n.nspname IN ('public','demo','mock_platform','sync_host'))
+    OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE p.proowner=r.oid AND n.nspname IN ('public','demo','mock_platform','sync_host'))
+    OR EXISTS (SELECT 1 FROM pg_database d WHERE d.datdba=r.oid AND d.datname=current_database()))
+ )
+$$;
+REVOKE ALL ON FUNCTION sync_host.safe_login(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION sync_host.safe_login(TEXT) TO shopmate_sync_worker;
 CREATE FUNCTION sync_host.validate_grant() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
  IF TG_OP='UPDATE' AND (to_jsonb(NEW)-'status') IS DISTINCT FROM (to_jsonb(OLD)-'status') THEN
   RAISE EXCEPTION 'Grant binding is immutable' USING ERRCODE='23514';
  END IF;
  IF NEW.status='ACTIVE' AND (NOT sync_host.authorized(NEW."principalUserId",NEW."organizationId",NEW."workspaceId",NEW."storeId",NEW."connectionId",NEW."externalStoreId",NEW.provider,NEW.generation)
-  OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=NEW."databaseRole" AND rolcanlogin AND NOT rolsuper AND NOT rolbypassrls
-   AND pg_has_role(rolname,'shopmate_sync_worker','MEMBER'))) THEN
+  OR NOT sync_host.safe_login(NEW."databaseRole")) THEN
   RAISE EXCEPTION 'Invalid sync worker authority' USING ERRCODE='23514';
  END IF;
  RETURN NEW;
@@ -76,7 +92,7 @@ CREATE TRIGGER validate_grant BEFORE INSERT OR UPDATE ON sync_host."WorkerGrant"
 ALTER TABLE sync_host."WorkerGrant" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sync_host."WorkerGrant" FORCE ROW LEVEL SECURITY;
 CREATE POLICY worker_grant ON sync_host."WorkerGrant" FOR SELECT TO shopmate_sync_worker USING (
- "databaseRole"=session_user AND session_user=current_user AND id=current_setting('sync.grant_id',true)
+ "databaseRole"=session_user AND session_user=current_user AND sync_host.safe_login(session_user) AND id=current_setting('sync.grant_id',true)
  AND "principalUserId"=current_setting('app.user_id',true) AND status='ACTIVE'
  AND sync_host.authorized("principalUserId","organizationId","workspaceId","storeId","connectionId","externalStoreId",provider,generation));
 ALTER TABLE sync_host."Job" ENABLE ROW LEVEL SECURITY;
