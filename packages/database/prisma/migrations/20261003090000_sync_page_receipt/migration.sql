@@ -48,6 +48,8 @@ BEGIN
   RAISE EXCEPTION 'Invalid sync login' USING ERRCODE='42501'; END IF;
  IF page_id IS NULL OR page_id !~ '^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$'
   OR page_hash IS NULL OR page_hash !~ '^[0-9a-f]{64}$'
+  -- Function argument typmods are ignored; reject rounding before receipt comparison.
+  OR received_through IS DISTINCT FROM date_trunc('milliseconds',received_through)
   OR (expected_cursor IS NOT NULL AND (length(expected_cursor)>1024 OR expected_cursor='' OR expected_cursor ~ '[[:cntrl:]]'))
   OR (next_cursor IS NOT NULL AND (length(next_cursor)>1024 OR next_cursor='' OR next_cursor ~ '[[:cntrl:]]')) THEN
   RAISE EXCEPTION 'Invalid page receipt' USING ERRCODE='23514'; END IF;

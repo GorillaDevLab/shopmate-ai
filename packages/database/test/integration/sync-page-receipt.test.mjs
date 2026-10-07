@@ -110,6 +110,39 @@ test("page receipt and cursor commit atomically under a current pinned lease", a
       assert.equal(receipts.rows[0].n, 1);
     });
     await t.test(
+      "submillisecond receipts reject consistently instead of breaking exact retries",
+      async () => {
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          await assert.rejects(
+            receive(
+              worker,
+              "receipt-job-a",
+              fence,
+              "precision",
+              "cursor-1",
+              "cursor-2",
+              "2026-01-01T00:00:00.0001Z",
+            ),
+            { code: "23514" },
+          );
+        }
+        assert.equal(
+          (await receive(worker, "receipt-job-a", fence, "page-1", null, "cursor-1", since)).rows[0]
+            .outcome,
+          "REPLAYED",
+        );
+        assert.equal(
+          (
+            await database.admin.query(
+              'SELECT count(*)::int AS n FROM sync_host."PageReceipt" WHERE "pageId"=$1',
+              ["precision"],
+            )
+          ).rows[0].n,
+          0,
+        );
+      },
+    );
+    await t.test(
       "transaction rollback restores receipt and staging progress together",
       async () => {
         await worker.query("BEGIN");
