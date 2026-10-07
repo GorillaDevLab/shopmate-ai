@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import test from "node:test";
 import { createScanCursor, readScanCursor } from "../dist/src/mock-platform/scan-cursor.js";
 
@@ -37,6 +38,17 @@ test("signed scan cursor preserves the entity filter", () => {
   const cursor = createScanCursor(key, filtered, now);
   assert.deepEqual(readScanCursor(key, cursor, scope, now + 1000), filtered);
   assert.notEqual(cursor, createScanCursor(key, state, now));
+});
+
+test("signed pre-filter cursor resumes as an unfiltered scan", () => {
+  const { kind: _kind, entityKey: _entityKey, ...legacy } = state;
+  const payload = Buffer.from(JSON.stringify(legacy), "utf8").toString("base64url");
+  const signature = createHmac("sha256", key).update(payload, "ascii").digest("base64url");
+  assert.deepEqual(readScanCursor(key, `${payload}.${signature}`, scope, now), {
+    ...legacy,
+    kind: null,
+    entityKey: null,
+  });
 });
 
 test("scan cursor rejects payload, signature, scope and certificate tampering", () => {

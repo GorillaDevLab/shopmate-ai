@@ -32,6 +32,7 @@ const fields = [
   "after",
   "expiresAt",
 ];
+const legacyFields = fields.filter((field) => field !== "kind" && field !== "entityKey");
 const kinds = ["STORE", "PRODUCT", "ORDER", "REFUND", "INVENTORY", "MARKETING"];
 const unsigned = /^(0|[1-9][0-9]*)$/u;
 const hash = /^[a-f0-9]{64}$/u;
@@ -86,8 +87,15 @@ function validAfter(value: unknown): value is ScanCursorState["after"] {
   );
 }
 
-function checkedState(value: unknown, now: number): ScanCursorState {
-  if (!exact(value, fields) || !Number.isSafeInteger(now)) invalid();
+function normalizedState(value: unknown): Record<string, unknown> {
+  if (exact(value, fields)) return value;
+  if (exact(value, legacyFields)) return { ...value, kind: null, entityKey: null };
+  return invalid();
+}
+
+function checkedState(input: unknown, now: number): ScanCursorState {
+  if (!Number.isSafeInteger(now)) invalid();
+  const value = normalizedState(input);
   validateScope(value.scope);
   if (
     typeof value.certificateHash !== "string" ||
