@@ -25,32 +25,32 @@ const state = {
 };
 
 test("signed scan cursor resumes the exact published window and tuple", () => {
-  const token = createScanCursor(key, state, now);
-  assert.deepEqual(readScanCursor(key, token, scope, now + 1000), state);
-  assert.match(token, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+  const cursor = createScanCursor(key, state, now);
+  assert.deepEqual(readScanCursor(key, cursor, scope, now + 1000), state);
+  assert.match(cursor, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
 });
 
 test("scan cursor rejects payload, signature, scope and certificate tampering", () => {
-  const token = createScanCursor(key, state, now);
-  const [payload, signature] = token.split(".");
+  const cursor = createScanCursor(key, state, now);
+  const [payload, signature] = cursor.split(".");
   for (const invalid of [
     `${payload}x.${signature}`,
-    `${payload}.${signature.slice(0, -1)}A`,
+    `${payload}.${signature[0] === "A" ? "B" : "A"}${signature.slice(1)}`,
     `${payload}.${signature}.extra`,
     "x".repeat(4097),
   ])
     assert.throws(() => readScanCursor(key, invalid, scope, now), { code: "SOURCE_INPUT" });
-  assert.throws(() => readScanCursor(key, token, { ...scope, storeId: "store-b" }, now), {
+  assert.throws(() => readScanCursor(key, cursor, { ...scope, storeId: "store-b" }, now), {
     code: "SOURCE_INPUT",
   });
-  assert.throws(() => readScanCursor("z".repeat(32), token, scope, now), {
+  assert.throws(() => readScanCursor("z".repeat(32), cursor, scope, now), {
     code: "SOURCE_INPUT",
   });
 });
 
 test("scan cursor expires and cannot be minted for an invalid window or unbounded lifetime", () => {
-  const token = createScanCursor(key, state, now);
-  assert.throws(() => readScanCursor(key, token, scope, state.expiresAt), {
+  const cursor = createScanCursor(key, state, now);
+  assert.throws(() => readScanCursor(key, cursor, scope, state.expiresAt), {
     code: "SOURCE_INPUT",
   });
   for (const invalid of [
