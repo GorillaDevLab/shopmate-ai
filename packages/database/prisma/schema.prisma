@@ -249,7 +249,7 @@ model SyncWorkerGrant {
 }
 
 model SyncJob {
-  id                String          @id
+  id                String            @id
   grantId           String
   organizationId    String
   workspaceId       String
@@ -259,21 +259,39 @@ model SyncJob {
   provider          String
   generation        Int
   stream            String
-  since             DateTime        @db.Timestamp(3)
-  until             DateTime        @db.Timestamp(3)
+  since             DateTime          @db.Timestamp(3)
+  until             DateTime          @db.Timestamp(3)
   cursor            Json?
-  successfulThrough DateTime?       @db.Timestamp(3)
-  status            String          @default("READY")
-  fence             Int             @default(0)
+  successfulThrough DateTime?         @db.Timestamp(3)
+  status            String            @default("READY")
+  fence             Int               @default(0)
   leaseOwner        String?
-  leaseUntil        DateTime?       @db.Timestamptz(3)
+  leaseUntil        DateTime?         @db.Timestamptz(3)
   leaseBackendPid   Int?
-  leaseBackendStart DateTime?       @db.Timestamptz(6)
+  leaseBackendStart DateTime?         @db.Timestamptz(6)
   failureCode       String?
-  grant             SyncWorkerGrant @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
+  grant             SyncWorkerGrant   @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
+  receiptCursor     Json?
+  receivedThrough   DateTime?         @db.Timestamp(3)
+  pageReceipts      SyncPageReceipt[]
 
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation, stream, since], map: "Job_scope_stream_window_key")
   @@map("Job")
+  @@schema("sync_host")
+}
+
+model SyncPageReceipt {
+  jobId           String
+  pageId          String
+  expectedCursor  String?
+  nextCursor      String?
+  receivedThrough DateTime @db.Timestamp(3)
+  pageHash        String
+  createdAt       DateTime @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  job             SyncJob  @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([jobId, pageId])
+  @@map("PageReceipt")
   @@schema("sync_host")
 }
 
