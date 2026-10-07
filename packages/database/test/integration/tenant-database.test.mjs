@@ -13,12 +13,12 @@ const tenantMigration = "20261003000000_tenant_foundation";
 const rlsMigration = "20261003010000_tenant_row_security";
 
 async function applySourceDriftMigrations(client) {
-  for (const migration of [
-    "20261003040000_demo_commerce_sessions",
-    "20261003050000_mock_source_generation",
-    "20261003060000_mock_source_control",
-    "20261003070000_mock_source_publication",
-  ])
+  // The fixture stages the tenant migrations individually; the drift gate must
+  // also include every later migration, without a second manually maintained list.
+  const migrations = (await readdir(migrationRoot))
+    .filter((name) => /^\d{14}_/u.test(name) && name > "20261003030000_tenant_compatibility_hardening")
+    .sort();
+  for (const migration of migrations)
     await client.query(
       await readFile(new URL(`${migration}/migration.sql`, migrationRoot), "utf8"),
     );
