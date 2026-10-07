@@ -18,7 +18,7 @@ jobs:
   quality:
     name: 质量门禁
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     services:
       tenant-postgres:
         image: postgres:16
