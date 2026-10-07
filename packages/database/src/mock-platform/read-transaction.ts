@@ -41,7 +41,11 @@ class Checkout {
     if (this.client && this.begun && !this.released)
       this.discard = (await rollback(this.client)) || this.discard;
   }
-  close(): void {
+  async close(control: ReadControl): Promise<void> {
+    control.close();
+    // Rollback can yield while an abort starts cancellation. Stop new triggers
+    // before draining that request, so its target cannot return to the pool.
+    await this.cancellation;
     this.release(this.discard);
     this.client?.off("error", this.onError);
   }
@@ -80,8 +84,7 @@ export async function readTransaction<T>(
     await checkout.rollback();
     throw control.error() ?? checkout.failure(error);
   } finally {
-    control.close();
-    checkout.close();
+    await checkout.close(control);
   }
 }
 async function rollback(client: pg.PoolClient): Promise<boolean> {
