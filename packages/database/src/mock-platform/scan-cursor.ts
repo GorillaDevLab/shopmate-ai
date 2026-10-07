@@ -10,6 +10,8 @@ export interface ScanCursorState {
   readonly highEventSeq: string;
   readonly since: string;
   readonly until: string;
+  readonly kind: string | null;
+  readonly entityKey: string | null;
   readonly after: {
     readonly kind: string;
     readonly entityKey: string;
@@ -25,6 +27,8 @@ const fields = [
   "highEventSeq",
   "since",
   "until",
+  "kind",
+  "entityKey",
   "after",
   "expiresAt",
 ];
@@ -70,7 +74,7 @@ function validUtc(value: unknown): value is string {
   );
 }
 
-function validAfter(value: unknown): boolean {
+function validAfter(value: unknown): value is ScanCursorState["after"] {
   if (value === null) return true;
   if (!exact(value, ["kind", "entityKey", "eventSeq"])) return false;
   return (
@@ -94,7 +98,17 @@ function checkedState(value: unknown, now: number): ScanCursorState {
     !validUtc(value.since) ||
     !validUtc(value.until) ||
     value.since > value.until ||
+    (value.kind !== null && !kinds.includes(value.kind as string)) ||
+    (value.entityKey !== null &&
+      (value.kind === null ||
+        typeof value.entityKey !== "string" ||
+        value.entityKey.length === 0 ||
+        value.entityKey.length > 1024)) ||
     !validAfter(value.after) ||
+    (value.after !== null && value.kind !== null && value.after.kind !== value.kind) ||
+    (value.after !== null &&
+      value.entityKey !== null &&
+      value.after.entityKey !== value.entityKey) ||
     !integer(value.expiresAt, now + 1, now + MAX_AGE_MS)
   )
     invalid();

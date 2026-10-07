@@ -28,21 +28,33 @@ const versionSql = `SELECT kind,"entityKey","eventSeq"::text AS "eventSeq",
   payload,"versionHash" FROM mock_platform."EntityVersion"
   WHERE ${journalScopeWhere} AND "releaseRevision"<=$8::bigint AND "eventSeq"<=$9::bigint
     AND "occurredAt">=$10::timestamp AND "occurredAt"<=$11::timestamp
-    AND ($12::text IS NULL OR (kind COLLATE "C","entityKey" COLLATE "C","eventSeq") >
-      ($12::text COLLATE "C",$13::text COLLATE "C",$14::bigint))
-  ORDER BY kind COLLATE "C","entityKey" COLLATE "C","eventSeq" LIMIT $15`;
+    AND ($12::text IS NULL OR kind=$12::text)
+    AND ($13::text IS NULL OR "entityKey"=$13::text)
+    AND ($14::text IS NULL OR (kind COLLATE "C","entityKey" COLLATE "C","eventSeq") >
+      ($14::text COLLATE "C",$15::text COLLATE "C",$16::bigint))
+  ORDER BY kind COLLATE "C","entityKey" COLLATE "C","eventSeq" LIMIT $17`;
 const hash = /^[a-f0-9]{64}$/u;
 
 export function validateScanInput(value: unknown): asserts value is SourceScanInput {
-  const keys = exact(value, ["since", "until", "limit"])
-    ? ["since", "until", "limit"]
-    : ["since", "until", "limit", "cursor"];
+  if (!object(value)) throw new SourceStorageError("SOURCE_INPUT");
+  const keys = ["since", "until", "limit"];
+  for (const optional of ["cursor", "kind", "entityKey"])
+    if (Object.hasOwn(value, optional)) keys.push(optional);
   if (
     !exact(value, keys) ||
     !validateUtc(value.since) ||
     !validateUtc(value.until) ||
     value.since > value.until ||
     !integer(value.limit, 1, 200) ||
+    ("kind" in value &&
+      !["STORE", "PRODUCT", "ORDER", "REFUND", "INVENTORY", "MARKETING"].includes(
+        value.kind as string,
+      )) ||
+    ("entityKey" in value &&
+      (!("kind" in value) ||
+        typeof value.entityKey !== "string" ||
+        value.entityKey.length === 0 ||
+        value.entityKey.length > 1024)) ||
     ("cursor" in value &&
       (typeof value.cursor !== "string" || value.cursor.length === 0 || value.cursor.length > 4096))
   )
@@ -55,6 +67,11 @@ function pin(
   input: SourceScanInput,
 ): void {
   if (state && (state.since !== input.since || state.until !== input.until))
+    throw new SourceStorageError("SOURCE_INPUT");
+  if (
+    state &&
+    (state.kind !== (input.kind ?? null) || state.entityKey !== (input.entityKey ?? null))
+  )
     throw new SourceStorageError("SOURCE_INPUT");
   if (!publication) return;
   if (
@@ -108,6 +125,8 @@ async function readVersions(
     publication.highEventSeq,
     input.since,
     input.until,
+    input.kind ?? null,
+    input.entityKey ?? null,
     after?.kind ?? null,
     after?.entityKey ?? null,
     after?.eventSeq ?? null,
@@ -137,6 +156,8 @@ function page(
           highEventSeq: publication.highEventSeq,
           since: input.since,
           until: input.until,
+          kind: input.kind ?? null,
+          entityKey: input.entityKey ?? null,
           after: { kind: last.kind, entityKey: last.entityKey, eventSeq: last.eventSeq },
           expiresAt: Date.now() + 15 * 60_000,
         })

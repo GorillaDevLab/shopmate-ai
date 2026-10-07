@@ -20,7 +20,9 @@ const state = {
   highEventSeq: "42",
   since: "2026-01-01T00:00:00.000Z",
   until: "2026-01-02T00:00:00.000Z",
-  after: { kind: "ORDER", entityKey: '["ORDER","order-1"]', eventSeq: "12" },
+  kind: "PRODUCT",
+  entityKey: null,
+  after: { kind: "PRODUCT", entityKey: '["PRODUCT","product-1"]', eventSeq: "12" },
   expiresAt: now + 60_000,
 };
 
@@ -28,6 +30,13 @@ test("signed scan cursor resumes the exact published window and tuple", () => {
   const cursor = createScanCursor(key, state, now);
   assert.deepEqual(readScanCursor(key, cursor, scope, now + 1000), state);
   assert.match(cursor, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+});
+
+test("signed scan cursor preserves the entity filter", () => {
+  const filtered = { ...state, entityKey: state.after.entityKey };
+  const cursor = createScanCursor(key, filtered, now);
+  assert.deepEqual(readScanCursor(key, cursor, scope, now + 1000), filtered);
+  assert.notEqual(cursor, createScanCursor(key, state, now));
 });
 
 test("scan cursor rejects payload, signature, scope and certificate tampering", () => {
@@ -57,6 +66,8 @@ test("scan cursor expires and cannot be minted for an invalid window or unbounde
     { ...state, since: "2026-01-03T00:00:00.000Z" },
     { ...state, expiresAt: now + 16 * 60_000 },
     { ...state, after: { ...state.after, eventSeq: "01" } },
+    { ...state, kind: "NOT_A_KIND" },
+    { ...state, kind: null, entityKey: '["PRODUCT","product-1"]' },
   ])
     assert.throws(() => createScanCursor(key, invalid, now), { code: "SOURCE_INPUT" });
   assert.throws(() => createScanCursor("short", state, now), { code: "SOURCE_CONFIGURATION" });
