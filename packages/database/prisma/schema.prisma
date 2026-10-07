@@ -102,13 +102,121 @@ model MockSourceRuntime {
   configHash       String
   generatorVersion String
   runtimeVersion   String
-  openingAt        DateTime            @db.Timestamp(3)
-  baselineEnd      DateTime            @db.Timestamp(3)
-  createdAt        DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamp(3)
-  session          DemoCommerceSession @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "Runtime_session_fkey")
+  openingAt        DateTime                  @db.Timestamp(3)
+  baselineEnd      DateTime                  @db.Timestamp(3)
+  createdAt        DateTime                  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamp(3)
+  session          DemoCommerceSession       @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "Runtime_session_fkey")
+  jobs             MockSourceBuildJob[]
+  events           MockSourceEvent[]
+  versions         MockSourceEntityVersion[]
 
   @@id([sessionId, generation], map: "Runtime_pkey")
+  @@unique([organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation], map: "Runtime_scope_key")
   @@map("Runtime")
+  @@schema("mock_platform")
+}
+
+model MockSourceBuildJob {
+  organizationId         String
+  workspaceId            String
+  storeId                String
+  sessionId              String
+  connectionId           String
+  externalStoreId        String
+  generation             Int
+  revision               BigInt
+  targetClockRevision    Int
+  targetTime             DateTime            @db.Timestamp(3)
+  baseRevision           BigInt
+  baseHighEventSeq       BigInt
+  baseProcessedThrough   DateTime            @db.Timestamp(3)
+  createdAt              DateTime            @db.Timestamptz(3)
+  state                  String
+  leaseGrantId           String
+  leaseOwner             String
+  fence                  BigInt
+  leaseUntil             DateTime            @db.Timestamptz(3)
+  failureCode            String?
+  checkpoint             Json
+  checkpointHash         String
+  highEventSeq           BigInt
+  eventCount             BigInt
+  versionCount           BigInt
+  lastAppendExpectedHash String?
+  lastAppendStartSeq     BigInt?
+  lastAppendEventCount   Int?
+  lastAppendHash         String?
+  processedThrough       DateTime            @db.Timestamp(3)
+  generatorVersion       String
+  runtimeVersion         String
+  codec                  String
+  publishedAt            DateTime?           @db.Timestamptz(3)
+  certificateHash        String?
+  mutationXid            Unsupported("xid8")
+  runtime                MockSourceRuntime   @relation(fields: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation], references: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation], onDelete: Restrict, onUpdate: NoAction, map: "BuildJob_runtime_fkey")
+  events                 MockSourceEvent[]
+
+  @@id([sessionId, generation, revision], map: "BuildJob_pkey")
+  @@unique([organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation, revision], map: "BuildJob_scope_revision_key")
+  @@unique([sessionId, generation, targetClockRevision], map: "BuildJob_target_key")
+  @@map("BuildJob")
+  @@schema("mock_platform")
+}
+
+model MockSourceEvent {
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  sessionId       String
+  connectionId    String
+  externalStoreId String
+  generation      Int
+  releaseRevision BigInt
+  eventSeq        BigInt
+  eventId         String
+  appendIndex     BigInt
+  acceptedFence   BigInt
+  occurredAt      DateTime                  @db.Timestamp(3)
+  kind            String
+  phaseRank       Int                       @db.SmallInt
+  entityKey       String
+  ordinal         BigInt
+  payload         Json
+  manifest        Json
+  envelopeHash    String
+  runtime         MockSourceRuntime         @relation(fields: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation], references: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation], onDelete: Restrict, onUpdate: NoAction, map: "SourceEvent_runtime_fkey")
+  job             MockSourceBuildJob        @relation(fields: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation, releaseRevision], references: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation, revision], onDelete: Restrict, onUpdate: NoAction, map: "SourceEvent_job_fkey")
+  versions        MockSourceEntityVersion[]
+
+  @@id([sessionId, generation, eventSeq], map: "SourceEvent_pkey")
+  @@unique([sessionId, generation, eventId], map: "SourceEvent_id_key")
+  @@unique([organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation, releaseRevision, eventSeq], map: "SourceEvent_scope_sequence_key")
+  @@index([sessionId, generation, releaseRevision, appendIndex, eventSeq], map: "SourceEvent_job_append_idx")
+  @@map("SourceEvent")
+  @@schema("mock_platform")
+}
+
+model MockSourceEntityVersion {
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  sessionId       String
+  connectionId    String
+  externalStoreId String
+  generation      Int
+  releaseRevision BigInt
+  eventSeq        BigInt
+  kind            String
+  entityKey       String
+  occurredAt      DateTime          @db.Timestamp(3)
+  payload         Json
+  versionHash     String
+  runtime         MockSourceRuntime @relation(fields: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation], references: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation], onDelete: Restrict, onUpdate: NoAction, map: "EntityVersion_runtime_fkey")
+  event           MockSourceEvent   @relation(fields: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation, releaseRevision, eventSeq], references: [organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation, releaseRevision, eventSeq], onDelete: Restrict, onUpdate: NoAction, map: "EntityVersion_event_fkey")
+
+  @@id([sessionId, generation, eventSeq], map: "EntityVersion_pkey")
+  @@index([sessionId, generation, kind, entityKey, eventSeq(sort: Desc)], map: "EntityVersion_entity_sequence_idx")
+  @@map("EntityVersion")
   @@schema("mock_platform")
 }
 

@@ -1,7 +1,27 @@
 import { sourcePool, type SourcePool } from "./clients.js";
-import { SourceAccessDenied } from "./errors.js";
+import { SourceAccessDenied, SourceDomainFailure } from "./errors.js";
 import { findGeneration, initializeGeneration } from "./generations.js";
 import { findGrant, listGrants, matchesGrant } from "./grants.js";
+import { assertFailureCode, claimJob, failJob, renewJob } from "./jobs.js";
+import { appendChunk } from "./journal.js";
+import { publish } from "./publication.js";
+import { findPublication } from "./publication-certificate.js";
+import type {
+  ClaimResult,
+  AppendResult,
+  ChunkInput,
+  FailResult,
+  LeaseRef,
+  RenewResult,
+  SourceFailureCode,
+  PublishInput,
+  PublishResult,
+} from "./publication-types.js";
+import {
+  validateChunk,
+  validateLeaseInput,
+  validatePublishInput,
+} from "./publication-validation.js";
 import {
   currentAccess,
   lockControl,
@@ -20,11 +40,17 @@ import type {
 } from "./types.js";
 
 export type * from "./types.js";
+export type * from "./publication-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
   return {
+    async findPublication(actor, scope) {
+      validateReadActor(actor);
+      validateScope(scope);
+      return findPublication(pool, actor, scope);
+    },
     async findGeneration(actor, scope) {
       validateReadActor(actor);
       validateScope(scope);
@@ -48,8 +74,92 @@ export function createMockSourceWorker(env: SourceEnvironment): MockSourceWorker
       validateScope(scope);
       return initializeControlled(pool, actor, scope);
     },
+    claim: (actor, scope) => claimControlled(pool, actor, scope),
+    renew: (actor, lease) => renewControlled(pool, actor, lease),
+    fail: (actor, lease, code) => failControlled(pool, actor, lease, code),
+    appendChunk: (actor, lease, input) => appendControlled(pool, actor, lease, input),
+    publish: (actor, lease, input) => publishControlled(pool, actor, lease, input),
     close: () => pool.end(),
   };
+}
+async function publishControlled(
+  pool: SourcePool,
+  actor: SourceWorkerActor,
+  lease: LeaseRef,
+  input: PublishInput,
+): Promise<PublishResult> {
+  validateWorkerActor(actor);
+  validateLeaseInput(lease);
+  validatePublishInput(input);
+  try {
+    return await publish(pool, actor, lease, input);
+  } catch (error) {
+    if (error instanceof SourceDomainFailure) return { status: error.status };
+    throw error;
+  }
+}
+async function appendControlled(
+  pool: SourcePool,
+  actor: SourceWorkerActor,
+  lease: LeaseRef,
+  input: ChunkInput,
+): Promise<AppendResult> {
+  validateWorkerActor(actor);
+  validateLeaseInput(lease);
+  validateChunk(input, lease.scope);
+  try {
+    return await appendChunk(pool, actor, lease, input);
+  } catch (error) {
+    if (error instanceof SourceDomainFailure) return { status: error.status };
+    throw error;
+  }
+}
+async function claimControlled(
+  pool: SourcePool,
+  actor: SourceWorkerActor,
+  scope: SourceScope,
+): Promise<ClaimResult> {
+  validateWorkerActor(actor);
+  validateScope(scope);
+  try {
+    return await claimJob(pool, actor, scope);
+  } catch (error) {
+    if (error instanceof SourceDomainFailure && error.status === "DENIED")
+      return { status: "DENIED" };
+    throw error;
+  }
+}
+async function renewControlled(
+  pool: SourcePool,
+  actor: SourceWorkerActor,
+  lease: LeaseRef,
+): Promise<RenewResult> {
+  validateWorkerActor(actor);
+  validateLeaseInput(lease);
+  try {
+    return await renewJob(pool, actor, lease);
+  } catch (error) {
+    if (error instanceof SourceDomainFailure && error.status !== "CONFLICT")
+      return { status: error.status };
+    throw error;
+  }
+}
+async function failControlled(
+  pool: SourcePool,
+  actor: SourceWorkerActor,
+  lease: LeaseRef,
+  code: SourceFailureCode,
+): Promise<FailResult> {
+  validateWorkerActor(actor);
+  validateLeaseInput(lease);
+  assertFailureCode(code);
+  try {
+    return await failJob(pool, actor, lease, code);
+  } catch (error) {
+    if (error instanceof SourceDomainFailure && error.status !== "CONFLICT")
+      return { status: error.status };
+    throw error;
+  }
 }
 async function initializeControlled(
   pool: SourcePool,

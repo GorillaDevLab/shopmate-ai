@@ -38,6 +38,39 @@ try {
   await run("packages/database", "test/integration/mock-source-control.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/mock-platform-publication.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-lease.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-lease-ports.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-append.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-append-ports.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-publish.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-publish-ports.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-transaction.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-control-races.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-auth-races.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-isolation-races.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   const runtimeUrl = await prepareTenantApiRuntime(server.url);
   await run(
     "apps/api",

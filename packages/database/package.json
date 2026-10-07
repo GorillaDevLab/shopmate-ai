@@ -23,7 +23,7 @@
     "generate": "prisma generate",
     "seed": "prisma generate && tsx src/seed.ts",
     "seed:orders": "prisma generate && tsx src/seed.ts && tsx src/order-seed.ts",
-    "test": "pnpm run build && prisma validate && node --import tsx --test test/*.test.mjs",
+    "test": "pnpm --filter @shopmate/contracts build && pnpm run build && prisma validate && node --import tsx --test test/*.test.mjs",
     "typecheck": "prisma generate && tsc --project tsconfig.build.json",
     "lint": "eslint src test prisma.config.ts --max-warnings=0",
     "prisma:format": "prisma format",

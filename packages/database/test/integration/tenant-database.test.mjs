@@ -12,6 +12,18 @@ const migrationRoot = new URL("../../prisma/migrations/", import.meta.url);
 const tenantMigration = "20261003000000_tenant_foundation";
 const rlsMigration = "20261003010000_tenant_row_security";
 
+async function applySourceDriftMigrations(client) {
+  for (const migration of [
+    "20261003040000_demo_commerce_sessions",
+    "20261003050000_mock_source_generation",
+    "20261003060000_mock_source_control",
+    "20261003070000_mock_source_publication",
+  ])
+    await client.query(
+      await readFile(new URL(`${migration}/migration.sql`, migrationRoot), "utf8"),
+    );
+}
+
 async function applyMigrations(client, beforeTenant = false) {
   const directories = (await readdir(migrationRoot))
     .filter((name) => /^\d{14}_/u.test(name))
@@ -356,24 +368,7 @@ test("tenant migration preserves legacy records and rejects foreign relations in
       }
     });
     await t.test("deployed migrations match the Prisma schema without drift", async () => {
-      await client.query(
-        await readFile(
-          new URL("20261003040000_demo_commerce_sessions/migration.sql", migrationRoot),
-          "utf8",
-        ),
-      );
-      await client.query(
-        await readFile(
-          new URL("20261003050000_mock_source_generation/migration.sql", migrationRoot),
-          "utf8",
-        ),
-      );
-      await client.query(
-        await readFile(
-          new URL("20261003060000_mock_source_control/migration.sql", migrationRoot),
-          "utf8",
-        ),
-      );
+      await applySourceDriftMigrations(client);
       const directory = fileURLToPath(new URL("../../", import.meta.url));
       const cli = fileURLToPath(
         new URL("../../node_modules/prisma/build/index.js", import.meta.url),

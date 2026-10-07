@@ -15,6 +15,8 @@
 
 - Phase 2.4b 持久源身份与不可变代配置：[PR #208](https://github.com/GorillaDevLab/shopmate-ai/pull/208)。head f96ee8e 的 CI 37129820713 success 后合并（a670edc）；全仓 1,663 passed，强制隔离 PostgreSQL/API 106 passed / 0 skipped。源读写使用独立受限身份，代配置冻结，拒绝结果回滚，连接故障有真实后端终止回归。共享控制锁与事实发布在后续单元交付。
 
+- Phase 2.4c 源与演示控制共用事务锁：[PR #209](https://github.com/GorillaDevLab/shopmate-ai/pull/209)。head 810b622 的 CI 37156146397 success 后合并（8c4fe6c）；全仓 1,663 passed，强制隔离 PostgreSQL/API 124 passed / 0 skipped。源初始化/读取与 advance、reset、disconnect 按会话串行，等待后以新快照检查当前权限；真实受限登录验证并发、旧快照拒绝与完整回滚。独立任务和整体审查通过。下一单元是源事件、实体版本及租约发布；部署仍暂缓。
+
 ## 连续实施顺序
 
 - [x] Phase 2.3 持久 Demo Session、PlatformConnection、演示租户标记、服务端管理与实际 resolver。
