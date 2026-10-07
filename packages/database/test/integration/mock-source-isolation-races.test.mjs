@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { settleDeadlock } from "../helpers/deadlock-outcome.mjs";
 import {
   isolationHarness,
   contextFor,
@@ -387,16 +388,9 @@ async function assertSurvivor(t, context, settled, before, op) {
   );
 }
 async function settleCycle(control, mutation) {
-  // Whichever backend PostgreSQL chooses must release its aborted transaction before the survivor settles.
-  const first = await Promise.race([
-    control.then((result) => ({ index: 0, ...result })),
-    mutation.then((result) => ({ index: 1, ...result })),
-  ]);
-  assert.equal(first.error?.code, "40P01");
-  await (first.index === 0 ? state.worker : state.other).query("ROLLBACK");
-  const rest = await (first.index === 0 ? mutation : control);
-  assert.ifError(rest.error);
-  return { victim: first.index, code: first.error.code, survivor: rest.result };
+  return settleDeadlock(control, mutation, (index) =>
+    (index === 0 ? state.worker : state.other).query("ROLLBACK"),
+  );
 }
 async function deadlock(t, op) {
   const context = await prepared(`deadlock-${op}`, op),
