@@ -21,6 +21,7 @@ model PlatformConnection {
   generation      Int                   @default(0)
   store           Store                 @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
   sessions        DemoCommerceSession[]
+  syncGrants      SyncWorkerGrant[]
 
   @@unique([storeId, provider])
   @@unique([id, organizationId, workspaceId, storeId, externalStoreId])
@@ -222,7 +223,56 @@ model MockSourceEntityVersion {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["public", "demo", "mock_platform"]
+  schemas  = ["public", "demo", "mock_platform", "sync_host"]
+}
+
+model SyncWorkerGrant {
+  id              String             @id
+  databaseRole    String
+  principalUserId String
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  connectionId    String
+  externalStoreId String
+  provider        String
+  generation      Int
+  initialSince    DateTime           @db.Timestamp(3)
+  status          String             @default("ACTIVE")
+  jobs            SyncJob[]
+  membership      OrganizationMember @relation(fields: [organizationId, principalUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction, map: "WorkerGrant_membership_fkey")
+  assignment      WorkspaceMember    @relation(fields: [organizationId, workspaceId, principalUserId], references: [organizationId, workspaceId, userId], onDelete: Restrict, onUpdate: NoAction, map: "WorkerGrant_workspace_fkey")
+  connection      PlatformConnection @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "WorkerGrant_connection_fkey")
+
+  @@map("WorkerGrant")
+  @@schema("sync_host")
+}
+
+model SyncJob {
+  id                String          @id
+  grantId           String
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  connectionId      String
+  externalStoreId   String
+  provider          String
+  generation        Int
+  stream            String
+  since             DateTime        @db.Timestamp(3)
+  until             DateTime        @db.Timestamp(3)
+  cursor            Json?
+  successfulThrough DateTime?       @db.Timestamp(3)
+  status            String          @default("READY")
+  fence             Int             @default(0)
+  leaseOwner        String?
+  leaseUntil        DateTime?       @db.Timestamptz(3)
+  failureCode       String?
+  grant             SyncWorkerGrant @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
+
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation, stream, since], map: "Job_scope_stream_window_key")
+  @@map("Job")
+  @@schema("sync_host")
 }
 
 model TenantBootstrapEnvironment {
@@ -340,6 +390,7 @@ model OrganizationMember {
   organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   workspaces     WorkspaceMember[]
   mockGrants     MockWorkerGrant[] @relation("WorkerMembership")
+  syncGrants     SyncWorkerGrant[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
@@ -374,6 +425,7 @@ model WorkspaceMember {
   workspace      Workspace          @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Cascade, onUpdate: NoAction, map: "WorkspaceMember_workspace_fkey")
   membership     OrganizationMember @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade, onUpdate: NoAction, map: "WorkspaceMember_membership_fkey")
   mockGrants     MockWorkerGrant[]
+  syncGrants     SyncWorkerGrant[]
   createdAt      DateTime           @default(now())
 
   @@unique([organizationId, workspaceId, userId])
