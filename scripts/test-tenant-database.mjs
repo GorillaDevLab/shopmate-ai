@@ -65,6 +65,9 @@ try {
   await run("packages/database", "test/integration/sync-host-database.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/mock-source-read-control.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/mock-source-transaction.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });

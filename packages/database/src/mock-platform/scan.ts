@@ -1,5 +1,6 @@
 import type pg from "pg";
 import type { SourcePool } from "./clients.js";
+import { readTransaction } from "./read-transaction.js";
 import { SourceAccessDenied, SourceStorageError } from "./errors.js";
 import { journalScopeWhere } from "./journal-state.js";
 import { readPublication } from "./publication-certificate.js";
@@ -12,14 +13,8 @@ import {
   type ScanCursorState,
 } from "./scan-cursor.js";
 import type { SourceScanInput, SourceScanPage, SourceVersion } from "./scan-types.js";
-import {
-  currentAccess,
-  lockControl,
-  readIdentity,
-  scopeValues,
-  transaction,
-} from "./transaction.js";
-import type { SourceReadActor, SourceScope } from "./types.js";
+import { currentAccess, lockControl, readIdentity, scopeValues } from "./transaction.js";
+import type { SourceReadActor, SourceReadControl, SourceScope } from "./types.js";
 import { exact, integer, object } from "./validation.js";
 
 const versionSql = `SELECT kind,"entityKey","eventSeq"::text AS "eventSeq",
@@ -190,15 +185,16 @@ export async function scanVersions(
   actor: SourceReadActor,
   scope: SourceScope,
   input: SourceScanInput,
+  control?: SourceReadControl,
 ): Promise<SourceScanPage | null> {
   validateScanKey(key);
   const state = input.cursor === undefined ? null : readScanCursor(key, input.cursor, scope);
   try {
-    return await transaction(
+    return await readTransaction(
       pool,
-      "reader",
       (client) => readPage(client, actor, scope, input, state, key),
       (result) => result === null,
+      control,
     );
   } catch (error) {
     if (error instanceof SourceAccessDenied) return null;
