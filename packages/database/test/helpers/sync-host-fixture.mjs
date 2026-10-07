@@ -3,15 +3,16 @@ import { URL } from "node:url";
 import { isolatedPostgres } from "./isolated-postgres.mjs";
 import { loginUrl, migrateSource, scopeFor, sourceFixtures } from "./mock-platform-fixture.mjs";
 
-export async function createSyncDatabase() {
+export async function createSyncDatabase(suite = "sync") {
+  if (!["sync", "receipt"].includes(suite)) throw new Error("Invalid sync fixture suite");
   const server = await isolatedPostgres();
   const operator = new pg.Client({ connectionString: server.url });
   let admin;
   try {
     await operator.connect();
-    await operator.query('CREATE DATABASE "shopmate_tenant_test_sync"');
+    await operator.query(`CREATE DATABASE "shopmate_tenant_test_${suite}"`);
     const url = new URL(server.url);
-    url.pathname = "/shopmate_tenant_test_sync";
+    url.pathname = `/shopmate_tenant_test_${suite}`;
     admin = new pg.Client({ connectionString: url.toString() });
     await admin.connect();
     await migrateSource(admin);
@@ -29,7 +30,9 @@ export async function createSyncDatabase() {
 async function provisionLogin(admin, login) {
   if (!["sync_worker_login", "sync_foreign_login"].includes(login))
     throw new Error("Invalid fixture role");
-  await admin.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
+  // Suites share an isolated server in the mandatory gate; logins are cluster-wide.
+  const existing = await admin.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [login]);
+  if (!existing.rowCount) await admin.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
   await admin.query(`GRANT shopmate_sync_worker TO ${login}`);
 }
 
