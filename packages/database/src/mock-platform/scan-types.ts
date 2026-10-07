@@ -5,6 +5,8 @@ export interface SourceScanInput {
   readonly until: string;
   readonly limit: number;
   readonly cursor?: string;
+  readonly kind?: SnapshotKind;
+  readonly entityKey?: string;
 }
 
 export interface SourceVersion {

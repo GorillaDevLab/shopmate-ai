@@ -32,6 +32,14 @@ test("published source versions scan in stable key order across reader restarts"
   assert.equal(first.publication.certificateHash, published.publication.certificateHash);
   assert.equal(first.items.length, 1);
   assert.ok(first.nextCursor);
+  await assert.rejects(
+    reader.scanVersions(readerActor, state.scope, {
+      ...input,
+      kind: "PRODUCT",
+      cursor: first.nextCursor,
+    }),
+    { code: "SOURCE_INPUT" },
+  );
   await reader.close();
   reader = source.createMockSourceReader(context.env);
   const second = await reader.scanVersions(readerActor, state.scope, {
@@ -48,6 +56,40 @@ test("published source versions scan in stable key order across reader restarts"
   );
   assert.equal(third.nextCursor, null);
   assert.equal((await reader.scanVersions(readerActor, state.scope, input)).items.length, 1);
+});
+
+test("published scans restrict kind and entity key before pagination", async () => {
+  const state = await sealedPublication(context, ["STORE", "PRODUCT", "ORDER"]);
+  await context.worker.publish(state.actor, state.lease, state.input);
+  const window = { since: state.lease.targetTime, until: state.lease.targetTime, limit: 1 };
+  const product = await reader.scanVersions(readerActor, state.scope, {
+    ...window,
+    kind: "PRODUCT",
+  });
+  assert.deepEqual(
+    product.items.map((item) => item.kind),
+    ["PRODUCT"],
+  );
+  assert.equal(product.nextCursor, null);
+  const exact = await reader.scanVersions(readerActor, state.scope, {
+    ...window,
+    kind: "PRODUCT",
+    entityKey: product.items[0].entityKey,
+  });
+  assert.deepEqual(exact.items, product.items);
+  const absent = await reader.scanVersions(readerActor, state.scope, {
+    ...window,
+    kind: "PRODUCT",
+    entityKey: '["PRODUCT","absent"]',
+  });
+  assert.deepEqual(absent.items, []);
+  await assert.rejects(
+    reader.scanVersions(readerActor, state.scope, {
+      ...window,
+      entityKey: product.items[0].entityKey,
+    }),
+    { code: "SOURCE_INPUT" },
+  );
 });
 
 test("scan returns no staged facts and an explicit empty published page", async () => {

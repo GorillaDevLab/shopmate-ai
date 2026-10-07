@@ -10,6 +10,8 @@ export interface ScanCursorState {
   readonly highEventSeq: string;
   readonly since: string;
   readonly until: string;
+  readonly kind: string | null;
+  readonly entityKey: string | null;
   readonly after: {
     readonly kind: string;
     readonly entityKey: string;
@@ -25,9 +27,12 @@ const fields = [
   "highEventSeq",
   "since",
   "until",
+  "kind",
+  "entityKey",
   "after",
   "expiresAt",
 ];
+const legacyFields = fields.filter((field) => field !== "kind" && field !== "entityKey");
 const kinds = ["STORE", "PRODUCT", "ORDER", "REFUND", "INVENTORY", "MARKETING"];
 const unsigned = /^(0|[1-9][0-9]*)$/u;
 const hash = /^[a-f0-9]{64}$/u;
@@ -70,7 +75,7 @@ function validUtc(value: unknown): value is string {
   );
 }
 
-function validAfter(value: unknown): boolean {
+function validAfter(value: unknown): value is ScanCursorState["after"] {
   if (value === null) return true;
   if (!exact(value, ["kind", "entityKey", "eventSeq"])) return false;
   return (
@@ -82,8 +87,15 @@ function validAfter(value: unknown): boolean {
   );
 }
 
-function checkedState(value: unknown, now: number): ScanCursorState {
-  if (!exact(value, fields) || !Number.isSafeInteger(now)) invalid();
+function normalizedState(value: unknown): Record<string, unknown> {
+  if (exact(value, fields)) return value;
+  if (exact(value, legacyFields)) return { ...value, kind: null, entityKey: null };
+  return invalid();
+}
+
+function checkedState(input: unknown, now: number): ScanCursorState {
+  if (!Number.isSafeInteger(now)) invalid();
+  const value = normalizedState(input);
   validateScope(value.scope);
   if (
     typeof value.certificateHash !== "string" ||
@@ -94,7 +106,17 @@ function checkedState(value: unknown, now: number): ScanCursorState {
     !validUtc(value.since) ||
     !validUtc(value.until) ||
     value.since > value.until ||
+    (value.kind !== null && !kinds.includes(value.kind as string)) ||
+    (value.entityKey !== null &&
+      (value.kind === null ||
+        typeof value.entityKey !== "string" ||
+        value.entityKey.length === 0 ||
+        value.entityKey.length > 1024)) ||
     !validAfter(value.after) ||
+    (value.after !== null && value.kind !== null && value.after.kind !== value.kind) ||
+    (value.after !== null &&
+      value.entityKey !== null &&
+      value.after.entityKey !== value.entityKey) ||
     !integer(value.expiresAt, now + 1, now + MAX_AGE_MS)
   )
     invalid();
