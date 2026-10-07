@@ -10,6 +10,7 @@ import type {
   PublishResult,
   Publication,
 } from "./publication-types.js";
+import type { SourceScanInput, SourceScanPage } from "./scan-types.js";
 
 export interface SourceScope {
   readonly organizationId: string;
@@ -50,6 +51,11 @@ export type SourceInitialization =
 export interface MockSourceReader {
   findPublication(actor: SourceReadActor, scope: SourceScope): Promise<Publication | null>;
   findGeneration(actor: SourceReadActor, scope: SourceScope): Promise<SourceGeneration | null>;
+  scanVersions(
+    actor: SourceReadActor,
+    scope: SourceScope,
+    input: SourceScanInput,
+  ): Promise<SourceScanPage | null>;
   close(): Promise<void>;
 }
 export interface MockSourceWorker {
