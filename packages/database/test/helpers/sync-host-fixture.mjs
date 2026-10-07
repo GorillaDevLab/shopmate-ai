@@ -58,12 +58,17 @@ export async function createSyncGrant(admin, scope, id, login = "sync_worker_log
 
 export async function connectSyncWorker(url, login = "sync_worker_login", grantId = "sync-grant-a") {
   const client = new pg.Client({ connectionString: loginUrl(url, login) });
+  try {
   await client.connect();
   await client.query("SELECT set_config('app.user_id',$1,false),set_config('sync.grant_id',$2,false)", [
     "source-worker",
     grantId,
   ]);
   return client;
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
 }
 
 export function syncScope(key = "a", generation = 0) {
@@ -80,7 +85,8 @@ export function syncScope(key = "a", generation = 0) {
 }
 
 export async function closeSyncDatabase(database) {
-  await database.admin.end();
-  await database.operator.end();
+  const results = await Promise.allSettled([database.admin.end(), database.operator.end()]);
   await database.server.stop();
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Sync fixture cleanup failed");
 }

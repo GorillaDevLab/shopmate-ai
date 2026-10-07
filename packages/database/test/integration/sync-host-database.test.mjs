@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { operatorControl } from "../helpers/mock-source-control-fixture.mjs";
 import {
   closeSyncDatabase,
   connectSyncWorker,
@@ -32,9 +33,12 @@ test("generic sync host persists scoped fixed-window jobs under restricted worke
     await t.test("stream set and fixed window identity are constrained", () =>
       assertWindowContract(database),
     );
+    await t.test("lease renewal and failure use current fences and DB wall time", () => assertLeaseTransitions(database));
+    await t.test("completed windows continue without a gap", () => assertContinuity(database));
     await t.test("current membership, connection and grant revoke access to old jobs", () =>
       assertCurrentAuthority(database),
     );
+    await t.test("generation reset starts a new window and fences old mutations", () => assertGenerationReset(database));
   } finally {
     await closeSyncDatabase(database);
   }
@@ -52,7 +56,7 @@ async function assertRlsContract(admin) {
     "SELECT rolcanlogin,rolsuper,rolbypassrls FROM pg_roles WHERE rolname='shopmate_sync_worker'",
   );
   assert.deepEqual(role.rows[0], { rolcanlogin: false, rolsuper: false, rolbypassrls: false });
-  assert.equal(await admin.query("SELECT has_table_privilege('shopmate_sync_worker','sync_host.\"Job\"','UPDATE') AS can_update").then((r) => r.rows[0].can_update), true);
+  assert.equal(await admin.query("SELECT has_column_privilege('shopmate_sync_worker','sync_host.\"Job\"','status','UPDATE') AS can_update").then((r) => r.rows[0].can_update), true);
   assert.equal(await admin.query("SELECT has_column_privilege('shopmate_sync_worker','sync_host.\"Job\"','cursor','UPDATE') AS can_update").then((r) => r.rows[0].can_update), false);
 }
 
@@ -65,10 +69,43 @@ async function assertGrantIdentity(url) {
     assert.deepEqual((await foreign.query('SELECT id FROM sync_host."WorkerGrant"')).rows, [{ id: "sync-grant-b" }]);
     await worker.query("SELECT set_config('sync.grant_id','sync-grant-b',false)");
     assert.equal((await worker.query('SELECT id FROM sync_host."WorkerGrant"')).rowCount, 0);
+    await worker.query("SET ROLE shopmate_sync_worker");
+    await worker.query("SELECT set_config('sync.grant_id','sync-grant-a',false)");
+    assert.equal((await worker.query('SELECT id FROM sync_host."WorkerGrant"')).rowCount, 0);
   } finally {
     await worker.end();
     await foreign.end();
   }
+}
+
+async function assertLeaseTransitions(database) {
+  const worker = await connectSyncWorker(database.url);
+  try {
+    const claimed = await claimJob(worker, "job-inventory", "inventory-owner");
+    assert.equal(claimed.fence, 1);
+    await assert.rejects(worker.query('UPDATE sync_host."Job" SET status=$1 WHERE id=$2', ["SUCCEEDED", claimed.id]), (e) => e.code === "23514");
+    const renewed = await worker.query('UPDATE sync_host."Job" SET "leaseUntil"=$1 WHERE id=$2 AND fence=$3 RETURNING EXTRACT(EPOCH FROM "leaseUntil"-clock_timestamp()) AS seconds', ["2099-01-01", claimed.id, 1]);
+    assert.ok(Number(renewed.rows[0].seconds) > 119 && Number(renewed.rows[0].seconds) <= 120);
+    assert.equal((await worker.query('UPDATE sync_host."Job" SET "leaseUntil"=clock_timestamp() WHERE id=$1 AND fence=$2', [claimed.id, 0])).rowCount, 0);
+    await worker.query('UPDATE sync_host."Job" SET status=$1,"failureCode"=$2 WHERE id=$3 AND fence=$4', ["FAILED", "READ_TIMEOUT", claimed.id, 1]);
+    const failed = (await worker.query('SELECT status,"leaseOwner","leaseUntil" FROM sync_host."Job" WHERE id=$1', [claimed.id])).rows[0];
+    assert.deepEqual(failed, { status: "FAILED", leaseOwner: null, leaseUntil: null });
+    const retry = await worker.query('UPDATE sync_host."Job" SET status=$1,fence=fence+1,"leaseOwner"=$2,"failureCode"=NULL WHERE id=$3 RETURNING fence', ["RUNNING", "inventory-retry", claimed.id]);
+    assert.equal(retry.rows[0].fence, 2);
+  } finally { await worker.end(); }
+}
+
+async function assertContinuity(database) {
+  const worker = await connectSyncWorker(database.url);
+  try {
+    await assert.rejects(insertJob(worker, "duplicate-open", syncScope(), "MARKETING"), (e) => e.code === "23505");
+    await assert.rejects(insertJob(worker, "invalid-stream", syncScope(), "PAYMENTS"), (e) => e.code === "23514");
+    // Operator completion stands in for the later atomic page-ingest capability.
+    await database.admin.query('UPDATE sync_host."Job" SET status=$1,"successfulThrough"=until WHERE id=$2', ["SUCCEEDED", "job-marketing"]);
+    await assert.rejects(insertJob(worker, "gap-window", syncScope(), "MARKETING", "2026-01-02T00:00:01.000Z", "2026-01-03"), (e) => e.code === "23514");
+    await insertJob(worker, "continuous-window", syncScope(), "MARKETING", firstUntil, "2026-01-03");
+    assert.equal((await worker.query('SELECT since=$1::timestamp AS exact FROM sync_host."Job" WHERE id=$2', [firstUntil, "continuous-window"])).rows[0].exact, true);
+  } finally { await worker.end(); }
 }
 
 async function assertInvalidGrantDenied(admin) {
@@ -122,7 +159,7 @@ async function assertLeaseRecovery(database) {
 async function assertWindowContract(database) {
   const worker = await connectSyncWorker(database.url);
   try {
-    for (const stream of streams) await insertJob(worker, `job-${stream.toLowerCase()}`, syncScope(), stream);
+    for (const stream of streams.filter((value) => value !== "PRODUCTS")) await insertJob(worker, `job-${stream.toLowerCase()}`, syncScope(), stream);
     assert.equal((await worker.query('SELECT id FROM sync_host."Job"')).rowCount, streams.length);
     await assert.rejects(
       insertJob(worker, "job-invalid-window", syncScope(), "ORDERS", "2026-01-01T00:00:01.000Z"),
@@ -144,27 +181,38 @@ async function assertWindowContract(database) {
 async function assertCurrentAuthority(database) {
   const worker = await connectSyncWorker(database.url);
   try {
-    await insertJob(worker, "sync-job-current", syncScope(), "ORDERS");
+    const jobId = "job-orders";
     await database.admin.query('UPDATE "WorkspaceMember" SET status=$1 WHERE "userId"=$2', [
       "INACTIVE",
       "source-worker",
     ]);
-    assert.equal((await worker.query('SELECT id FROM sync_host."Job" WHERE id=$1', ["sync-job-current"])).rowCount, 0);
+    assert.equal((await worker.query('SELECT id FROM sync_host."Job" WHERE id=$1', [jobId])).rowCount, 0);
     await database.admin.query('UPDATE "WorkspaceMember" SET status=$1 WHERE "userId"=$2', [
       "ACTIVE",
       "source-worker",
     ]);
-    await database.admin.query('UPDATE "PlatformConnection" SET generation=1 WHERE id=$1', [
+    await operatorControl(database.admin, 'UPDATE "PlatformConnection" SET generation=1 WHERE id=$1', [
       syncScope().connectionId,
     ]);
-    assert.equal((await worker.query('SELECT id FROM sync_host."Job" WHERE id=$1', ["sync-job-current"])).rowCount, 0);
-    const stored = await database.admin.query('SELECT status,fence FROM sync_host."Job" WHERE id=$1', ["sync-job-current"]);
+    assert.equal((await worker.query('SELECT id FROM sync_host."Job" WHERE id=$1', [jobId])).rowCount, 0);
+    const stored = await database.admin.query('SELECT status,fence FROM sync_host."Job" WHERE id=$1', [jobId]);
     assert.deepEqual(stored.rows[0], { status: "READY", fence: 0 });
     await database.admin.query('UPDATE sync_host."WorkerGrant" SET status=$1 WHERE id=$2', ["REVOKED", "sync-grant-a"]);
-    assert.equal((await worker.query('SELECT id FROM sync_host."Job" WHERE id=$1', ["sync-job-current"])).rowCount, 0);
+    assert.equal((await worker.query('SELECT id FROM sync_host."Job" WHERE id=$1', [jobId])).rowCount, 0);
   } finally {
     await worker.end();
   }
+}
+
+async function assertGenerationReset(database) {
+  await createSyncGrant(database.admin, syncScope("a", 1), "sync-grant-new");
+  const worker = await connectSyncWorker(database.url, "sync_worker_login", "sync-grant-new");
+  try {
+    assert.equal((await worker.query('UPDATE sync_host."Job" SET status=$1 WHERE id=$2', ["FAILED", "sync-job-a"])).rowCount, 0);
+    const scope = syncScope("a", 1);
+    await worker.query('INSERT INTO sync_host."Job" (id,"grantId","organizationId","workspaceId","storeId","connectionId","externalStoreId",provider,generation,stream,since,until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', ["generation-one-job", "sync-grant-new", scope.organizationId, scope.workspaceId, scope.storeId, scope.connectionId, scope.externalStoreId, scope.provider, 1, "PRODUCTS", firstSince, firstUntil]);
+    assert.deepEqual((await worker.query('SELECT id FROM sync_host."Job"')).rows, [{ id: "generation-one-job" }]);
+  } finally { await worker.end(); }
 }
 
 async function insertJob(client, id, scope, stream, since = firstSince, until = firstUntil) {
