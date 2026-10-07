@@ -16,7 +16,9 @@ async function applySourceDriftMigrations(client) {
   // The fixture stages the tenant migrations individually; the drift gate must
   // also include every later migration, without a second manually maintained list.
   const migrations = (await readdir(migrationRoot))
-    .filter((name) => /^\d{14}_/u.test(name) && name > "20261003030000_tenant_compatibility_hardening")
+    .filter(
+      (name) => /^\d{14}_/u.test(name) && name > "20261003030000_tenant_compatibility_hardening",
+    )
     .sort();
   for (const migration of migrations)
     await client.query(
