@@ -48,6 +48,10 @@ function secret(key: string): Buffer {
   return Buffer.from(key, "utf8");
 }
 
+export function validateScanKey(key: string): void {
+  secret(key);
+}
+
 function validUInt(value: unknown): value is string {
   return (
     typeof value === "string" &&

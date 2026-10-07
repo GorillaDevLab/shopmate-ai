@@ -6,6 +6,7 @@ import { assertFailureCode, claimJob, failJob, renewJob } from "./jobs.js";
 import { appendChunk } from "./journal.js";
 import { publish } from "./publication.js";
 import { findPublication } from "./publication-certificate.js";
+import { scanVersions, validateScanInput } from "./scan.js";
 import type {
   ClaimResult,
   AppendResult,
@@ -41,11 +42,18 @@ import type {
 
 export type * from "./types.js";
 export type * from "./publication-types.js";
+export type * from "./scan-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
   return {
+    async scanVersions(actor, scope, input) {
+      validateReadActor(actor);
+      validateScope(scope);
+      validateScanInput(input);
+      return scanVersions(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input);
+    },
     async findPublication(actor, scope) {
       validateReadActor(actor);
       validateScope(scope);
