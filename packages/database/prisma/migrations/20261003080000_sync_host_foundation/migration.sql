@@ -28,7 +28,7 @@ CREATE TABLE sync_host."Job" (
   since TIMESTAMP(3) NOT NULL, until TIMESTAMP(3) NOT NULL,
   cursor JSONB, "successfulThrough" TIMESTAMP(3), status TEXT NOT NULL DEFAULT 'READY',
   fence INTEGER NOT NULL DEFAULT 0 CHECK (fence>=0), "leaseOwner" TEXT, "leaseUntil" TIMESTAMPTZ(3),
-  "failureCode" TEXT,
+  "failureCode" TEXT, "leaseBackendPid" INTEGER, "leaseBackendStart" TIMESTAMPTZ(6),
   CONSTRAINT "Job_values_check" CHECK (id ~ '^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$'
     AND status IN ('READY','RUNNING','FAILED','SUCCEEDED') AND since<until
     AND since>=timestamp '0001-01-01' AND until<=timestamp '9999-12-31 23:59:59.999'
@@ -102,7 +102,8 @@ BEGIN
  IF (NEW."organizationId",NEW."workspaceId",NEW."storeId",NEW."connectionId",NEW."externalStoreId",NEW.provider,NEW.generation)
   IS DISTINCT FROM (binding."organizationId",binding."workspaceId",binding."storeId",binding."connectionId",binding."externalStoreId",binding.provider,binding.generation)
   OR NEW.status<>'READY' OR NEW.fence<>0 OR NEW.cursor IS NOT NULL OR NEW."successfulThrough" IS NOT NULL
-  OR NEW."leaseOwner" IS NOT NULL OR NEW."leaseUntil" IS NOT NULL OR NEW."failureCode" IS NOT NULL THEN
+  OR NEW."leaseOwner" IS NOT NULL OR NEW."leaseUntil" IS NOT NULL OR NEW."failureCode" IS NOT NULL
+  OR NEW."leaseBackendPid" IS NOT NULL OR NEW."leaseBackendStart" IS NOT NULL THEN
   RAISE EXCEPTION 'Invalid initial job binding' USING ERRCODE='23514';
  END IF;
  -- Serialize every grant for the same scope/stream before inspecting its completed prefix.
@@ -118,9 +119,10 @@ BEGIN
 END $$;
 CREATE TRIGGER validate_window BEFORE INSERT ON sync_host."Job" FOR EACH ROW EXECUTE FUNCTION sync_host.validate_window();
 CREATE FUNCTION sync_host.validate_lease() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
-DECLARE wall TIMESTAMPTZ:=clock_timestamp();
+DECLARE wall TIMESTAMPTZ:=clock_timestamp(); backend_started TIMESTAMPTZ;
 BEGIN
  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=session_user AND (rolsuper OR rolbypassrls)) THEN RETURN NEW; END IF;
+ SELECT backend_start INTO backend_started FROM pg_stat_activity WHERE pid=pg_backend_pid();
  IF (to_jsonb(NEW)-ARRAY['status','fence','leaseOwner','leaseUntil','failureCode'])
   IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['status','fence','leaseOwner','leaseUntil','failureCode']) THEN
   RAISE EXCEPTION 'Job progress is immutable outside atomic ingestion' USING ERRCODE='23514';
@@ -129,14 +131,17 @@ BEGIN
   IF NEW.fence<>OLD.fence+1 OR NEW."leaseOwner" IS NULL OR NEW."failureCode" IS NOT NULL THEN
    RAISE EXCEPTION 'Invalid lease claim' USING ERRCODE='23514';
   END IF;
- ELSIF OLD.status='RUNNING' AND OLD."leaseUntil">wall AND NEW.fence=OLD.fence AND NEW."leaseOwner"=OLD."leaseOwner" THEN
+  NEW."leaseBackendPid":=pg_backend_pid(); NEW."leaseBackendStart":=backend_started;
+ ELSIF OLD.status='RUNNING' AND OLD."leaseUntil">wall AND NEW.fence=OLD.fence AND NEW."leaseOwner"=OLD."leaseOwner"
+  AND OLD."leaseBackendPid"=pg_backend_pid() AND OLD."leaseBackendStart"=backend_started THEN
   IF NEW.status NOT IN ('RUNNING','FAILED') OR NEW.status='FAILED' AND NEW."failureCode" IS NULL THEN
    RAISE EXCEPTION 'Invalid lease transition' USING ERRCODE='23514';
   END IF;
  ELSE RAISE EXCEPTION 'Stale lease or forbidden completion' USING ERRCODE='23514';
  END IF;
  IF NEW.status='RUNNING' THEN NEW."leaseUntil":=wall+interval '2 minutes';
- ELSE NEW."leaseUntil":=NULL; NEW."leaseOwner":=NULL; END IF;
+ ELSE NEW."leaseUntil":=NULL; NEW."leaseOwner":=NULL;
+  NEW."leaseBackendPid":=NULL; NEW."leaseBackendStart":=NULL; END IF;
  RETURN NEW;
 END $$;
 CREATE TRIGGER validate_lease BEFORE UPDATE ON sync_host."Job" FOR EACH ROW EXECUTE FUNCTION sync_host.validate_lease();

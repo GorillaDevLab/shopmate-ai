@@ -267,6 +267,8 @@ model SyncJob {
   fence             Int             @default(0)
   leaseOwner        String?
   leaseUntil        DateTime?       @db.Timestamptz(3)
+  leaseBackendPid   Int?
+  leaseBackendStart DateTime?       @db.Timestamptz(6)
   failureCode       String?
   grant             SyncWorkerGrant @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
 

@@ -83,6 +83,7 @@ async function assertLeaseTransitions(database) {
   try {
     const claimed = await claimJob(worker, "job-inventory", "inventory-owner");
     assert.equal(claimed.fence, 1);
+    await assertPeerLeaseDenied(database.url, claimed.id);
     await assert.rejects(worker.query('UPDATE sync_host."Job" SET status=$1 WHERE id=$2', ["SUCCEEDED", claimed.id]), (e) => e.code === "23514");
     const renewed = await worker.query('UPDATE sync_host."Job" SET "leaseUntil"=$1 WHERE id=$2 AND fence=$3 RETURNING EXTRACT(EPOCH FROM "leaseUntil"-clock_timestamp()) AS seconds', ["2099-01-01", claimed.id, 1]);
     assert.ok(Number(renewed.rows[0].seconds) > 119 && Number(renewed.rows[0].seconds) <= 120);
@@ -93,6 +94,14 @@ async function assertLeaseTransitions(database) {
     const retry = await worker.query('UPDATE sync_host."Job" SET status=$1,fence=fence+1,"leaseOwner"=$2,"failureCode"=NULL WHERE id=$3 RETURNING fence', ["RUNNING", "inventory-retry", claimed.id]);
     assert.equal(retry.rows[0].fence, 2);
   } finally { await worker.end(); }
+}
+
+async function assertPeerLeaseDenied(url, id) {
+  const peer = await connectSyncWorker(url);
+  try {
+    await assert.rejects(peer.query('UPDATE sync_host."Job" SET "leaseUntil"=clock_timestamp() WHERE id=$1 AND fence=$2', [id, 1]), (e) => e.code === "23514");
+    await assert.rejects(peer.query('UPDATE sync_host."Job" SET status=$1,"failureCode"=$2 WHERE id=$3 AND fence=$4', ["FAILED", "READ_TIMEOUT", id, 1]), (e) => e.code === "23514");
+  } finally { await peer.end(); }
 }
 
 async function assertContinuity(database) {
