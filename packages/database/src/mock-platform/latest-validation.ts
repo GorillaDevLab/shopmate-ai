@@ -2,6 +2,7 @@ import { SourceStorageError } from "./errors.js";
 import { validPublicationPin } from "./latest-publication.js";
 import type { LatestStateInput } from "./latest-types.js";
 import { snapshotKinds, validateEntityKey } from "./record-codec.js";
+import { validateDataBounds } from "./record-bounds.js";
 import type { SnapshotKind } from "./publication-types.js";
 import { representable, validateUtc } from "./record-primitives.js";
 import { exact, integer, object } from "./validation.js";
@@ -19,6 +20,7 @@ function assertKey(kind: unknown, value: unknown): void {
 }
 
 export function validateLatestInput(value: unknown): asserts value is LatestStateInput {
+  validateDataBounds(value, 8192, 64, 4);
   if (!object(value)) throw new SourceStorageError("SOURCE_INPUT");
   const keys = ["until", "limit"];
   for (const optional of ["cursor", "kind", "entityKey", "contextHash", "publication"])

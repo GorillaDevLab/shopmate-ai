@@ -42,3 +42,40 @@ test("latest exact keys accept validated tuples and retain raw database text com
     }),
   );
 });
+
+test("latest rejects hostile tuple serializers, array prototypes and accessors without invoking them", () => {
+  let invoked = false;
+  const serializer = ["PRODUCT", "x"];
+  serializer.toJSON = () => {
+    invoked = true;
+    return ["PRODUCT", "other"];
+  };
+  const accessor = ["PRODUCT", "x"];
+  Object.defineProperty(accessor, "1", {
+    enumerable: true,
+    get() {
+      invoked = true;
+      return "x";
+    },
+  });
+  class CustomTuple extends Array {}
+  for (const entityKey of [serializer, accessor, new CustomTuple("PRODUCT", "x")])
+    assert.throws(() => validateLatestInput({ ...input, entityKey }), { code: "SOURCE_INPUT" });
+  assert.equal(invoked, false);
+});
+
+test("the bounded request walk retains maximum legitimate cursor, raw key and pin inputs", () => {
+  assert.doesNotThrow(() =>
+    validateLatestInput({
+      ...input,
+      cursor: "a".repeat(4096),
+      entityKey: "界".repeat(1024),
+      contextHash: "a".repeat(64),
+      publication: {
+        revision: "9223372036854775807",
+        highEventSeq: "9223372036854775807",
+        certificateHash: "b".repeat(64),
+      },
+    }),
+  );
+});
