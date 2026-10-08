@@ -274,6 +274,7 @@ test("a real SQL failure rolls back identity and leaves the worker usable", asyn
     spy.mock.restore();
   }
   assert.ok(observed.length);
+  assert.equal(injected, true);
   for (const { settings } of observed)
     assert.ok(Object.values(settings).every((value) => value === "" || value === null));
   assert.equal((await hydrate(state)).status, "HYDRATED");
@@ -306,11 +307,14 @@ test(
   async (t) => {
     const state = await preparedHistory();
     const original = pg.Client.prototype.query;
-    let seeks = 0;
+    let seeks = 0,
+      waited = false;
     const spy = t.mock.method(pg.Client.prototype, "query", async function (sql, ...args) {
       const result = await original.call(this, sql, ...args);
-      if (sql === hydratePointSql && ++seeks === 1)
+      if (sql === hydratePointSql && ++seeks === 1) {
         await waitForLeaseExpiry(context.rawAdmin, state.lease);
+        waited = true;
+      }
       return result;
     });
     try {
@@ -322,6 +326,7 @@ test(
         { status: "FENCED" },
       );
       assert.equal(seeks, 1);
+      assert.equal(waited, true);
     } finally {
       spy.mock.restore();
     }
