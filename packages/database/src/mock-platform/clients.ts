@@ -62,9 +62,9 @@ export async function verifyCredentials(client: pg.PoolClient, mode: SourceMode)
       (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR
         r.rolname IN ('pg_read_all_data','pg_write_all_data','pg_read_server_files','pg_write_server_files','pg_execute_server_program') OR EXISTS (
         SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relowner=r.oid AND
-          (n.nspname IN ('demo','mock_platform') OR (n.nspname='public' AND c.relname=ANY($2::text[])))) OR EXISTS (
-        SELECT 1 FROM pg_namespace n WHERE n.nspowner=r.oid AND n.nspname IN ('public','demo','mock_platform')) OR EXISTS (
-        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.proowner=r.oid AND n.nspname IN ('demo','mock_platform')))) AS safe`,
+          (n.nspname IN ('demo','mock_platform','sync_host','commerce') OR (n.nspname='public' AND c.relname=ANY($2::text[])))) OR EXISTS (
+        SELECT 1 FROM pg_namespace n WHERE n.nspowner=r.oid AND n.nspname IN ('public','demo','mock_platform','sync_host','commerce')) OR EXISTS (
+        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.proowner=r.oid AND n.nspname IN ('demo','mock_platform','sync_host','commerce')))) AS safe`,
     [
       `shopmate_mock_source_${mode}`,
       [
