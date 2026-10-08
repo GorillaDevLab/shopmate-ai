@@ -51,11 +51,11 @@ export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
   return {
-    async readLatestStates(actor, scope, input) {
+    async readLatestStates(actor, scope, input, control) {
       validateReadActor(actor);
       validateScope(scope);
       validateLatestInput(input);
-      return readLatestStates(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input);
+      return readLatestStates(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input, control);
     },
     async scanVersions(actor, scope, input, control) {
       validateReadActor(actor);

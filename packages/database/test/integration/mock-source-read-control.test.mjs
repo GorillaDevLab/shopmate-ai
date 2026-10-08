@@ -11,6 +11,8 @@ import {
 } from "../helpers/mock-source-lease-port-fixture.mjs";
 import { readerActor, scopeFor } from "../helpers/mock-platform-fixture.mjs";
 import { beginControl } from "../helpers/mock-source-control-fixture.mjs";
+import { preparedAppend } from "../helpers/mock-source-append-port-fixture.mjs";
+import { eventFor } from "../helpers/mock-source-append-fixture.mjs";
 
 const source = await import("../../dist/src/mock-platform/index.js");
 let context, reader, monitor;
@@ -94,6 +96,152 @@ test("read deadline and signal inputs are validated before database access", asy
       reader.findGeneration(readerActor, scopeFor(), control),
       fixedError("SOURCE_INPUT"),
     );
+});
+
+const latestInput = { until: "2026-01-01T00:00:00.000Z", limit: 1 };
+test("latest pre-abort and expired deadline keep fixed errors", async () => {
+  const controller = new globalThis.AbortController();
+  controller.abort("private latest reason");
+  await assert.rejects(
+    reader.readLatestStates(readerActor, scopeFor(), latestInput, {
+      signal: controller.signal,
+    }),
+    fixedError("SOURCE_ABORTED"),
+  );
+  await assert.rejects(
+    reader.readLatestStates(readerActor, scopeFor(), latestInput, {
+      deadlineAt: "2020-01-01T00:00:00.000Z",
+    }),
+    fixedError("SOURCE_DEADLINE"),
+  );
+});
+test("latest validates read control before accessing PostgreSQL", async () => {
+  for (const control of [null, [], { signal: {} }, { deadlineAt: "2026-02-30T00:00:00.000Z" }])
+    await assert.rejects(
+      reader.readLatestStates(readerActor, scopeFor(), latestInput, control),
+      fixedError("SOURCE_INPUT"),
+    );
+});
+async function latestLockCancellation(control, code, abort) {
+  await beginControl(context.rawAdmin);
+  try {
+    const pending = reader.readLatestStates(readerActor, scopeFor(), latestInput, control);
+    const rejected = assert.rejects(pending, fixedError(code));
+    const backend = await waitBackend((row) => row.wait_event_type === "Lock");
+    abort?.();
+    await rejected;
+    await assertGone(backend.pid);
+    assert.equal(
+      (await monitor.query("SELECT 1 FROM pg_locks WHERE pid=$1", [backend.pid])).rowCount,
+      0,
+    );
+  } finally {
+    await context.rawAdmin.query("ROLLBACK");
+  }
+  assert.equal(await reader.readLatestStates(readerActor, scopeFor(), latestInput), null);
+}
+test("latest abort in CONTROL wait destroys its backend and reader recovers", async () => {
+  const controller = new globalThis.AbortController();
+  await latestLockCancellation({ signal: controller.signal }, "SOURCE_ABORTED", () =>
+    controller.abort(),
+  );
+});
+test("latest deadline in CONTROL wait destroys its backend and reader recovers", async () => {
+  await latestLockCancellation(
+    { deadlineAt: new Date(Date.now() + 1200).toISOString() },
+    "SOURCE_DEADLINE",
+  );
+});
+async function latestHistory() {
+  const state = await preparedAppend(context);
+  const events = ["first", "second"].map((id) =>
+    eventFor({ scope: state.scope }, "PRODUCT", "0", state.lease.targetTime, (record) => {
+      record.externalProductId = id;
+      record.skus[0].externalProductId = id;
+    }),
+  );
+  const appended = await context.worker.appendChunk(state.actor, state.lease, {
+    expectedCheckpointHash: state.lease.checkpointHash,
+    next: { processedThrough: state.lease.targetTime, sealed: true },
+    events,
+  });
+  assert.equal(appended.status, "COMMITTED");
+  const published = await context.worker.publish(state.actor, state.lease, {
+    expectedBaseRevision: state.lease.baseRevision,
+    checkpointHash: appended.checkpointHash,
+  });
+  assert.equal(published.status, "PUBLISHED");
+  return {
+    scope: state.scope,
+    input: { until: state.lease.targetTime, limit: 1, kind: "PRODUCT" },
+  };
+}
+function sleepLatestQuery(t, matches) {
+  const original = pg.Client.prototype.query;
+  let injected = false;
+  return t.mock.method(pg.Client.prototype, "query", async function (sql, ...args) {
+    if (typeof sql === "string" && matches(sql) && !injected) {
+      injected = true;
+      await original.call(this, "SELECT pg_advisory_xact_lock(12345,67891)");
+      await original.call(this, "SELECT pg_sleep(20)");
+    }
+    return original.call(this, sql, ...args);
+  });
+}
+async function canceledLatestSql(state, control, code, abort) {
+  const pending = reader.readLatestStates(readerActor, state.scope, state.input, control);
+  const rejected = assert.rejects(pending, fixedError(code));
+  const backend = await waitBackend((row) => row.query === "SELECT pg_sleep(20)");
+  assert.equal(
+    (
+      await monitor.query(
+        "SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND classid=12345 AND objid=67891",
+        [backend.pid],
+      )
+    ).rowCount,
+    1,
+  );
+  abort?.();
+  await rejected;
+  await assertGone(backend.pid);
+  assert.equal(
+    (await monitor.query("SELECT 1 FROM pg_locks WHERE pid=$1", [backend.pid])).rowCount,
+    0,
+  );
+}
+test("latest abort during candidate SQL releases transaction locks and keeps pinned recovery", async (t) => {
+  const state = await latestHistory(),
+    controller = new globalThis.AbortController();
+  const spy = sleepLatestQuery(t, (sql) => sql.includes("$15::boolean"));
+  try {
+    await canceledLatestSql(state, { signal: controller.signal }, "SOURCE_ABORTED", () =>
+      controller.abort("private reason"),
+    );
+  } finally {
+    spy.mock.restore();
+    controller.abort();
+  }
+  const recovered = await reader.readLatestStates(readerActor, state.scope, state.input);
+  assert.equal(recovered.items[0].payload.externalProductId, "first");
+  assert.ok(recovered.nextCursor);
+});
+test("latest deadline during cursor witness SQL releases locks and resumes the same cursor", async (t) => {
+  const state = await latestHistory();
+  const first = await reader.readLatestStates(readerActor, state.scope, state.input);
+  state.input = { ...state.input, cursor: first.nextCursor };
+  const spy = sleepLatestQuery(t, (sql) => sql.includes('AND "eventSeq"=$8::bigint'));
+  try {
+    await canceledLatestSql(
+      state,
+      { deadlineAt: new Date(Date.now() + 2000).toISOString() },
+      "SOURCE_DEADLINE",
+    );
+  } finally {
+    spy.mock.restore();
+  }
+  const recovered = await reader.readLatestStates(readerActor, state.scope, state.input);
+  assert.equal(recovered.publication.certificateHash, first.publication.certificateHash);
+  assert.equal(recovered.items[0].payload.externalProductId, "second");
 });
 test("abort while waiting for control lock terminates backend and reader recovers", async () => {
   const controller = new globalThis.AbortController();
@@ -200,6 +348,10 @@ test("recovered reader rechecks current credentials and actor access", async () 
   await monitor.query("GRANT shopmate_mock_source_worker TO source_read_login");
   try {
     await assert.rejects(
+      reader.readLatestStates(readerActor, scopeFor(), latestInput),
+      fixedError("SOURCE_CREDENTIALS"),
+    );
+    await assert.rejects(
       reader.findGeneration(readerActor, scopeFor()),
       fixedError("SOURCE_CREDENTIALS"),
     );
@@ -208,6 +360,14 @@ test("recovered reader rechecks current credentials and actor access", async () 
   }
   assert.equal(
     await reader.findGeneration({ ...readerActor, userId: "source-unassigned" }, scopeFor()),
+    null,
+  );
+  assert.equal(
+    await reader.readLatestStates(
+      { ...readerActor, userId: "source-unassigned" },
+      scopeFor(),
+      latestInput,
+    ),
     null,
   );
   assert.deepEqual(await reader.findGeneration(readerActor, scopeFor()), initialized.generation);
