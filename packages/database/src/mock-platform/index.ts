@@ -4,6 +4,7 @@ import { findGeneration, initializeGeneration } from "./generations.js";
 import { findGrant, listGrants, matchesGrant } from "./grants.js";
 import { assertFailureCode, claimJob, failJob, renewJob } from "./jobs.js";
 import { appendChunk } from "./journal.js";
+import { hydrateBuild } from "./hydration.js";
 import { publish } from "./publication.js";
 import { findPublication } from "./publication-certificate.js";
 import { readLatestStates, validateLatestInput } from "./latest.js";
@@ -45,6 +46,7 @@ export type * from "./types.js";
 export type * from "./publication-types.js";
 export type * from "./scan-types.js";
 export type * from "./latest-types.js";
+export type * from "./hydration-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
@@ -94,6 +96,7 @@ export function createMockSourceWorker(env: SourceEnvironment): MockSourceWorker
     renew: (actor, lease) => renewControlled(pool, actor, lease),
     fail: (actor, lease, code) => failControlled(pool, actor, lease, code),
     appendChunk: (actor, lease, input) => appendControlled(pool, actor, lease, input),
+    hydrateBuild: (actor, lease, input) => hydrateBuild(pool, actor, lease, input),
     publish: (actor, lease, input) => publishControlled(pool, actor, lease, input),
     close: () => pool.end(),
   };
