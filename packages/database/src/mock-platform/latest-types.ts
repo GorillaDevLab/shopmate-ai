@@ -9,6 +9,8 @@ export interface LatestStateInput {
   readonly cursor?: string;
   readonly kind?: SnapshotKind;
   readonly entityKey?: string;
+  /** Digest of additional host method/query filters; does not establish authorization. */
+  readonly contextHash?: string;
 }
 
 export interface LatestStatePage {

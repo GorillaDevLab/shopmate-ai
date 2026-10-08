@@ -9,6 +9,11 @@ import { eventFor } from "../helpers/mock-source-append-fixture.mjs";
 import { advance } from "../helpers/mock-source-publish-fixture.mjs";
 import { readerActor } from "../helpers/mock-platform-fixture.mjs";
 import { assertEntitySeeks, measuredLatest } from "../helpers/mock-source-latest-plan-fixture.mjs";
+import { restartedLatestRead } from "../helpers/mock-source-latest-restart.mjs";
+import {
+  readLatestCursor,
+  createLatestCursor,
+} from "../../dist/src/mock-platform/latest-cursor.js";
 
 const source = await import("../../dist/src/mock-platform/index.js");
 let context;
@@ -194,6 +199,9 @@ test("latest-state pages advance across future-only keys and preserve the prior 
   assert.equal(first.publication.revision, "2");
   assert.deepEqual(first.items, []);
   assert.ok(first.nextCursor);
+  assert.ok(first.nextCursor.length <= 1024);
+  await reader.close();
+  reader = source.createMockSourceReader(context.env);
   const second = await reader.readLatestStates(readerActor, state.scope, {
     ...input,
     cursor: first.nextCursor,
@@ -306,4 +314,52 @@ test("latest-state distinguishes unpublished and empty published scopes", async 
     }),
     { code: "SOURCE_INPUT" },
   );
+});
+
+test("compact latest cursors survive another process and preserve chain expiry on retries", async () => {
+  const state = await preparedAppend(context);
+  await publishEvents(state, [product(state, "a"), product(state, "b"), product(state, "c")]);
+  const input = {
+    until: state.lease.targetTime,
+    kind: "PRODUCT",
+    limit: 1,
+    contextHash: "a".repeat(64),
+  };
+  const first = await reader.readLatestStates(readerActor, state.scope, input);
+  const resumed = { ...input, cursor: first.nextCursor };
+  const second = await restartedLatestRead(context.env, readerActor, state.scope, resumed);
+  const retry = await reader.readLatestStates(readerActor, state.scope, resumed);
+  assert.deepEqual(second, retry);
+  const decode = (cursor) =>
+    readLatestCursor(context.env.MOCK_SOURCE_CURSOR_KEY, cursor, state.scope, input);
+  assert.equal(decode(first.nextCursor).expiresAt, decode(second.nextCursor).expiresAt);
+  assert.equal(second.items[0].payload.externalProductId, "b");
+  const last = await reader.readLatestStates(readerActor, state.scope, {
+    ...input,
+    cursor: second.nextCursor,
+  });
+  assert.equal(last.items[0].payload.externalProductId, "c");
+  assert.equal(last.nextCursor, null);
+});
+
+test("a signed witness cannot resume against an entity from another scope", async () => {
+  const original = await preparedAppend(context),
+    foreign = await preparedAppend(context);
+  const publication = await publishEvents(original, [
+    product(original, "a"),
+    product(original, "b"),
+  ]);
+  await publishEvents(foreign, [product(foreign, "a")]);
+  const input = { until: original.lease.targetTime, kind: "PRODUCT", limit: 1 };
+  const cursor = createLatestCursor(
+    context.env.MOCK_SOURCE_CURSOR_KEY,
+    foreign.scope,
+    publication,
+    input,
+    { kind: "PRODUCT", entityKey: '["PRODUCT", "b"]', eventSeq: "2" },
+    Date.now() + 60_000,
+  );
+  await assert.rejects(reader.readLatestStates(readerActor, foreign.scope, { ...input, cursor }), {
+    code: "SOURCE_INTEGRITY",
+  });
 });

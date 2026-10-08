@@ -1,17 +1,40 @@
-import { createHmac } from "node:crypto";
+import { createHash } from "node:crypto";
 import { SourceStorageError } from "./errors.js";
-import { createScanCursor, readScanCursor, type ScanCursorState } from "./scan-cursor.js";
+import { decodeCompactLatest, encodeCompactLatest } from "./latest-cursor-codec.js";
 import type { LatestStateInput } from "./latest-types.js";
 import type { Publication } from "./publication-types.js";
 import type { SourceScope } from "./types.js";
+import { scopeKeys, validateScope } from "./validation.js";
 
 export interface LatestPosition {
   readonly kind: string;
   readonly entityKey: string;
+  readonly eventSeq: string;
+}
+export interface LatestCursorState {
+  readonly certificateHash: string;
+  readonly revision: string;
+  readonly highEventSeq: string;
+  readonly until: string;
+  readonly afterEventSeq: string;
+  readonly expiresAt: number;
 }
 
-function domainKey(key: string): string {
-  return createHmac("sha256", key).update("mock-source-latest-v1").digest("base64url");
+function digest(values: readonly unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(values), "utf8").digest("base64url");
+}
+function scopeDigest(scope: SourceScope): string {
+  validateScope(scope);
+  return digest(scopeKeys.map((field) => scope[field]));
+}
+function queryDigest(input: LatestStateInput): string {
+  return digest([
+    input.until,
+    input.limit,
+    input.kind ?? null,
+    input.entityKey ?? null,
+    input.contextHash ?? null,
+  ]);
 }
 
 export function readLatestCursor(
@@ -19,17 +42,19 @@ export function readLatestCursor(
   cursor: string,
   scope: SourceScope,
   input: LatestStateInput,
-): ScanCursorState {
-  const state = readScanCursor(domainKey(key), cursor, scope);
-  if (
-    state.since !== input.until ||
-    state.until !== input.until ||
-    state.kind !== (input.kind ?? null) ||
-    state.entityKey !== (input.entityKey ?? null) ||
-    state.after?.eventSeq !== String(input.limit)
-  )
+  now = Date.now(),
+): LatestCursorState {
+  const state = decodeCompactLatest(key, cursor, now);
+  if (state.s !== scopeDigest(scope) || state.q !== queryDigest(input) || state.t !== input.until)
     throw new SourceStorageError("SOURCE_INPUT");
-  return state;
+  return {
+    certificateHash: state.c,
+    revision: state.r,
+    highEventSeq: state.h,
+    until: state.t,
+    afterEventSeq: state.a,
+    expiresAt: state.e,
+  };
 }
 
 export function createLatestCursor(
@@ -39,17 +64,21 @@ export function createLatestCursor(
   input: LatestStateInput,
   after: LatestPosition,
   expiresAt: number,
+  now = Date.now(),
 ): string {
-  return createScanCursor(domainKey(key), {
-    scope,
-    certificateHash: publication.certificateHash,
-    revision: publication.revision,
-    highEventSeq: publication.highEventSeq,
-    since: input.until,
-    until: input.until,
-    kind: input.kind ?? null,
-    entityKey: input.entityKey ?? null,
-    after: { ...after, eventSeq: String(input.limit) },
-    expiresAt,
-  });
+  return encodeCompactLatest(
+    key,
+    {
+      v: 1,
+      s: scopeDigest(scope),
+      q: queryDigest(input),
+      c: publication.certificateHash,
+      r: publication.revision,
+      h: publication.highEventSeq,
+      t: input.until,
+      a: after.eventSeq,
+      e: expiresAt,
+    },
+    now,
+  );
 }

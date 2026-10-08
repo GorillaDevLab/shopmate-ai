@@ -2,12 +2,18 @@ import type pg from "pg";
 import type { SourcePool } from "./clients.js";
 import { SourceAccessDenied, SourceStorageError } from "./errors.js";
 import { journalScopeWhere } from "./journal-state.js";
-import { createLatestCursor, readLatestCursor, type LatestPosition } from "./latest-cursor.js";
+import {
+  createLatestCursor,
+  readLatestCursor,
+  type LatestCursorState,
+  type LatestPosition,
+} from "./latest-cursor.js";
+import { restoreLatestPosition } from "./latest-witness.js";
 import type { LatestStateInput, LatestStatePage } from "./latest-types.js";
 import { readPublication } from "./publication-certificate.js";
 import { representable, validateUtc } from "./record-primitives.js";
 import { checkedVersion } from "./scan.js";
-import { validateScanKey, type ScanCursorState } from "./scan-cursor.js";
+import { validateScanKey } from "./scan-cursor.js";
 import type { SourceVersion } from "./scan-types.js";
 import {
   currentAccess,
@@ -19,7 +25,7 @@ import {
 import type { SourceReadActor, SourceScope } from "./types.js";
 import { exact, integer, object } from "./validation.js";
 
-const keySql = `SELECT kind,"entityKey" FROM mock_platform."EntityVersion"
+const keySql = `SELECT kind,"entityKey","eventSeq"::text AS "eventSeq" FROM mock_platform."EntityVersion" v
   WHERE ${journalScopeWhere}
     AND ($8::text IS NULL OR kind COLLATE "C"=$8::text COLLATE "C")
     AND ($9::text IS NULL OR "entityKey" COLLATE "C"=$9::text COLLATE "C")
@@ -27,7 +33,7 @@ const keySql = `SELECT kind,"entityKey" FROM mock_platform."EntityVersion"
       ($10::text COLLATE "C",$11::text COLLATE "C"))
     AND "eventSeq"<=$12::bigint AND "releaseRevision"<=$13::bigint
     AND "occurredAt"<=$14::timestamp
-  ORDER BY kind COLLATE "C","entityKey" COLLATE "C" LIMIT 1`;
+  ORDER BY kind COLLATE "C","entityKey" COLLATE "C",v."occurredAt" DESC,v."eventSeq" DESC LIMIT 1`;
 const latestSql = `SELECT kind,"entityKey","eventSeq"::text AS "eventSeq",
   "releaseRevision"::text AS "releaseRevision",
   to_char("occurredAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "occurredAt",
@@ -45,13 +51,15 @@ const CANDIDATE_BUDGET = 32;
 export function validateLatestInput(value: unknown): asserts value is LatestStateInput {
   if (!object(value)) throw new SourceStorageError("SOURCE_INPUT");
   const keys = ["until", "limit"];
-  for (const optional of ["cursor", "kind", "entityKey"])
+  for (const optional of ["cursor", "kind", "entityKey", "contextHash"])
     if (Object.hasOwn(value, optional)) keys.push(optional);
   if (
     !exact(value, keys) ||
     !validateUtc(value.until) ||
     !integer(value.limit, 1, 200) ||
     ("kind" in value && !kinds.includes(value.kind as string)) ||
+    ("contextHash" in value &&
+      (typeof value.contextHash !== "string" || !/^[a-f0-9]{64}$/u.test(value.contextHash))) ||
     ("entityKey" in value &&
       (!("kind" in value) ||
         typeof value.entityKey !== "string" ||
@@ -107,7 +115,7 @@ async function latestVersion(
 }
 
 function pinned(
-  state: ScanCursorState | null,
+  state: LatestCursorState | null,
   publication: LatestStatePage["publication"],
   until: string,
 ): void {
@@ -149,7 +157,7 @@ async function readPage(
   actor: SourceReadActor,
   scope: SourceScope,
   input: LatestStateInput,
-  state: ScanCursorState | null,
+  state: LatestCursorState | null,
   key: string,
 ): Promise<LatestStatePage | null> {
   await lockControl(client, scope);
@@ -158,7 +166,10 @@ async function readPage(
   const publication = await readPublication(client, scope, state?.revision ?? null);
   if (!publication) return null;
   pinned(state, publication, input.until);
-  const collected = await collectPage(client, scope, publication, input, state?.after ?? null);
+  const after = state
+    ? await restoreLatestPosition(client, scope, publication, state, input)
+    : null;
+  const collected = await collectPage(client, scope, publication, input, after);
   if (!(await currentAccess(client, scope, "reader"))) throw new SourceAccessDenied();
   const nextCursor =
     collected.more && collected.after
@@ -168,7 +179,7 @@ async function readPage(
           publication,
           input,
           collected.after,
-          Date.now() + 15 * 60_000,
+          state?.expiresAt ?? Date.now() + 15 * 60_000,
         )
       : null;
   return { publication, items: collected.items, nextCursor };
