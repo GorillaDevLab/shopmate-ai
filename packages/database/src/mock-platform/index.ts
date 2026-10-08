@@ -7,6 +7,7 @@ import { assertFailureCode, claimJob, failJob, renewJob } from "./jobs.js";
 import { appendChunk } from "./journal.js";
 import { publish } from "./publication.js";
 import { findPublication } from "./publication-certificate.js";
+import { readLatestStates, validateLatestInput } from "./latest.js";
 import { scanVersions, validateScanInput } from "./scan.js";
 import type {
   ClaimResult,
@@ -44,11 +45,18 @@ import type {
 export type * from "./types.js";
 export type * from "./publication-types.js";
 export type * from "./scan-types.js";
+export type * from "./latest-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
   return {
+    async readLatestStates(actor, scope, input) {
+      validateReadActor(actor);
+      validateScope(scope);
+      validateLatestInput(input);
+      return readLatestStates(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input);
+    },
     async scanVersions(actor, scope, input, control) {
       validateReadActor(actor);
       validateScope(scope);

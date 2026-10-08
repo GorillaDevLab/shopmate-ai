@@ -30,6 +30,7 @@ export class DatabaseMockConnectorAccessResolver implements MockConnectorAccessR
       generation: record.generation,
     });
     return {
+      sessionId: record.id,
       context,
       config,
       generation: record.generation,

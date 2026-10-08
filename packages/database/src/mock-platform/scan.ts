@@ -79,7 +79,7 @@ function pin(
   if (input.until > publication.targetTime) throw new SourceStorageError("SOURCE_INPUT");
 }
 
-function checkedVersion(row: SourceVersion, scope: SourceScope): SourceVersion {
+export function checkedVersion(row: SourceVersion, scope: SourceScope): SourceVersion {
   if (
     !positiveUInt(row.eventSeq) ||
     !positiveUInt(row.releaseRevision) ||
