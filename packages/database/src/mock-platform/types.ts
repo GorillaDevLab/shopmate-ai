@@ -11,6 +11,7 @@ import type {
   Publication,
 } from "./publication-types.js";
 import type { SourceScanInput, SourceScanPage } from "./scan-types.js";
+import type { LatestStateInput, LatestStatePage } from "./latest-types.js";
 
 export interface SourceScope {
   readonly organizationId: string;
@@ -56,6 +57,11 @@ export interface MockSourceReader {
     scope: SourceScope,
     input: SourceScanInput,
   ): Promise<SourceScanPage | null>;
+  readLatestStates(
+    actor: SourceReadActor,
+    scope: SourceScope,
+    input: LatestStateInput,
+  ): Promise<LatestStatePage | null>;
   close(): Promise<void>;
 }
 export interface MockSourceWorker {

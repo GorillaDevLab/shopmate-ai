@@ -217,6 +217,7 @@ model MockSourceEntityVersion {
 
   @@id([sessionId, generation, eventSeq], map: "EntityVersion_pkey")
   @@index([sessionId, generation, kind, entityKey, eventSeq(sort: Desc)], map: "EntityVersion_entity_sequence_idx")
+  @@index([sessionId, generation, kind, entityKey, occurredAt(sort: Desc), eventSeq(sort: Desc)], map: "EntityVersion_entity_time_idx")
   @@map("EntityVersion")
   @@schema("mock_platform")
 }
