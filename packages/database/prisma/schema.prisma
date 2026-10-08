@@ -22,6 +22,7 @@ model PlatformConnection {
   store           Store                 @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
   sessions        DemoCommerceSession[]
   syncGrants      SyncWorkerGrant[]
+  commerceScopes  CommerceSourceScope[]
 
   @@unique([storeId, provider])
   @@unique([id, organizationId, workspaceId, storeId, externalStoreId])
@@ -217,13 +218,80 @@ model MockSourceEntityVersion {
 
   @@id([sessionId, generation, eventSeq], map: "EntityVersion_pkey")
   @@index([sessionId, generation, kind, entityKey, eventSeq(sort: Desc)], map: "EntityVersion_entity_sequence_idx")
+  @@index([sessionId, generation, kind, entityKey, occurredAt(sort: Desc), eventSeq(sort: Desc)], map: "EntityVersion_entity_time_idx")
   @@map("EntityVersion")
   @@schema("mock_platform")
 }
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["public", "demo", "mock_platform", "sync_host"]
+  schemas  = ["public", "demo", "mock_platform", "sync_host", "commerce"]
+}
+
+model CommerceSourceScope {
+  id              String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  connectionId    String
+  externalStoreId String
+  provider        String
+  generation      Int
+  createdAt       DateTime                  @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  connection      PlatformConnection        @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "SourceScope_connection_fkey")
+  products        CanonicalProductListing[]
+
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation], map: "SourceScope_namespace_key")
+  @@unique([id, organizationId, workspaceId, storeId], map: "SourceScope_tenant_key")
+  @@map("SourceScope")
+  @@schema("commerce")
+}
+
+model CanonicalProductListing {
+  scopeId           String                @db.Uuid
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  externalProductId String
+  title             String
+  description       String?
+  category          String?
+  brand             String?
+  status            String
+  sourceVersion     String?
+  sourceUpdatedAt   DateTime?             @db.Timestamptz(3)
+  sourcePayloadHash String
+  qualityState      String
+  qualityIssues     String[]
+  ingestedAt        DateTime              @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  scope             CommerceSourceScope   @relation(fields: [scopeId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "ProductListing_scope_fkey")
+  skus              CanonicalSkuListing[]
+
+  @@id([scopeId, externalProductId])
+  @@unique([scopeId, organizationId, workspaceId, storeId, externalProductId], map: "ProductListing_tenant_key")
+  @@index([organizationId, workspaceId, storeId], map: "ProductListing_store_idx")
+  @@map("ProductListing")
+  @@schema("commerce")
+}
+
+model CanonicalSkuListing {
+  scopeId            String                  @db.Uuid
+  organizationId     String
+  workspaceId        String
+  storeId            String
+  externalSkuId      String
+  externalProductId  String
+  attributes         Json
+  salePriceMinor     BigInt
+  costPriceMinor     BigInt?
+  originalPriceMinor BigInt?
+  status             String
+  product            CanonicalProductListing @relation(fields: [scopeId, organizationId, workspaceId, storeId, externalProductId], references: [scopeId, organizationId, workspaceId, storeId, externalProductId], onDelete: Restrict, onUpdate: NoAction, map: "SkuListing_product_fkey")
+
+  @@id([scopeId, externalSkuId])
+  @@index([scopeId, externalProductId], map: "SkuListing_product_idx")
+  @@map("SkuListing")
+  @@schema("commerce")
 }
 
 model SyncWorkerGrant {
