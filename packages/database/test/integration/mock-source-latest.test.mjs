@@ -15,7 +15,7 @@ let context;
 let reader;
 
 test.before(async () => {
-  context = await leasePortDatabase(source, "scan");
+  context = await leasePortDatabase(source, "latest");
   context.env.MOCK_SOURCE_CURSOR_KEY = "k".repeat(32);
   reader = source.createMockSourceReader(context.env);
 });
