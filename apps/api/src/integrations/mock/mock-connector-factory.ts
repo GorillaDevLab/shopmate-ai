@@ -31,6 +31,7 @@ const EnvironmentSchema = z.strictObject({
   enableDemoMode: z.boolean(),
 });
 const AccessSchema = z.strictObject({
+  sessionId: TenantIdSchema,
   context: TenantContextSchema,
   config: MockConfigSchema,
   generation: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
@@ -131,6 +132,6 @@ function correlates(record: AccessRecord, identity: AuthContext, storeId: string
 
 function connectionFingerprint(record: AccessRecord): string {
   return createHash("sha256")
-    .update(JSON.stringify([record.generation, record.config]))
+    .update(JSON.stringify([record.sessionId, record.generation, record.config]))
     .digest("hex");
 }
