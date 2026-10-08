@@ -33,6 +33,7 @@ const config = {
   dailyOrders: 6,
 };
 const record = () => ({
+  sessionId: "session-a",
   context: {
     ...identity,
     organizationId: "org-a",
@@ -93,6 +94,8 @@ describe("fresh tenant connector selection", () => {
   });
 
   it.each([
+    { sessionId: undefined },
+    { sessionId: "invalid session" },
     { environmentMarker: "production" },
     { demoTenant: false },
     { generation: -1 },

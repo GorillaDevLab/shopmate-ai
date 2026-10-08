@@ -9,6 +9,23 @@ const options = () => ({
   deadlineAt: new Date(Date.now() + 5000).toISOString(),
 });
 describe("database connector composition", () => {
+  it("invalidates a connector when its persisted session is replaced with identical configuration", async () => {
+    const repo = repository();
+    let current = record();
+    vi.mocked(repo.findDemoSession).mockImplementation(async () => current);
+    const host = new DemoCommerceConnectorHost(repo, {
+      enabled: true,
+      origin: "https://demo.example.com",
+    });
+    const opened = await host.open(identity, "store-a", options());
+    if (!opened.ok) throw new Error(opened.error.code);
+    expect(await opened.data.getStore(options())).toMatchObject({ ok: true });
+    current = { ...current, id: "session-replacement" };
+    expect(await opened.data.getStore(options())).toMatchObject({
+      ok: false,
+      error: { code: "AUTH_EXPIRED" },
+    });
+  });
   it("freshens persisted time using actual Factory and invalidates a reset connector", async () => {
     const repo = repository();
     let current = record();
