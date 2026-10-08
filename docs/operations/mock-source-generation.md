@@ -127,7 +127,11 @@ Recovery requires the live owner/fence/grant and the current checkpoint hash.
 `processedThrough`. The query excludes sequences above its committed high watermark
 and selects versions from the current lease revision or an owning PUBLISHED build
 at or below its frozen base revision. Current authorization and wall-clock lease
-validity are checked again after reading; the read transaction always rolls back.
+validity are checked before every point seek and again after reading; the read
+transaction always rolls back. Worker RLS alone checks current access, not a live
+lease. An already-running point statement retains the existing ten-second SQL
+timeout; expiry stops subsequent keys. This does not introduce a total worker
+operation deadline or cancellation during pool acquisition/control locking.
 Grant revocation/reset returns DENIED, an obsolete/expired lease returns FENCED,
 and a stale checkpoint returns CONFLICT. Invalid controls raise SOURCE_INPUT.
 

@@ -301,11 +301,30 @@ test("reset denies the old generation while preserving its persisted facts", asy
   }
 });
 test(
-  "natural expiry fences recovery and takeover resumes its committed prefix",
+  "natural expiry between keys stops further seeks and takeover resumes its committed prefix",
   { timeout: 60000 },
-  async () => {
+  async (t) => {
     const state = await preparedHistory();
-    await waitForLeaseExpiry(context.rawAdmin, state.lease);
+    const original = pg.Client.prototype.query;
+    let seeks = 0;
+    const spy = t.mock.method(pg.Client.prototype, "query", async function (sql, ...args) {
+      const result = await original.call(this, sql, ...args);
+      if (sql === hydratePointSql && ++seeks === 1)
+        await waitForLeaseExpiry(context.rawAdmin, state.lease);
+      return result;
+    });
+    try {
+      assert.deepEqual(
+        await hydrate(state, {
+          ...input(state),
+          entityKeys: [key("ORDER"), ["ORDER", "missing-one"], ["ORDER", "missing-two"]],
+        }),
+        { status: "FENCED" },
+      );
+      assert.equal(seeks, 1);
+    } finally {
+      spy.mock.restore();
+    }
     assert.deepEqual(await hydrate(state), { status: "FENCED" });
     const claimed = await context.worker.claim(state.actor, state.scope);
     assert.equal(claimed.status, "CLAIMED");

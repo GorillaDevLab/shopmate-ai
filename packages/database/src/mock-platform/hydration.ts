@@ -84,6 +84,9 @@ async function recoveryAction(
   const base = await baseRevision(client, lease),
     items: SourceVersion[] = [];
   for (const key of input.entityKeys) {
+    // Worker RLS checks access, not this lease. Recheck before each seek so
+    // expiry cannot extend a hundred-query read beyond one active statement.
+    await finalJournalCheck(client, lease);
     const rows = await client.query<SourceVersion>(
       hydratePointSql,
       hydrationValues(lease, base, job.checkpoint.highEventSeq, input, key),
