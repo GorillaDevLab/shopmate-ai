@@ -108,3 +108,19 @@ test("latest compact decoder rejects signed malformed envelopes", () => {
     });
   }
 });
+
+test("structured exact key contents are signed and maximum witness integers remain bounded", (t) => {
+  const query = { ...input, entityKey: ["PRODUCT", 'quoted/"中文'] };
+  const after = { ...position, eventSeq: "9223372036854775807" };
+  const cursor = createLatestCursor(key, scope, publication, query, after, expiresAt, now);
+  assert.ok(cursor.length < 700);
+  t.diagnostic(`Maximum signed integer witness cursor: ${cursor.length} characters`);
+  for (const entityKey of [
+    ["PRODUCT", "other"],
+    ["ORDER", 'quoted/"中文'],
+    JSON.stringify(query.entityKey),
+  ])
+    assert.throws(() => readLatestCursor(key, cursor, scope, { ...query, entityKey }, now), {
+      code: "SOURCE_INPUT",
+    });
+});

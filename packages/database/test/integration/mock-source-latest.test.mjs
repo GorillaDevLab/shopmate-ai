@@ -440,3 +440,33 @@ test("explicit pins reject malformed identities and missing certificates while r
   ]);
   assert.equal(await reader.readLatestStates(readerActor, state.scope, input), null);
 });
+
+test("structured exact keys select every kind including escaped identifiers and composite keys", async () => {
+  const state = await preparedAppend(context);
+  const at = state.lease.targetTime;
+  const kinds = ["STORE", "PRODUCT", "ORDER", "REFUND", "INVENTORY", "MARKETING"];
+  const events = kinds.map((kind) =>
+    eventFor({ scope: state.scope, job: { targetTime: at } }, kind),
+  );
+  events[1] = product(state, 'quoted/"中文');
+  await publishEvents(state, events);
+  const input = { until: at, limit: 10 };
+  const all = await reader.readLatestStates(readerActor, state.scope, input);
+  assert.equal(all.items.length, 6);
+  for (const item of all.items) {
+    const entityKey = JSON.parse(item.entityKey);
+    const exact = await reader.readLatestStates(readerActor, state.scope, {
+      ...input,
+      kind: item.kind,
+      entityKey,
+    });
+    assert.deepEqual(exact.items, [item]);
+    assert.equal(exact.nextCursor, null);
+  }
+  const absent = await reader.readLatestStates(readerActor, state.scope, {
+    ...input,
+    kind: "PRODUCT",
+    entityKey: ["PRODUCT", "absent"],
+  });
+  assert.deepEqual(absent.items, []);
+});

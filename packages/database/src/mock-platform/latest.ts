@@ -9,10 +9,9 @@ import {
   type LatestPosition,
 } from "./latest-cursor.js";
 import { restoreLatestPosition } from "./latest-witness.js";
-import { assertLatestPublication, validPublicationPin } from "./latest-publication.js";
+import { assertLatestPublication } from "./latest-publication.js";
 import type { LatestStateInput, LatestStatePage } from "./latest-types.js";
 import { readPublication } from "./publication-certificate.js";
-import { representable, validateUtc } from "./record-primitives.js";
 import { checkedVersion } from "./scan.js";
 import { validateScanKey } from "./scan-cursor.js";
 import type { SourceVersion } from "./scan-types.js";
@@ -24,12 +23,13 @@ import {
   transaction,
 } from "./transaction.js";
 import type { SourceReadActor, SourceScope } from "./types.js";
-import { exact, integer, object } from "./validation.js";
+export { validateLatestInput } from "./latest-validation.js";
 
 const keySql = `SELECT kind,"entityKey","eventSeq"::text AS "eventSeq" FROM mock_platform."EntityVersion" v
   WHERE ${journalScopeWhere}
     AND ($8::text IS NULL OR kind COLLATE "C"=$8::text COLLATE "C")
-    AND ($9::text IS NULL OR "entityKey" COLLATE "C"=$9::text COLLATE "C")
+    AND ($9::text IS NULL OR "entityKey" COLLATE "C"=
+      (CASE WHEN $15::boolean THEN $9::jsonb::text ELSE $9::text END) COLLATE "C")
     AND ($10::text IS NULL OR (kind COLLATE "C","entityKey" COLLATE "C") >
       ($10::text COLLATE "C",$11::text COLLATE "C"))
     AND "eventSeq"<=$12::bigint AND "releaseRevision"<=$13::bigint
@@ -44,35 +44,9 @@ const latestSql = `SELECT kind,"entityKey","eventSeq"::text AS "eventSeq",
     AND "occurredAt"<=$10::timestamp AND "eventSeq"<=$11::bigint
     AND "releaseRevision"<=$12::bigint
   ORDER BY v."occurredAt" DESC,v."eventSeq" DESC LIMIT 1`;
-const kinds = ["STORE", "PRODUCT", "ORDER", "REFUND", "INVENTORY", "MARKETING"];
 const CANDIDATE_BUDGET = 32;
 // Pin discovery as well as values so later publications cannot expose keys in an old cursor.
 // The index matches C ordering; qualify ORDER BY columns to avoid formatted DTO aliases.
-
-export function validateLatestInput(value: unknown): asserts value is LatestStateInput {
-  if (!object(value)) throw new SourceStorageError("SOURCE_INPUT");
-  const keys = ["until", "limit"];
-  for (const optional of ["cursor", "kind", "entityKey", "contextHash", "publication"])
-    if (Object.hasOwn(value, optional)) keys.push(optional);
-  if (
-    !exact(value, keys) ||
-    !validateUtc(value.until) ||
-    !integer(value.limit, 1, 200) ||
-    ("publication" in value && !validPublicationPin(value.publication)) ||
-    ("kind" in value && !kinds.includes(value.kind as string)) ||
-    ("contextHash" in value &&
-      (typeof value.contextHash !== "string" || !/^[a-f0-9]{64}$/u.test(value.contextHash))) ||
-    ("entityKey" in value &&
-      (!("kind" in value) ||
-        typeof value.entityKey !== "string" ||
-        value.entityKey.length === 0 ||
-        value.entityKey.length > 1024 ||
-        !representable(value.entityKey))) ||
-    ("cursor" in value &&
-      (typeof value.cursor !== "string" || value.cursor.length === 0 || value.cursor.length > 4096))
-  )
-    throw new SourceStorageError("SOURCE_INPUT");
-}
 
 async function nextKey(
   client: pg.PoolClient,
@@ -84,12 +58,13 @@ async function nextKey(
   const result = await client.query<LatestPosition>(keySql, [
     ...scopeValues(scope),
     input.kind ?? null,
-    input.entityKey ?? null,
+    Array.isArray(input.entityKey) ? JSON.stringify(input.entityKey) : (input.entityKey ?? null),
     after?.kind ?? null,
     after?.entityKey ?? null,
     publication.highEventSeq,
     publication.revision,
     publication.targetTime,
+    Array.isArray(input.entityKey),
   ]);
   if (result.rowCount === 0) return null;
   if (result.rowCount !== 1 || !result.rows[0]) throw new SourceStorageError("SOURCE_INTEGRITY");
