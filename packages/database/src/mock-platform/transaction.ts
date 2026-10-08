@@ -48,7 +48,7 @@ export async function transaction<T>(
     client?.release(discard);
   }
 }
-async function configureTransaction(client: pg.PoolClient): Promise<void> {
+export async function configureTransaction(client: pg.PoolClient): Promise<void> {
   await client.query("SET LOCAL TIME ZONE 'UTC'");
   await client.query("SET LOCAL lock_timeout='5s'");
   await client.query("SET LOCAL statement_timeout='10s'");

@@ -1,5 +1,7 @@
 export type SourceErrorCode =
   | "SOURCE_INPUT"
+  | "SOURCE_ABORTED"
+  | "SOURCE_DEADLINE"
   | "SOURCE_CONFIGURATION"
   | "SOURCE_CREDENTIALS"
   | "SOURCE_STORAGE"
