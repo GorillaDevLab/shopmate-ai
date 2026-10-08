@@ -1,6 +1,6 @@
-import type { ConnectorSku } from "@shopmate/contracts";
-import type { CatalogEntry } from "./mock-catalog.js";
-import { DAY_MS, openingTime, type MockConfig } from "./mock-config.js";
+import { ConnectorTimestampSchema, type ConnectorSku } from "@shopmate/contracts";
+import { generateCatalog, type CatalogEntry } from "./mock-catalog.js";
+import { DAY_MS, MockConfigSchema, openingTime, type MockConfig } from "./mock-config.js";
 import { seededInteger } from "./mock-random.js";
 import { campaignPlan } from "./mock-campaign-plan.js";
 
@@ -139,10 +139,15 @@ function restockEvents(
   config: MockConfig,
   skus: readonly ConnectorSku[],
   until: number,
+  after = Number.NEGATIVE_INFINITY,
 ): TimelineEvent[] {
   const events: TimelineEvent[] = [];
   const horizon = Date.parse(config.historyStart) + config.days * DAY_MS;
-  for (let at = openingTime(config); at <= until && at < horizon; at += 7 * DAY_MS) {
+  const opening = openingTime(config);
+  const first = Number.isFinite(after)
+    ? opening + Math.max(0, Math.floor((after - opening) / (7 * DAY_MS)) + 1) * 7 * DAY_MS
+    : opening;
+  for (let at = first; at <= until && at < horizon; at += 7 * DAY_MS) {
     skus.forEach((sku, index) => {
       // Leave one hero SKU without recent replenishment so lost demand follows actual stock depletion.
       if (
@@ -180,6 +185,34 @@ export function generateTimeline(
       events.push(...orderEvents(candidateFor(config, skus, day, index)));
     }
   }
+  return orderedTimeline(events.filter((event) => event.at <= until));
+}
+
+/** Generates at most one day without replaying earlier history; delayed settlements look back five days. */
+export function generateTimelineWindow(
+  input: unknown,
+  afterInput: unknown,
+  untilInput: unknown,
+): TimelineEvent[] {
+  const config = MockConfigSchema.parse(input);
+  const after = Date.parse(ConnectorTimestampSchema.parse(afterInput));
+  const until = Date.parse(ConnectorTimestampSchema.parse(untilInput));
+  if (until <= after || until - after > DAY_MS) throw new RangeError("Invalid timeline window");
+  const skus = generateCatalog(config).flatMap((entry) => entry.product.skus);
+  const events = restockEvents(config, skus, until, after);
+  const start = Date.parse(config.historyStart);
+  // RETURN is the longest delayed effect; older candidates cannot affect this window.
+  const firstDay = Math.max(0, Math.floor((after - 5 * DAY_MS - start) / DAY_MS));
+  const lastDay = Math.min(config.days - 1, Math.floor((until - start) / DAY_MS));
+  for (let day = firstDay; day <= lastDay; day += 1) {
+    for (let index = 0; index < dailyDemand(config, day); index += 1) {
+      events.push(...orderEvents(candidateFor(config, skus, day, index)));
+    }
+  }
+  return orderedTimeline(events.filter((event) => event.at > after && event.at <= until));
+}
+
+function orderedTimeline(events: TimelineEvent[]): TimelineEvent[] {
   const rank = {
     RESTOCK: 0,
     RESERVE: 1,
@@ -190,14 +223,12 @@ export function generateTimeline(
     REFUND: 6,
     RETURN: 7,
   };
-  return events
-    .filter((event) => event.at <= until)
-    .sort(
-      (a, b) =>
-        a.at - b.at ||
-        rank[a.kind] - rank[b.kind] ||
-        compareKeys(a.candidate?.id ?? a.skuId!, b.candidate?.id ?? b.skuId!),
-    );
+  return events.sort(
+    (a, b) =>
+      a.at - b.at ||
+      rank[a.kind] - rank[b.kind] ||
+      compareKeys(a.candidate?.id ?? a.skuId!, b.candidate?.id ?? b.skuId!),
+  );
 }
 
 function compareKeys(a: string, b: string): number {
