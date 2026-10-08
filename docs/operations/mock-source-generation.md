@@ -111,3 +111,36 @@ Explicitly retry an uncertain publication with the same reference and exact base
 The dedicated reader's `findPublication(actor, scope)` returns the latest own-scope PUBLISHED certificate or null when denied or unpublished. It takes CONTROL and checks current human/merchant access, without resolving a worker grant, locking a job or requiring a lease. It uses only granted public columns, independently verifies the PostgreSQL JSONB certificate hash and validates the stored DTO. Malformed public state raises sanitized `SOURCE_INTEGRITY`; private job state and source events are never returned. A later published head does not authorize versions belonging to an earlier unpublished revision.
 
 Version 1 keeps the existing bounds: at most 100 events and 2 MiB per chunk, at most 256 KiB per record, canonical unsigned bigint decimal strings and the fixed thirty-second database wall lease. The whole-job final publication proof is bounded by accepted data, with no throughput claim. A deliberately empty sealed prefix can be physically complete; it does not establish that a generator supplied all required business events. Unchanged-clock command writes still require the separate requestRevision/command-receipt extension. This delivery uses synthetic data only and includes no real platform, Jev or LLM calls, background generation, scans, connector replacement or full P2 completion. Deployment and online migration remain deferred.
+
+## Bounded build recovery
+
+`worker.hydrateBuild(actor, lease, { expectedCheckpointHash, beforeTime, kind, entityKeys })`
+recovers the latest snapshot strictly before `beforeTime` for each explicit key.
+Kinds are limited to ORDER, INVENTORY and MARKETING. Keys use the existing structured
+tuples (`["ORDER", orderId]`, `["INVENTORY", skuId, locationId]`,
+`["MARKETING", campaignId, date]`); callers send one to one hundred unique keys of
+the selected kind. Input is bounded to 128 KiB. PostgreSQL canonicalizes their JSONB
+text, including Unicode, quotes and backslashes, before indexed equality lookup.
+
+Recovery requires the live owner/fence/grant and the current checkpoint hash.
+`beforeTime` is a canonical UTC millisecond timestamp no later than the checkpoint's
+`processedThrough`. The query excludes sequences above its committed high watermark
+and selects versions from the current lease revision or an owning PUBLISHED build
+at or below its frozen base revision. Current authorization and wall-clock lease
+validity are checked again after reading; the read transaction always rolls back.
+Grant revocation/reset returns DENIED, an obsolete/expired lease returns FENCED,
+and a stale checkpoint returns CONFLICT. Invalid controls raise SOURCE_INPUT.
+
+The HYDRATED result carries the pinned checkpoint/hash and at most one validated
+SourceVersion per requested key, in request order with absent keys omitted. Each
+record retains the 256 KiB bound, so the worst-case payload is bounded by one hundred
+records; this port does not claim the append chunk's smaller 2 MiB aggregate bound.
+There is no cursor and no history enumeration. It reuses the entity occurrence-time
+index. The mandatory real PostgreSQL suite measures one hundred point queries over
+24,000 older synthetic versions and a large committed prefix, and covers rollback,
+revocation, reset, actual expiry/takeover and revision/prefix isolation. Small prefixes
+may legitimately use the primary key instead; planner node names are not contractual.
+
+This is a recovery prerequisite for the incremental generator host. The host must
+still choose bounded causal keys, replay same-time groups deterministically and obey
+the existing append/checkpoint/publication protocol. No generator host is included.
