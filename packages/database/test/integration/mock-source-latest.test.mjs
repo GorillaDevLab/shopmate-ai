@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import pg from "pg";
 import {
   leasePortDatabase,
   closeLeasePortDatabase,
@@ -469,4 +470,36 @@ test("structured exact keys select every kind including escaped identifiers and 
     entityKey: ["PRODUCT", "absent"],
   });
   assert.deepEqual(absent.items, []);
+});
+
+test("explicit pins recheck authorization when revocation hides the certificate mid-read", async (t) => {
+  const state = await preparedAppend(context);
+  const publication = await publishEvents(state, [product(state, "a")]);
+  const input = {
+    until: state.lease.targetTime,
+    limit: 1,
+    publication: publicationPin(publication),
+  };
+  const original = pg.Client.prototype.query;
+  let revoked = false;
+  const spy = t.mock.method(pg.Client.prototype, "query", async function (sql, ...args) {
+    if (typeof sql === "string" && sql.startsWith("WITH certificate AS") && !revoked) {
+      revoked = true;
+      await context.admin.query(
+        'UPDATE "OrganizationMember" SET status=$1 WHERE "organizationId"=$2 AND "userId"=$3',
+        ["INACTIVE", state.scope.organizationId, readerActor.userId],
+      );
+    }
+    return original.call(this, sql, ...args);
+  });
+  try {
+    assert.equal(await reader.readLatestStates(readerActor, state.scope, input), null);
+    assert.equal(revoked, true);
+  } finally {
+    spy.mock.restore();
+    await context.admin.query(
+      'UPDATE "OrganizationMember" SET status=$1 WHERE "organizationId"=$2 AND "userId"=$3',
+      ["ACTIVE", state.scope.organizationId, readerActor.userId],
+    );
+  }
 });

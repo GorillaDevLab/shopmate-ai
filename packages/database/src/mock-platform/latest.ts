@@ -114,6 +114,16 @@ async function collectPage(
   };
 }
 
+async function unavailablePublication(
+  client: pg.PoolClient,
+  scope: SourceScope,
+  explicitlyPinned: boolean,
+): Promise<null> {
+  if (!(await currentAccess(client, scope, "reader"))) throw new SourceAccessDenied();
+  if (explicitlyPinned) throw new SourceStorageError("SOURCE_INTEGRITY");
+  return null;
+}
+
 async function readPage(
   client: pg.PoolClient,
   actor: SourceReadActor,
@@ -130,9 +140,8 @@ async function readPage(
     scope,
     state?.revision ?? input.publication?.revision ?? null,
   );
-  if (!publication && (state || input.publication))
-    throw new SourceStorageError("SOURCE_INTEGRITY");
-  if (!publication) return null;
+  if (!publication)
+    return unavailablePublication(client, scope, Boolean(state || input.publication));
   assertLatestPublication(state, publication, input);
   const after = state
     ? await restoreLatestPosition(client, scope, publication, state, input)
