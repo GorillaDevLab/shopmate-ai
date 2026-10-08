@@ -46,6 +46,7 @@ export type * from "./publication-types.js";
 export type * from "./scan-types.js";
 export type * from "./latest-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
+export { packSourceChunk, type SourceChunkPlan } from "./chunk-packer.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
