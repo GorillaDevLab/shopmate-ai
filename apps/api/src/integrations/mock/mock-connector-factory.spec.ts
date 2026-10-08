@@ -78,8 +78,6 @@ describe("fresh tenant connector selection", () => {
   });
 
   it.each([
-    { sessionId: undefined },
-    { sessionId: "invalid session" },
     { appEnv: "production", enableDemoMode: true },
     { appEnv: "staging", enableDemoMode: true },
     { appEnv: "demo", enableDemoMode: false },
@@ -96,6 +94,8 @@ describe("fresh tenant connector selection", () => {
   });
 
   it.each([
+    { sessionId: undefined },
+    { sessionId: "invalid session" },
     { environmentMarker: "production" },
     { demoTenant: false },
     { generation: -1 },
