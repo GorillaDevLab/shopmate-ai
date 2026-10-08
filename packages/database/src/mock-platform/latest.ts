@@ -9,6 +9,7 @@ import {
   type LatestPosition,
 } from "./latest-cursor.js";
 import { restoreLatestPosition } from "./latest-witness.js";
+import { assertLatestPublication, validPublicationPin } from "./latest-publication.js";
 import type { LatestStateInput, LatestStatePage } from "./latest-types.js";
 import { readPublication } from "./publication-certificate.js";
 import { representable, validateUtc } from "./record-primitives.js";
@@ -51,12 +52,13 @@ const CANDIDATE_BUDGET = 32;
 export function validateLatestInput(value: unknown): asserts value is LatestStateInput {
   if (!object(value)) throw new SourceStorageError("SOURCE_INPUT");
   const keys = ["until", "limit"];
-  for (const optional of ["cursor", "kind", "entityKey", "contextHash"])
+  for (const optional of ["cursor", "kind", "entityKey", "contextHash", "publication"])
     if (Object.hasOwn(value, optional)) keys.push(optional);
   if (
     !exact(value, keys) ||
     !validateUtc(value.until) ||
     !integer(value.limit, 1, 200) ||
+    ("publication" in value && !validPublicationPin(value.publication)) ||
     ("kind" in value && !kinds.includes(value.kind as string)) ||
     ("contextHash" in value &&
       (typeof value.contextHash !== "string" || !/^[a-f0-9]{64}$/u.test(value.contextHash))) ||
@@ -114,21 +116,6 @@ async function latestVersion(
   return checkedVersion(result.rows[0], scope);
 }
 
-function pinned(
-  state: LatestCursorState | null,
-  publication: LatestStatePage["publication"],
-  until: string,
-): void {
-  if (until > publication.targetTime) throw new SourceStorageError("SOURCE_INPUT");
-  if (
-    state &&
-    (state.certificateHash !== publication.certificateHash ||
-      state.revision !== publication.revision ||
-      state.highEventSeq !== publication.highEventSeq)
-  )
-    throw new SourceStorageError("SOURCE_INTEGRITY");
-}
-
 async function collectPage(
   client: pg.PoolClient,
   scope: SourceScope,
@@ -163,9 +150,15 @@ async function readPage(
   await lockControl(client, scope);
   await readIdentity(client, actor);
   if (!(await currentAccess(client, scope, "reader"))) return null;
-  const publication = await readPublication(client, scope, state?.revision ?? null);
+  const publication = await readPublication(
+    client,
+    scope,
+    state?.revision ?? input.publication?.revision ?? null,
+  );
+  if (!publication && (state || input.publication))
+    throw new SourceStorageError("SOURCE_INTEGRITY");
   if (!publication) return null;
-  pinned(state, publication, input.until);
+  assertLatestPublication(state, publication, input);
   const after = state
     ? await restoreLatestPosition(client, scope, publication, state, input)
     : null;

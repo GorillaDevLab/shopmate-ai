@@ -363,3 +363,80 @@ test("a signed witness cannot resume against an entity from another scope", asyn
     code: "SOURCE_INTEGRITY",
   });
 });
+
+function publicationPin(publication) {
+  const { revision, highEventSeq, certificateHash } = publication;
+  return { revision, highEventSeq, certificateHash };
+}
+
+test("an explicit first-page pin keeps the discovered publication after a later release", async () => {
+  const state = await preparedAppend(context);
+  const original = await publishEvents(state, [product(state, "a"), product(state, "b")]);
+  const until = state.lease.targetTime;
+  const future = new Date(Date.parse(until) + 1000).toISOString();
+  await nextRelease(state, future);
+  const newer = await publishEvents(state, [product(state, "c-new", future)]);
+  const input = { until, limit: 1, kind: "PRODUCT", publication: publicationPin(original) };
+  const first = await reader.readLatestStates(readerActor, state.scope, input);
+  assert.equal(first.publication.certificateHash, original.certificateHash);
+  assert.equal(first.items[0].payload.externalProductId, "a");
+  const second = await reader.readLatestStates(readerActor, state.scope, {
+    ...input,
+    cursor: first.nextCursor,
+  });
+  assert.equal(second.items[0].payload.externalProductId, "b");
+  assert.equal(second.nextCursor, null);
+  await assert.rejects(
+    reader.readLatestStates(readerActor, state.scope, {
+      ...input,
+      cursor: first.nextCursor,
+      publication: publicationPin(newer),
+    }),
+    { code: "SOURCE_INTEGRITY" },
+  );
+});
+
+test("explicit pins reject malformed identities and missing certificates while retaining authorization", async () => {
+  const state = await preparedAppend(context);
+  const publication = await publishEvents(state, [product(state, "a")]);
+  const pin = publicationPin(publication);
+  const input = { until: state.lease.targetTime, limit: 1, publication: pin };
+  for (const change of [
+    { revision: "01" },
+    { revision: "0" },
+    { highEventSeq: "-1" },
+    { certificateHash: "A".repeat(64) },
+    { extra: true },
+  ])
+    await assert.rejects(
+      reader.readLatestStates(readerActor, state.scope, {
+        ...input,
+        publication: { ...pin, ...change },
+      }),
+      { code: "SOURCE_INPUT" },
+    );
+  for (const change of [
+    { revision: "99" },
+    { highEventSeq: "0" },
+    { certificateHash: "b".repeat(64) },
+  ])
+    await assert.rejects(
+      reader.readLatestStates(readerActor, state.scope, {
+        ...input,
+        publication: { ...pin, ...change },
+      }),
+      { code: "SOURCE_INTEGRITY" },
+    );
+  await assert.rejects(
+    reader.readLatestStates(readerActor, state.scope, {
+      ...input,
+      until: new Date(Date.parse(input.until) + 1).toISOString(),
+    }),
+    { code: "SOURCE_INPUT" },
+  );
+  await context.admin.query('UPDATE "PlatformConnection" SET status=$1 WHERE id=$2', [
+    "DISCONNECTED",
+    state.scope.connectionId,
+  ]);
+  assert.equal(await reader.readLatestStates(readerActor, state.scope, input), null);
+});
