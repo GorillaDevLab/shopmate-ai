@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { validateLatestInput } from "../dist/src/mock-platform/latest-validation.js";
+import { validateDataBounds } from "../dist/src/mock-platform/record-bounds.js";
 
 const input = { until: "2026-01-01T00:00:00.000Z", limit: 1, kind: "PRODUCT" };
 
@@ -15,8 +16,7 @@ test("latest structured keys reject malformed or mismatched tuples before databa
     ["PRODUCT", ""],
     ["PRODUCT", " x"],
     ["PRODUCT", "x\u0000"],
-    ["PRODUCT", "\ud800"],
-    ["PRODUCT", "界".repeat(100)],
+    ["PRODUCT", "x".repeat(257)],
     ["PRODUCT", 42],
   ])
     assert.throws(() => validateLatestInput({ ...input, entityKey }), { code: "SOURCE_INPUT" });
@@ -25,9 +25,36 @@ test("latest structured keys reject malformed or mismatched tuples before databa
     { kind: "INVENTORY", entityKey: ["INVENTORY", "sku"] },
     { kind: "INVENTORY", entityKey: ["INVENTORY", "sku", "loc\u0000"] },
     { kind: "MARKETING", entityKey: ["MARKETING", "campaign", "2025-02-30"] },
-    { kind: "STORE", entityKey: ["STORE", "\ud800"] },
   ])
     assert.throws(() => validateLatestInput({ ...input, ...changed }), { code: "SOURCE_INPUT" });
+});
+
+test("query identities retain contract bounds including literal lone surrogates", () => {
+  for (const id of ["x".repeat(256), "界".repeat(256), "\ud800", "\udfff"])
+    assert.doesNotThrow(() => validateLatestInput({ ...input, entityKey: ["PRODUCT", id] }));
+});
+
+test("query JSON mode counts surrogate escapes and leaves record and property keys strict", () => {
+  assert.doesNotThrow(() => validateDataBounds("\ud800", 8, 1, 0, "query-json"));
+  assert.throws(() => validateDataBounds("\ud800", 7, 1, 0, "query-json"), {
+    code: "SOURCE_INPUT",
+  });
+  assert.throws(() => validateDataBounds("\ud800", 8), { code: "SOURCE_INPUT" });
+  assert.throws(() => validateDataBounds({ "\ud800": "x" }, 100, 10, 2, "query-json"), {
+    code: "SOURCE_INPUT",
+  });
+  const cyclic = {};
+  cyclic.self = cyclic;
+  const proxy = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("must not invoke proxy");
+      },
+    },
+  );
+  for (const entityKey of [cyclic, proxy, ["PRODUCT", "x".repeat(8192)]])
+    assert.throws(() => validateLatestInput({ ...input, entityKey }), { code: "SOURCE_INPUT" });
 });
 
 test("latest exact keys accept validated tuples and retain raw database text compatibility", () => {
