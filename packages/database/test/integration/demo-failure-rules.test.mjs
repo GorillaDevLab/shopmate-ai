@@ -36,10 +36,18 @@ const input = {
 };
 test("persistent failure rules use restricted current demo authority and atomic audit", async (t) => {
   const server = await isolatedPostgres();
-  const admin = new pg.Client({ connectionString: server.url });
-  const fixture = new DemoCommerceApiFixture(server.url);
+  const operator = new pg.Client({ connectionString: server.url });
+  // Mandatory CI shares a populated cluster; migrations and fixtures belong to this sibling only.
+  const databaseUrl = new URL(server.url);
+  databaseUrl.pathname = "/shopmate_tenant_test_failurerules";
+  const admin = new pg.Client({ connectionString: databaseUrl.toString() });
+  const fixture = new DemoCommerceApiFixture(databaseUrl.toString());
+  let createdDatabase = false;
   let repo;
   try {
+    await operator.connect();
+    await operator.query('CREATE DATABASE "shopmate_tenant_test_failurerules"');
+    createdDatabase = true;
     await admin.connect();
     const root = new URL("../../prisma/migrations/", import.meta.url);
     for (const name of (await readdir(root)).filter((name) => /^\d{14}_/u.test(name)).sort())
@@ -63,7 +71,7 @@ test("persistent failure rules use restricted current demo authority and atomic 
     await admin.query(
       "GRANT EXECUTE ON FUNCTION demo.has_failure_rule_access(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,BOOLEAN) TO shopmate_failure_rules_test",
     );
-    const url = new URL(server.url);
+    const url = new URL(databaseUrl);
     url.username = "shopmate_failure_rules_test";
     process.env.DATABASE_URL = url.toString();
     repo = await import("../../dist/src/index.js");
@@ -222,7 +230,11 @@ test("persistent failure rules use restricted current demo authority and atomic 
     await t.test(
       "worker login cannot mutate rules even with accidental table grants and human identity",
       async () => {
-        await admin.query("CREATE ROLE failure_worker_login LOGIN NOSUPERUSER NOBYPASSRLS");
+        if (
+          !(await admin.query("SELECT 1 FROM pg_roles WHERE rolname='failure_worker_login'"))
+            .rowCount
+        )
+          await admin.query("CREATE ROLE failure_worker_login LOGIN NOSUPERUSER NOBYPASSRLS");
         await admin.query("GRANT shopmate_mock_source_worker TO failure_worker_login");
         await admin.query(
           'GRANT SELECT,INSERT,UPDATE ON demo."DemoFailureRule" TO failure_worker_login',
@@ -230,7 +242,7 @@ test("persistent failure rules use restricted current demo authority and atomic 
         await admin.query(
           "GRANT EXECUTE ON FUNCTION demo.has_failure_rule_access(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,BOOLEAN) TO failure_worker_login",
         );
-        const url = new URL(server.url);
+        const url = new URL(databaseUrl);
         url.username = "failure_worker_login";
         const worker = new pg.Client({ connectionString: url.toString() });
         await worker.connect();
@@ -258,7 +270,7 @@ test("persistent failure rules use restricted current demo authority and atomic 
       await admin.query(
         'GRANT UPDATE,DELETE ON demo."DemoFailureRuleAudit" TO shopmate_failure_rules_test',
       );
-      const url = new URL(server.url);
+      const url = new URL(databaseUrl);
       url.username = "shopmate_failure_rules_test";
       const client = new pg.Client({ connectionString: url.toString() });
       await client.connect();
@@ -284,6 +296,8 @@ test("persistent failure rules use restricted current demo authority and atomic 
     if (repo) await repo.disconnectPrismaClient();
     await fixture.close();
     await admin.end();
+    if (createdDatabase) await operator.query('DROP DATABASE "shopmate_tenant_test_failurerules"');
+    await operator.end();
     await server.stop();
   }
 });
