@@ -115,3 +115,10 @@ function replenish(state: ReplayState, event: TimelineEvent): void {
   // Order up to a target; additive full batches would hide stockouts behind unlimited accumulation.
   stockChange(state, event, "RESTOCK", Math.max(0, event.stock! - available), 0);
 }
+
+/** Shared causal commerce transition; callers own and drain the scratch effects. */
+export function applyTimelineEvent(config: MockConfig, state: ReplayState, event: TimelineEvent): void {
+  if (event.kind === "RESTOCK") replenish(state, event);
+  else if (event.kind === "RESERVE") reserve(config, state, event);
+  else applyOrderEvent(config, state, event);
+}
