@@ -12,7 +12,8 @@ import {
 import { AuthPermission, type AuthContext } from "../../auth/contracts/index.js";
 import type { BusinessClock } from "./business-clock.js";
 import { executeMockRead, MockConnectorError } from "./mock-call.js";
-import { MockCommerceConnector } from "./mock-commerce-connector.js";
+import { PersistentCommerceConnector } from "./persistent-commerce-connector.js";
+import type { PersistentReadBinder } from "./persistent-read-port.js";
 import { MockConfigSchema } from "./mock-config.js";
 
 const IdentitySchema = z
@@ -53,6 +54,7 @@ export class MockConnectorFactory {
     environment: unknown,
     private readonly resolver: MockConnectorAccessResolver,
     private readonly clock: BusinessClock,
+    private readonly binder: PersistentReadBinder,
   ) {
     const parsed = EnvironmentSchema.safeParse(environment);
     this.enabled = parsed.success && parsed.data.appEnv === "demo" && parsed.data.enableDemoMode;
@@ -71,8 +73,17 @@ export class MockConnectorFactory {
       const record = await this.resolve(actor.data, selected.data, call);
       this.requirePermission(record, "tenant:read");
       const fingerprint = connectionFingerprint(record);
-      const connector = new MockCommerceConnector(record.config, this.clock, (permission, next) =>
-        this.verify(actor.data, selected.data, fingerprint, permission, next),
+      const scope = {
+        ...record.config.binding,
+        sessionId: record.sessionId,
+        generation: record.generation,
+      };
+      const sourceActor = { userId: record.context.userId, merchantId: record.context.merchantId };
+      const connector = new PersistentCommerceConnector(
+        scope,
+        this.clock,
+        (permission, next) => this.verify(actor.data, selected.data, fingerprint, permission, next),
+        this.binder.bind(sourceActor, scope),
       );
       return { ok: true, data: connector };
     });

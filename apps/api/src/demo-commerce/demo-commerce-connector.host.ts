@@ -2,6 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import { DatabaseMockConnectorAccessResolver } from "../integrations/mock/database-mock-connector-access-resolver.js";
 import { MockConnectorFactory } from "../integrations/mock/mock-connector-factory.js";
 import { PersistentMockClock } from "../integrations/mock/persistent-mock-clock.js";
+import type { PersistentReadBinder } from "../integrations/mock/persistent-read-port.js";
+import { DatabasePersistentReadPorts } from "./database-persistent-read-ports.js";
 import {
   DEMO_COMMERCE_REPOSITORY,
   type DemoCommerceRepository,
@@ -13,6 +15,7 @@ export class DemoCommerceConnectorHost {
   constructor(
     @Inject(DEMO_COMMERCE_REPOSITORY) private readonly repository: DemoCommerceRepository,
     @Inject(DEMO_COMMERCE_ENV) private readonly environment: DemoCommerceEnvironment,
+    @Inject(DatabasePersistentReadPorts) private readonly binder: PersistentReadBinder,
   ) {}
   open(identity: unknown, storeId: unknown, options: unknown) {
     // A clock belongs to this selected connector; interleaved sessions never share business time.
@@ -23,6 +26,7 @@ export class DemoCommerceConnectorHost {
       { appEnv: "demo", enableDemoMode: enabled },
       resolver,
       clock,
+      this.binder,
     ).open(identity, storeId, options);
   }
 }
