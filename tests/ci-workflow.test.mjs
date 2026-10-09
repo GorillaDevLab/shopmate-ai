@@ -4,6 +4,14 @@ import test from "node:test";
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("typed canonical order PostgreSQL suite is mandatory in the CI tenant gate", () => {
+  assert.match(readFileSync(workflowPath, "utf8"), /run: pnpm test:tenant/u);
+  assert.match(
+    readFileSync("scripts/test-tenant-database.mjs", "utf8"),
+    /await run\("packages\/database", "test\/integration\/canonical-order-storage\.test\.mjs"/u,
+  );
+});
+
 test("required tenant gate includes product page validation and atomic commit", () => {
   const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
   for (const suite of ["product-commit-input", "product-page-commit"]) {
