@@ -2,7 +2,7 @@ import { sourcePool, type SourcePool } from "./clients.js";
 import { readTransaction } from "./read-transaction.js";
 import { SourceAccessDenied, SourceDomainFailure } from "./errors.js";
 import { findGeneration, initializeGeneration } from "./generations.js";
-import { findGrant, listGrants, matchesGrant } from "./grants.js";
+import { findGrant, listBuildScopes, listGrants, matchesGrant } from "./grants.js";
 import { assertFailureCode, claimJob, failJob, renewJob } from "./jobs.js";
 import { appendChunk } from "./journal.js";
 import { hydrateBuild } from "./hydration.js";
@@ -94,6 +94,7 @@ export function createMockSourceWorker(env: SourceEnvironment): MockSourceWorker
   const pool = sourcePool(env, "worker");
   return {
     listGrants: () => transaction(pool, "worker", listGrants),
+    listBuildScopes: () => transaction(pool, "worker", listBuildScopes),
     async initializeGeneration(actor, scope) {
       validateWorkerActor(actor);
       validateScope(scope);

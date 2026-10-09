@@ -230,7 +230,7 @@ datasource db {
 }
 
 model CommerceSourceScope {
-  id              String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id              String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organizationId  String
   workspaceId     String
   storeId         String
@@ -238,10 +238,13 @@ model CommerceSourceScope {
   externalStoreId String
   provider        String
   generation      Int
-  createdAt       DateTime                  @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
-  connection      PlatformConnection        @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "SourceScope_connection_fkey")
+  createdAt       DateTime                         @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  connection      PlatformConnection               @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "SourceScope_connection_fkey")
   products        CanonicalProductListing[]
   orders          CanonicalOrderListing[]
+  refunds         CanonicalRefundListing[]
+  inventories     CanonicalInventoryListing[]
+  campaignMetrics CanonicalCampaignMetricListing[]
   productCommits  SyncProductPageCommit[]
 
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation], map: "SourceScope_namespace_key")
@@ -996,4 +999,85 @@ model DemoFailureRuleAudit {
   @@unique([sessionId, afterRevision])
   @@index([organizationId, workspaceId, sessionId], map: "DemoFailureRuleAudit_scope_idx")
   @@schema("demo")
+}
+
+model CanonicalRefundListing {
+  scopeId           String              @db.Uuid
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  externalRefundId  String
+  externalOrderId   String
+  externalSkuId     String?
+  status            String
+  currency          String
+  requestedMinor    BigInt
+  succeededMinor    BigInt?
+  requestedAt       DateTime            @db.Timestamptz(3)
+  succeededAt       DateTime?           @db.Timestamptz(3)
+  sourceVersion     String?
+  sourceUpdatedAt   DateTime?           @db.Timestamptz(3)
+  sourcePayloadHash String
+  qualityState      String
+  qualityIssues     String[]
+  ingestedAt        DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  scope             CommerceSourceScope @relation(fields: [scopeId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "RefundListing_scope_fkey")
+
+  @@id([scopeId, externalRefundId])
+  @@index([organizationId, workspaceId, storeId], map: "RefundListing_store_idx")
+  @@map("RefundListing")
+  @@schema("commerce")
+}
+
+model CanonicalInventoryListing {
+  scopeId            String              @db.Uuid
+  organizationId     String
+  workspaceId        String
+  storeId            String
+  externalSkuId      String
+  externalLocationId String
+  available          BigInt?
+  reserved           BigInt?
+  onHand             BigInt?
+  safetyStock        BigInt?
+  leadTimeDays       Int?
+  sourceVersion      String?
+  sourceUpdatedAt    DateTime?           @db.Timestamptz(3)
+  sourcePayloadHash  String
+  qualityState       String
+  qualityIssues      String[]
+  ingestedAt         DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  scope              CommerceSourceScope @relation(fields: [scopeId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "InventoryListing_scope_fkey")
+
+  @@id([scopeId, externalSkuId, externalLocationId])
+  @@index([organizationId, workspaceId, storeId], map: "InventoryListing_store_idx")
+  @@map("InventoryListing")
+  @@schema("commerce")
+}
+
+model CanonicalCampaignMetricListing {
+  scopeId                String              @db.Uuid
+  organizationId         String
+  workspaceId            String
+  storeId                String
+  externalCampaignId     String
+  date                   DateTime            @db.Date
+  currency               String
+  impressions            BigInt?
+  clicks                 BigInt?
+  attributedOrders       BigInt?
+  spendMinor             BigInt?
+  attributedRevenueMinor BigInt?
+  sourceVersion          String?
+  sourceUpdatedAt        DateTime?           @db.Timestamptz(3)
+  sourcePayloadHash      String
+  qualityState           String
+  qualityIssues          String[]
+  ingestedAt             DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  scope                  CommerceSourceScope @relation(fields: [scopeId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "CampaignMetricListing_scope_fkey")
+
+  @@id([scopeId, externalCampaignId, date])
+  @@index([organizationId, workspaceId, storeId], map: "CampaignMetricListing_store_idx")
+  @@map("CampaignMetricListing")
+  @@schema("commerce")
 }

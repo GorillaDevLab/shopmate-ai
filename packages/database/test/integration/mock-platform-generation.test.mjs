@@ -59,6 +59,20 @@ test("frozen source generations use real restricted logins and fresh RLS", async
       async () => {
         assert.equal((await workLogin.query('SELECT * FROM demo."MockWorkerGrant"')).rowCount, 3);
         assert.equal((await worker.listGrants()).length, 3);
+        assert.equal(typeof worker.listBuildScopes, "function");
+        assert.deepEqual(await worker.listBuildScopes(), [
+          { actor: { grantId: "source-grant-a" }, scope: scopeFor("a") },
+          { actor: { grantId: "source-grant-a2" }, scope: scopeFor("a2") },
+          { actor: { grantId: "source-grant-b" }, scope: scopeFor("b") },
+        ]);
+        const work = await worker.listBuildScopes();
+        assert.ok(Object.isFrozen(work));
+        assert.ok(
+          work.every(
+            (item) =>
+              Object.isFrozen(item) && Object.isFrozen(item.actor) && Object.isFrozen(item.scope),
+          ),
+        );
         for (const client of [readLogin, workLogin]) {
           assert.deepEqual(
             (
@@ -202,6 +216,7 @@ test("frozen source generations use real restricted logins and fresh RLS", async
       });
       try {
         assert.deepEqual(await foreign.listGrants(), []);
+        assert.deepEqual(await foreign.listBuildScopes(), []);
         assert.deepEqual(await foreign.initializeGeneration(actor, scope), { status: "DENIED" });
       } finally {
         await foreign.close();
@@ -250,6 +265,10 @@ test("frozen source generations use real restricted logins and fresh RLS", async
           sql,
         );
         assert.ok(!(await worker.listGrants()).some((grant) => grant.id === actor.grantId), sql);
+        assert.ok(
+          !(await worker.listBuildScopes()).some((work) => work.actor.grantId === actor.grantId),
+          sql,
+        );
         if (both) assert.equal(await reader.findGeneration(readerActor, scope), null, sql);
         await admin.query(sql, parameters.length === 2 ? [on, coordinate] : [on]);
       }
@@ -277,6 +296,10 @@ test("frozen source generations use real restricted logins and fresh RLS", async
       assert.equal(next.status, "CREATED");
       assert.equal(next.generation.openingAt, "2026-02-15T16:00:00.000Z");
       assert.equal(next.generation.baselineEnd, "2026-03-01T16:00:00.000Z");
+      const discovered = (await worker.listBuildScopes()).find(
+        (work) => work.actor.grantId === actor.grantId,
+      );
+      assert.deepEqual(discovered, { actor, scope: { ...scope, generation: 1 } });
       assert.equal((await admin.query('SELECT * FROM mock_platform."Runtime"')).rowCount, 2);
     });
     await t.test("malformed persisted configuration cannot create a runtime", async () => {
@@ -709,6 +732,7 @@ test("frozen source generations use real restricted logins and fresh RLS", async
       await admin.query("GRANT shopmate_mock_source_reader TO source_worker_login");
       try {
         await assert.rejects(worker.listGrants(), (e) => e.code === "SOURCE_CREDENTIALS");
+        await assert.rejects(worker.listBuildScopes(), (e) => e.code === "SOURCE_CREDENTIALS");
       } finally {
         await admin.query("REVOKE shopmate_mock_source_reader FROM source_worker_login");
       }
