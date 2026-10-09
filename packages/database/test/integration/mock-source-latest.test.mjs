@@ -472,6 +472,38 @@ test("structured exact keys select every kind including escaped identifiers and 
   assert.deepEqual(absent.items, []);
 });
 
+test("legal contract identities certify absence only under an authorized publication", async () => {
+  const state = await preparedAppend(context);
+  const input = { until: state.lease.targetTime, limit: 1, kind: "PRODUCT" };
+  const entityKey = ["PRODUCT", "\ud800"];
+  assert.equal(
+    await reader.readLatestStates(readerActor, state.scope, { ...input, entityKey }),
+    null,
+  );
+  const publication = await publishEvents(state, [product(state, 'quoted/"中文')]);
+  for (const id of ["x".repeat(256), "界".repeat(256), "\ud800", "\udfff"]) {
+    const page = await reader.readLatestStates(readerActor, state.scope, {
+      ...input,
+      entityKey: ["PRODUCT", id],
+    });
+    assert.deepEqual(page.items, []);
+    assert.equal(page.publication.certificateHash, publication.certificateHash);
+    assert.equal(page.nextCursor, null);
+  }
+  assert.equal(
+    await reader.readLatestStates({ ...readerActor, userId: "unknown" }, state.scope, {
+      ...input,
+      entityKey,
+    }),
+    null,
+  );
+  const event = product(state, "\ud800");
+  const { validateSnapshotEvent } = await import(
+    "../../dist/src/mock-platform/publication-validation.js"
+  );
+  assert.throws(() => validateSnapshotEvent(event, state.scope), { code: "SOURCE_INPUT" });
+});
+
 test("explicit pins recheck authorization when revocation hides the certificate mid-read", async (t) => {
   const state = await preparedAppend(context);
   const publication = await publishEvents(state, [product(state, "a")]);
