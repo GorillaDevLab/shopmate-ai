@@ -1,4 +1,8 @@
-import { ConnectorBindingSchema, ConnectorTimestampSchema, MockScenarioPlanSchema } from "@shopmate/contracts";
+import {
+  ConnectorBindingSchema,
+  ConnectorTimestampSchema,
+  MockScenarioPlanSchema,
+} from "@shopmate/contracts";
 import { z } from "zod";
 
 export const DAY_MS = 86_400_000;
@@ -36,11 +40,16 @@ const inputSchema = z.strictObject({
 });
 
 export const MockConfigSchema = inputSchema
-  .refine((input) => !input.scenarioPlan || (
-    input.scenarioPlan.externalStoreId === input.binding.externalStoreId &&
-    input.scenarioPlan.endDay <= input.days &&
-    input.scenarioPlan.mutations.every((m) => m.skuIndex < input.productCount * input.variantsPerProduct)
-  ), { message: "Scenario exceeds frozen commerce scope" })
+  .refine(
+    (input) =>
+      !input.scenarioPlan ||
+      (input.scenarioPlan.externalStoreId === input.binding.externalStoreId &&
+        input.scenarioPlan.endDay <= input.days &&
+        input.scenarioPlan.mutations.every(
+          (m) => m.skuIndex < input.productCount * input.variantsPerProduct,
+        )),
+    { message: "Scenario exceeds frozen commerce scope" },
+  )
   .refine((input) => input.binding.externalStoreId.length <= 200, {
     message: "External store namespace exceeds derived ID budget",
   })
@@ -69,6 +78,11 @@ export const MockConfigSchema = inputSchema
       ).success,
     { message: "History and settlement timestamps exceed connector calendar range" },
   )
+  .transform((input) => {
+    if (!input.scenarioPlan) return input;
+    const { scenarioPlan, ...base } = input;
+    return { ...base, scenarioPlan };
+  })
   .readonly();
 
 export type MockConfig = z.infer<typeof MockConfigSchema>;
@@ -78,3 +92,6 @@ export function openingTime(config: MockConfig): number {
   return Date.parse(config.historyStart) + offset * DAY_MS;
 }
 
+export function generatorVersion(config: MockConfig): "mock-source-v1" | "mock-source-v2" {
+  return config.scenarioPlan ? "mock-source-v2" : GENERATOR_VERSION;
+}
