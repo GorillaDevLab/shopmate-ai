@@ -151,6 +151,22 @@ describe("causal validation and ownership", () => {
         .map((row) => row.kind),
     ).toEqual(["ORDER"]);
   });
+  it("rejects future and noncausal hydrated payment times", () => {
+    const reducer = reducerModule.createCausalReducer(config);
+    opening.forEach((event) => reducer.apply(event));
+    reducer.apply(reserve);
+    reducer.apply({ ...reserve, kind: "PAY", at: reserve.at + 300000 });
+    const snapshot = reducer.snapshot();
+    const paid = snapshot.orders[0]!;
+    for (const offset of [1, 600000, 20 * DAY_MS]) {
+      const orders = [{ ...paid, paidAt: new Date(reserve.at + offset).toISOString() }];
+      expect(() => reducerModule.createCausalReducer(config, { ...snapshot, orders })).toThrow();
+    }
+    const orders = [{ ...paid, source: { ...paid.source, updatedAt: paid.orderedAt } }];
+    expect(() => reducerModule.createCausalReducer(config, { ...snapshot, orders })).toThrow();
+    expect(reducerModule.createCausalReducer(config, snapshot).snapshot()).toEqual(snapshot);
+    expect(reducer.snapshot()).toEqual(snapshot);
+  });
 });
 
 it("rejects unknown quantities, inconsistent order facts and unproven resume positions", () => {

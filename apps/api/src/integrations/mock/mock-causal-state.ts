@@ -240,7 +240,10 @@ function validateHydratedOrder(row: ConnectorOrder, skus: ReadonlyMap<string, Co
     throw new Error("Unknown or inconsistent hydrated order facts");
   if (
     paid
-      ? row.paidMinor !== row.payableMinor || row.paidAt === null
+      ? row.paidMinor !== row.payableMinor ||
+        row.paidAt === null ||
+        Date.parse(row.paidAt) !== Date.parse(row.orderedAt) + 300000 ||
+        Date.parse(row.paidAt) > Date.parse(row.source.updatedAt)
       : row.paidMinor !== 0 || row.paidAt !== null || row.refundedMinor !== 0
   )
     throw new Error("Invalid hydrated payment state");
