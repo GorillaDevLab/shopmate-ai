@@ -13,6 +13,10 @@
     "./mock-platform": {
       "types": "./dist/src/mock-platform/index.d.ts",
       "import": "./dist/src/mock-platform/index.js"
+    },
+    "./mock-platform-read": {
+      "types": "./dist/src/mock-platform/readonly-index.d.ts",
+      "import": "./dist/src/mock-platform/readonly-index.js"
     }
   },
   "scripts": {
