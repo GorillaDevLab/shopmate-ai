@@ -16,7 +16,14 @@ describe("frozen causal scenario plans", () => {
     expect(() => createScenarioPlan(config, "SCENARIO_999", 3, 9)).toThrow();
     expect(() => createScenarioPlan(config, "SCENARIO_001", 3, 99)).toThrow();
     const plan = createScenarioPlan(config, "SCENARIO_001", 3, 9);
-    expect(MockConfigSchema.safeParse({ ...config, scenarioPlan: { ...plan, extra: 1 } }).success).toBe(false);
-    expect(MockConfigSchema.safeParse({ ...config, scenarioPlan: { ...plan, externalStoreId: "foreign" } }).success).toBe(false);
+    expect(
+      MockConfigSchema.safeParse({ ...config, scenarioPlan: { ...plan, extra: 1 } }).success,
+    ).toBe(false);
+    expect(
+      MockConfigSchema.safeParse({
+        ...config,
+        scenarioPlan: { ...plan, externalStoreId: "foreign" },
+      }).success,
+    ).toBe(false);
   });
 });
