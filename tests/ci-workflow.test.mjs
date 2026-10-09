@@ -4,6 +4,13 @@ import test from "node:test";
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("required tenant gate includes product page validation and atomic commit", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  for (const suite of ["product-commit-input", "product-page-commit"]) {
+    assert.ok(gate.includes(`test/integration/${suite}.test.mjs`));
+  }
+});
+
 test("CI 工作流覆盖 PR、main 推送和手动触发", () => {
   const workflow = readFileSync(workflowPath, "utf8");
 
