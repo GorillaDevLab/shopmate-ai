@@ -4,6 +4,14 @@ import test from "node:test";
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("typed refund inventory marketing PostgreSQL suite is mandatory in the CI tenant gate", () => {
+  assert.match(readFileSync(workflowPath, "utf8"), /run: pnpm test:tenant/u);
+  assert.match(
+    readFileSync("scripts/test-tenant-database.mjs", "utf8"),
+    /await run\("packages\/database", "test\/integration\/canonical-commerce-facts\.test\.mjs"/u,
+  );
+});
+
 test("typed canonical order PostgreSQL suite is mandatory in the CI tenant gate", () => {
   assert.match(readFileSync(workflowPath, "utf8"), /run: pnpm test:tenant/u);
   assert.match(
