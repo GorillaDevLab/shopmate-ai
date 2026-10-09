@@ -58,7 +58,7 @@ test("SQL validators match all four strict DTOs, safe amounts, Unicode budgets a
   unicode.externalRefundId += "x";
   await assert.rejects(normalize("REFUNDS", unicode), { code: "23514" });
   const badOrder = record("ORDERS");
-  badOrder.items.push(structuredClone(badOrder.items[0]));
+  badOrder.items.push(globalThis.structuredClone(badOrder.items[0]));
   await assert.rejects(normalize("ORDERS", badOrder), { code: "23514" });
 });
 test("generic admission ignores product-only resource fields and bounds stored envelope timestamps", async () => {
