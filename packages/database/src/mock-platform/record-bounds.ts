@@ -13,23 +13,25 @@ interface Budget {
   maxNodes: number;
   maxDepth: number;
 }
-function stringSize(value: string, remaining: number): number {
+type StringMode = "record" | "query-json";
+function stringSize(value: string, remaining: number, mode: StringMode = "record"): number {
   let bytes = 2;
   requireInput(bytes <= remaining);
   for (const character of value) {
     const code = character.codePointAt(0)!;
-    requireInput(code !== 0 && (code < 0xd800 || code > 0xdfff));
-    if (character === '"' || character === "\\") bytes += 2;
+    requireInput(code !== 0 && (mode === "query-json" || code < 0xd800 || code > 0xdfff));
+    if (code >= 0xd800 && code <= 0xdfff) bytes += 6;
+    else if (character === '"' || character === "\\") bytes += 2;
     else if (code < 32) bytes += [8, 9, 10, 12, 13].includes(code) ? 2 : 6;
     else bytes += code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4;
     requireInput(bytes <= remaining);
   }
   return bytes;
 }
-function primitiveSize(value: unknown, remaining: number): number | null {
+function primitiveSize(value: unknown, remaining: number, mode: StringMode): number | null {
   if (value === null || typeof value === "boolean") return value === null ? 4 : value ? 4 : 5;
   if (typeof value === "string") {
-    return stringSize(value, remaining);
+    return stringSize(value, remaining, mode);
   }
   if (typeof value === "number") {
     requireInput(Number.isSafeInteger(value));
@@ -75,6 +77,7 @@ export function validateDataBounds(
   maxBytes: number,
   maxNodes = 20000,
   maxDepth = 12,
+  stringMode: StringMode = "record",
 ): void {
   const budget = { bytes: 0, nodes: 0, maxBytes, maxNodes, maxDepth };
   const stack: Frame[] = [{ value, depth: 0 }];
@@ -86,7 +89,7 @@ export function validateDataBounds(
       continue;
     }
     requireInput(++budget.nodes <= maxNodes && frame.depth <= maxDepth);
-    const size = primitiveSize(frame.value, maxBytes - budget.bytes);
+    const size = primitiveSize(frame.value, maxBytes - budget.bytes, stringMode);
     if (size !== null) budget.bytes += size;
     else {
       requireInput(

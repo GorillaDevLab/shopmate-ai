@@ -1,5 +1,6 @@
 import type pg from "pg";
 import type { SourcePool } from "./clients.js";
+import { readTransaction } from "./read-transaction.js";
 import { SourceAccessDenied, SourceStorageError } from "./errors.js";
 import { journalScopeWhere } from "./journal-state.js";
 import {
@@ -14,15 +15,10 @@ import type { LatestStateInput, LatestStatePage } from "./latest-types.js";
 import { readPublication } from "./publication-certificate.js";
 import { checkedVersion } from "./scan.js";
 import { validateScanKey } from "./scan-cursor.js";
+import { representable } from "./record-primitives.js";
 import type { SourceVersion } from "./scan-types.js";
-import {
-  currentAccess,
-  lockControl,
-  readIdentity,
-  scopeValues,
-  transaction,
-} from "./transaction.js";
-import type { SourceReadActor, SourceScope } from "./types.js";
+import { currentAccess, lockControl, readIdentity, scopeValues } from "./transaction.js";
+import type { SourceReadActor, SourceReadControl, SourceScope } from "./types.js";
 export { validateLatestInput } from "./latest-validation.js";
 
 const keySql = `SELECT kind,"entityKey","eventSeq"::text AS "eventSeq" FROM mock_platform."EntityVersion" v
@@ -55,6 +51,9 @@ async function nextKey(
   after: LatestPosition | null,
   publication: LatestStatePage["publication"],
 ): Promise<LatestPosition | null> {
+  // A literal unpaired surrogate cannot occur in a strictly validated source record.
+  // Reach this only after publication and authorization checks; JSONB rejects its escape.
+  if (Array.isArray(input.entityKey) && !input.entityKey.every(representable)) return null;
   const result = await client.query<LatestPosition>(keySql, [
     ...scopeValues(scope),
     input.kind ?? null,
@@ -168,16 +167,17 @@ export async function readLatestStates(
   actor: SourceReadActor,
   scope: SourceScope,
   input: LatestStateInput,
+  control?: SourceReadControl,
 ): Promise<LatestStatePage | null> {
   validateScanKey(key);
   const state =
     input.cursor === undefined ? null : readLatestCursor(key, input.cursor, scope, input);
   try {
-    return await transaction(
+    return await readTransaction(
       pool,
-      "reader",
       (client) => readPage(client, actor, scope, input, state, key),
       (result) => result === null,
+      control,
     );
   } catch (error) {
     if (error instanceof SourceAccessDenied) return null;

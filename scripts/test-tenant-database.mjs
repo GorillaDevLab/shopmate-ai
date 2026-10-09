@@ -62,6 +62,9 @@ try {
   await run("packages/database", "test/integration/mock-source-scan.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/mock-build-hydration.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/sync-host-database.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
@@ -87,6 +90,12 @@ try {
     TEST_DATABASE_URL: server.url,
   });
   await run("packages/database", "test/integration/sync-page-receipt.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/product-commit-input.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/product-page-commit.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
   const runtimeUrl = await prepareTenantApiRuntime(server.url);
