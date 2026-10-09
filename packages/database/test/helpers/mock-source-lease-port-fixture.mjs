@@ -6,6 +6,10 @@ import { loginUrl, migrateSource, sourceEnv, sourceFixtures } from "./mock-platf
 import { maintenanceClient } from "./mock-source-control-fixture.mjs";
 
 const portDatabases = {
+  hydration: {
+    name: "shopmate_tenant_test_hydration_ports",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_hydration_ports"',
+  },
   readcontrol: {
     name: "shopmate_tenant_test_readcontrol_ports",
     sql: 'CREATE DATABASE "shopmate_tenant_test_readcontrol_ports"',

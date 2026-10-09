@@ -12,6 +12,7 @@ import type {
 } from "./publication-types.js";
 import type { SourceScanInput, SourceScanPage } from "./scan-types.js";
 import type { LatestStateInput, LatestStatePage } from "./latest-types.js";
+import type { BuildHydrationInput, BuildHydrationResult } from "./hydration-types.js";
 
 export interface SourceScope {
   readonly organizationId: string;
@@ -81,6 +82,11 @@ export interface MockSourceReader {
   close(): Promise<void>;
 }
 export interface MockSourceWorker {
+  hydrateBuild(
+    actor: SourceWorkerActor,
+    lease: LeaseRef,
+    input: BuildHydrationInput,
+  ): Promise<BuildHydrationResult>;
   listGrants(): Promise<readonly SourceWorkerGrant[]>;
   initializeGeneration(actor: SourceWorkerActor, scope: SourceScope): Promise<SourceInitialization>;
   claim(actor: SourceWorkerActor, scope: SourceScope): Promise<ClaimResult>;
