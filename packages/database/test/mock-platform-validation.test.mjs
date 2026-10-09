@@ -188,16 +188,50 @@ async function files(directory) {
   return result;
 }
 
+const sourceImport = /(?:from\s*|(?:import|require)\s*(?:\(\s*)?)\s*["'][^"']*mock-platform/u;
+function withoutReadComposition(code, provider) {
+  if (!provider) return code;
+  return code.replace(
+    /import\s*\{([^{}]+)\}\s*from\s*["']@shopmate\/database\/mock-platform-read["'];?/gu,
+    (statement, names) => {
+      const imports = names
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .sort();
+      assert.deepEqual(imports, ["createMockSourceReadPorts", "type SourceReadPorts"]);
+      return "";
+    },
+  );
+}
+test("only the server composition module can import the named read-only factory and types", () => {
+  const allowed =
+    'import { createMockSourceReadPorts, type SourceReadPorts } from "@shopmate/database/mock-platform-read";';
+  assert.doesNotMatch(withoutReadComposition(allowed, true), sourceImport);
+  assert.match(withoutReadComposition(allowed, false), sourceImport);
+  for (const code of [
+    'import * as source from "@shopmate/database/mock-platform-read";',
+    'import "@shopmate/database/mock-platform-read";',
+    'const source = import("@shopmate/database/mock-platform-read");',
+    'import { createMockSourceWorker } from "@shopmate/database/mock-platform";',
+  ])
+    assert.match(withoutReadComposition(code, true), sourceImport);
+  assert.throws(() =>
+    withoutReadComposition(
+      'import { createMockSourceReadPorts, type SourceReadPorts, sourcePool } from "@shopmate/database/mock-platform-read";',
+      true,
+    ),
+  );
+});
 test("normal domain modules cannot import the privileged source subpath", async () => {
   for (const directory of ["../../../apps/api/src/", "../../../apps/web/src/", "../src/"]) {
     for (const file of await files(new URL(directory, import.meta.url))) {
       if (file.pathname.includes("/mock-platform/")) continue;
-      const code = await readFile(file, "utf8");
-      assert.doesNotMatch(
-        code,
-        /(?:from\s*|import\s*\(|require\s*\()\s*["'][^"']*mock-platform/u,
-        file.pathname,
+      const provider = file.pathname.endsWith(
+        "/apps/api/src/demo-commerce/database-persistent-read-ports.ts",
       );
+      const code = withoutReadComposition(await readFile(file, "utf8"), provider);
+      assert.doesNotMatch(code, sourceImport, file.pathname);
     }
   }
 });

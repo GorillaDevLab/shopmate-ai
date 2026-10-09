@@ -8,12 +8,14 @@ import {
   DatabaseDemoCommerceRepository,
 } from "./demo-commerce.repository.js";
 import { DemoCommerceConnectorHost } from "./demo-commerce-connector.host.js";
+import { DatabasePersistentReadPorts } from "./database-persistent-read-ports.js";
 @Module({
   controllers: [DemoCommerceController],
   providers: [
     DemoCommerceGuard,
     DemoCommerceService,
     DemoCommerceConnectorHost,
+    DatabasePersistentReadPorts,
     { provide: DEMO_COMMERCE_ENV, useFactory: () => readDemoCommerceEnvironment(process.env) },
     { provide: DEMO_COMMERCE_REPOSITORY, useClass: DatabaseDemoCommerceRepository },
   ],
