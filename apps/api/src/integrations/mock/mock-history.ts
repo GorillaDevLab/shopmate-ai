@@ -1,3 +1,5 @@
+import { plannedCandidate, launchedCandidate } from "./mock-scenario-candidates.js";
+import { scenarioAt } from "./mock-scenario-plans.js";
 import { ConnectorTimestampSchema, type ConnectorSku } from "@shopmate/contracts";
 import { generateCatalog, type CatalogEntry } from "./mock-catalog.js";
 import { DAY_MS, MockConfigSchema, openingTime, type MockConfig } from "./mock-config.js";
@@ -65,7 +67,7 @@ function candidateFor(
   skus: readonly ConnectorSku[],
   day: number,
   index: number,
-): OrderCandidate {
+): OrderCandidate | null {
   const random = (key: string, max: number) =>
     seededInteger(config.seed, ["order", day, index, key], max);
   const hero = random("hero", 100) < 65;
@@ -81,21 +83,25 @@ function candidateFor(
     10_000,
     Math.floor((campaignPlan(config, day).potentialOrders * 10_000) / dailyDemand(config, day)),
   );
-  return {
-    id: `${config.binding.externalStoreId}:order:${day}:${index}`,
-    at,
-    sku,
-    quantity: 1 + random("quantity", 2),
-    discountBps: problematic ? 500 + Math.floor(progress * 2500) : 500,
-    campaignId:
-      random("attribution", 10_000) < attributionBps
-        ? `${config.binding.externalStoreId}:campaign:${day}`
-        : null,
-    cancel: random("cancel", 100) < 12,
-    refund: random("refund", 10_000) < refundBps,
-    partialRefund: random("partial", 2) === 0,
-    returnGoods: random("return", 2) === 0,
-  };
+  return plannedCandidate(
+    config,
+    {
+      id: `${config.binding.externalStoreId}:order:${day}:${index}`,
+      at,
+      sku,
+      quantity: 1 + random("quantity", 2),
+      discountBps: problematic ? 500 + Math.floor(progress * 2500) : 500,
+      campaignId:
+        random("attribution", 10_000) < attributionBps
+          ? `${config.binding.externalStoreId}:campaign:${day}`
+          : null,
+      cancel: random("cancel", 100) < 12,
+      refund: random("refund", 10_000) < refundBps,
+      partialRefund: random("partial", 2) === 0,
+      returnGoods: random("return", 2) === 0,
+    },
+    skus.indexOf(sku),
+  );
 }
 
 function candidateTime(
@@ -145,7 +151,8 @@ function restockEvents(
   const horizon = Date.parse(config.historyStart) + config.days * DAY_MS;
   const opening = openingTime(config);
   const first = Number.isFinite(after)
-    ? opening + Math.max(0, Math.floor((after - opening) / (7 * DAY_MS)) + 1) * 7 * DAY_MS
+    ? opening +
+      Math.max(0, Math.floor((after - 5 * DAY_MS - opening) / (7 * DAY_MS)) + 1) * 7 * DAY_MS
     : opening;
   for (let at = first; at <= until && at < horizon; at += 7 * DAY_MS) {
     skus.forEach((sku, index) => {
@@ -158,11 +165,19 @@ function restockEvents(
       )
         return;
       const share = index < 10 ? 0.065 : 0.35 / skus.length;
+      const mutation = scenarioAt(config, at)?.mutations.find((m) => m.skuIndex === index);
+      if (mutation?.restockBps === 0) return;
+      const arrival = at + (mutation?.restockDelayDays ?? 0) * DAY_MS;
+      if (arrival <= after || arrival > until) return;
       events.push({
         kind: "RESTOCK",
-        at,
+        at: arrival,
         skuId: sku.externalSkuId,
-        stock: Math.max(25, Math.ceil(config.dailyOrders * 7 * 2 * share)),
+        stock: Math.floor(
+          (Math.max(25, Math.ceil(config.dailyOrders * 7 * 2 * share)) *
+            (mutation?.restockBps ?? 10000)) /
+            10000,
+        ),
       });
     });
   }
@@ -182,7 +197,9 @@ export function generateTimeline(
     day += 1
   ) {
     for (let index = 0; index < dailyDemand(config, day); index += 1) {
-      events.push(...orderEvents(candidateFor(config, skus, day, index)));
+      const candidate = candidateFor(config, skus, day, index);
+      const launched = candidate && launchedCandidate(config, candidate, skus);
+      if (launched) events.push(...orderEvents(launched));
     }
   }
   return orderedTimeline(events.filter((event) => event.at <= until));
@@ -206,7 +223,9 @@ export function generateTimelineWindow(
   const lastDay = Math.min(config.days - 1, Math.floor((until - start) / DAY_MS));
   for (let day = firstDay; day <= lastDay; day += 1) {
     for (let index = 0; index < dailyDemand(config, day); index += 1) {
-      events.push(...orderEvents(candidateFor(config, skus, day, index)));
+      const candidate = candidateFor(config, skus, day, index);
+      const launched = candidate && launchedCandidate(config, candidate, skus);
+      if (launched) events.push(...orderEvents(launched));
     }
   }
   return orderedTimeline(events.filter((event) => event.at > after && event.at <= until));
