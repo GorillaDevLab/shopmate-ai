@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 import { mockFailure } from "./mock-call.js";
 
-const ScopeSchema = z.strictObject({
+export const PersistentSourceScopeSchema = z.strictObject({
   ...ConnectorBindingSchema.unwrap().shape,
   sessionId: TenantIdSchema,
   generation: z.number().int().min(0).max(2_147_483_647),
@@ -28,7 +28,7 @@ const utc = z.iso
       .string()
       .refine((value) => !value.startsWith("0000") && new Date(value).toISOString() === value),
   );
-const VersionSchema = z.strictObject({
+export const PersistentSourceVersionSchema = z.strictObject({
   kind: z.enum(["STORE", "PRODUCT", "ORDER", "REFUND", "INVENTORY", "MARKETING"]),
   entityKey: z.string().min(1).max(1024),
   eventSeq: positiveUInt,
@@ -56,9 +56,9 @@ export function mapPersistentSourceVersion(
   scopeInput: unknown,
   versionInput: unknown,
 ): ConnectorResult<PersistentSourceRecord> {
-  const scope = ScopeSchema.safeParse(scopeInput);
+  const scope = PersistentSourceScopeSchema.safeParse(scopeInput);
   if (!scope.success) return mockFailure("INVALID_INPUT");
-  const version = VersionSchema.safeParse(versionInput);
+  const version = PersistentSourceVersionSchema.safeParse(versionInput);
   if (!version.success) return mockFailure("INVALID_RESPONSE");
   const mapped = MappedSchema.safeParse({ kind: version.data.kind, record: version.data.payload });
   if (!mapped.success) return mockFailure("INVALID_RESPONSE");

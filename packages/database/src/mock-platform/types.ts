@@ -50,13 +50,28 @@ export interface SourceGeneration {
 export type SourceInitialization =
   | { readonly status: "CREATED" | "EXISTS"; readonly generation: SourceGeneration }
   | { readonly status: "DENIED" };
+/** Total read lifetime defaults to 30s and caps longer deadlines at 30s. */
+export interface SourceReadControl {
+  readonly signal?: AbortSignal;
+  /** Canonical UTC timestamp, including milliseconds and Z. */
+  readonly deadlineAt?: string;
+}
 export interface MockSourceReader {
-  findPublication(actor: SourceReadActor, scope: SourceScope): Promise<Publication | null>;
-  findGeneration(actor: SourceReadActor, scope: SourceScope): Promise<SourceGeneration | null>;
+  findPublication(
+    actor: SourceReadActor,
+    scope: SourceScope,
+    control?: SourceReadControl,
+  ): Promise<Publication | null>;
+  findGeneration(
+    actor: SourceReadActor,
+    scope: SourceScope,
+    control?: SourceReadControl,
+  ): Promise<SourceGeneration | null>;
   scanVersions(
     actor: SourceReadActor,
     scope: SourceScope,
     input: SourceScanInput,
+    control?: SourceReadControl,
   ): Promise<SourceScanPage | null>;
   readLatestStates(
     actor: SourceReadActor,

@@ -10,6 +10,10 @@ const portDatabases = {
     name: "shopmate_tenant_test_hydration_ports",
     sql: 'CREATE DATABASE "shopmate_tenant_test_hydration_ports"',
   },
+  readcontrol: {
+    name: "shopmate_tenant_test_readcontrol_ports",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_readcontrol_ports"',
+  },
   publish: {
     name: "shopmate_tenant_test_publish_ports",
     sql: 'CREATE DATABASE "shopmate_tenant_test_publish_ports"',

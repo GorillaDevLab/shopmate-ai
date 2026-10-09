@@ -1,4 +1,5 @@
 import { sourcePool, type SourcePool } from "./clients.js";
+import { readTransaction } from "./read-transaction.js";
 import { SourceAccessDenied, SourceDomainFailure } from "./errors.js";
 import { findGeneration, initializeGeneration } from "./generations.js";
 import { findGrant, listGrants, matchesGrant } from "./grants.js";
@@ -48,6 +49,7 @@ export type * from "./scan-types.js";
 export type * from "./latest-types.js";
 export type * from "./hydration-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
+export { packSourceChunk, type SourceChunkPlan } from "./chunk-packer.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
@@ -58,27 +60,32 @@ export function createMockSourceReader(env: SourceEnvironment): MockSourceReader
       validateLatestInput(input);
       return readLatestStates(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input);
     },
-    async scanVersions(actor, scope, input) {
+    async scanVersions(actor, scope, input, control) {
       validateReadActor(actor);
       validateScope(scope);
       validateScanInput(input);
-      return scanVersions(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input);
+      return scanVersions(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input, control);
     },
-    async findPublication(actor, scope) {
+    async findPublication(actor, scope, control) {
       validateReadActor(actor);
       validateScope(scope);
-      return findPublication(pool, actor, scope);
+      return findPublication(pool, actor, scope, control);
     },
-    async findGeneration(actor, scope) {
+    async findGeneration(actor, scope, control) {
       validateReadActor(actor);
       validateScope(scope);
-      return transaction(pool, "reader", async (client) => {
-        await readIdentity(client, actor);
-        await lockControl(client, scope);
-        if (!(await currentAccess(client, scope, "reader"))) return null;
-        const found = await findGeneration(client, scope);
-        return found && (await currentAccess(client, scope, "reader")) ? found : null;
-      });
+      return readTransaction(
+        pool,
+        async (client) => {
+          await readIdentity(client, actor);
+          await lockControl(client, scope);
+          if (!(await currentAccess(client, scope, "reader"))) return null;
+          const found = await findGeneration(client, scope);
+          return found && (await currentAccess(client, scope, "reader")) ? found : null;
+        },
+        undefined,
+        control,
+      );
     },
     close: () => pool.end(),
   };
