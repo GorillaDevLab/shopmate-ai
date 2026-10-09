@@ -15,6 +15,7 @@ import type { LatestStateInput, LatestStatePage } from "./latest-types.js";
 import { readPublication } from "./publication-certificate.js";
 import { checkedVersion } from "./scan.js";
 import { validateScanKey } from "./scan-cursor.js";
+import { representable } from "./record-primitives.js";
 import type { SourceVersion } from "./scan-types.js";
 import { currentAccess, lockControl, readIdentity, scopeValues } from "./transaction.js";
 import type { SourceReadActor, SourceReadControl, SourceScope } from "./types.js";
@@ -50,6 +51,9 @@ async function nextKey(
   after: LatestPosition | null,
   publication: LatestStatePage["publication"],
 ): Promise<LatestPosition | null> {
+  // A literal unpaired surrogate cannot occur in a strictly validated source record.
+  // Reach this only after publication and authorization checks; JSONB rejects its escape.
+  if (Array.isArray(input.entityKey) && !input.entityKey.every(representable)) return null;
   const result = await client.query<LatestPosition>(keySql, [
     ...scopeValues(scope),
     input.kind ?? null,
