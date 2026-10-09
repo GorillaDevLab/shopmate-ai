@@ -1,4 +1,4 @@
-import { ConnectorBindingSchema, ConnectorTimestampSchema } from "@shopmate/contracts";
+import { ConnectorBindingSchema, ConnectorTimestampSchema, MockScenarioPlanSchema } from "@shopmate/contracts";
 import { z } from "zod";
 
 export const DAY_MS = 86_400_000;
@@ -32,9 +32,15 @@ const inputSchema = z.strictObject({
   growthBps: z.number().int().min(0).max(10_000).optional(),
   refundBps: z.number().int().min(0).max(5000).optional(),
   adSpendMinor: z.number().int().min(0).max(100_000_000).optional(),
+  scenarioPlan: MockScenarioPlanSchema.optional(),
 });
 
 export const MockConfigSchema = inputSchema
+  .refine((input) => !input.scenarioPlan || (
+    input.scenarioPlan.externalStoreId === input.binding.externalStoreId &&
+    input.scenarioPlan.endDay <= input.days &&
+    input.scenarioPlan.mutations.every((m) => m.skuIndex < input.productCount * input.variantsPerProduct)
+  ), { message: "Scenario exceeds frozen commerce scope" })
   .refine((input) => input.binding.externalStoreId.length <= 200, {
     message: "External store namespace exceeds derived ID budget",
   })
@@ -71,3 +77,4 @@ export function openingTime(config: MockConfig): number {
   const offset = config.profile === "new" ? Math.max(0, config.days - 14) : 0;
   return Date.parse(config.historyStart) + offset * DAY_MS;
 }
+

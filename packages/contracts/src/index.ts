@@ -372,3 +372,5 @@ export type {
   AssistantWorkspaceReadResponse,
   AssistantWorkspaceSaveRequest,
 } from "./ai/assistant-memory.schema.js";
+export { MockScenarioIdSchema, MockScenarioPlanSchema } from "./commerce/mock-scenario.schema.js";
+export type { MockScenarioPlan, MockScenarioMutation } from "./commerce/mock-scenario.schema.js";
