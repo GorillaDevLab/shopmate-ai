@@ -30,6 +30,11 @@ export interface SourceReadActor {
 export interface SourceWorkerActor {
   readonly grantId: string;
 }
+/** Discovery is advisory; every initialization/claim rechecks this current scope. */
+export interface SourceBuildWork {
+  readonly actor: SourceWorkerActor;
+  readonly scope: SourceScope;
+}
 export interface SourceWorkerGrant extends Omit<SourceScope, "generation"> {
   readonly id: string;
   readonly databaseRole: string;
@@ -88,6 +93,7 @@ export interface MockSourceWorker {
     input: BuildHydrationInput,
   ): Promise<BuildHydrationResult>;
   listGrants(): Promise<readonly SourceWorkerGrant[]>;
+  listBuildScopes(): Promise<readonly SourceBuildWork[]>;
   initializeGeneration(actor: SourceWorkerActor, scope: SourceScope): Promise<SourceInitialization>;
   claim(actor: SourceWorkerActor, scope: SourceScope): Promise<ClaimResult>;
   renew(actor: SourceWorkerActor, lease: LeaseRef): Promise<RenewResult>;
