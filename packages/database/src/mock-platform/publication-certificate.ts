@@ -1,17 +1,12 @@
 import type pg from "pg";
 import type { SourcePool } from "./clients.js";
+import { readTransaction } from "./read-transaction.js";
 import { SourceAccessDenied, SourceStorageError } from "./errors.js";
 import { journalScopeWhere } from "./journal-state.js";
 import type { Publication } from "./publication-types.js";
 import { validatePublication } from "./publication-validation.js";
-import {
-  currentAccess,
-  lockControl,
-  readIdentity,
-  scopeValues,
-  transaction,
-} from "./transaction.js";
-import type { SourceReadActor, SourceScope } from "./types.js";
+import { currentAccess, lockControl, readIdentity, scopeValues } from "./transaction.js";
+import type { SourceReadActor, SourceReadControl, SourceScope } from "./types.js";
 
 // Public columns and builtins also work under the reader's deliberately narrow grants.
 const certificateSql = `WITH certificate AS (SELECT jsonb_build_object(
@@ -51,11 +46,11 @@ export async function findPublication(
   pool: SourcePool,
   actor: SourceReadActor,
   scope: SourceScope,
+  control?: SourceReadControl,
 ): Promise<Publication | null> {
   try {
-    return await transaction(
+    return await readTransaction(
       pool,
-      "reader",
       async (client) => {
         await lockControl(client, scope);
         await readIdentity(client, actor);
@@ -65,6 +60,7 @@ export async function findPublication(
         return found;
       },
       (result) => result === null,
+      control,
     );
   } catch (error) {
     if (error instanceof SourceAccessDenied) return null;

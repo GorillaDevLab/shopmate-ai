@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import pg from "pg";
 import {
   leasePortDatabase,
   closeLeasePortDatabase,
@@ -9,6 +10,11 @@ import { eventFor } from "../helpers/mock-source-append-fixture.mjs";
 import { advance } from "../helpers/mock-source-publish-fixture.mjs";
 import { readerActor } from "../helpers/mock-platform-fixture.mjs";
 import { assertEntitySeeks, measuredLatest } from "../helpers/mock-source-latest-plan-fixture.mjs";
+import { restartedLatestRead } from "../helpers/mock-source-latest-restart.mjs";
+import {
+  readLatestCursor,
+  createLatestCursor,
+} from "../../dist/src/mock-platform/latest-cursor.js";
 
 const source = await import("../../dist/src/mock-platform/index.js");
 let context;
@@ -194,6 +200,9 @@ test("latest-state pages advance across future-only keys and preserve the prior 
   assert.equal(first.publication.revision, "2");
   assert.deepEqual(first.items, []);
   assert.ok(first.nextCursor);
+  assert.ok(first.nextCursor.length <= 1024);
+  await reader.close();
+  reader = source.createMockSourceReader(context.env);
   const second = await reader.readLatestStates(readerActor, state.scope, {
     ...input,
     cursor: first.nextCursor,
@@ -306,4 +315,191 @@ test("latest-state distinguishes unpublished and empty published scopes", async 
     }),
     { code: "SOURCE_INPUT" },
   );
+});
+
+test("compact latest cursors survive another process and preserve chain expiry on retries", async () => {
+  const state = await preparedAppend(context);
+  await publishEvents(state, [product(state, "a"), product(state, "b"), product(state, "c")]);
+  const input = {
+    until: state.lease.targetTime,
+    kind: "PRODUCT",
+    limit: 1,
+    contextHash: "a".repeat(64),
+  };
+  const first = await reader.readLatestStates(readerActor, state.scope, input);
+  const resumed = { ...input, cursor: first.nextCursor };
+  const second = await restartedLatestRead(context.env, readerActor, state.scope, resumed);
+  const retry = await reader.readLatestStates(readerActor, state.scope, resumed);
+  assert.deepEqual(second, retry);
+  const decode = (cursor) =>
+    readLatestCursor(context.env.MOCK_SOURCE_CURSOR_KEY, cursor, state.scope, input);
+  assert.equal(decode(first.nextCursor).expiresAt, decode(second.nextCursor).expiresAt);
+  assert.equal(second.items[0].payload.externalProductId, "b");
+  const last = await reader.readLatestStates(readerActor, state.scope, {
+    ...input,
+    cursor: second.nextCursor,
+  });
+  assert.equal(last.items[0].payload.externalProductId, "c");
+  assert.equal(last.nextCursor, null);
+});
+
+test("a signed witness cannot resume against an entity from another scope", async () => {
+  const original = await preparedAppend(context),
+    foreign = await preparedAppend(context);
+  const publication = await publishEvents(original, [
+    product(original, "a"),
+    product(original, "b"),
+  ]);
+  await publishEvents(foreign, [product(foreign, "a")]);
+  const input = { until: original.lease.targetTime, kind: "PRODUCT", limit: 1 };
+  const cursor = createLatestCursor(
+    context.env.MOCK_SOURCE_CURSOR_KEY,
+    foreign.scope,
+    publication,
+    input,
+    { kind: "PRODUCT", entityKey: '["PRODUCT", "b"]', eventSeq: "2" },
+    Date.now() + 60_000,
+  );
+  await assert.rejects(reader.readLatestStates(readerActor, foreign.scope, { ...input, cursor }), {
+    code: "SOURCE_INTEGRITY",
+  });
+});
+
+function publicationPin(publication) {
+  const { revision, highEventSeq, certificateHash } = publication;
+  return { revision, highEventSeq, certificateHash };
+}
+
+test("an explicit first-page pin keeps the discovered publication after a later release", async () => {
+  const state = await preparedAppend(context);
+  const original = await publishEvents(state, [product(state, "a"), product(state, "b")]);
+  const until = state.lease.targetTime;
+  const future = new Date(Date.parse(until) + 1000).toISOString();
+  await nextRelease(state, future);
+  const newer = await publishEvents(state, [product(state, "c-new", future)]);
+  const input = { until, limit: 1, kind: "PRODUCT", publication: publicationPin(original) };
+  const first = await reader.readLatestStates(readerActor, state.scope, input);
+  assert.equal(first.publication.certificateHash, original.certificateHash);
+  assert.equal(first.items[0].payload.externalProductId, "a");
+  const second = await reader.readLatestStates(readerActor, state.scope, {
+    ...input,
+    cursor: first.nextCursor,
+  });
+  assert.equal(second.items[0].payload.externalProductId, "b");
+  assert.equal(second.nextCursor, null);
+  await assert.rejects(
+    reader.readLatestStates(readerActor, state.scope, {
+      ...input,
+      cursor: first.nextCursor,
+      publication: publicationPin(newer),
+    }),
+    { code: "SOURCE_INTEGRITY" },
+  );
+});
+
+test("explicit pins reject malformed identities and missing certificates while retaining authorization", async () => {
+  const state = await preparedAppend(context);
+  const publication = await publishEvents(state, [product(state, "a")]);
+  const pin = publicationPin(publication);
+  const input = { until: state.lease.targetTime, limit: 1, publication: pin };
+  for (const change of [
+    { revision: "01" },
+    { revision: "0" },
+    { highEventSeq: "-1" },
+    { certificateHash: "A".repeat(64) },
+    { extra: true },
+  ])
+    await assert.rejects(
+      reader.readLatestStates(readerActor, state.scope, {
+        ...input,
+        publication: { ...pin, ...change },
+      }),
+      { code: "SOURCE_INPUT" },
+    );
+  for (const change of [
+    { revision: "99" },
+    { highEventSeq: "0" },
+    { certificateHash: "b".repeat(64) },
+  ])
+    await assert.rejects(
+      reader.readLatestStates(readerActor, state.scope, {
+        ...input,
+        publication: { ...pin, ...change },
+      }),
+      { code: "SOURCE_INTEGRITY" },
+    );
+  await assert.rejects(
+    reader.readLatestStates(readerActor, state.scope, {
+      ...input,
+      until: new Date(Date.parse(input.until) + 1).toISOString(),
+    }),
+    { code: "SOURCE_INPUT" },
+  );
+  await context.admin.query('UPDATE "PlatformConnection" SET status=$1 WHERE id=$2', [
+    "DISCONNECTED",
+    state.scope.connectionId,
+  ]);
+  assert.equal(await reader.readLatestStates(readerActor, state.scope, input), null);
+});
+
+test("structured exact keys select every kind including escaped identifiers and composite keys", async () => {
+  const state = await preparedAppend(context);
+  const at = state.lease.targetTime;
+  const kinds = ["STORE", "PRODUCT", "ORDER", "REFUND", "INVENTORY", "MARKETING"];
+  const events = kinds.map((kind) =>
+    eventFor({ scope: state.scope, job: { targetTime: at } }, kind),
+  );
+  events[1] = product(state, 'quoted/"中文');
+  await publishEvents(state, events);
+  const input = { until: at, limit: 10 };
+  const all = await reader.readLatestStates(readerActor, state.scope, input);
+  assert.equal(all.items.length, 6);
+  for (const item of all.items) {
+    const entityKey = JSON.parse(item.entityKey);
+    const exact = await reader.readLatestStates(readerActor, state.scope, {
+      ...input,
+      kind: item.kind,
+      entityKey,
+    });
+    assert.deepEqual(exact.items, [item]);
+    assert.equal(exact.nextCursor, null);
+  }
+  const absent = await reader.readLatestStates(readerActor, state.scope, {
+    ...input,
+    kind: "PRODUCT",
+    entityKey: ["PRODUCT", "absent"],
+  });
+  assert.deepEqual(absent.items, []);
+});
+
+test("explicit pins recheck authorization when revocation hides the certificate mid-read", async (t) => {
+  const state = await preparedAppend(context);
+  const publication = await publishEvents(state, [product(state, "a")]);
+  const input = {
+    until: state.lease.targetTime,
+    limit: 1,
+    publication: publicationPin(publication),
+  };
+  const original = pg.Client.prototype.query;
+  let revoked = false;
+  const spy = t.mock.method(pg.Client.prototype, "query", async function (sql, ...args) {
+    if (typeof sql === "string" && sql.startsWith("WITH certificate AS") && !revoked) {
+      revoked = true;
+      await context.admin.query(
+        'UPDATE "OrganizationMember" SET status=$1 WHERE "organizationId"=$2 AND "userId"=$3',
+        ["INACTIVE", state.scope.organizationId, readerActor.userId],
+      );
+    }
+    return original.call(this, sql, ...args);
+  });
+  try {
+    assert.equal(await reader.readLatestStates(readerActor, state.scope, input), null);
+    assert.equal(revoked, true);
+  } finally {
+    spy.mock.restore();
+    await context.admin.query(
+      'UPDATE "OrganizationMember" SET status=$1 WHERE "organizationId"=$2 AND "userId"=$3',
+      ["ACTIVE", state.scope.organizationId, readerActor.userId],
+    );
+  }
 });
