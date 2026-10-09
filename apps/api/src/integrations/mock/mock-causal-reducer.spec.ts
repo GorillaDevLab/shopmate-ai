@@ -377,3 +377,32 @@ it("rejects contract-valid explicitly unknown facts instead of fabricating zeroe
     reducerModule.createCausalReducer(config, { orders: [], inventory: [unknownInventory] }),
   ).toThrow();
 });
+
+it("conserves a cancelled reservation and leaves insufficient-stock demand absent", () => {
+  const config = configFor("mature");
+  const event = generateTimeline(
+    config,
+    generateCatalog(config),
+    Date.parse(config.historyStart) + DAY_MS,
+  ).find((row) => row.kind === "RESERVE")!;
+  const candidate = { ...event.candidate!, id: "m:order:a", quantity: 2, cancel: true };
+  const reducer = reducerModule.createCausalReducer(config);
+  reducer.apply({
+    kind: "RESTOCK",
+    at: candidate.at,
+    skuId: candidate.sku.externalSkuId,
+    stock: 2,
+  });
+  expect(
+    reducer.apply({ kind: "RESERVE", at: candidate.at, candidate }).map((row) => row.kind),
+  ).toEqual(["ORDER", "INVENTORY"]);
+  const stockout = { ...candidate, id: "m:order:z" };
+  expect(reducer.apply({ kind: "RESERVE", at: stockout.at, candidate: stockout })).toEqual([]);
+  const cancelled = reducer.apply({ kind: "CANCEL", at: candidate.at + 1800000, candidate });
+  expect(cancelled.map((row) => row.kind)).toEqual(["ORDER", "INVENTORY"]);
+  const inventory = reducer.snapshot().inventory[0]!;
+  expect(inventory.onHand).toBe(2);
+  expect(inventory.reserved).toBe(0);
+  expect(inventory.available).toBe(2);
+  expect(reducer.snapshot().orders.map((row) => row.status)).toEqual(["CANCELLED"]);
+});
