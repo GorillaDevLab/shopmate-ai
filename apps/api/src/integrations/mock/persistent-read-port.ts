@@ -28,6 +28,12 @@ export interface PersistentReadRequest {
 export interface PersistentReadPort {
   read(request: PersistentReadRequest, options: ReadOptions): Promise<unknown | null>;
 }
+export interface PersistentReadBinder {
+  bind(
+    actor: { readonly userId: string; readonly merchantId: string },
+    scope: PersistentScope,
+  ): PersistentReadPort;
+}
 const utc = z.iso
   .datetime({ precision: 3 })
   .refine((value) => !value.startsWith("0000") && new Date(value).toISOString() === value);

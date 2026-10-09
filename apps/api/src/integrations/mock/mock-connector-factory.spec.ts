@@ -6,6 +6,8 @@ import {
 } from "@shopmate/contracts";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { SimulationClock } from "./business-clock.js";
+import type { PersistentReadBinder } from "./persistent-read-port.js";
+import { emptyPersistentBinder } from "../../../test/helpers/persistent-read.fixture.js";
 import {
   MockConnectorFactory,
   type MockConnectorAccessResolver,
@@ -59,17 +61,80 @@ function port(result: ConnectorResult<CommerceConnector>): CommerceConnector {
 afterEach(() => vi.useRealTimers());
 
 describe("fresh tenant connector selection", () => {
+  it("never falls back when the required runtime binder is absent", async () => {
+    const factory = new MockConnectorFactory(
+      environment,
+      { resolve: async () => record() },
+      new SimulationClock(config.historyStart),
+      undefined as unknown as PersistentReadBinder,
+    );
+    expect(await factory.open(identity, "store-a", options())).toEqual({
+      ok: false,
+      error: { code: "TEMPORARY", retryAfterMs: null },
+    });
+  });
+  it("rechecks independent permissions after persistent source I/O", async () => {
+    let current = record();
+    const binder: PersistentReadBinder = {
+      bind(actor, scope) {
+        const port = emptyPersistentBinder.bind(actor, scope);
+        return {
+          async read(request, options) {
+            const result = await port.read(request, options);
+            current = { ...current, context: { ...current.context, permissions: ["tenant:read"] } };
+            return result;
+          },
+        };
+      },
+    };
+    const connector = port(
+      await new MockConnectorFactory(
+        environment,
+        { resolve: async () => current },
+        new SimulationClock("2026-01-14T00:00:00Z"),
+        binder,
+      ).open(identity, "store-a", options()),
+    );
+    expect(
+      await connector.listProducts({ until: "2026-01-14T00:00:00Z", limit: 1 }, options()),
+    ).toMatchObject({ ok: false, error: { code: "PERMISSION_DENIED" } });
+  });
+  it("requires source binding from the validated record and never synthesizes unknown publication", async () => {
+    const read = vi.fn(async () => null);
+    const binder: PersistentReadBinder = { bind: vi.fn(() => ({ read })) };
+    const connector = port(
+      await new MockConnectorFactory(
+        environment,
+        { resolve: async () => record() },
+        new SimulationClock("2026-01-14T00:00:00Z"),
+        binder,
+      ).open(identity, "store-a", options()),
+    );
+    expect(binder.bind).toHaveBeenCalledWith(
+      { userId: identity.userId, merchantId: identity.merchantId },
+      { ...config.binding, sessionId: "session-a", generation: 1 },
+    );
+    expect(await connector.getStore(options())).toEqual({
+      ok: false,
+      error: { code: "TEMPORARY", retryAfterMs: null },
+    });
+    expect(read).toHaveBeenCalledTimes(1);
+  });
   it("resolves store config internally and returns a common port", async () => {
     const resolver: MockConnectorAccessResolver = { resolve: vi.fn(async () => record()) };
     const factory = new MockConnectorFactory(
       environment,
       resolver,
       new SimulationClock("2026-01-14T00:00:00Z"),
+      emptyPersistentBinder,
     );
     const connector = port(await factory.open(identity, "store-a", options()));
     expect(connector.binding).toEqual(config.binding);
-    expect(await connector.getStore(options())).toMatchObject({ ok: true });
-    expect(resolver.resolve).toHaveBeenCalledTimes(2);
+    expect(await connector.getStore(options())).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
+    expect(resolver.resolve).toHaveBeenCalledTimes(3);
     expect(resolver.resolve).toHaveBeenCalledWith(
       identity,
       "store-a",
@@ -88,6 +153,7 @@ describe("fresh tenant connector selection", () => {
       env,
       resolver,
       new SimulationClock(config.historyStart),
+      emptyPersistentBinder,
     ).open(identity, "store-a", options());
     expect(result).toMatchObject({ ok: false, error: { code: "PERMISSION_DENIED" } });
     expect(resolver.resolve).not.toHaveBeenCalled();
@@ -110,6 +176,7 @@ describe("fresh tenant connector selection", () => {
       environment,
       { resolve: async () => ({ ...record(), ...change }) },
       new SimulationClock(config.historyStart),
+      emptyPersistentBinder,
     );
     expect(await factory.open(identity, "store-a", options())).toMatchObject({
       ok: false,
@@ -123,6 +190,7 @@ describe("fresh tenant connector selection", () => {
       environment,
       resolver,
       new SimulationClock(config.historyStart),
+      emptyPersistentBinder,
     );
     expect(
       await factory.open({ ...identity, organizationId: "org-b" }, "store-a", options()),
@@ -139,6 +207,7 @@ describe("fresh tenant connector selection", () => {
       environment,
       { resolve: async () => current },
       new SimulationClock("2026-01-14T00:00:00Z"),
+      emptyPersistentBinder,
     );
     const connector = port(await factory.open(identity, "store-a", options()));
     const page = await connector.listProducts(
@@ -164,6 +233,7 @@ describe("fresh tenant connector selection", () => {
         environment,
         { resolve: async () => current },
         new SimulationClock(config.historyStart),
+        emptyPersistentBinder,
       );
       const connector = port(await factory.open(identity, "store-a", options()));
       current =
@@ -188,10 +258,14 @@ describe("fresh tenant connector selection", () => {
       environment,
       { resolve: async () => current },
       new SimulationClock("2026-01-14T00:00:00Z"),
+      emptyPersistentBinder,
     );
     const connector = port(await factory.open(identity, "store-a", options()));
     current = { ...current, context: { ...current.context, permissions: ["tenant:read"] } };
-    expect(await connector.getStore(options())).toMatchObject({ ok: true });
+    expect(await connector.getStore(options())).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
     expect(
       await connector.listOrders({ until: "2026-01-14T00:00:00Z", limit: 10 }, options()),
     ).toMatchObject({ ok: false, error: { code: "PERMISSION_DENIED" } });
@@ -206,6 +280,7 @@ describe("fresh tenant connector selection", () => {
         },
       },
       new SimulationClock(config.historyStart),
+      emptyPersistentBinder,
     );
     expect(await broken.open(identity, "store-a", options())).toEqual({
       ok: false,
@@ -222,6 +297,7 @@ describe("fresh tenant connector selection", () => {
         },
       },
       new SimulationClock(config.historyStart),
+      emptyPersistentBinder,
     );
     const pending = hanging.open(identity, "store-a", options());
     await vi.advanceTimersByTimeAsync(5000);

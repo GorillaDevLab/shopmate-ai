@@ -3,23 +3,49 @@ import { actor, record, repository } from "../../../test/helpers/demo-commerce.f
 import { DatabaseMockConnectorAccessResolver } from "./database-mock-connector-access-resolver.js";
 import { DemoCommerceConnectorHost } from "../../demo-commerce/demo-commerce-connector.host.js";
 import { PersistentMockClock } from "./persistent-mock-clock.js";
+import { emptyPersistentBinder } from "../../../test/helpers/persistent-read.fixture.js";
 const identity = { ...actor, permissions: [] };
 const options = () => ({
   requestId: "read-a",
   deadlineAt: new Date(Date.now() + 5000).toISOString(),
 });
 describe("database connector composition", () => {
+  it("passes the required persistent binder into each selected factory", async () => {
+    const binder = { bind: vi.fn(() => ({ read: async () => null })) };
+    const host = new DemoCommerceConnectorHost(
+      repository(),
+      {
+        enabled: true,
+        origin: "https://demo.example.com",
+      },
+      binder,
+    );
+    const opened = await host.open(identity, "store-a", options());
+    if (!opened.ok) throw new Error(opened.error.code);
+    expect(binder.bind).toHaveBeenCalledTimes(1);
+    expect(await opened.data.getStore(options())).toMatchObject({
+      ok: false,
+      error: { code: "TEMPORARY" },
+    });
+  });
   it("invalidates a connector when its persisted session is replaced with identical configuration", async () => {
     const repo = repository();
     let current = record();
     vi.mocked(repo.findDemoSession).mockImplementation(async () => current);
-    const host = new DemoCommerceConnectorHost(repo, {
-      enabled: true,
-      origin: "https://demo.example.com",
-    });
+    const host = new DemoCommerceConnectorHost(
+      repo,
+      {
+        enabled: true,
+        origin: "https://demo.example.com",
+      },
+      emptyPersistentBinder,
+    );
     const opened = await host.open(identity, "store-a", options());
     if (!opened.ok) throw new Error(opened.error.code);
-    expect(await opened.data.getStore(options())).toMatchObject({ ok: true });
+    expect(await opened.data.getStore(options())).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
     current = { ...current, id: "session-replacement" };
     expect(await opened.data.getStore(options())).toMatchObject({
       ok: false,
@@ -30,14 +56,21 @@ describe("database connector composition", () => {
     const repo = repository();
     let current = record();
     vi.mocked(repo.findDemoSession).mockImplementation(async () => current);
-    const host = new DemoCommerceConnectorHost(repo, {
-      enabled: true,
-      origin: "https://demo.example.com",
-    });
+    const host = new DemoCommerceConnectorHost(
+      repo,
+      {
+        enabled: true,
+        origin: "https://demo.example.com",
+      },
+      emptyPersistentBinder,
+    );
     const opened = await host.open(identity, "store-a", options());
     expect(opened.ok).toBe(true);
     if (!opened.ok) throw new Error("open");
-    expect(await opened.data.getStore(options())).toMatchObject({ ok: true });
+    expect(await opened.data.getStore(options())).toMatchObject({
+      ok: false,
+      error: { code: "NOT_FOUND" },
+    });
     current = {
       ...current,
       clockNow: new Date("2026-01-15T00:00:00Z"),

@@ -6,17 +6,22 @@ import { DemoSessionViewSchema, type CommerceConnector } from "@shopmate/contrac
 import { disconnectPrismaClient, getPrismaClient } from "@shopmate/database";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DemoCommerceApiFixture } from "../../../packages/database/test/helpers/demo-commerce-api-fixture.mjs";
+import { DemoPersistentApiFixture } from "../../../packages/database/test/helpers/demo-persistent-api-fixture.mjs";
 import { AuthPermission, createAuthContext } from "../src/auth/contracts/index.js";
 import { signDemoSession } from "../src/auth/session/demo-session.js";
 import { DEMO_SESSION_COOKIE_NAME } from "../src/auth/session/demo-session-cookie.js";
 import { DemoCommerceConnectorHost } from "../src/demo-commerce/demo-commerce-connector.host.js";
 import { DEMO_COMMERCE_ENV } from "../src/demo-commerce/demo-commerce.environment.js";
+import { DatabasePersistentReadPorts } from "../src/demo-commerce/database-persistent-read-ports.js";
+import {
+  DEMO_COMMERCE_REPOSITORY,
+  type DemoCommerceRepository,
+} from "../src/demo-commerce/demo-commerce.repository.js";
 
 const operatorUrl = process.env.TENANT_TEST_OPERATOR_URL;
 if (!operatorUrl || !process.env.DATABASE_URL)
   throw new Error("Run pnpm test:tenant with isolated PostgreSQL; this suite cannot be skipped");
-const fixture = new DemoCommerceApiFixture(operatorUrl);
+const fixture = new DemoPersistentApiFixture(operatorUrl);
 const signingKey = randomBytes(48).toString("hex");
 const origin = "https://demo.example.test";
 const command = {
@@ -51,6 +56,7 @@ describe("persisted demo controls with actual authenticated AppModule and restri
   let host: DemoCommerceConnectorHost;
   beforeAll(async () => {
     await fixture.initialize();
+    for (const [key, value] of Object.entries(fixture.readEnvironment)) vi.stubEnv(key, value);
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("APP_ENV", "demo");
     vi.stubEnv("ENABLE_DEMO_MODE", "true");
@@ -97,8 +103,9 @@ describe("persisted demo controls with actual authenticated AppModule and restri
       .set("Origin", origin)
       .send(body);
   }
-  async function create(store = "demo-api-store-a", body = command) {
+  async function create(store = "demo-api-store-a", body = command, publish = true) {
     const response = await post("", body, store).expect(201);
+    if (publish) await fixture.publish(store);
     return DemoSessionViewSchema.parse(response.body);
   }
   async function connector(store = "demo-api-store-a"): Promise<CommerceConnector> {
@@ -107,6 +114,121 @@ describe("persisted demo controls with actual authenticated AppModule and restri
     if (!opened.ok) throw new Error(opened.error.code);
     return opened.data;
   }
+  async function reopenedConnector() {
+    const provider = new DatabasePersistentReadPorts();
+    const selected = new DemoCommerceConnectorHost(
+      app.get<DemoCommerceRepository>(DEMO_COMMERCE_REPOSITORY),
+      { enabled: true, origin },
+      provider,
+    );
+    const opened = await selected.open(identity(), "demo-api-store-a", options());
+    if (!opened.ok) {
+      await provider.onModuleDestroy();
+      throw new Error(opened.error.code);
+    }
+    return { connector: opened.data, close: () => provider.onModuleDestroy() };
+  }
+  it("uses unknown publication, certified absence and exact persisted DTOs without replay", async () => {
+    await create("demo-api-store-a", command, false);
+    const opened = await connector();
+    const ref = { externalProductId: "absent" };
+    expect(await opened.getProduct(ref, options())).toMatchObject({
+      ok: false,
+      error: { code: "TEMPORARY" },
+    });
+    await fixture.publish("demo-api-store-a", true);
+    for (const id of ["absent", "x".repeat(256), "界".repeat(256), "\ud800"])
+      expect(await opened.getProduct({ ...ref, externalProductId: id }, options())).toMatchObject({
+        ok: false,
+        error: { code: "NOT_FOUND" },
+      });
+    await post("/advance", { expectedRevision: 0, durationMs: 1 }).expect(200);
+    await fixture.publish("demo-api-store-a");
+    expect(
+      await opened.getProduct({ ...ref, externalProductId: 'quoted/"中文' }, options()),
+    ).toMatchObject({ ok: true, data: { title: "Persisted fixture product", status: "DELETED" } });
+  });
+  it("keeps runtime writes unsupported with the execution identity", async () => {
+    await create();
+    const opened = await connector();
+    expect(
+      await opened.updatePrice(
+        {
+          executionId: "execution",
+          idempotencyKey: "key",
+          externalSkuId: "sku",
+          expectedVersion: "v1",
+          oldPriceMinor: 100,
+          newPriceMinor: 200,
+          currency: "CNY",
+        },
+        options(),
+      ),
+    ).toMatchObject({ executionId: "execution", outcome: "REJECTED", failureCode: "UNSUPPORTED" });
+  });
+  it("rejects source cursor scope and filter tampering", async () => {
+    await create();
+    await create("demo-api-store-a2");
+    const selected = await connector(),
+      other = await connector("demo-api-store-a2");
+    const query = { until: command.observedAt, limit: 1 };
+    const first = await selected.listProducts(query, options());
+    if (!first.ok || !first.data.nextCursor) throw new Error("Persisted cursor required");
+    const resumed = { ...query, cursor: first.data.nextCursor };
+    expect(await other.listProducts(resumed, options())).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+    expect(
+      await selected.listProducts({ ...resumed, since: "2026-01-01T00:00:00.000Z" }, options()),
+    ).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+  });
+  it("invalidates the original connector when an identical session is replaced", async () => {
+    const original = await create();
+    const opened = await connector();
+    await fixture.reset();
+    const replacement = await create();
+    expect(replacement.id).not.toBe(original.id);
+    expect(await opened.getStore(options())).toMatchObject({
+      ok: false,
+      error: { code: "AUTH_EXPIRED" },
+    });
+  });
+  it("denies facts when membership is independently revoked while source SQL is waiting", async () => {
+    await create();
+    const opened = await connector();
+    const release = await fixture.holdEntityTable();
+    try {
+      const pending = opened.listProducts({ until: command.observedAt, limit: 1 }, options());
+      await fixture.waitSourceQuery();
+      await fixture.disableMembership();
+      await release();
+      expect(await pending).toMatchObject({ ok: false, error: { code: "PERMISSION_DENIED" } });
+    } finally {
+      await release();
+    }
+  });
+  it("actively cancels actual source SQL through the runtime provider and reuses its pool", async () => {
+    await create();
+    const opened = await connector();
+    const release = await fixture.holdEntityTable();
+    const controller = new AbortController();
+    try {
+      const pending = opened.listProducts(
+        { until: command.observedAt, limit: 1 },
+        { ...options(), signal: controller.signal },
+      );
+      const pid = await fixture.waitSourceQuery();
+      controller.abort("private caller reason");
+      expect(await pending).toEqual({ ok: false, error: { code: "ABORTED", retryAfterMs: null } });
+      await fixture.waitBackendGone(pid);
+    } finally {
+      await release();
+    }
+    expect(
+      await opened.listProducts({ until: command.observedAt, limit: 1 }, options()),
+    ).toMatchObject({ ok: true });
+  });
 
   it("uses nonowner NOBYPASSRLS with no rows outside identity transactions", async () => {
     expect(
@@ -287,8 +409,12 @@ describe("persisted demo controls with actual authenticated AppModule and restri
     const before = await first.listProducts(query, options());
     expect(before.ok).toBe(true);
     await disconnectPrismaClient();
-    const second = await connector();
-    expect(await second.listProducts(query, options())).toEqual(before);
+    const restarted = await reopenedConnector();
+    try {
+      expect(await restarted.connector.listProducts(query, options())).toEqual(before);
+    } finally {
+      await restarted.close();
+    }
     expect((await get().expect(200)).body.configHash).toMatch(/^[a-f0-9]{64}$/u);
   });
   it("freshens time and facts but retains the existing paging frame", async () => {
@@ -304,11 +430,23 @@ describe("persisted demo controls with actual authenticated AppModule and restri
       options(),
     );
     await post("/advance", { expectedRevision: 0, durationMs: 86_400_000 }).expect(200);
-    const next = await opened.listProducts({ ...query, cursor: page.data.nextCursor! }, options());
-    expect(next).toMatchObject({
-      ok: true,
-      data: { observedAt: page.data.observedAt, sourceWatermark: page.data.sourceWatermark },
-    });
+    await fixture.publish("demo-api-store-a");
+    const restarted = await reopenedConnector();
+    try {
+      const next = await restarted.connector.listProducts(
+        { ...query, cursor: page.data.nextCursor! },
+        options(),
+      );
+      expect(next).toMatchObject({
+        ok: true,
+        data: {
+          observedAt: "2026-01-15T00:00:00.000Z",
+          sourceWatermark: page.data.sourceWatermark,
+        },
+      });
+    } finally {
+      await restarted.close();
+    }
     const fresh = await opened.listOrders({ until: "2026-01-15T00:00:00Z", limit: 200 }, options());
     expect(fresh).toMatchObject({ ok: true, data: { observedAt: "2026-01-15T00:00:00.000Z" } });
     expect(fresh).not.toEqual(initial);
