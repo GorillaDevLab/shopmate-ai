@@ -240,6 +240,7 @@ model CommerceSourceScope {
   createdAt       DateTime                  @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
   connection      PlatformConnection        @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "SourceScope_connection_fkey")
   products        CanonicalProductListing[]
+  orders          CanonicalOrderListing[]
 
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation], map: "SourceScope_namespace_key")
   @@unique([id, organizationId, workspaceId, storeId], map: "SourceScope_tenant_key")
@@ -291,6 +292,59 @@ model CanonicalSkuListing {
   @@id([scopeId, externalSkuId])
   @@index([scopeId, externalProductId], map: "SkuListing_product_idx")
   @@map("SkuListing")
+  @@schema("commerce")
+}
+
+model CanonicalOrderListing {
+  scopeId           String                      @db.Uuid
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  externalOrderId   String
+  status            String
+  orderedAt         DateTime                    @db.Timestamptz(3)
+  paidAt            DateTime?                   @db.Timestamptz(3)
+  currency          String
+  grossMinor        BigInt
+  discountMinor     BigInt
+  shippingMinor     BigInt
+  payableMinor      BigInt
+  paidMinor         BigInt?
+  refundedMinor     BigInt?
+  sourceVersion     String?
+  sourceUpdatedAt   DateTime?                   @db.Timestamptz(3)
+  sourcePayloadHash String
+  qualityState      String
+  qualityIssues     String[]
+  ingestedAt        DateTime                    @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  scope             CommerceSourceScope         @relation(fields: [scopeId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "OrderListing_scope_fkey")
+  lines             CanonicalOrderLineListing[]
+
+  @@id([scopeId, externalOrderId])
+  @@unique([scopeId, organizationId, workspaceId, storeId, externalOrderId], map: "OrderListing_tenant_key")
+  @@index([organizationId, workspaceId, storeId], map: "OrderListing_store_idx")
+  @@map("OrderListing")
+  @@schema("commerce")
+}
+
+model CanonicalOrderLineListing {
+  scopeId           String                @db.Uuid
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  externalOrderId   String
+  externalLineId    String
+  externalProductId String
+  externalSkuId     String
+  quantity          BigInt
+  unitPriceMinor    BigInt
+  grossMinor        BigInt
+  discountMinor     BigInt
+  netMinor          BigInt
+  order             CanonicalOrderListing @relation(fields: [scopeId, organizationId, workspaceId, storeId, externalOrderId], references: [scopeId, organizationId, workspaceId, storeId, externalOrderId], onDelete: Restrict, onUpdate: NoAction, map: "OrderLineListing_order_fkey")
+
+  @@id([scopeId, externalOrderId, externalLineId])
+  @@map("OrderLineListing")
   @@schema("commerce")
 }
 
