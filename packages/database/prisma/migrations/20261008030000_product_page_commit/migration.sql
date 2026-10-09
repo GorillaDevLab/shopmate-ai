@@ -228,6 +228,7 @@ BEGIN
  SELECT * INTO receipt FROM sync_host."ProductPageCommit" c WHERE c."jobId"=job_id AND c."pageId"=page_id;
  IF FOUND THEN
   IF receipt."pageHash"<>page_hash THEN RAISE EXCEPTION 'Conflicting product page' USING ERRCODE='23505'; END IF;
+  PERFORM sync_host.require_page_lease(job,expected_fence);
   RETURN sync_host.product_commit_result(receipt,'REPLAYED');
  END IF;
  IF job."receiptCursor" #>> '{}' IS DISTINCT FROM expected_cursor THEN RAISE EXCEPTION 'Non-contiguous product page' USING ERRCODE='23514'; END IF;

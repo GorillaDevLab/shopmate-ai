@@ -294,6 +294,29 @@ test("missing identity and foreign Job fail closed before waiting on its lock", 
     await foreign.query("SET statement_timeout=0");
   }
 });
+test("exact replay rechecks a lease that expires while canonical manifest lookup waits", async () => {
+  const before = await counts();
+  await admin.query(
+    'UPDATE sync_host."Job" SET "leaseUntil"=clock_timestamp()+interval \'1500 milliseconds\' WHERE id=$1',
+    ["product-job"],
+  );
+  await admin.query("BEGIN");
+  await admin.query('LOCK TABLE sync_host."ProductPageCommit" IN ACCESS EXCLUSIVE MODE');
+  const rejected = assert.rejects(commit(page()), { code: "42501" });
+  try {
+    await admin.query("SELECT pg_sleep(2)");
+    await admin.query("COMMIT");
+    await rejected;
+  } finally {
+    await admin.query("ROLLBACK");
+    await admin.query(
+      'UPDATE sync_host."Job" SET "leaseUntil"=clock_timestamp()+interval \'120 seconds\' WHERE id=$1',
+      ["product-job"],
+    );
+  }
+  assert.deepEqual(await counts(), before);
+});
+
 test("an expired lease during explicit transaction rolls the entire successful RPC back at COMMIT", async () => {
   const before = await counts();
   await admin.query(
