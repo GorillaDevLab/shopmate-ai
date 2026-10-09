@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
+import process from "node:process";
+import { URL } from "node:url";
 import pg from "pg";
 import { isolatedPostgres } from "../helpers/isolated-postgres.mjs";
 import { DemoCommerceApiFixture } from "../helpers/demo-commerce-api-fixture.mjs";

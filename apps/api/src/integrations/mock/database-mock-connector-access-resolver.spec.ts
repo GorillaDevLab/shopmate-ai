@@ -6,15 +6,13 @@ import { PersistentMockClock } from "./persistent-mock-clock.js";
 import { emptyPersistentBinder } from "../../../test/helpers/persistent-read.fixture.js";
 function ruleRepository() {
   return {
-    findDemoFailureRules: vi
-      .fn()
-      .mockResolvedValue({
-        sessionId: "session-a",
-        generation: 0,
-        revision: 0,
-        clockNow: "2026-01-01T00:00:00.000Z",
-        rules: [],
-      }),
+    findDemoFailureRules: vi.fn().mockResolvedValue({
+      sessionId: "session-a",
+      generation: 0,
+      revision: 0,
+      clockNow: "2026-01-01T00:00:00.000Z",
+      rules: [],
+    }),
     createDemoFailureRule: vi.fn(),
     removeDemoFailureRule: vi.fn(),
   };
