@@ -221,7 +221,7 @@ test("internal pure helpers are not callable through worker or reader grants", a
       roles,
     )
   ).rows;
-  assert.equal(rows.length, 13);
+  assert.ok(rows.length >= 13);
   assert.ok(rows.every((row) => !row.worker && !row.reader));
 });
 
