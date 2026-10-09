@@ -44,3 +44,7 @@ it("shares the existing timeline comparator including same-time kind and key ord
   expect(history.compareTimelineEvents(left, { ...left, skuId: "b" })).toBeLessThan(0);
   expect(history.compareTimelineEvents(left, { ...left, at: 1 })).toBeLessThan(0);
 });
+
+it("routes offline replay through the shared transition instead of duplicating dispatch", () => {
+  expect(replay.replayTimeline.toString()).toContain("applyTimelineEvent(config, state, event)");
+});

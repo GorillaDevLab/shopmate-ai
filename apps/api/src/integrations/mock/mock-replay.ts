@@ -102,9 +102,7 @@ export function replayTimeline(
     ledger: [],
   };
   for (const event of timeline) {
-    if (event.kind === "RESTOCK") replenish(state, event);
-    else if (event.kind === "RESERVE") reserve(config, state, event);
-    else applyOrderEvent(config, state, event);
+    applyTimelineEvent(config, state, event);
   }
   return state;
 }
