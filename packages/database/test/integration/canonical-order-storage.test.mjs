@@ -292,6 +292,69 @@ test("canonical order storage preserves complete typed snapshots and tenant acce
       },
     );
     await t.test(
+      "parent locking serializes independently valid zero-value line deletions",
+      async () => {
+        await transaction(admin, async () => {
+          await order(admin, scopeB, "zero-race");
+          await admin.query(
+            'UPDATE commerce."OrderListing" SET "grossMinor"=0,"discountMinor"=0,"shippingMinor"=0,"payableMinor"=0,"paidMinor"=0 WHERE "scopeId"=$1 AND "externalOrderId"=\'zero-race\'',
+            [scopeB],
+          );
+          await admin.query(
+            'DELETE FROM commerce."OrderLineListing" WHERE "scopeId"=$1 AND "externalOrderId"=\'zero-race\'',
+            [scopeB],
+          );
+          await line(admin, scopeB, "zero-race", "one", 0);
+          await line(admin, scopeB, "zero-race", "two", 0);
+        });
+        const other = new pg.Client({ connectionString: url.toString() });
+        await other.connect();
+        try {
+          // Pause after the real deferred check so both COMMITs overlap even on fast machines.
+          // The parent lock must survive this pause; without it both deletes validate stale state.
+          await admin.query(
+            "CREATE FUNCTION commerce.order_test_commit_pause() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.\"externalOrderId\"='zero-race' THEN PERFORM pg_sleep(0.15); END IF; RETURN NULL; END $$",
+          );
+          await admin.query(
+            "REVOKE ALL ON FUNCTION commerce.order_test_commit_pause() FROM PUBLIC",
+          );
+          await admin.query(
+            'CREATE CONSTRAINT TRIGGER zz_order_test_pause AFTER DELETE ON commerce."OrderLineListing" DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION commerce.order_test_commit_pause()',
+          );
+          await admin.query("BEGIN");
+          await other.query("BEGIN");
+          await admin.query(
+            'DELETE FROM commerce."OrderLineListing" WHERE "scopeId"=$1 AND "externalOrderId"=\'zero-race\' AND "externalLineId"=\'one\'',
+            [scopeB],
+          );
+          await other.query(
+            'DELETE FROM commerce."OrderLineListing" WHERE "scopeId"=$1 AND "externalOrderId"=\'zero-race\' AND "externalLineId"=\'two\'',
+            [scopeB],
+          );
+          const commits = await Promise.allSettled([admin.query("COMMIT"), other.query("COMMIT")]);
+          assert.equal(commits.filter((result) => result.status === "fulfilled").length, 1);
+          const failure = commits.find((result) => result.status === "rejected");
+          assert.equal(failure.reason.code, "23514");
+          assert.equal(
+            (
+              await admin.query(
+                'SELECT count(*)::int AS n FROM commerce."OrderLineListing" WHERE "scopeId"=$1 AND "externalOrderId"=\'zero-race\'',
+                [scopeB],
+              )
+            ).rows[0].n,
+            1,
+          );
+        } finally {
+          await Promise.allSettled([admin.query("ROLLBACK"), other.query("ROLLBACK")]);
+          await other.end();
+          await admin.query(
+            'DROP TRIGGER IF EXISTS zz_order_test_pause ON commerce."OrderLineListing"',
+          );
+          await admin.query("DROP FUNCTION IF EXISTS commerce.order_test_commit_pause()");
+        }
+      },
+    );
+    await t.test(
       "literal Unicode identifiers remain distinct without product synchronization",
       async () => {
         await transaction(admin, () => order(admin, scopeA, "é"));
