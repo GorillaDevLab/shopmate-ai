@@ -56,4 +56,15 @@ describe("demo failure rule commands", () => {
       }).success,
     ).toBe(false);
   });
+  it("rejects throwing proxy reflection without exposing its exception", () => {
+    const input = new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw new Error("secret controls");
+        },
+      },
+    );
+    expect(DemoFailureRuleCreateSchema.safeParse(input).success).toBe(false);
+  });
 });

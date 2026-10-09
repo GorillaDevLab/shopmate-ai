@@ -78,7 +78,14 @@ function boundedData(input: unknown, depth = 0): boolean {
 }
 
 const commandGate = z.unknown().superRefine((input, context) => {
-  if (!boundedData(input)) context.addIssue({ code: "custom", message: "Invalid demo controls" });
+  let valid = false;
+  try {
+    valid = boundedData(input);
+  } catch {
+    // Reflection traps are untrusted input failures, never database or transport errors.
+    valid = false;
+  }
+  if (!valid) context.addIssue({ code: "custom", message: "Invalid demo controls" });
 });
 const revisionSchema = z.number().int().min(0).max(2_147_483_646);
 export const DemoFailureRuleCreateSchema = commandGate.pipe(
