@@ -77,6 +77,9 @@ try {
   await run("packages/database", "test/integration/canonical-order-storage.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/canonical-commerce-facts.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/mock-source-latest.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
