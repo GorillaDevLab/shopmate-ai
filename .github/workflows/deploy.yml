@@ -40,13 +40,13 @@ jobs:
 
             pnpm install --frozen-lockfile
 
-            # 迁移使用与 API 相同的根目录 .env；缺少 DATABASE_URL 时直接失败，
-            # 避免 prisma.config.ts 回退到 CI 默认连接串。
+            # Runtime 使用 DATABASE_URL；迁移使用独立的 provisioning identity。
             set -a
             . ./.env
             set +a
             : "${DATABASE_URL:?根目录 .env 缺少 DATABASE_URL}"
-            pnpm --filter @shopmate/database prisma:migrate:deploy
+            : "${MIGRATION_DATABASE_URL:?根目录 .env 缺少 MIGRATION_DATABASE_URL}"
+            DATABASE_URL="$MIGRATION_DATABASE_URL" pnpm --filter @shopmate/database prisma:migrate:deploy
 
             pnpm build
 
