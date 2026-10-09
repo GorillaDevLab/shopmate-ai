@@ -4,13 +4,13 @@ import { DAY_MS, openingTime, type MockConfig } from "./mock-config.js";
 import type { ReplayState } from "./mock-types.js";
 import { campaignPlan } from "./mock-campaign-plan.js";
 
-interface CampaignTotal {
+export interface CampaignTotal {
   orders: number;
   revenue: number;
   lastPaymentAt: number;
 }
 
-function campaign(
+export function campaignRow(
   config: MockConfig,
   day: number,
   until: number,
@@ -57,7 +57,7 @@ export function generateMarketing(
   for (let day = 0; day < config.days; day += 1) {
     const start = Date.parse(config.historyStart) + day * DAY_MS;
     if (start >= openingTime(config) && start < until)
-      rows.push(campaign(config, day, until, totals));
+      rows.push(campaignRow(config, day, until, totals));
   }
   return rows;
 }
