@@ -117,7 +117,11 @@ function replenish(state: ReplayState, event: TimelineEvent): void {
 }
 
 /** Shared causal commerce transition; callers own and drain the scratch effects. */
-export function applyTimelineEvent(config: MockConfig, state: ReplayState, event: TimelineEvent): void {
+export function applyTimelineEvent(
+  config: MockConfig,
+  state: ReplayState,
+  event: TimelineEvent,
+): void {
   if (event.kind === "RESTOCK") replenish(state, event);
   else if (event.kind === "RESERVE") reserve(config, state, event);
   else applyOrderEvent(config, state, event);

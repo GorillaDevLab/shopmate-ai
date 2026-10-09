@@ -213,6 +213,11 @@ export function generateTimelineWindow(
 }
 
 function orderedTimeline(events: TimelineEvent[]): TimelineEvent[] {
+  return events.sort(compareTimelineEvents);
+}
+
+/** Preserve offline causal ordering; publication grouping has its own UTF-8 key ordering. */
+export function compareTimelineEvents(a: TimelineEvent, b: TimelineEvent): number {
   const rank = {
     RESTOCK: 0,
     RESERVE: 1,
@@ -223,14 +228,12 @@ function orderedTimeline(events: TimelineEvent[]): TimelineEvent[] {
     REFUND: 6,
     RETURN: 7,
   };
-  return events.sort(
-    (a, b) =>
-      a.at - b.at ||
-      rank[a.kind] - rank[b.kind] ||
-      compareKeys(a.candidate?.id ?? a.skuId!, b.candidate?.id ?? b.skuId!),
+  return (
+    a.at - b.at ||
+    rank[a.kind] - rank[b.kind] ||
+    compareKeys(a.candidate?.id ?? a.skuId!, b.candidate?.id ?? b.skuId!)
   );
 }
-
 function compareKeys(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
