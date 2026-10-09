@@ -77,6 +77,7 @@ export interface MockSourceReader {
     actor: SourceReadActor,
     scope: SourceScope,
     input: LatestStateInput,
+    control?: SourceReadControl,
   ): Promise<LatestStatePage | null>;
   close(): Promise<void>;
 }
