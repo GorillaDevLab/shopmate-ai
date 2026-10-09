@@ -121,7 +121,7 @@ export async function observeSourceSettings(action) {
     const client = await original.apply(this, args);
     if (!restored.has(client)) {
       const query = client.query.bind(client);
-      restored.set(client, client.query);
+      restored.set(client, Object.getOwnPropertyDescriptor(client, "query"));
       client.query = async (...queryArgs) => {
         const result = await query(...queryArgs);
         if (["COMMIT", "ROLLBACK"].includes(queryArgs[0])) {
@@ -142,6 +142,9 @@ export async function observeSourceSettings(action) {
     return observations;
   } finally {
     pg.Pool.prototype.connect = original;
-    for (const [client, query] of restored) client.query = query;
+    for (const [client, descriptor] of restored) {
+      if (descriptor) Object.defineProperty(client, "query", descriptor);
+      else delete client.query;
+    }
   }
 }
