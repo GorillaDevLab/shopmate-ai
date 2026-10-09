@@ -1,0 +1,13 @@
+# Typed canonical order storage
+
+`commerce.OrderListing` and `commerce.OrderLineListing` store normalized Connector order facts under the existing seven-coordinate `SourceScope`. Composite foreign keys include organization, workspace and store ownership. Order line identities are unique within the scoped order; product and SKU identifiers are retained literally, without requiring a product stream to arrive first.
+
+Amounts are nonnegative CNY minor-unit BIGINT values bounded by JavaScript's maximum safe integer. Numeric multiplication and aggregation prevent overflow before validation. Each order requires 1–500 distinct lines, matching gross and discount totals, and matching payable after shipping. Row checks enforce line economics, refund/payment bounds, all six statuses and timestamp ordering. Unknown payment/refund/source times require their explicit quality issues. `SOURCE_INCONSISTENT` and `PAYMENT_UNKNOWN` preserve the contract's provider anomaly exceptions; unknown values remain SQL NULL.
+
+Deferred constraint triggers validate the final transaction state after locking the parent. This allows complete line replacement within one transaction and rejects partial snapshots at COMMIT. READ COMMITTED is mandatory so the aggregate query after acquiring the lock can observe committed concurrent changes. The PostgreSQL suite includes overlapping child deletions and verifies both invalid transactions roll back.
+
+The existing current-generation connection guard and `commerce.can_read` authorize reads. Both tables enable and force RLS; reader policies require `session_user = current_user`. Only the commerce reader gets SELECT. PUBLIC function execution is revoked, and workers receive no table DML or order-writing RPC.
+
+This unit is storage only. It does not add worker lease fencing, page receipts, business cursors, completion events, SDK projection or deployment. Those belong to a future restricted ingestion RPC. TIMESTAMPTZ(3) stores UTC millisecond facts within years 0001–9999; it does not claim to reject PostgreSQL's rounding of original higher-precision timestamp text. Input timestamp normalization must occur at the future RPC boundary.
+
+The required tenant gate runs `canonical-order-storage.test.mjs` against a dedicated `shopmate_tenant_test_orders` database. The loopback test URL guard validates its name before creation and cleanup. Tests cover contracts, unknown values, anomaly flags, Unicode identity, ownership forgery, RLS, write denial, generation/revocation, snapshot replacement, bounds and concurrency; Prisma migration diff checks that deployed relations match the model.
