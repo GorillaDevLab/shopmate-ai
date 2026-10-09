@@ -30,6 +30,10 @@ const portDatabases = {
     name: "shopmate_tenant_test_latest_ports",
     sql: 'CREATE DATABASE "shopmate_tenant_test_latest_ports"',
   },
+  readport: {
+    name: "shopmate_tenant_test_read_ports",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_read_ports"',
+  },
 };
 
 export async function leasePortDatabase(source, suite = "lease") {
