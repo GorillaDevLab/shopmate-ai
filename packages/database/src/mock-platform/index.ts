@@ -50,6 +50,7 @@ export type * from "./latest-types.js";
 export type * from "./hydration-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 export { packSourceChunk, type SourceChunkPlan } from "./chunk-packer.js";
+export { eventTuple, compareEventTuples } from "./record-codec.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");

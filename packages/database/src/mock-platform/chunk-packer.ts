@@ -20,6 +20,7 @@ export interface SourceChunkPlan {
   readonly targetTime: string;
 }
 interface PackingState {
+  readonly eventLimit: number;
   readonly events: SnapshotEvent[];
   readonly baseBytes: number;
   eventBytes: number;
@@ -100,7 +101,10 @@ function unaccepted(plan: SourceChunkPlan, tuple: LastEvent): boolean {
 }
 function addEvent(state: PackingState, encoded: string): boolean {
   const bytes = Buffer.byteLength(encoded, "utf8") + (state.events.length ? 1 : 0);
-  if (state.events.length === 100 || state.baseBytes + state.eventBytes + bytes > 2 * 1024 * 1024)
+  if (
+    state.events.length === state.eventLimit ||
+    state.baseBytes + state.eventBytes + bytes > 2 * 1024 * 1024
+  )
     return false;
   // Validation already forbids accessors, serializers and non-JSON values. Own the
   // snapshot so later generator mutation cannot change a prepared append receipt.
@@ -108,13 +112,14 @@ function addEvent(state: PackingState, encoded: string): boolean {
   state.eventBytes += bytes;
   return true;
 }
-function packingState(plan: SourceChunkPlan): PackingState {
+function packingState(plan: SourceChunkPlan, eventLimit: number): PackingState {
   const base = {
     expectedCheckpointHash: plan.expectedCheckpointHash,
     next: { processedThrough: plan.windowEnd, sealed: false },
     events: [],
   };
   return {
+    eventLimit,
     events: [],
     baseBytes: Buffer.byteLength(JSON.stringify(base)),
     eventBytes: 0,
@@ -129,9 +134,11 @@ function packingState(plan: SourceChunkPlan): PackingState {
 export function packSourceChunk(
   plan: SourceChunkPlan,
   events: Iterable<SnapshotEvent>,
+  eventLimit = 100,
 ): ChunkInput {
   validatePlan(plan);
-  const state = packingState(plan);
+  requireInput(Number.isSafeInteger(eventLimit) && eventLimit >= 1 && eventLimit <= 100);
+  const state = packingState(plan, eventLimit);
   let exhausted = true;
   for (const event of events) {
     const { tuple, encoded } = inspectEvent(plan, state, event);
