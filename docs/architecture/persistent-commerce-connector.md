@@ -1,9 +1,9 @@
 # Persistent CommerceConnector boundary
 
 `PersistentCommerceConnector` implements the common thirteen-method contract using an injected,
-server-owned `PersistentReadPort`. It does not generate or cache synthetic history. The existing
-factory is not switched by this unit; composition with the database latest reader is a subsequent
-change. Public callers must continue using an authoritative factory, never constructing this adapter.
+server-owned `PersistentReadPort`. It does not generate or cache synthetic history. Runtime
+`MockConnectorFactory` now requires the persistent binder and constructs this adapter. Public
+callers use the authoritative factory; offline `MockCommerceConnector` remains an explicit fixture.
 
 The composition must bind the reader to the complete organization, workspace, store, connection,
 external store, session and generation namespace. It must verify persisted publication certificates,
@@ -23,5 +23,24 @@ and a point absence under that publication returns `NOT_FOUND`. Deleted rows, pa
 unknown costs remain explicit. Malformed source responses return `INVALID_RESPONSE`. Mock writes
 remain rejected with their original execution ID, and verification remains unsupported.
 
-No migration, production deployment, public factory switch, normalized fact ingestion or sync
-completion is included in this adapter unit.
+`DemoCommerceModule` owns one lazy `DatabasePersistentReadPorts` provider. This unique composition
+module imports the named read-only factory and types from `@shopmate/database/mock-platform-read`.
+Business and web modules cannot import source SQL, pools, worker ports or cursor codecs. The
+provider closes its pool on module destruction and translates source errors to fixed connector
+failure codes. Each open receives its own `PersistentMockClock`; binding actor and full scope come
+from the freshly validated access record, never a request namespace.
+
+Configure `MOCK_PLATFORM_READ_DATABASE_URL` with the approved reader login and
+`MOCK_SOURCE_CURSOR_KEY` through server environment variables. Missing configuration fails closed;
+there is no offline runtime fallback. Discovery and latest SQL share one server-capped absolute
+deadline and the same abort signal. Access lookup retains its existing fifteen-second transaction,
+ten-second statement and five-second lock limits; the resolver has no active SQL cancellation.
+
+The mandatory authenticated AppModule/PostgreSQL suite publishes fixtures through restricted worker
+initialize/claim/append/publish ports. It exercises certificate absence, known DTOs, restart and later
+publication, scope/filter tamper, generation/session replacement, access revocation during SQL and
+source backend cancellation with pool reuse. Disposable operator teardown restores trigger
+protection before normal calls; fixtures never manufacture certificate or source version rows.
+
+This composition adds no migration or deployment. Incremental generation, scenarios, failures,
+other stream sync and final P2 acceptance remain separate work.
