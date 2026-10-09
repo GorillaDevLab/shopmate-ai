@@ -15,6 +15,13 @@ import { executeMockRead, MockConnectorError } from "./mock-call.js";
 import { PersistentCommerceConnector } from "./persistent-commerce-connector.js";
 import type { PersistentReadBinder } from "./persistent-read-port.js";
 import { MockConfigSchema } from "./mock-config.js";
+import { ReadFaultInjectingConnector } from "./read-fault-connector.js";
+import type { PersistentScope } from "./persistent-read-port.js";
+export type MockFailureRuleLoader = (
+  actor: { readonly userId: string; readonly merchantId: string },
+  scope: PersistentScope,
+  options: ReadOptions,
+) => Promise<unknown>;
 
 const IdentitySchema = z
   .strictObject({
@@ -55,6 +62,7 @@ export class MockConnectorFactory {
     private readonly resolver: MockConnectorAccessResolver,
     private readonly clock: BusinessClock,
     private readonly binder: PersistentReadBinder,
+    private readonly loadFailureRules?: MockFailureRuleLoader,
   ) {
     const parsed = EnvironmentSchema.safeParse(environment);
     this.enabled = parsed.success && parsed.data.appEnv === "demo" && parsed.data.enableDemoMode;
@@ -72,21 +80,32 @@ export class MockConnectorFactory {
       if (!actor.success || !selected.success) throw new MockConnectorError("INVALID_INPUT");
       const record = await this.resolve(actor.data, selected.data, call);
       this.requirePermission(record, "tenant:read");
-      const fingerprint = connectionFingerprint(record);
-      const scope = {
-        ...record.config.binding,
-        sessionId: record.sessionId,
-        generation: record.generation,
-      };
-      const sourceActor = { userId: record.context.userId, merchantId: record.context.merchantId };
-      const connector = new PersistentCommerceConnector(
-        scope,
-        this.clock,
-        (permission, next) => this.verify(actor.data, selected.data, fingerprint, permission, next),
-        this.binder.bind(sourceActor, scope),
-      );
-      return { ok: true, data: connector };
+      return { ok: true, data: this.connector(record, actor.data, selected.data) };
     });
+  }
+
+  private connector(record: AccessRecord, actor: AuthContext, storeId: string): CommerceConnector {
+    const fingerprint = connectionFingerprint(record);
+    const scope = {
+      ...record.config.binding,
+      sessionId: record.sessionId,
+      generation: record.generation,
+    };
+    const sourceActor = { userId: record.context.userId, merchantId: record.context.merchantId };
+    const authorize = (permission: TenantPermission, next: ReadOptions) =>
+      this.verify(actor, storeId, fingerprint, permission, next);
+    const connector = new PersistentCommerceConnector(
+      scope,
+      this.clock,
+      authorize,
+      this.binder.bind(sourceActor, scope),
+    );
+    const loader = this.loadFailureRules;
+    return loader
+      ? new ReadFaultInjectingConnector(connector, this.clock, authorize, (next) =>
+          loader(sourceActor, scope, next),
+        )
+      : connector;
   }
 
   private async verify(
