@@ -1,8 +1,9 @@
+import { scenarioProducts, scenarioCatalog } from "./mock-scenario-products.js";
 import type { SourceGroupSnapshot, SourceGroupEntityKey } from "./mock-source-group-types.js";
 import { ConnectorStoreSchema, ConnectorTimestampSchema } from "@shopmate/contracts";
 import { z } from "zod";
 import { MockConfigSchema, openingTime, DAY_MS, type MockConfig } from "./mock-config.js";
-import { generateCatalog, sourceAt } from "./mock-catalog.js";
+import { sourceAt } from "./mock-catalog.js";
 import { createCausalReducer, type CausalReducer } from "./mock-causal-reducer.js";
 import { owned, type CausalHydration } from "./mock-causal-state.js";
 import {
@@ -147,7 +148,7 @@ function opening(config: MockConfig, at: string): SourceGroupSnapshot[] {
   const events: SourceGroupSnapshot[] = [
     { kind: "STORE", occurredAt: at, ordinal: "0", after: store },
   ];
-  for (const entry of generateCatalog(config))
+  for (const entry of scenarioCatalog(config, Date.parse(at)))
     events.push({
       kind: "PRODUCT",
       occurredAt: at,
@@ -163,7 +164,7 @@ function timestampGroup(
   at: string,
   timeline: readonly TimelineEvent[],
 ): SourceGroup {
-  const effects = opening(config, at);
+  const effects = [...opening(config, at), ...scenarioProducts(config, at)];
   for (const event of timeline) {
     const mutations = causal.apply(event);
     marketing.apply(event, mutations);

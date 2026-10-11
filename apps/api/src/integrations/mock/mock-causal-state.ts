@@ -1,3 +1,4 @@
+import { plannedSku } from "./mock-scenario-candidates.js";
 import {
   ConnectorInventorySchema,
   ConnectorOrderSchema,
@@ -92,7 +93,14 @@ export function validateEvent(
       event.at > candidate.at + 5 * DAY_MS
     )
       throw new Error("Invalid candidate scope or settlement time");
-    if (JSON.stringify(candidate.sku) !== JSON.stringify(skus.get(candidate.sku.externalSkuId)))
+    if (
+      JSON.stringify(candidate.sku) !==
+      JSON.stringify(
+        skus.has(candidate.sku.externalSkuId)
+          ? plannedSku(config, skus.get(candidate.sku.externalSkuId)!, candidate.at)
+          : undefined,
+      )
+    )
       throw new Error("Candidate differs from frozen catalog");
     validateLifecycle(event);
   }
@@ -146,7 +154,7 @@ function validateOrders(
     canonical(row.source.updatedAt);
     canonical(row.orderedAt);
     if (row.paidAt !== null) canonical(row.paidAt);
-    validateHydratedOrder(row, skus);
+    validateHydratedOrder(row, skus, config);
     if (dto.lastEvent && Date.parse(row.source.updatedAt!) > dto.lastEvent.at)
       throw new Error("Order ahead of resume position");
   }
@@ -215,9 +223,14 @@ export function validatePrior(
   if (event.kind === "RETURN") validateReturn(order, event);
 }
 
-function validateHydratedOrder(row: ConnectorOrder, skus: ReadonlyMap<string, ConnectorSku>): void {
+function validateHydratedOrder(
+  row: ConnectorOrder,
+  skus: ReadonlyMap<string, ConnectorSku>,
+  config: MockConfig,
+): void {
   const item = row.items[0]!;
-  const sku = skus.get(item.externalSkuId);
+  const baselineSku = skus.get(item.externalSkuId);
+  const sku = baselineSku && plannedSku(config, baselineSku, Date.parse(row.orderedAt));
   const paid = ["PAID", "FULFILLED", "COMPLETED"].includes(row.status);
   if (
     row.items.length !== 1 ||
