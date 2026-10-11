@@ -1,3 +1,4 @@
+import { types } from "node:util";
 import {
   ReadOptionsSchema,
   type ConnectorFailureCode,
@@ -16,10 +17,55 @@ export function mockFailure(code: ConnectorFailureCode): ConnectorResult<never> 
   return Object.freeze({ ok: false, error: Object.freeze({ code, retryAfterMs: null }) });
 }
 
+function optionData(input: unknown): Record<string, unknown> | null {
+  if (
+    !input ||
+    typeof input !== "object" ||
+    types.isProxy(input) ||
+    Object.getPrototypeOf(input) !== Object.prototype
+  )
+    return null;
+  const data: Record<string, unknown> = {};
+  for (const key of Reflect.ownKeys(input)) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key);
+    if (
+      typeof key !== "string" ||
+      !["signal", "requestId", "deadlineAt"].includes(key) ||
+      !descriptor ||
+      !("value" in descriptor) ||
+      !descriptor.enumerable
+    )
+      return null;
+    data[key] = descriptor.value;
+  }
+  return data;
+}
+function validSignal(signal: unknown): signal is AbortSignal {
+  if (
+    !signal ||
+    typeof signal !== "object" ||
+    types.isProxy(signal) ||
+    Object.getPrototypeOf(signal) !== AbortSignal.prototype ||
+    !(signal instanceof AbortSignal) ||
+    Object.getOwnPropertyNames(signal).length > 0
+  )
+    return false;
+  for (const key of Object.getOwnPropertySymbols(signal)) {
+    const descriptor = Object.getOwnPropertyDescriptor(signal, key);
+    if (!descriptor || !("value" in descriptor)) return false;
+  }
+  try {
+    Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")!.get!.call(signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
 function parseOptions(input: unknown): ConnectorResult<ReadOptions> {
-  if (input === null || typeof input !== "object") return mockFailure("INVALID_INPUT");
-  const { signal, ...json } = input as Record<string, unknown>;
-  if (signal !== undefined && !(signal instanceof AbortSignal)) return mockFailure("INVALID_INPUT");
+  const data = optionData(input);
+  if (!data) return mockFailure("INVALID_INPUT");
+  const { signal, ...json } = data;
+  if (signal !== undefined && !validSignal(signal)) return mockFailure("INVALID_INPUT");
   const parsed = ReadOptionsSchema.safeParse(json);
   return parsed.success
     ? { ok: true, data: { ...parsed.data, signal } }

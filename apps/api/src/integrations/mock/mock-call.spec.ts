@@ -46,7 +46,7 @@ describe("mock call gate", () => {
 
   it("propagates caller cancellation into asynchronous work and removes its listener", async () => {
     const controller = new AbortController();
-    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    const remove = vi.spyOn(AbortSignal.prototype, "removeEventListener");
     let cancelled = false;
     const result = executeMockRead({ ...options(), signal: controller.signal }, async (call) => {
       call.signal!.addEventListener("abort", () => {
@@ -58,6 +58,7 @@ describe("mock call gate", () => {
     expect(await result).toMatchObject({ ok: false, error: { code: "ABORTED" } });
     expect(cancelled).toBe(true);
     expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+    remove.mockRestore();
   });
 
   it("rejects an already cancelled signal without work", async () => {
@@ -118,4 +119,93 @@ describe("mock call gate", () => {
       }),
     ).toEqual({ ok: false, error: { code: "TEMPORARY", retryAfterMs: null } });
   });
+});
+
+describe("hostile call controls", () => {
+  it.each([
+    "accessor",
+    "proxy",
+    "symbol",
+    "nonenumerable",
+    "nonplain",
+    "proxied-signal",
+    "unbranded-signal",
+    "overridden-signal",
+  ] as const)("rejects %s without invoking caller code or work", async (kind) => {
+    const invoked = vi.fn(),
+      work = vi.fn(async () => ok);
+    let input: object = options();
+    if (kind === "accessor")
+      Object.defineProperty(input, "requestId", {
+        get() {
+          invoked();
+          return "request-a";
+        },
+        enumerable: true,
+      });
+    if (kind === "proxy")
+      input = new Proxy(input, {
+        ownKeys(target) {
+          invoked();
+          return Reflect.ownKeys(target);
+        },
+        get(target, key) {
+          invoked();
+          return Reflect.get(target, key);
+        },
+      });
+    if (kind === "symbol")
+      Object.defineProperty(input, Symbol("extra"), { value: true, enumerable: true });
+    if (kind === "nonenumerable") Object.defineProperty(input, "extra", { value: true });
+    if (kind === "nonplain") Object.setPrototypeOf(input, { inherited: true });
+    if (kind === "proxied-signal")
+      input = {
+        ...options(),
+        signal: new Proxy(new AbortController().signal, {
+          getPrototypeOf(target) {
+            invoked();
+            return Reflect.getPrototypeOf(target);
+          },
+        }),
+      };
+    if (kind === "unbranded-signal")
+      input = { ...options(), signal: Object.create(AbortSignal.prototype) };
+    if (kind === "overridden-signal") {
+      const signal = new AbortController().signal;
+      Object.defineProperty(signal, "aborted", {
+        get() {
+          invoked();
+          return false;
+        },
+      });
+      input = { ...options(), signal };
+    }
+    expect(await executeMockRead(input, work)).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+    expect(invoked).not.toHaveBeenCalled();
+    expect(work).not.toHaveBeenCalled();
+  });
+});
+
+it("rejects signal symbol accessors before native brand checks or work", async () => {
+  const invoked = vi.fn(),
+    work = vi.fn(async () => ok),
+    signal = new AbortController().signal;
+  const slot =
+    Object.getOwnPropertySymbols(signal).find((key) => String(key) === "Symbol(kAborted)") ??
+    Symbol("hostile");
+  Object.defineProperty(signal, slot, {
+    get() {
+      invoked();
+      return false;
+    },
+  });
+  expect(await executeMockRead({ ...options(), signal }, work)).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+  expect(invoked).not.toHaveBeenCalled();
+  expect(work).not.toHaveBeenCalled();
 });
