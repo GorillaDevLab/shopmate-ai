@@ -2,7 +2,7 @@ import type pg from "pg";
 import { SourceStorageError } from "./errors.js";
 import { currentAccess, workerIdentity } from "./transaction.js";
 import { exact, safeId, validateScope } from "./validation.js";
-import type { SourceScope, SourceWorkerGrant } from "./types.js";
+import type { SourceBuildWork, SourceScope, SourceWorkerGrant } from "./types.js";
 
 const grantKeys = [
   "id",
@@ -64,27 +64,53 @@ export function matchesGrant(grant: SourceWorkerGrant, scope: SourceScope): bool
     "externalStoreId",
   ].every((key) => grant[key as keyof SourceWorkerGrant] === scope[key as keyof SourceScope]);
 }
-async function grantAvailable(client: pg.PoolClient, grant: SourceWorkerGrant): Promise<boolean> {
-  if (!(await workerIdentity(client, grant))) return false;
+async function grantScope(
+  client: pg.PoolClient,
+  grant: SourceWorkerGrant,
+): Promise<SourceScope | null> {
+  if (!(await workerIdentity(client, grant))) return null;
   const result = await client.query<{ generation: number }>(
     'SELECT generation FROM public."PlatformConnection" WHERE id=$1',
     [grant.connectionId],
   );
   const generation = result.rows[0]?.generation;
-  if (result.rowCount !== 1 || generation === undefined) return false;
+  if (result.rowCount !== 1 || generation === undefined) return null;
   const { organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId } = grant;
-  return currentAccess(
-    client,
-    { organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation },
-    "worker",
-  );
+  const scope = {
+    organizationId,
+    workspaceId,
+    storeId,
+    sessionId,
+    connectionId,
+    externalStoreId,
+    generation,
+  };
+  try {
+    validateScope(scope);
+  } catch {
+    throw new SourceStorageError("SOURCE_INTEGRITY");
+  }
+  return (await currentAccess(client, scope, "worker")) ? scope : null;
 }
 export async function listGrants(client: pg.PoolClient): Promise<readonly SourceWorkerGrant[]> {
   const result = await client.query('SELECT * FROM demo."MockWorkerGrant" ORDER BY id');
   const available: SourceWorkerGrant[] = [];
   for (const row of result.rows) {
     const grant = validateGrant(row);
-    if (await grantAvailable(client, grant)) available.push(grant);
+    if (await grantScope(client, grant)) available.push(grant);
   }
   return available;
+}
+export async function listBuildScopes(client: pg.PoolClient): Promise<readonly SourceBuildWork[]> {
+  const result = await client.query('SELECT * FROM demo."MockWorkerGrant" ORDER BY id');
+  const available: SourceBuildWork[] = [];
+  for (const row of result.rows) {
+    const grant = validateGrant(row);
+    const scope = await grantScope(client, grant);
+    if (scope)
+      available.push(
+        Object.freeze({ actor: Object.freeze({ grantId: grant.id }), scope: Object.freeze(scope) }),
+      );
+  }
+  return Object.freeze(available);
 }

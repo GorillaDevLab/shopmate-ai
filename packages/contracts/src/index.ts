@@ -374,3 +374,13 @@ export type {
 } from "./ai/assistant-memory.schema.js";
 export { MockScenarioIdSchema, MockScenarioPlanSchema } from "./commerce/mock-scenario.schema.js";
 export type { MockScenarioPlan, MockScenarioMutation } from "./commerce/mock-scenario.schema.js";
+export {
+  MockReadMethodSchema,
+  MockReadFailureEffectSchema,
+  MockReadFailureRuleSchema,
+  MockReadFailureRulesSchema,
+  DemoFailureRuleTimestampSchema,
+  DemoFailureRuleCreateSchema,
+  DemoFailureRuleRemoveSchema,
+} from "./demo/demo-failure-rules.schema.js";
+export type { MockReadFailureRule } from "./demo/demo-failure-rules.schema.js";

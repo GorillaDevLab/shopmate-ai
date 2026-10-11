@@ -197,6 +197,9 @@ importers:
       '@prisma/client':
         specifier: 7.10.0
         version: 7.10.0(prisma@7.10.0(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(magicast@0.5.4)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@6.0.2))(typescript@6.0.2)
+      '@shopmate/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       dotenv:
         specifier: ^17.0.0
         version: 17.4.2

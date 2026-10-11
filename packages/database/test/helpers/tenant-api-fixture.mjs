@@ -18,6 +18,16 @@ export async function prepareTenantApiRuntime(url) {
     await client.query(
       "GRANT EXECUTE ON FUNCTION demo.has_store_access(TEXT,TEXT,TEXT,BOOLEAN),demo.lock_source_control(TEXT) TO shopmate_tenant_api",
     );
+    await client.query(
+      'GRANT SELECT,INSERT,UPDATE ON demo."DemoFailureRule" TO shopmate_tenant_api',
+    );
+    await client.query('GRANT SELECT,INSERT ON demo."DemoFailureRuleAudit" TO shopmate_tenant_api');
+    await client.query(
+      'GRANT USAGE ON SEQUENCE demo."DemoFailureRuleAudit_id_seq" TO shopmate_tenant_api',
+    );
+    await client.query(
+      "GRANT EXECUTE ON FUNCTION demo.has_failure_rule_access(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,BOOLEAN) TO shopmate_tenant_api",
+    );
     const runtime = new URL(url);
     runtime.username = "shopmate_tenant_api";
     runtime.password = "";
