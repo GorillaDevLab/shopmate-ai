@@ -13,7 +13,7 @@ connection/external store/provider/generation binding. Application business
 modules cannot import this entry point; the database input suite checks that
 boundary.
 
-`list_work` returns at most ten recent jobs for the current grant. `create_window`
+`list_work` returns the latest job for each stream, at most five, for the current grant. `create_window`
 uses a server-generated Job ID and serializes the complete scope/stream. It
 returns an existing identical open window or creates the next fixed window from
 the completed requested boundary. The existing 31-day maximum remains enforced.

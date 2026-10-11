@@ -38,6 +38,9 @@ test("terminal canonical pages complete all streams with unknown freshness and a
     const next = (await worker.query("SELECT sync_host.create_window($1,$2::timestamp) AS job", [stream, "2026-01-03T00:00:00.000Z"])).rows[0].job;
     assert.match(next.since, /^2026-01-02/u);
   }
+  const listed = (await worker.query("SELECT sync_host.list_work() AS work")).rows[0].work.jobs;
+  assert.equal(listed.length, 5);
+  assert.deepEqual(listed.map((job) => job.stream).sort(), ["INVENTORY", "MARKETING", "ORDERS", "PRODUCTS", "REFUNDS"]);
 });
 async function nextJob(stream) {
   const job = (await worker.query('SELECT * FROM sync_host."Job" WHERE stream=$1 AND status=\'READY\'', [stream])).rows[0];

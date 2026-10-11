@@ -33,7 +33,7 @@ DECLARE g sync_host."WorkerGrant"; jobs JSONB;
 BEGIN
  SELECT * INTO g FROM sync_host."WorkerGrant" WHERE id=current_setting('sync.grant_id',true);
  IF g.id IS NULL THEN RAISE EXCEPTION 'SYNC_AUTHORITY_DENIED' USING ERRCODE='42501'; END IF;
- SELECT coalesce(jsonb_agg(to_jsonb(j) ORDER BY j.stream,j.since),'[]'::jsonb) INTO jobs FROM (SELECT * FROM sync_host."Job" WHERE "grantId"=g.id ORDER BY since DESC,stream LIMIT 10) j;
+ SELECT coalesce(jsonb_agg(to_jsonb(j) ORDER BY j.stream,j.since),'[]'::jsonb) INTO jobs FROM (SELECT DISTINCT ON (stream) * FROM sync_host."Job" WHERE "grantId"=g.id ORDER BY stream,since DESC LIMIT 5) j;
  RETURN jsonb_build_object('grant',to_jsonb(g),'jobs',jobs);
 END $$;
 
