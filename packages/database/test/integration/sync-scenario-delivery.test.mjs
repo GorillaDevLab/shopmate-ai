@@ -349,3 +349,31 @@ test("current generation reset and disconnect revoke saved-page replay and disco
   await assert.rejects(host.replayDelivery(pending), /SYNC_WORKER_OPERATION_FAILED/);
   assert.deepEqual(await snapshot(pending.job.id), before);
 });
+
+test("LOAD rejects an interruption whose immutable endpoint exceeds the supported clock range", async () => {
+  const other = scopeFor("a2", 1),
+    config = configFor(other, "mature", 3);
+  config.historyStart = "9999-12-23T16:00:00.000Z";
+  config.scenarioPlan = {
+    version: "mock-scenario-v1",
+    scenarioId: "SCENARIO_009",
+    externalStoreId: other.externalStoreId,
+    startDay: 0,
+    endDay: 1,
+    mutations: [],
+    campaignSpendBps: 10000,
+    campaignConversionBps: 10000,
+    delivery: { kind: "INTERRUPT", durationMs: 86400000 },
+  };
+  const result = await repo.loadDemoScenario(readerActor, other.storeId, {
+    runId: "overflow-interruption",
+    confirmSessionId: other.sessionId,
+    expectedRevision: 0,
+    expectedGeneration: 0,
+    config,
+    configHash: hashConfig(config),
+    generatorVersion: "mock-source-v2",
+    clockNow: new Date("9999-12-31T16:00:00.000Z"),
+  });
+  assert.equal(result.status, "CONFLICT");
+});

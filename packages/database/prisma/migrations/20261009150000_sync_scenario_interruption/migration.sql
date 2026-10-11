@@ -1,4 +1,12 @@
 BEGIN;
+-- A successfully loaded interruption must have a representable half-open endpoint.
+ALTER TABLE demo."DemoScenarioRun" ADD CONSTRAINT "DemoScenarioRun_interrupt_endpoint" CHECK (
+ (config->'scenarioPlan'->'delivery'->>'kind' IS DISTINCT FROM 'INTERRUPT' OR
+  (jsonb_typeof(config->'scenarioPlan'->'delivery'->'durationMs')='number'
+   AND (config->'scenarioPlan'->'delivery'->>'durationMs') ~ '^[0-9]{1,8}$'
+   AND (config->'scenarioPlan'->'delivery'->>'durationMs')::bigint BETWEEN 1 AND 86400000
+   AND "businessClock"+(config->'scenarioPlan'->'delivery'->>'durationMs')::bigint*interval '1 millisecond'
+    <=timestamp '9999-12-31 23:59:59.999')) IS TRUE);
 CREATE FUNCTION sync_host.scenario_interrupt_rule(descriptor JSONB) RETURNS JSONB
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE run demo."DemoScenarioRun"; duration_ms BIGINT; expires TIMESTAMP;
