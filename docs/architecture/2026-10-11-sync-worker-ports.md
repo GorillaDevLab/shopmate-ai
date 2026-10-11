@@ -56,7 +56,11 @@ still applies. SDK methods own their autocommit statements and expose no raw
 Client or arbitrary transaction callback.
 
 The SDK page boundary is closed, UTF-8 bounded and sanitizes unsupported JSONB
-record text into fixed invalid candidates for canonical quarantine. It exposes
+record text into fixed invalid candidates for canonical quarantine. An invalid
+candidate retains only its original safe `externalStoreId`, without business
+content. The RPC still checks that namespace before record quarantine: foreign,
+missing, overlong or unsafe scope remains a whole-page rejection, and the SDK
+never substitutes the Job's scope. It exposes
 generic fetch callbacks; it contains no provider-specific business ingestion.
 It is a bounded worker port, not a scheduler, source publication host, P3 event
 engine, or proof of full phase acceptance. Fetches longer than the lease fail

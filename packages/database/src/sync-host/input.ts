@@ -31,6 +31,13 @@ export function workerCursor(value: unknown): string | null {
     throw new Error("SYNC_INPUT_INVALID");
   return value;
 }
+function invalidRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const externalStoreId = (value as Record<string, unknown>).externalStoreId;
+  if (typeof externalStoreId !== "string" || !externalStoreId || externalStoreId.length > 256 || /[\p{Cc}\p{Cs}]/u.test(externalStoreId)) return {};
+  // Preserve the original namespace for the RPC's authority check; never adopt the Job's namespace.
+  return { externalStoreId };
+}
 function safeRecord(value: unknown): unknown {
   try {
     const encoded = JSON.stringify(value, (key: string, item: unknown) => {
@@ -40,8 +47,8 @@ function safeRecord(value: unknown): unknown {
       if (typeof item === "bigint" || typeof item === "function" || typeof item === "symbol" || item === undefined) throw new Error("INVALID_RECORD");
       return item;
     });
-    return encoded === undefined ? {} : JSON.parse(encoded) as unknown;
-  } catch { return {}; }
+    return encoded === undefined ? invalidRecord(value) : JSON.parse(encoded) as unknown;
+  } catch { return invalidRecord(value); }
 }
 export function encodeWorkerPage(stream: SyncStream, value: unknown): string {
   try {
