@@ -6,6 +6,14 @@ import { loginUrl, migrateSource, sourceEnv, sourceFixtures } from "./mock-platf
 import { maintenanceClient } from "./mock-source-control-fixture.mjs";
 
 const portDatabases = {
+  history: {
+    name: "shopmate_tenant_test_history",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_history"',
+  },
+  slices: {
+    name: "shopmate_tenant_test_slices",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_slices"',
+  },
   bulk: {
     name: "shopmate_tenant_test_bulkappend",
     sql: 'CREATE DATABASE "shopmate_tenant_test_bulkappend"',

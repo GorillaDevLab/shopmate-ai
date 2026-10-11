@@ -11,16 +11,24 @@ import { DemoCommerceConnectorHost } from "./demo-commerce-connector.host.js";
 import { DatabasePersistentReadPorts } from "./database-persistent-read-ports.js";
 import { DemoFailureRulesController } from "./demo-failure-rules.controller.js";
 import { DemoFailureRulesService } from "./demo-failure-rules.service.js";
+import { DemoScenariosController } from "./demo-scenarios.controller.js";
+import { DemoScenariosService } from "./demo-scenarios.service.js";
+import {
+  DEMO_SCENARIO_REPOSITORY,
+  DatabaseDemoScenarioRepository,
+} from "./demo-scenarios.repository.js";
 import {
   DEMO_FAILURE_RULE_REPOSITORY,
   DatabaseDemoFailureRuleRepository,
 } from "./demo-failure-rules.repository.js";
 @Module({
-  controllers: [DemoCommerceController, DemoFailureRulesController],
+  controllers: [DemoCommerceController, DemoFailureRulesController, DemoScenariosController],
   providers: [
     DemoCommerceGuard,
     DemoCommerceService,
     DemoFailureRulesService,
+    DemoScenariosService,
+    { provide: DEMO_SCENARIO_REPOSITORY, useClass: DatabaseDemoScenarioRepository },
     { provide: DEMO_FAILURE_RULE_REPOSITORY, useClass: DatabaseDemoFailureRuleRepository },
     DemoCommerceConnectorHost,
     DatabasePersistentReadPorts,

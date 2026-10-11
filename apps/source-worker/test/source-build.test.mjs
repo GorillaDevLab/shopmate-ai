@@ -119,7 +119,16 @@ test("source host recovers an acknowledged opening prefix without duplicate fact
         'UPDATE demo."DemoCommerceSession" SET "clockNow"=$1,"clockRevision"="clockRevision"+1,revision=revision+1 WHERE id=$2',
         [until, scope.sessionId],
       );
-      assert.equal((await buildSource(context.worker, work, generationTools)).status, "PUBLISHED");
+      for (let slice = 0; slice < 4; slice++) {
+        const result = await buildSource(context.worker, work, generationTools);
+        assert.equal(result.status, "PUBLISHED");
+        assert.equal(
+          result.publication.targetTime,
+          new Date(
+            Date.parse(config.historyStart) + ((days - 1) * 4 + slice + 1) * 21_600_000,
+          ).toISOString(),
+        );
+      }
       await assertLatest(context, scope, config, until);
     }
     const count = await publishedCount(context, scope);

@@ -51,7 +51,7 @@ function fixture(sealed = false) {
       status: "CREATED",
       generation: { sourceConfig: {} },
     })),
-    claim: vi.fn(async () => ({ status: "CLAIMED", lease })),
+    claimSlice: vi.fn(async () => ({ status: "CLAIMED", lease })),
     renew: vi.fn(async () => ({ status: "RENEWED", lease })),
     hydrateBuild: vi.fn(async () => ({
       status: "HYDRATED",
@@ -184,7 +184,7 @@ describe("source build orchestration", () => {
     await expect(buildSource(f.port, work, f.tools, stop.signal)).rejects.toBeInstanceOf(
       BuildInterrupted,
     );
-    expect(f.worker.claim).not.toHaveBeenCalled();
+    expect(f.worker.claimSlice).not.toHaveBeenCalled();
   });
   it("seals an exhausted interval even when its checkpoint already reached target", async () => {
     const f = fixture();
