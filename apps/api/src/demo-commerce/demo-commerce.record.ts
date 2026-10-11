@@ -10,7 +10,7 @@ import {
 import type { DemoActor } from "@shopmate/database";
 import { z } from "zod";
 import {
-  GENERATOR_VERSION,
+  generatorVersion,
   MockConfigSchema,
   type MockConfig,
 } from "../integrations/mock/mock-config.js";
@@ -30,7 +30,7 @@ const RecordSchema = StoreAccessSchema.extend({
   externalStoreId: z.string().min(1).max(200),
   config: z.unknown(),
   configHash: z.string().regex(/^[a-f0-9]{64}$/u),
-  generatorVersion: z.literal(GENERATOR_VERSION),
+  generatorVersion: z.enum(["mock-source-v1", "mock-source-v2"]),
   clockNow: z.date(),
   clockRevision: count,
   revision: count,
@@ -82,7 +82,9 @@ export function validateDemoRecord(input: unknown, actor: DemoActor, storeId: st
 type ValidRecord = z.infer<typeof RecordSchema>;
 function validateConfig(record: ValidRecord, config: MockConfig): void {
   const { binding, ...settings } = config;
-  DemoSourceSettingsSchema.parse(settings);
+  DemoSourceSettingsSchema.parse(
+    Object.fromEntries(Object.entries(settings).filter(([key]) => key !== "scenarioPlan")),
+  );
   if (
     binding.organizationId !== record.organizationId ||
     binding.workspaceId !== record.workspaceId ||
@@ -90,6 +92,7 @@ function validateConfig(record: ValidRecord, config: MockConfig): void {
     binding.connectionId !== record.connectionId ||
     binding.externalStoreId !== record.externalStoreId ||
     configHash(config) !== record.configHash ||
+    record.generatorVersion !== generatorVersion(config) ||
     record.clockNow.getTime() < Date.parse(config.historyStart)
   )
     throw new Error("Invalid demo configuration");

@@ -177,7 +177,7 @@ export interface Publication {
   readonly eventCount: UInt;
   readonly versionCount: UInt;
   readonly processedThrough: Utc;
-  readonly generatorVersion: "mock-source-v1";
+  readonly generatorVersion: "mock-source-v1" | "mock-source-v2";
   readonly runtimeVersion: "mock-runtime-v2";
   readonly codec: "source-snapshot-v1";
   readonly publishedAt: Utc;

@@ -83,3 +83,10 @@ test("CI 工作流使用锁文件缓存并执行质量门禁", () => {
     assert.match(workflow, new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
 });
+test("scenario version PostgreSQL suite is mandatory in the tenant gate", () => {
+  assert.ok(
+    readFileSync("scripts/test-tenant-database.mjs", "utf8").includes(
+      "test/integration/mock-source-scenario-configuration.test.mjs",
+    ),
+  );
+});

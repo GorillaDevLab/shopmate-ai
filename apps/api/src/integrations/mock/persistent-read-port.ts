@@ -53,7 +53,7 @@ const PublicationSchema = z.strictObject({
   eventCount: uint,
   versionCount: uint,
   processedThrough: utc,
-  generatorVersion: z.literal("mock-source-v1"),
+  generatorVersion: z.enum(["mock-source-v1", "mock-source-v2"]),
   runtimeVersion: z.literal("mock-runtime-v2"),
   codec: z.literal("source-snapshot-v1"),
   publishedAt: utc,

@@ -391,6 +391,9 @@ model SyncJob {
   until             DateTime                  @db.Timestamp(3)
   cursor            Json?
   successfulThrough DateTime?                 @db.Timestamp(3)
+  observedAt        DateTime?                 @db.Timestamptz(3)
+  sourceWatermark   DateTime?                 @db.Timestamptz(3)
+  pageCount         Int                       @default(0)
   status            String                    @default("READY")
   fence             Int                       @default(0)
   leaseOwner        String?

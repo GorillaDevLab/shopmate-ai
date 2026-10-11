@@ -1,3 +1,4 @@
+import { validScenario, canonicalScenario } from "./scenario-configuration.js";
 import { createHash } from "node:crypto";
 import { SourceStorageError } from "./errors.js";
 import { bindingKeys, exact, integer, object } from "./validation.js";
@@ -46,17 +47,27 @@ function canonicalHash(config: Record<string, unknown>): string {
   const binding = config.binding as Record<string, unknown>;
   // Approved v1 hashes schema-ordered JSON; JSONB discards that order at rest.
   const canonical = Object.fromEntries(
-    configKeys.map((key) => [
-      key,
-      key === "binding"
-        ? Object.fromEntries(bindingKeys.map((field) => [field, binding[field]]))
-        : config[key],
-    ]),
+    (Object.hasOwn(config, "scenarioPlan") ? [...configKeys, "scenarioPlan"] : configKeys).map(
+      (key) => [
+        key,
+        key === "binding"
+          ? Object.fromEntries(bindingKeys.map((field) => [field, binding[field]]))
+          : key === "scenarioPlan"
+            ? canonicalScenario(config[key])
+            : config[key],
+      ],
+    ),
   );
   return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
-function validShape(config: unknown, scope: SourceScope): config is Record<string, unknown> {
-  if (!exact(config, configKeys) || !exact(config.binding, bindingKeys)) return false;
+function validShape(
+  config: unknown,
+  scope: SourceScope,
+  version: unknown,
+): config is Record<string, unknown> {
+  const keys = version === "mock-source-v2" ? [...configKeys, "scenarioPlan"] : configKeys;
+  if (!exact(config, keys) || !exact(config.binding, bindingKeys)) return false;
+  if (version === "mock-source-v2" && !validScenario(config)) return false;
   return (
     bindingKeys.every((key) => (config.binding as Record<string, unknown>)[key] === scope[key]) &&
     Object.entries(ranges).every(([key, [min, max]]) => integer(config[key], min, max)) &&
@@ -73,8 +84,8 @@ export function frozenConfiguration(
 ): FrozenConfiguration {
   if (
     !object(config) ||
-    !validShape(config, scope) ||
-    version !== "mock-source-v1" ||
+    !validShape(config, scope, version) ||
+    !["mock-source-v1", "mock-source-v2"].includes(version as string) ||
     typeof hash !== "string" ||
     !/^[a-f0-9]{64}$/u.test(hash) ||
     canonicalHash(config) !== hash
