@@ -10,4 +10,3 @@ ALTER TABLE mock_platform."BuildJob" DROP CONSTRAINT "BuildJob_generatorVersion_
 ALTER TABLE mock_platform."BuildJob" ADD CONSTRAINT "BuildJob_generatorVersion_check"
   CHECK ("generatorVersion" IN ('mock-source-v1','mock-source-v2'));
 COMMIT;
-
