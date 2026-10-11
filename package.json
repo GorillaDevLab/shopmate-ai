@@ -7,7 +7,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "test:tenant": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build && node scripts/test-tenant-database.mjs",
+    "test:tenant": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build && pnpm --filter @shopmate/api build && pnpm --filter @shopmate/source-worker build && node scripts/test-tenant-database.mjs",
     "predev": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build",
     "dev": "pnpm -r --parallel --if-present run dev",
     "build": "pnpm -r --if-present run build",
@@ -19,8 +19,8 @@
     "typecheck": "pnpm -r --if-present run typecheck && tsc --project tsconfig.json",
     "smoke": "node scripts/smoke-test.mjs",
     "secret:scan": "node scripts/secret-scan.mjs",
-    "format": "prettier --write eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts packages/contracts/package.json packages/contracts/tsconfig.json packages/contracts/tsconfig.build.json packages/contracts/src packages/database/package.json packages/database/tsconfig.build.json scripts tests playwright.config.ts playwright.live.config.ts tsconfig.json tests/e2e",
-    "format:check": "prettier --check eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts packages/contracts/package.json packages/contracts/tsconfig.json packages/contracts/tsconfig.build.json packages/contracts/src packages/database/package.json packages/database/tsconfig.build.json scripts tests playwright.config.ts playwright.live.config.ts tsconfig.json tests/e2e",
+    "format": "prettier --write eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts packages/contracts/package.json packages/contracts/tsconfig.json packages/contracts/tsconfig.build.json packages/contracts/src packages/database/package.json packages/database/tsconfig.build.json scripts tests playwright.config.ts playwright.live.config.ts tsconfig.json tests/e2e apps/source-worker/package.json apps/source-worker/tsconfig.json apps/source-worker/tsconfig.build.json apps/source-worker/vitest.config.ts apps/source-worker/src apps/source-worker/test",
+    "format:check": "prettier --check eslint.config.mjs .prettierrc.json tsconfig.base.json package.json apps/api/package.json apps/api/src apps/api/test apps/web/package.json apps/web/src apps/web/*.mjs apps/web/*.ts packages/contracts/package.json packages/contracts/tsconfig.json packages/contracts/tsconfig.build.json packages/contracts/src packages/database/package.json packages/database/tsconfig.build.json scripts tests playwright.config.ts playwright.live.config.ts tsconfig.json tests/e2e apps/source-worker/package.json apps/source-worker/tsconfig.json apps/source-worker/tsconfig.build.json apps/source-worker/vitest.config.ts apps/source-worker/src apps/source-worker/test",
     "test:e2e": "pnpm --filter @shopmate/database seed:orders && playwright test",
     "demo:init": "node scripts/demo-init.mjs",
     "demo:health": "node scripts/smoke-test.mjs",

@@ -96,6 +96,7 @@ export interface MockSourceWorker {
   listBuildScopes(): Promise<readonly SourceBuildWork[]>;
   initializeGeneration(actor: SourceWorkerActor, scope: SourceScope): Promise<SourceInitialization>;
   claim(actor: SourceWorkerActor, scope: SourceScope): Promise<ClaimResult>;
+  claimSlice(actor: SourceWorkerActor, scope: SourceScope): Promise<ClaimResult>;
   renew(actor: SourceWorkerActor, lease: LeaseRef): Promise<RenewResult>;
   fail(actor: SourceWorkerActor, lease: LeaseRef, code: SourceFailureCode): Promise<FailResult>;
   appendChunk(actor: SourceWorkerActor, lease: LeaseRef, input: ChunkInput): Promise<AppendResult>;

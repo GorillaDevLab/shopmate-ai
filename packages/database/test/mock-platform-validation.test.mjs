@@ -30,7 +30,7 @@ test("source worker exposes bounded lease operations", async () => {
     MOCK_PLATFORM_WORKER_DATABASE_URL: "postgresql://source@127.0.0.1:1/test",
   });
   try {
-    for (const method of ["claim", "renew", "fail", "appendChunk", "publish"])
+    for (const method of ["claim", "claimSlice", "renew", "fail", "appendChunk", "publish"])
       assert.equal(typeof worker[method], "function", method);
     for (const method of ["findPublication"])
       assert.equal(Object.hasOwn(worker, method), false, method);
@@ -149,6 +149,8 @@ test("lease inputs reject before an unreachable database is contacted", async ()
   try {
     await assert.rejects(worker.claim({}, scope), { code: "SOURCE_INPUT" });
     await assert.rejects(worker.claim(actor, null), { code: "SOURCE_INPUT" });
+    await assert.rejects(worker.claimSlice({}, scope), { code: "SOURCE_INPUT" });
+    await assert.rejects(worker.claimSlice(actor, null), { code: "SOURCE_INPUT" });
     for (const bad of [null, [], {}, { ...lease, extra: true }, { ...lease, scope: null }]) {
       await assert.rejects(worker.renew(actor, bad), { code: "SOURCE_INPUT" });
       await assert.rejects(worker.fail(actor, bad, "INTERRUPTED"), { code: "SOURCE_INPUT" });

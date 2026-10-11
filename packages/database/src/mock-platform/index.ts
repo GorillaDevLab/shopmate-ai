@@ -50,6 +50,7 @@ export type * from "./latest-types.js";
 export type * from "./hydration-types.js";
 export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 export { packSourceChunk, type SourceChunkPlan } from "./chunk-packer.js";
+export { eventTuple, compareEventTuples } from "./record-codec.js";
 
 export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
   const pool = sourcePool(env, "reader");
@@ -101,6 +102,7 @@ export function createMockSourceWorker(env: SourceEnvironment): MockSourceWorker
       return initializeControlled(pool, actor, scope);
     },
     claim: (actor, scope) => claimControlled(pool, actor, scope),
+    claimSlice: (actor, scope) => claimControlled(pool, actor, scope, true),
     renew: (actor, lease) => renewControlled(pool, actor, lease),
     fail: (actor, lease, code) => failControlled(pool, actor, lease, code),
     appendChunk: (actor, lease, input) => appendControlled(pool, actor, lease, input),
@@ -145,11 +147,12 @@ async function claimControlled(
   pool: SourcePool,
   actor: SourceWorkerActor,
   scope: SourceScope,
+  sliced = false,
 ): Promise<ClaimResult> {
   validateWorkerActor(actor);
   validateScope(scope);
   try {
-    return await claimJob(pool, actor, scope);
+    return await claimJob(pool, actor, scope, sliced);
   } catch (error) {
     if (error instanceof SourceDomainFailure && error.status === "DENIED")
       return { status: "DENIED" };

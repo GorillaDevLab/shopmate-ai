@@ -44,6 +44,27 @@ test("new revisions exclude the published base boundary even if the base was emp
 });
 const order = (ordinal = "0") => eventFor(context, "ORDER", ordinal, at);
 
+test("a smaller host budget preserves the unaccepted timestamp tail", () => {
+  const current = plan();
+  current.targetTime = at;
+  const events = Array.from({ length: 21 }, (_, index) => order(String(index)));
+  const first = packSourceChunk(current, events, 20);
+  assert.equal(first.events.length, 20);
+  assert.equal(first.next.sealed, false);
+  current.checkpoint = {
+    ...current.checkpoint,
+    chunkIndex: "1",
+    highEventSeq: "20",
+    processedThrough: at,
+    lastEvent: eventTuple(first.events[19]),
+  };
+  const final = packSourceChunk(current, events, 20);
+  assert.equal(final.events.length, 1);
+  assert.equal(final.next.sealed, true);
+  for (const invalid of [0, 101, 1.5, NaN])
+    assert.throws(() => packSourceChunk(plan(), events, invalid), { code: "SOURCE_INPUT" });
+});
+
 test("packs at most 100 events and resumes inside a timestamp using numeric ordinals", () => {
   const events = Array.from({ length: 125 }, (_, index) => order(String(index)));
   const first = packSourceChunk(plan(), events);

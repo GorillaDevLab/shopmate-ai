@@ -110,8 +110,14 @@ async function insertJob(client: pg.PoolClient, scope: SourceScope): Promise<Bui
   return leaseFrom(result.rows[0], scope);
 }
 
-async function claimAction(client: pg.PoolClient, scope: SourceScope): Promise<ClaimResult> {
+async function claimAction(
+  client: pg.PoolClient,
+  scope: SourceScope,
+  sliced: boolean,
+): Promise<ClaimResult> {
   await protocol(client, "CLAIM", null);
+  // The server supplies the fixed budget; takeover never changes an accepted target.
+  await client.query("SELECT set_config('mock.source_slice',$1,true)", [sliced ? "6h" : ""]);
   const open = await openJob(client, scope);
   await requireCurrentWorkerAccess(client, scope);
   if (open?.state === "BUILDING" && open.active) return { status: "BUSY" };
@@ -131,6 +137,7 @@ export function claimJob(
   pool: SourcePool,
   actor: SourceWorkerActor,
   scope: SourceScope,
+  sliced = false,
 ): Promise<ClaimResult> {
   return workerOperation<ClaimResult>(
     pool,
@@ -139,7 +146,7 @@ export function claimJob(
     ["DENIED"],
     (result) => result.status !== "CLAIMED",
     { status: "DENIED" },
-    (client) => claimAction(client, scope),
+    (client) => claimAction(client, scope, sliced),
   );
 }
 

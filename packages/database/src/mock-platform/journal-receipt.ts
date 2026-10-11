@@ -4,13 +4,24 @@ import type { ChunkInput, LeaseRef } from "./publication-types.js";
 import { journalScopeWhere, journalValues } from "./journal-state.js";
 
 // The extra candidate detects an oversized receipt without reading its full history.
+// Separate indexed ranges keep a correlated OR from evaluating RLS across the whole prefix.
+// UNION preserves both corruption witnesses without double-counting overlapping facts.
 const receiptRange = `WITH job AS MATERIALIZED (SELECT j FROM mock_platform."BuildJob" j
   WHERE ${journalScopeWhere} AND revision=$8::bigint),
- candidates AS MATERIALIZED (SELECT e AS fact,e."eventSeq" AS seq
-  FROM mock_platform."SourceEvent" e,job WHERE e."sessionId"=(job.j)."sessionId" AND e.generation=(job.j).generation
-  AND (e."eventSeq">=(job.j)."lastAppendStartSeq" OR (e."releaseRevision"=(job.j).revision
-  AND e."appendIndex"=mock_platform.source_uint((job.j).checkpoint->>'chunkIndex')))
-  ORDER BY e."eventSeq" LIMIT 101),
+ bounds AS MATERIALIZED (SELECT (job.j)."sessionId" AS session,(job.j).generation AS generation,
+  (job.j).revision AS revision,(job.j)."lastAppendStartSeq" AS start,
+  mock_platform.source_uint((job.j).checkpoint->>'chunkIndex') AS chunk FROM job),
+ candidates AS MATERIALIZED (SELECT fact,seq FROM (
+  SELECT e::mock_platform."SourceEvent" AS fact,e."eventSeq" AS seq FROM bounds CROSS JOIN LATERAL (
+    SELECT e.* FROM mock_platform."SourceEvent" e WHERE e."sessionId"=bounds.session
+      AND e.generation=bounds.generation AND e."eventSeq">=bounds.start
+    ORDER BY e."eventSeq" LIMIT 101) e
+  UNION
+  SELECT e::mock_platform."SourceEvent" AS fact,e."eventSeq" AS seq FROM bounds CROSS JOIN LATERAL (
+    SELECT e.* FROM mock_platform."SourceEvent" e WHERE e."sessionId"=bounds.session
+      AND e.generation=bounds.generation AND e."releaseRevision"=bounds.revision AND e."appendIndex"=bounds.chunk
+    ORDER BY e."eventSeq" LIMIT 101) e
+  ) matched ORDER BY seq LIMIT 101),
  events AS MATERIALIZED (SELECT *,row_number() OVER w AS position,lag(fact) OVER w AS prior
    FROM candidates WINDOW w AS (ORDER BY seq)),
  versions AS MATERIALIZED (SELECT v AS fact,v."eventSeq" AS seq FROM mock_platform."EntityVersion" v,job
