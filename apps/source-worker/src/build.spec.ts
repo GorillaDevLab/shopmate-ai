@@ -95,7 +95,7 @@ function storeEvent(at: string, ordinal = "0"): SnapshotEvent {
     after: {
       externalStoreId: work.scope.externalStoreId,
       name: "Demo",
-      category: null,
+      category: "Retail",
       currency: "CNY",
       timeZone: "Asia/Shanghai",
       source: {
@@ -107,6 +107,21 @@ function storeEvent(at: string, ordinal = "0"): SnapshotEvent {
   };
 }
 describe("source build orchestration", () => {
+  it("combines adjacent timestamp groups into one bounded append", async () => {
+    const f = fixture(),
+      at = f.lease.checkpoint.processedThrough;
+    const second = "2026-01-01T00:00:00.500Z";
+    Object.assign(f.lease, { targetTime: "2026-01-01T00:00:01.000Z" });
+    f.tools.create = () => ({
+      window: () => [
+        { occurredAt: at, events: [storeEvent(at)] },
+        { occurredAt: second, events: [storeEvent(second)] },
+      ],
+    });
+    expect((await buildSource(f.port, work, f.tools)).status).toBe("PUBLISHED");
+    expect(f.worker.appendChunk).toHaveBeenCalledTimes(2);
+    expect(f.worker.appendChunk.mock.calls[0]![2].events).toHaveLength(2);
+  });
   it("replays a completed base boundary without staging an empty duplicate chunk", async () => {
     const f = fixture(),
       at = f.lease.checkpoint.processedThrough;

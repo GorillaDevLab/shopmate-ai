@@ -18,6 +18,7 @@ import {
 } from "./build-types.js";
 
 const DAY_MS = 86_400_000;
+const APPEND_BUDGET = 80;
 function active(signal?: AbortSignal): void {
   if (signal?.aborted) throw new BuildInterrupted();
 }
@@ -105,13 +106,31 @@ class BuildExecution {
         Math.min(Date.parse(after) + DAY_MS, Date.parse(this.lease.targetTime)),
       ).toISOString();
       await this.renew();
-      for (const group of generator.window(after, until)) {
-        active(this.signal);
-        await this.group(group.events, group.occurredAt);
-      }
+      await this.window(generator.window(after, until));
       if (!this.lease.checkpoint.sealed) await this.group([], until);
       after = until;
     }
+  }
+  private async window(
+    groups: ReturnType<ReturnType<GenerationTools["create"]>["window"]>,
+  ): Promise<void> {
+    let pending: SnapshotEvent[] = [],
+      through = this.lease.checkpoint.processedThrough;
+    for (const group of groups) {
+      active(this.signal);
+      if (this.covered(group.events, group.occurredAt)) continue;
+      if (pending.length && pending.length + group.events.length > APPEND_BUDGET) {
+        await this.group(pending, through);
+        pending = [];
+      }
+      pending.push(...group.events);
+      through = group.occurredAt;
+      if (pending.length >= APPEND_BUDGET) {
+        await this.group(pending, through);
+        pending = [];
+      }
+    }
+    if (pending.length) await this.group(pending, through);
   }
   private async group(events: readonly SnapshotEvent[], until: string): Promise<void> {
     if (this.covered(events, until)) return;
@@ -136,6 +155,13 @@ class BuildExecution {
   }
   private covered(events: readonly SnapshotEvent[], until: string): boolean {
     const checkpoint = this.lease.checkpoint;
+    if (
+      this.lease.baseRevision === "0" &&
+      checkpoint.chunkIndex === "0" &&
+      checkpoint.highEventSeq === "0" &&
+      checkpoint.lastEvent === null
+    )
+      return false;
     if (until > checkpoint.processedThrough || until === this.lease.targetTime) return false;
     const last = events.at(-1);
     return (
@@ -156,7 +182,7 @@ class BuildExecution {
         targetTime: this.lease.targetTime,
       },
       events,
-      20,
+      APPEND_BUDGET,
     );
   }
   async release(error: unknown): Promise<void> {
