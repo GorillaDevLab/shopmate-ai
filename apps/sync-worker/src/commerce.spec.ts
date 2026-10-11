@@ -377,3 +377,34 @@ describe("hostile read controls", () => {
     },
   );
 });
+
+it("keeps an existing connector usable after clock and session revisions advance", async () => {
+  const f = fixture();
+  const c = await connector(f);
+  const advanced = {
+    ...bootstrap(),
+    businessNow: "2026-01-15T16:00:00.000Z",
+    clockRevision: 2,
+    sessionRevision: 2,
+  };
+  f.set(advanced);
+  f.read.mockResolvedValue(emptyPage());
+  const until = bootstrap().businessNow;
+  expect(await c.listProducts({ until, limit: 1 }, options())).toMatchObject({
+    ok: true,
+    data: { items: [], sourceWatermark: until },
+  });
+  expect(f.read).toHaveBeenCalledWith(
+    expect.objectContaining({ requestedUntil: until, businessNow: advanced.businessNow }),
+    expect.anything(),
+  );
+});
+it("keeps an existing connector usable after mutable rule session revisions advance", async () => {
+  const f = fixture();
+  const c = await connector(f);
+  f.set({ ...bootstrap(), sessionRevision: 2 });
+  f.read.mockResolvedValue(emptyPage());
+  expect(
+    await c.listProducts({ until: bootstrap().businessNow, limit: 1 }, options()),
+  ).toMatchObject({ ok: true, data: { items: [] } });
+});

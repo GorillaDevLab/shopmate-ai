@@ -99,7 +99,6 @@ class BootstrapResolver implements MockConnectorAccessResolver {
       record.grantId !== this.pinned.grantId ||
       record.principalUserId !== this.pinned.principalUserId ||
       record.merchantId !== this.pinned.merchantId ||
-      record.sessionRevision !== this.pinned.sessionRevision ||
       actor.userId !== record.principalUserId ||
       actor.merchantId !== record.merchantId ||
       storeId !== record.scope.storeId
