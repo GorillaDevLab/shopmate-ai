@@ -136,6 +136,9 @@ importers:
 
   apps/sync-worker:
     dependencies:
+      '@shopmate/api':
+        specifier: workspace:*
+        version: link:../api
       '@shopmate/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

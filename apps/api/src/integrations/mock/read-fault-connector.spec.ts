@@ -459,7 +459,7 @@ describe("read-only fault injecting connector", () => {
   it.each(["deadline", "abort"] as const)("cleans delay timers/listeners on %s", async (mode) => {
     vi.useFakeTimers();
     const controller = new AbortController();
-    const remove = vi.spyOn(controller.signal, "removeEventListener");
+    const remove = vi.spyOn(AbortSignal.prototype, "removeEventListener");
     const { base, wrapper } = create([rule({ kind: "DELAY", delayMs: 100 })]);
     const source = vi.spyOn(base, "getStore");
     const result = wrapper.getStore({ ...options(20), signal: controller.signal });
@@ -471,6 +471,7 @@ describe("read-only fault injecting connector", () => {
     });
     expect(source).not.toHaveBeenCalled();
     expect(remove).toHaveBeenCalled();
+    remove.mockRestore();
     expect(vi.getTimerCount()).toBe(0);
   });
 

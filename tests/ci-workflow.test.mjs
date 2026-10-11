@@ -12,6 +12,20 @@ test("bounded publication and high-load source history are mandatory in tenant C
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("real five-stream sync commerce composition is mandatory in tenant CI", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  assert.match(gate, /await run\("apps\/sync-worker", "test\/commerce\.test\.mjs"/u);
+});
+
+test("real sync checkpoint recovery builds its runtime and is mandatory in tenant CI", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  assert.match(gate, /await run\("apps\/sync-worker", "test\/checkpoint-read\.test\.mjs"/u);
+  assert.match(
+    JSON.parse(readFileSync("package.json", "utf8")).scripts["test:tenant"],
+    /--filter @shopmate\/sync-worker build/u,
+  );
+});
+
 test("grant-scoped failure metadata PostgreSQL coverage is mandatory", () => {
   assert.ok(
     readFileSync("scripts/test-tenant-database.mjs", "utf8").includes(
