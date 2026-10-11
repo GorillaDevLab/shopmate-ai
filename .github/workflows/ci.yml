@@ -83,3 +83,56 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  sync-profiles:
+    name: 历史源与同步验收 (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    # The longest measured local profile took 12.3 minutes; keep each history isolated.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: growing
+            full: "false"
+          - profile: problematic
+            full: "false"
+          - profile: mature
+            full: "false"
+          - profile: new
+            full: "true"
+    services:
+      tenant-postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tenant_test_admin
+          POSTGRES_DB: shopmate_tenant_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tenant_test_admin -d shopmate_tenant_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Accept persistent profile history and all five sync streams
+        env:
+          TEST_DATABASE_URL: postgresql://tenant_test_admin@127.0.0.1:5432/shopmate_tenant_test
+          P2_ACCEPTANCE_PROFILE: ${{ matrix.profile }}
+          P2_ACCEPTANCE_FULL: ${{ matrix.full }}
+        run: pnpm test:profiles

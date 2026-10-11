@@ -12,6 +12,23 @@ test("bounded publication and high-load source history are mandatory in tenant C
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("four persistent history profiles run as independent required CI jobs", () => {
+  const workflow = readFileSync(workflowPath, "utf8");
+  assert.match(workflow, /^  sync-profiles:/mu);
+  for (const profile of ["growing", "problematic", "mature", "new"])
+    assert.match(workflow, new RegExp(`profile: ${profile}\\b`, "u"));
+  assert.match(workflow, /profile: new\s+full: "true"/u);
+  assert.match(workflow, /P2_ACCEPTANCE_PROFILE: \$\{\{ matrix\.profile \}\}/u);
+  assert.match(workflow, /P2_ACCEPTANCE_FULL: \$\{\{ matrix\.full \}\}/u);
+  assert.match(workflow, /run: pnpm test:profiles/u);
+  assert.doesNotMatch(workflow, /continue-on-error:/u);
+  const command = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:profiles"];
+  assert.equal(typeof command, "string");
+  for (const dependency of ["contracts", "database", "api", "source-worker", "sync-worker"])
+    assert.ok(command.includes(`--filter @shopmate/${dependency} build`));
+  assert.ok(command.endsWith("node apps/sync-worker/test/profiles.test.mjs"));
+});
+
 test("durable sync restart, expired cursor, lost acknowledgment and revoked authority are mandatory", () => {
   const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
   assert.match(gate, /await run\("apps\/sync-worker", "test\/runtime\.test\.mjs"/u);
