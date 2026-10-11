@@ -42,4 +42,3 @@ describe("commerce restricted reader", () => {
     expect(read.mock.calls[0]?.[1]).not.toHaveProperty("requestId");
   });
 });
-
