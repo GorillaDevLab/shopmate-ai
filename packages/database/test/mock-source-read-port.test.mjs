@@ -1,3 +1,4 @@
+import { types } from "node:util";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -290,4 +291,71 @@ test("read-port signals reject symbol accessors before native brand checks or so
   );
   assert.equal(invoked, false);
   assert.equal(reader.calls.length, 0);
+});
+
+test("read-port rejects nested listener traps before source I/O", async () => {
+  for (const kind of ["proxy", "getter", "map-method", "nested-map", "cycle", "oversized"]) {
+    let traps = 0;
+    const signal = new AbortController().signal,
+      reader = fakeReader();
+    const slot = Object.getOwnPropertySymbols(signal).find((key) =>
+      types.isMap(Object.getOwnPropertyDescriptor(signal, key)?.value),
+    );
+    const map = Object.getOwnPropertyDescriptor(signal, slot).value;
+    const node = { size: 0, next: undefined, resistStopPropagation: false };
+    const proxy = new Proxy(node, {
+      get(target, key) {
+        traps++;
+        return Reflect.get(target, key);
+      },
+    });
+    if (kind === "cycle") Map.prototype.set.call(map, "abort", { ...node, next: node });
+    if (kind === "cycle") Object.defineProperty(node, "next", { value: node });
+    if (kind === "oversized")
+      for (let index = 0; index < 257; index++) Map.prototype.set.call(map, String(index), node);
+    if (kind === "proxy") Map.prototype.set.call(map, "abort", proxy);
+    if (kind === "getter") {
+      Object.defineProperty(node, "next", {
+        get() {
+          traps++;
+          return undefined;
+        },
+      });
+      Map.prototype.set.call(map, "abort", node);
+    }
+    if (kind === "map-method")
+      Object.defineProperty(map, "get", {
+        get() {
+          traps++;
+          return undefined;
+        },
+      });
+    if (kind === "nested-map") Map.prototype.set.call(map, "abort", new Map([["nested", proxy]]));
+    const port = module.bindSourceReadPort(reader, key, actor, scope);
+    await assert.rejects(port.read(request, { signal }), { code: "SOURCE_INPUT" });
+    await assert.rejects(port.findPublication({ signal }), { code: "SOURCE_INPUT" });
+    assert.equal(traps, 0);
+    assert.equal(reader.calls.length, 0);
+  }
+});
+
+test("read-port preserves native listeners and signal factories without inspecting abort reasons", async () => {
+  let notified = 0;
+  const controller = new AbortController();
+  controller.signal.addEventListener("abort", () => notified++);
+  for (const signal of [controller.signal, AbortSignal.any([]), AbortSignal.timeout(5000)])
+    await module.bindSourceReadPort(fakeReader(), key, actor, scope).read(request, { signal });
+  controller.abort();
+  assert.equal(notified, 1);
+  const reason = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("reason must not be read");
+      },
+    },
+  );
+  await module
+    .bindSourceReadPort(fakeReader(), key, actor, scope)
+    .read(request, { signal: AbortSignal.abort(reason) });
 });
