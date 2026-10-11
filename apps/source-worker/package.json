@@ -1,0 +1,24 @@
+{
+  "name": "@shopmate/source-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "pnpm --filter @shopmate/api build && tsc --noEmit",
+    "lint": "eslint src vitest.config.ts --max-warnings=0",
+    "test": "pnpm --filter @shopmate/api build && vitest run",
+    "start": "node dist/main.js",
+    "start:once": "node dist/main.js --once"
+  },
+  "dependencies": {
+    "@shopmate/api": "workspace:*",
+    "@shopmate/contracts": "workspace:*",
+    "@shopmate/database": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "6.0.2",
+    "vitest": "4.1.11"
+  }
+}

@@ -4,6 +4,21 @@ import test from "node:test";
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("real source host recovery is mandatory in tenant CI", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  assert.match(gate, /await run\("apps\/source-worker", "test\/source-build\.test\.mjs"/u);
+  assert.match(
+    JSON.parse(readFileSync("package.json", "utf8")).scripts["test:tenant"],
+    /--filter @shopmate\/source-worker build/u,
+  );
+});
+
+test("source bulk insertion and live authorization plan checks are mandatory", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  for (const suite of ["mock-source-bulk-append", "mock-source-auth-plans"])
+    assert.ok(gate.includes(`test/integration/${suite}.test.mjs`));
+});
+
 test("generic canonical page validators and atomic ingestion are mandatory in tenant CI", () => {
   assert.match(readFileSync(workflowPath, "utf8"), /run: pnpm test:tenant/u);
   const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");

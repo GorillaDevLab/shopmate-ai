@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./mock-generator": {
+      "types": "./dist/integrations/mock/mock-worker-generation.d.ts",
+      "import": "./dist/integrations/mock/mock-worker-generation.js"
+    }
+  },
   "scripts": {
     "pretest": "pnpm --filter @shopmate/database build",
     "dev": "nest start --watch",

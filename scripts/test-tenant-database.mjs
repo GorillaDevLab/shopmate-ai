@@ -23,6 +23,15 @@ function run(directory, script, args, environment) {
 
 const server = await isolatedPostgres();
 try {
+  await run("packages/database", "test/integration/mock-source-bulk-append.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/mock-source-auth-plans.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("apps/source-worker", "test/source-build.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/tenant-migration-paths.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
