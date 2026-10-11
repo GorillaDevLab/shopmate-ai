@@ -62,46 +62,64 @@ function hourFor(value: number): number {
   return 23;
 }
 
-function candidateFor(
+function baselineCandidateFor(
   config: MockConfig,
   skus: readonly ConnectorSku[],
   day: number,
   index: number,
-): OrderCandidate | null {
+): OrderCandidate {
   const random = (key: string, max: number) =>
     seededInteger(config.seed, ["order", day, index, key], max);
   const hero = random("hero", 100) < 65;
   const sku = skus[random("sku", hero ? Math.min(10, skus.length) : skus.length)]!;
-  const progress = day / Math.max(1, config.days - 1);
   const at = candidateTime(config, day, random);
+  return {
+    id: `${config.binding.externalStoreId}:order:${day}:${index}`,
+    at,
+    sku,
+    quantity: 1 + random("quantity", 2),
+    ...commercialFlags(config, sku, skus[0]!, day, random),
+    cancel: random("cancel", 100) < 12,
+    partialRefund: random("partial", 2) === 0,
+    returnGoods: random("return", 2) === 0,
+  };
+}
+function commercialFlags(
+  config: MockConfig,
+  sku: ConnectorSku,
+  heroSku: ConnectorSku,
+  day: number,
+  random: (key: string, max: number) => number,
+) {
+  const progress = day / Math.max(1, config.days - 1);
   const problematic = config.profile === "problematic";
   const refundBps =
-    problematic && progress > 0.7 && sku === skus[0]
+    problematic && progress > 0.7 && sku === heroSku
       ? Math.min(5000, config.refundBps * 3)
       : config.refundBps;
   const attributionBps = Math.min(
     10_000,
     Math.floor((campaignPlan(config, day).potentialOrders * 10_000) / dailyDemand(config, day)),
   );
-  return plannedCandidate(
-    config,
-    {
-      id: `${config.binding.externalStoreId}:order:${day}:${index}`,
-      at,
-      sku,
-      quantity: 1 + random("quantity", 2),
-      discountBps: problematic ? 500 + Math.floor(progress * 2500) : 500,
-      campaignId:
-        random("attribution", 10_000) < attributionBps
-          ? `${config.binding.externalStoreId}:campaign:${day}`
-          : null,
-      cancel: random("cancel", 100) < 12,
-      refund: random("refund", 10_000) < refundBps,
-      partialRefund: random("partial", 2) === 0,
-      returnGoods: random("return", 2) === 0,
-    },
-    skus.indexOf(sku),
-  );
+  return {
+    discountBps: problematic ? 500 + Math.floor(progress * 2500) : 500,
+    campaignId:
+      random("attribution", 10_000) < attributionBps
+        ? `${config.binding.externalStoreId}:campaign:${day}`
+        : null,
+    refund: random("refund", 10_000) < refundBps,
+  };
+}
+function candidateFor(
+  config: MockConfig,
+  skus: readonly ConnectorSku[],
+  day: number,
+  index: number,
+): OrderCandidate | null {
+  const baseline = baselineCandidateFor(config, skus, day, index);
+  // Resolve the launch SKU first so every intervention belongs to the order's final target.
+  const launched = launchedCandidate(config, baseline, skus);
+  return launched && plannedCandidate(config, launched, skus.indexOf(launched.sku));
 }
 
 function candidateTime(
@@ -198,8 +216,7 @@ export function generateTimeline(
   ) {
     for (let index = 0; index < dailyDemand(config, day); index += 1) {
       const candidate = candidateFor(config, skus, day, index);
-      const launched = candidate && launchedCandidate(config, candidate, skus);
-      if (launched) events.push(...orderEvents(launched));
+      if (candidate) events.push(...orderEvents(candidate));
     }
   }
   return orderedTimeline(events.filter((event) => event.at <= until));
@@ -224,8 +241,7 @@ export function generateTimelineWindow(
   for (let day = firstDay; day <= lastDay; day += 1) {
     for (let index = 0; index < dailyDemand(config, day); index += 1) {
       const candidate = candidateFor(config, skus, day, index);
-      const launched = candidate && launchedCandidate(config, candidate, skus);
-      if (launched) events.push(...orderEvents(launched));
+      if (candidate) events.push(...orderEvents(candidate));
     }
   }
   return orderedTimeline(events.filter((event) => event.at > after && event.at <= until));
