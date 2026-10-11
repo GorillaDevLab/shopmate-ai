@@ -119,6 +119,12 @@ try {
   await run("packages/database", "test/integration/product-page-commit.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/canonical-commit-input.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/canonical-page-commit.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   const runtimeUrl = await prepareTenantApiRuntime(server.url);
   await run(
     "apps/api",
