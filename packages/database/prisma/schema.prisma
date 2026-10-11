@@ -230,22 +230,23 @@ datasource db {
 }
 
 model CommerceSourceScope {
-  id              String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organizationId  String
-  workspaceId     String
-  storeId         String
-  connectionId    String
-  externalStoreId String
-  provider        String
-  generation      Int
-  createdAt       DateTime                         @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
-  connection      PlatformConnection               @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "SourceScope_connection_fkey")
-  products        CanonicalProductListing[]
-  orders          CanonicalOrderListing[]
-  refunds         CanonicalRefundListing[]
-  inventories     CanonicalInventoryListing[]
-  campaignMetrics CanonicalCampaignMetricListing[]
-  productCommits  SyncProductPageCommit[]
+  id               String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String
+  workspaceId      String
+  storeId          String
+  connectionId     String
+  externalStoreId  String
+  provider         String
+  generation       Int
+  createdAt        DateTime                         @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  connection       PlatformConnection               @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "SourceScope_connection_fkey")
+  products         CanonicalProductListing[]
+  orders           CanonicalOrderListing[]
+  refunds          CanonicalRefundListing[]
+  inventories      CanonicalInventoryListing[]
+  campaignMetrics  CanonicalCampaignMetricListing[]
+  productCommits   SyncProductPageCommit[]
+  canonicalCommits SyncCanonicalPageCommit[]
 
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation], map: "SourceScope_namespace_key")
   @@unique([id, organizationId, workspaceId, storeId], map: "SourceScope_tenant_key")
@@ -376,7 +377,7 @@ model SyncWorkerGrant {
 }
 
 model SyncJob {
-  id                String                  @id
+  id                String                    @id
   grantId           String
   organizationId    String
   workspaceId       String
@@ -386,22 +387,26 @@ model SyncJob {
   provider          String
   generation        Int
   stream            String
-  since             DateTime                @db.Timestamp(3)
-  until             DateTime                @db.Timestamp(3)
+  since             DateTime                  @db.Timestamp(3)
+  until             DateTime                  @db.Timestamp(3)
   cursor            Json?
-  successfulThrough DateTime?               @db.Timestamp(3)
-  status            String                  @default("READY")
-  fence             Int                     @default(0)
+  successfulThrough DateTime?                 @db.Timestamp(3)
+  observedAt        DateTime?                 @db.Timestamptz(3)
+  sourceWatermark   DateTime?                 @db.Timestamptz(3)
+  pageCount         Int                       @default(0)
+  status            String                    @default("READY")
+  fence             Int                       @default(0)
   leaseOwner        String?
-  leaseUntil        DateTime?               @db.Timestamptz(3)
+  leaseUntil        DateTime?                 @db.Timestamptz(3)
   leaseBackendPid   Int?
-  leaseBackendStart DateTime?               @db.Timestamptz(6)
+  leaseBackendStart DateTime?                 @db.Timestamptz(6)
   failureCode       String?
-  grant             SyncWorkerGrant         @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
+  grant             SyncWorkerGrant           @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
   receiptCursor     Json?
-  receivedThrough   DateTime?               @db.Timestamp(3)
+  receivedThrough   DateTime?                 @db.Timestamp(3)
   pageReceipts      SyncPageReceipt[]
   productCommits    SyncProductPageCommit[]
+  canonicalCommits  SyncCanonicalPageCommit[]
 
   @@unique([id, organizationId, workspaceId, storeId], map: "Job_tenant_key")
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation, stream, since], map: "Job_scope_stream_window_key")
@@ -414,11 +419,12 @@ model SyncPageReceipt {
   pageId          String
   expectedCursor  String?
   nextCursor      String?
-  receivedThrough DateTime               @db.Timestamp(3)
+  receivedThrough DateTime                 @db.Timestamp(3)
   pageHash        String
-  createdAt       DateTime               @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
-  job             SyncJob                @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  createdAt       DateTime                 @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  job             SyncJob                  @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   productCommit   SyncProductPageCommit?
+  canonicalCommit SyncCanonicalPageCommit?
 
   @@id([jobId, pageId])
   @@map("PageReceipt")
@@ -492,6 +498,76 @@ model SyncProductQuarantine {
   @@id([jobId, pageId, ordinal])
   @@unique([jobId, pageId, ordinal, organizationId, workspaceId, storeId], map: "ProductQuarantine_tenant_key")
   @@map("ProductQuarantine")
+  @@schema("sync_host")
+}
+
+model SyncCanonicalPageCommit {
+  jobId             String
+  pageId            String
+  scopeId           String                      @db.Uuid
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  codec             String                      @default("canonical-page-v1")
+  pageHash          String
+  observedAt        DateTime                    @db.Timestamptz(3)
+  sourceWatermark   DateTime?                   @db.Timestamptz(3)
+  terminal          Boolean
+  acceptedFence     Int
+  inputCount        Int
+  appliedCount      Int
+  duplicateCount    Int
+  staleCount        Int
+  quarantinedCount  Int
+  lineInsertedCount Int
+  lineDeletedCount  Int
+  createdAt         DateTime                    @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  receipt           SyncPageReceipt             @relation(fields: [jobId, pageId], references: [jobId, pageId], onDelete: Restrict, onUpdate: NoAction, map: "CanonicalPageCommit_receipt_fkey")
+  job               SyncJob                     @relation(fields: [jobId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "CanonicalPageCommit_job_fkey")
+  scope             CommerceSourceScope         @relation(fields: [scopeId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "CanonicalPageCommit_scope_fkey")
+  decisions         SyncCanonicalPageDecision[]
+
+  @@id([jobId, pageId])
+  @@unique([jobId, pageId, organizationId, workspaceId, storeId], map: "CanonicalPageCommit_tenant_key")
+  @@map("CanonicalPageCommit")
+  @@schema("sync_host")
+}
+
+model SyncCanonicalPageDecision {
+  jobId               String
+  pageId              String
+  ordinal             Int
+  organizationId      String
+  workspaceId         String
+  storeId             String
+  recordKey           Json?
+  candidateHash       String
+  decision            String
+  previousVersion     String?
+  previousUpdatedAt   DateTime?                @db.Timestamptz(3)
+  previousPayloadHash String?
+  commit              SyncCanonicalPageCommit  @relation(fields: [jobId, pageId, organizationId, workspaceId, storeId], references: [jobId, pageId, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "CanonicalPageDecision_commit_fkey")
+  quarantine          SyncCanonicalQuarantine?
+
+  @@id([jobId, pageId, ordinal])
+  @@unique([jobId, pageId, ordinal, organizationId, workspaceId, storeId], map: "CanonicalPageDecision_tenant_key")
+  @@map("CanonicalPageDecision")
+  @@schema("sync_host")
+}
+
+model SyncCanonicalQuarantine {
+  jobId          String
+  pageId         String
+  ordinal        Int
+  organizationId String
+  workspaceId    String
+  storeId        String
+  reason         String
+  decision       SyncCanonicalPageDecision @relation(fields: [jobId, pageId, ordinal, organizationId, workspaceId, storeId], references: [jobId, pageId, ordinal, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "CanonicalQuarantine_decision_fkey")
+
+  @@id([jobId, pageId, ordinal])
+  @@unique([jobId, pageId, ordinal, organizationId, workspaceId, storeId], map: "CanonicalQuarantine_tenant_key")
+  @@map("CanonicalQuarantine")
   @@schema("sync_host")
 }
 
@@ -951,56 +1027,6 @@ model MonitoringNotification {
   @@schema("public")
 }
 
-model DemoFailureRule {
-  id              String
-  organizationId  String
-  workspaceId     String
-  storeId         String
-  sessionId       String
-  connectionId    String
-  externalStoreId String
-  generation      Int
-  priority        Int
-  startsAt        DateTime               @db.Timestamp(3)
-  endsAt          DateTime               @db.Timestamp(3)
-  methods         String[]
-  effectKind      String
-  effectCode      String?
-  retryAfterMs    Int?
-  delayMs         Int?
-  createdRevision Int
-  removedRevision Int?
-  session         DemoCommerceSession    @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction)
-  audits          DemoFailureRuleAudit[]
-
-  @@id([sessionId, generation, id])
-  @@index([organizationId, workspaceId, storeId, sessionId, generation], map: "DemoFailureRule_scope_idx")
-  @@schema("demo")
-}
-
-model DemoFailureRuleAudit {
-  id              BigInt          @id @default(autoincrement())
-  organizationId  String
-  workspaceId     String
-  storeId         String
-  sessionId       String
-  connectionId    String
-  externalStoreId String
-  generation      Int
-  actorUserId     String
-  kind            String
-  ruleId          String
-  beforeRevision  Int
-  afterRevision   Int
-  clockNow        DateTime        @db.Timestamp(3)
-  snapshot        Json
-  rule            DemoFailureRule @relation(fields: [sessionId, generation, ruleId], references: [sessionId, generation, id], onDelete: Restrict, onUpdate: NoAction)
-
-  @@unique([sessionId, afterRevision])
-  @@index([organizationId, workspaceId, sessionId], map: "DemoFailureRuleAudit_scope_idx")
-  @@schema("demo")
-}
-
 model CanonicalRefundListing {
   scopeId           String              @db.Uuid
   organizationId    String
@@ -1080,4 +1106,54 @@ model CanonicalCampaignMetricListing {
   @@index([organizationId, workspaceId, storeId], map: "CampaignMetricListing_store_idx")
   @@map("CampaignMetricListing")
   @@schema("commerce")
+}
+
+model DemoFailureRule {
+  id              String
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  sessionId       String
+  connectionId    String
+  externalStoreId String
+  generation      Int
+  priority        Int
+  startsAt        DateTime               @db.Timestamp(3)
+  endsAt          DateTime               @db.Timestamp(3)
+  methods         String[]
+  effectKind      String
+  effectCode      String?
+  retryAfterMs    Int?
+  delayMs         Int?
+  createdRevision Int
+  removedRevision Int?
+  session         DemoCommerceSession    @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction)
+  audits          DemoFailureRuleAudit[]
+
+  @@id([sessionId, generation, id])
+  @@index([organizationId, workspaceId, storeId, sessionId, generation], map: "DemoFailureRule_scope_idx")
+  @@schema("demo")
+}
+
+model DemoFailureRuleAudit {
+  id              BigInt          @id @default(autoincrement())
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  sessionId       String
+  connectionId    String
+  externalStoreId String
+  generation      Int
+  actorUserId     String
+  kind            String
+  ruleId          String
+  beforeRevision  Int
+  afterRevision   Int
+  clockNow        DateTime        @db.Timestamp(3)
+  snapshot        Json
+  rule            DemoFailureRule @relation(fields: [sessionId, generation, ruleId], references: [sessionId, generation, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([sessionId, afterRevision])
+  @@index([organizationId, workspaceId, sessionId], map: "DemoFailureRuleAudit_scope_idx")
+  @@schema("demo")
 }

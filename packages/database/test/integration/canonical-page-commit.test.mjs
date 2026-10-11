@@ -100,7 +100,8 @@ test.before(async () => {
   await migrateSource(admin);
   await sourceFixtures(admin);
   for (const login of ["sync_worker_login", "sync_foreign_login"]) {
-    await admin.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
+    const existing = await admin.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [login]);
+    if (!existing.rowCount) await admin.query(`CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS`);
     await admin.query(`GRANT shopmate_sync_worker TO ${login}`);
   }
   await createSyncGrant(admin, syncScope(), "sync-grant-a");
