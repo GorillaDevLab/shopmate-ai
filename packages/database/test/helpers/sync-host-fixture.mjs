@@ -23,7 +23,13 @@ export async function createSyncDatabase(suite = "sync") {
     await sourceFixtures(admin);
     await provisionLogin(admin, "sync_worker_login");
     await provisionLogin(admin, "sync_foreign_login");
-    return { admin, operator, server, url: url.toString(), ownedDatabase: suite === "worker" ? databaseName : null };
+    return {
+      admin,
+      operator,
+      server,
+      url: url.toString(),
+      ownedDatabase: suite === "worker" ? databaseName : null,
+    };
   } catch (error) {
     await admin?.end();
     if (suite === "worker" && created) await operator.query(`DROP DATABASE "${databaseName}"`);
@@ -102,10 +108,11 @@ export function syncScope(key = "a", generation = 0) {
 export async function closeSyncDatabase(database) {
   const results = await Promise.allSettled([database.admin.end()]);
   if (database.ownedDatabase) {
-    if (!/^shopmate_tenant_test_worker[0-9a-f]{12}$/u.test(database.ownedDatabase)) throw new Error("Invalid owned fixture database");
+    if (!/^shopmate_tenant_test_worker[0-9a-f]{12}$/u.test(database.ownedDatabase))
+      throw new Error("Invalid owned fixture database");
     await database.operator.query(`DROP DATABASE "${database.ownedDatabase}"`);
   }
-  results.push(...await Promise.allSettled([database.operator.end()]));
+  results.push(...(await Promise.allSettled([database.operator.end()])));
   await database.server.stop();
   const failures = results.filter((result) => result.status === "rejected");
   if (failures.length)
