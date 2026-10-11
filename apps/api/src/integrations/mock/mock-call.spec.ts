@@ -1,3 +1,4 @@
+import { types } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { executeMockRead, MockConnectorError } from "./mock-call.js";
 
@@ -233,4 +234,73 @@ it("rejects proxy-valued signal internals before listener registration", async (
   expect(invoked).not.toHaveBeenCalled();
   expect(work).not.toHaveBeenCalled();
 });
-import { types } from "node:util";
+
+it.each(["proxy", "getter", "map-method", "nested-map", "cycle", "oversized"] as const)(
+  "rejects hostile listener %s without traps or work",
+  async (kind) => {
+    const signal = new AbortController().signal,
+      invoked = vi.fn(),
+      work = vi.fn(async () => ok);
+    const slot = Object.getOwnPropertySymbols(signal).find((key) =>
+      types.isMap(Object.getOwnPropertyDescriptor(signal, key)?.value),
+    );
+    const map = Object.getOwnPropertyDescriptor(signal, slot!)!.value as Map<string, unknown>;
+    const node = { size: 0, next: undefined, resistStopPropagation: false };
+    const proxy = new Proxy(node, {
+      get(target, key) {
+        invoked();
+        return Reflect.get(target, key);
+      },
+    });
+    if (kind === "cycle") Map.prototype.set.call(map, "abort", { ...node, next: node });
+    if (kind === "cycle") Object.defineProperty(node, "next", { value: node });
+    if (kind === "oversized")
+      for (let index = 0; index < 257; index++) Map.prototype.set.call(map, String(index), node);
+    if (kind === "proxy") Map.prototype.set.call(map, "abort", proxy);
+    if (kind === "getter") {
+      Object.defineProperty(node, "next", {
+        get() {
+          invoked();
+          return undefined;
+        },
+      });
+      Map.prototype.set.call(map, "abort", node);
+    }
+    if (kind === "map-method") Object.defineProperty(map, "get", { value: invoked });
+    if (kind === "nested-map") Map.prototype.set.call(map, "abort", new Map([["nested", proxy]]));
+    expect(await executeMockRead({ ...options(), signal }, work)).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+    expect(invoked).not.toHaveBeenCalled();
+    expect(work).not.toHaveBeenCalled();
+  },
+);
+
+it("preserves existing native listeners and native signal factories", async () => {
+  const controller = new AbortController(),
+    listener = vi.fn();
+  controller.signal.addEventListener("abort", listener);
+  expect(
+    await executeMockRead({ ...options(), signal: controller.signal }, async () => ok),
+  ).toEqual(ok);
+  const events = Object.getOwnPropertySymbols(controller.signal)
+    .map((key) => Object.getOwnPropertyDescriptor(controller.signal, key)!.value)
+    .find((value: unknown) => types.isMap(value)) as Map<string, { size: number }>;
+  expect(Map.prototype.get.call(events, "abort").size).toBe(1);
+  controller.abort();
+  expect(listener).toHaveBeenCalledOnce();
+  for (const signal of [AbortSignal.any([]), AbortSignal.timeout(5000)])
+    expect(await executeMockRead({ ...options(), signal }, async () => ok)).toEqual(ok);
+  const reason = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("reason must not be read");
+      },
+    },
+  );
+  expect(
+    await executeMockRead({ ...options(), signal: AbortSignal.abort(reason) }, async () => ok),
+  ).toMatchObject({ ok: false, error: { code: "ABORTED" } });
+});
