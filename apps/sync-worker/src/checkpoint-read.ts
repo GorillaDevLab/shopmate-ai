@@ -87,7 +87,8 @@ function safeListenerState(map: object): boolean {
     for (const key of keys) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !("value" in descriptor)) return false;
-      pending.push(descriptor.value);
+      // Registration compares callback identity; it does not consume the callback receiver's payload.
+      if (key !== "listener" && key !== "callback") pending.push(descriptor.value);
     }
   }
   return true;

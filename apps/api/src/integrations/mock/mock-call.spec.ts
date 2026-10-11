@@ -304,3 +304,15 @@ it("preserves existing native listeners and native signal factories", async () =
     await executeMockRead({ ...options(), signal: AbortSignal.abort(reason) }, async () => ok),
   ).toMatchObject({ ok: false, error: { code: "ABORTED" } });
 });
+
+it("keeps preexisting object listener receivers opaque during registration", async () => {
+  const controller = new AbortController(), listener = vi.fn();
+  const receiver = {
+    handleEvent: listener,
+    payload: new Proxy({}, { get() { throw new Error("opaque payload must not be read"); } }),
+  };
+  controller.signal.addEventListener("abort", receiver);
+  expect(await executeMockRead({ ...options(), signal: controller.signal }, async () => ok)).toEqual(ok);
+  controller.abort();
+  expect(listener).toHaveBeenCalledOnce();
+});
