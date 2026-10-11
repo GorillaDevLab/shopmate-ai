@@ -90,3 +90,10 @@ test("scenario version PostgreSQL suite is mandatory in the tenant gate", () => 
     ),
   );
 });
+test("scenario management PostgreSQL suite is mandatory in the tenant gate", () => {
+  assert.ok(
+    readFileSync("scripts/test-tenant-database.mjs", "utf8").includes(
+      "test/integration/demo-scenarios.test.mjs",
+    ),
+  );
+});

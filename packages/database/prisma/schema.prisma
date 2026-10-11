@@ -45,6 +45,7 @@ model DemoCommerceSession {
   connection       PlatformConnection  @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction)
   audits           DemoControlAudit[]
   failureRules     DemoFailureRule[]
+  scenarioRuns     DemoScenarioRun[]
   workerGrants     MockWorkerGrant[]
   runtimes         MockSourceRuntime[]
 
@@ -1155,5 +1156,41 @@ model DemoFailureRuleAudit {
 
   @@unique([sessionId, afterRevision])
   @@index([organizationId, workspaceId, sessionId], map: "DemoFailureRuleAudit_scope_idx")
+  @@schema("demo")
+}
+
+model DemoScenarioRun {
+  id              String                @id
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  sessionId       String
+  connectionId    String
+  externalStoreId String
+  generation      Int
+  loadedRevision  Int
+  configHash      String
+  config          Json
+  loadedAt        DateTime              @default(dbgenerated("(clock_timestamp() AT TIME ZONE 'UTC'::text)")) @db.Timestamp(3)
+  businessClock   DateTime              @db.Timestamp(3)
+  actorUserId     String
+  session         DemoCommerceSession   @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "DemoScenarioRun_sessionId_organizationId_workspaceId_store_fkey")
+  audit           DemoScenarioRunAudit?
+
+  @@unique([sessionId, generation])
+  @@index([organizationId, workspaceId, storeId, sessionId, generation(sort: Desc)], map: "DemoScenarioRun_scope_idx")
+  @@schema("demo")
+}
+
+model DemoScenarioRunAudit {
+  runId          String          @id
+  organizationId String
+  workspaceId    String
+  storeId        String
+  sessionId      String
+  actorUserId    String
+  snapshot       Json
+  run            DemoScenarioRun @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
   @@schema("demo")
 }

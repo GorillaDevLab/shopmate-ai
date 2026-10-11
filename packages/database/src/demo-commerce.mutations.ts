@@ -32,7 +32,7 @@ type ControlKind = "CREATE" | "ADVANCE" | "RESET" | "DISCONNECT";
 
 class DemoWriteConflict extends Error {}
 
-function executeOne(tx: DemoTransaction) {
+export function executeOne(tx: DemoTransaction) {
   return async (template: TemplateStringsArray, ...values: unknown[]): Promise<void> => {
     // RLS can hide a previously locked row between statements; throwing rolls back prior writes.
     if ((await tx.$executeRaw(template, ...values)) !== 1)
@@ -40,7 +40,7 @@ function executeOne(tx: DemoTransaction) {
   };
 }
 
-async function finish(
+export async function finish(
   tx: DemoTransaction,
   access: DemoStoreAccess,
   kind: ControlKind,
@@ -150,7 +150,7 @@ function bindingScope(
   };
 }
 
-async function mutateExisting(
+export async function mutateExisting(
   actor: DemoActor,
   storeId: string,
   revision: number,
@@ -196,7 +196,7 @@ export async function advanceDemoSession(
   });
 }
 
-async function updateConnection(
+export async function updateConnection(
   tx: DemoTransaction,
   row: DemoConnectionRecord,
   status: "ACTIVE" | "DISCONNECTED",

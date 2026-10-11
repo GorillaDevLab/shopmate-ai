@@ -298,6 +298,8 @@ test("persistent demo controls run under real restricted PostgreSQL RLS", async 
         "DemoControlAudit",
         "DemoFailureRule",
         "DemoFailureRuleAudit",
+        "DemoScenarioRun",
+        "DemoScenarioRunAudit",
         "MockWorkerGrant",
       ]);
     });

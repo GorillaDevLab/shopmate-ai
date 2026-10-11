@@ -47,6 +47,9 @@ try {
   await run("packages/database", "test/integration/demo-failure-rules.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/demo-scenarios.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/demo-commerce-database.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
