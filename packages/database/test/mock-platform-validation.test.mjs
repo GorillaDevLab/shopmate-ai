@@ -189,6 +189,16 @@ async function files(directory) {
 }
 
 const sourceImport = /(?:from\s*|(?:import|require)\s*(?:\(\s*)?)\s*["'][^"']*mock-platform/u;
+function withoutScenarioValidation(code, scenario) {
+  if (!scenario) return code;
+  // Management reuses pure frozen-config validation, without worker/read ports or credentials.
+  return code
+    .replace(
+      /^import \{ frozenConfiguration \} from "\.\/mock-platform\/configuration\.js";\r?$/gmu,
+      "",
+    )
+    .replace(/^import \{ SourceStorageError \} from "\.\/mock-platform\/errors\.js";\r?$/gmu, "");
+}
 function withoutReadComposition(code, provider) {
   if (!provider) return code;
   return code.replace(
@@ -223,6 +233,20 @@ test("only the server composition module can import the named read-only factory 
     ),
   );
 });
+test("scenario management can reuse only the two named pure validation imports", () => {
+  const pure =
+    'import { frozenConfiguration } from "./mock-platform/configuration.js";\nimport { SourceStorageError } from "./mock-platform/errors.js";';
+  assert.doesNotMatch(withoutScenarioValidation(pure, true), sourceImport);
+  assert.match(withoutScenarioValidation(pure, false), sourceImport);
+  for (const code of [
+    'import { sourcePool } from "./mock-platform/clients.js";',
+    'import { createMockSourceWorker } from "./mock-platform/index.js";',
+    'import * as validation from "./mock-platform/configuration.js";',
+    'import { frozenConfiguration, sourcePool } from "./mock-platform/configuration.js";',
+    'const validation = import("./mock-platform/configuration.js");',
+  ])
+    assert.match(withoutScenarioValidation(code, true), sourceImport);
+});
 test("normal domain modules cannot import the privileged source subpath", async () => {
   for (const directory of ["../../../apps/api/src/", "../../../apps/web/src/", "../src/"]) {
     for (const file of await files(new URL(directory, import.meta.url))) {
@@ -230,7 +254,11 @@ test("normal domain modules cannot import the privileged source subpath", async 
       const provider = file.pathname.endsWith(
         "/apps/api/src/demo-commerce/database-persistent-read-ports.ts",
       );
-      const code = withoutReadComposition(await readFile(file, "utf8"), provider);
+      const scenario = file.pathname.endsWith("/packages/database/src/demo-scenarios.ts");
+      const code = withoutScenarioValidation(
+        withoutReadComposition(await readFile(file, "utf8"), provider),
+        scenario,
+      );
       assert.doesNotMatch(code, sourceImport, file.pathname);
     }
   }
