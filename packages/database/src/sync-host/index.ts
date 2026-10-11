@@ -29,7 +29,8 @@ function readJob(value: unknown): SyncJob {
 export class SyncWorkerPorts {
   private readonly owner = `worker-${randomUUID()}`;
   private running = false;
-  private constructor(private readonly client: pg.Client) {}
+  readonly #client: pg.Client;
+  private constructor(client: pg.Client) { this.#client = client; }
   static async connect(binding: WorkerBinding): Promise<SyncWorkerPorts> {
     workerId(binding.grantId); workerId(binding.principalUserId);
     const client = new pg.Client({ connectionString: workerDatabaseUrl(process.env), application_name: "shopmate-sync-worker" });
@@ -46,22 +47,22 @@ export class SyncWorkerPorts {
       throw new Error("SYNC_WORKER_CONNECTION_FAILED");
     }
   }
-  private async rpc(sql: string, values: readonly unknown[] = []): Promise<unknown> {
-    try { return (await this.client.query(sql, [...values])).rows[0]?.result as unknown; }
+  async #rpc(sql: string, values: readonly unknown[] = []): Promise<unknown> {
+    try { return (await this.#client.query(sql, [...values])).rows[0]?.result as unknown; }
     catch { throw new Error("SYNC_WORKER_OPERATION_FAILED"); }
   }
-  async listWork(): Promise<unknown> { return this.rpc("SELECT sync_host.list_work() AS result"); }
+  async listWork(): Promise<unknown> { return this.#rpc("SELECT sync_host.list_work() AS result"); }
   async createWindow(stream: SyncStream, until: string): Promise<SyncJob> {
-    return readJob(await this.rpc("SELECT sync_host.create_window($1,$2::timestamp) AS result", [workerStream(stream), workerTime(until)]));
+    return readJob(await this.#rpc("SELECT sync_host.create_window($1,$2::timestamp) AS result", [workerStream(stream), workerTime(until)]));
   }
   private async lease(job: SyncJob, action: "CLAIM" | "RENEW" | "FAIL"): Promise<SyncJob> {
-    return readJob(await this.rpc("SELECT sync_host.control_lease($1,$2,$3,$4) AS result", [workerId(job.id), action, job.fence, this.owner]));
+    return readJob(await this.#rpc("SELECT sync_host.control_lease($1,$2,$3,$4) AS result", [workerId(job.id), action, job.fence, this.owner]));
   }
   async claim(job: SyncJob): Promise<SyncJob> { return this.lease(job, "CLAIM"); }
   async renew(job: SyncJob): Promise<SyncJob> { return this.lease(job, "RENEW"); }
   async fail(job: SyncJob): Promise<SyncJob> { return this.lease(job, "FAIL"); }
   async commitPage(job: SyncJob, pageId: string, expectedCursor: string | null, page: unknown): Promise<SyncJob> {
-    const result = await this.rpc("SELECT sync_host.commit_worker_page($1,$2,$3,$4,$5::jsonb) AS result",
+    const result = await this.#rpc("SELECT sync_host.commit_worker_page($1,$2,$3,$4,$5::jsonb) AS result",
       [workerId(job.id), job.fence, workerId(pageId), workerCursor(expectedCursor), encodeWorkerPage(workerStream(job.stream), page)]);
     if (!result || typeof result !== "object" || !("job" in result)) throw new Error("SYNC_RESULT_INVALID");
     return readJob(result.job);
@@ -92,5 +93,5 @@ export class SyncWorkerPorts {
       return current;
     } finally { this.running = false; }
   }
-  async close(): Promise<void> { await this.client.end(); }
+  async close(): Promise<void> { await this.#client.end(); }
 }

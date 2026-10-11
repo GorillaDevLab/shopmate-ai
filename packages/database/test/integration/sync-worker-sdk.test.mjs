@@ -35,6 +35,7 @@ test("SDK keeps fetch outside SQL transactions and refuses application operator 
   let ports;
   try {
     ports = await SyncWorkerPorts.connect({ principalUserId: "source-worker", grantId: "sync-grant-a" });
+    assert.equal("client" in ports, false); assert.equal("rpc" in ports, false);
     const job = await ports.createWindow("INVENTORY", until);
     let calls = 0;
     const done = await ports.run(job, async ({ limit, cursor }) => {
