@@ -242,3 +242,52 @@ test("read-port controls reject accessors and proxies before invoking them or so
   assert.equal(invoked, false);
   assert.equal(reader.calls.length, 0);
 });
+
+test("read-port signals reject proxies and unbranded signals without invoking traps or source I/O", async () => {
+  const reader = fakeReader();
+  const port = module.bindSourceReadPort(reader, key, actor, scope);
+  let invoked = false;
+  const proxy = new Proxy(new globalThis.AbortController().signal, {
+    getPrototypeOf(target) {
+      invoked = true;
+      return Reflect.getPrototypeOf(target);
+    },
+  });
+  const overridden = new globalThis.AbortController().signal;
+  Object.defineProperty(overridden, "aborted", {
+    get() {
+      invoked = true;
+      return false;
+    },
+  });
+  for (const signal of [proxy, Object.create(globalThis.AbortSignal.prototype), overridden]) {
+    for (const operation of [
+      () => port.read(request, { signal }),
+      () => port.findPublication({ signal }),
+    ])
+      await assert.rejects(operation(), { code: "SOURCE_INPUT" });
+  }
+  assert.equal(invoked, false);
+  assert.equal(reader.calls.length, 0);
+});
+
+test("read-port signals reject symbol accessors before native brand checks or source I/O", async () => {
+  const reader = fakeReader(),
+    signal = new globalThis.AbortController().signal;
+  let invoked = false;
+  const slot =
+    Object.getOwnPropertySymbols(signal).find((key) => String(key) === "Symbol(kAborted)") ??
+    Symbol("hostile");
+  Object.defineProperty(signal, slot, {
+    get() {
+      invoked = true;
+      return false;
+    },
+  });
+  await assert.rejects(
+    module.bindSourceReadPort(reader, key, actor, scope).read(request, { signal }),
+    { code: "SOURCE_INPUT" },
+  );
+  assert.equal(invoked, false);
+  assert.equal(reader.calls.length, 0);
+});

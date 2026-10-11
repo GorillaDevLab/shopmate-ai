@@ -2,6 +2,27 @@ import { SourceStorageError } from "./errors.js";
 import { types } from "node:util";
 import { validateUtc } from "./record-primitives.js";
 import type { SourceReadControl } from "./types.js";
+function validSignal(signal: unknown): signal is AbortSignal {
+  if (
+    !signal ||
+    typeof signal !== "object" ||
+    types.isProxy(signal) ||
+    Object.getPrototypeOf(signal) !== AbortSignal.prototype ||
+    !(signal instanceof AbortSignal) ||
+    Object.getOwnPropertyNames(signal).length > 0
+  )
+    return false;
+  for (const key of Object.getOwnPropertySymbols(signal)) {
+    const descriptor = Object.getOwnPropertyDescriptor(signal, key);
+    if (!descriptor || !("value" in descriptor)) return false;
+  }
+  try {
+    Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")!.get!.call(signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function fixedPortControl(control?: SourceReadControl): SourceReadControl {
   if (control !== undefined) {
@@ -22,7 +43,7 @@ export function fixedPortControl(control?: SourceReadControl): SourceReadControl
       )
         throw new SourceStorageError("SOURCE_INPUT");
     }
-    if (control.signal !== undefined && !(control.signal instanceof AbortSignal))
+    if (control.signal !== undefined && !validSignal(control.signal))
       throw new SourceStorageError("SOURCE_INPUT");
   }
   const requested = control?.deadlineAt;
