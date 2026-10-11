@@ -213,7 +213,7 @@ function publicationFields(value: unknown): Publication {
   );
   requireInput([result.targetTime, result.processedThrough, result.publishedAt].every(validateUtc));
   requireInput(
-    result.generatorVersion === "mock-source-v1" &&
+    ["mock-source-v1", "mock-source-v2"].includes(result.generatorVersion as string) &&
       result.runtimeVersion === "mock-runtime-v2" &&
       result.codec === "source-snapshot-v1" &&
       hash(result.certificateHash),

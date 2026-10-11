@@ -1,3 +1,4 @@
+import { scenarioCatalog } from "./mock-scenario-products.js";
 import { createHash } from "node:crypto";
 import {
   ConnectorInventorySchema,
@@ -9,7 +10,7 @@ import {
 import { generateCatalog, sourceAt, type CatalogEntry } from "./mock-catalog.js";
 import {
   DAY_MS,
-  GENERATOR_VERSION,
+  generatorVersion,
   MockConfigSchema,
   openingTime,
   type MockConfig,
@@ -68,12 +69,13 @@ export function generateMockSource(input: unknown, asOf: unknown): MockSnapshot 
   );
   const store = opened ? storeRow(config) : null;
   const payload = {
-    generatorVersion: GENERATOR_VERSION,
+    generatorVersion: generatorVersion(config),
     binding: config.binding,
     observedAt,
     historyUntil: new Date(until).toISOString(),
     store,
-    catalog,
+    catalog:
+      opened && config.scenarioPlan ? scenarioCatalog(config, Date.parse(observedAt)) : catalog,
     orders: Array.from(state.orders.values(), (order) => ConnectorOrderSchema.parse(order)),
     economics: Array.from(state.economics.values()),
     refunds: state.refunds,
