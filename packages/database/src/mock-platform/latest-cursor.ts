@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { SourceStorageError } from "./errors.js";
-import { decodeCompactLatest, encodeCompactLatest } from "./latest-cursor-codec.js";
+import {
+  decodeCompactLatest,
+  decodeLatestCheckpoint,
+  encodeCompactLatest,
+  type CompactLatestState,
+} from "./latest-cursor-codec.js";
 import type { LatestStateInput } from "./latest-types.js";
 import type { Publication } from "./publication-types.js";
 import type { SourceScope } from "./types.js";
@@ -45,6 +50,22 @@ export function readLatestCursor(
   now = Date.now(),
 ): LatestCursorState {
   const state = decodeCompactLatest(key, cursor, now);
+  return scopedCursor(state, scope, input);
+}
+export function readLatestCheckpoint(
+  key: string,
+  cursor: string,
+  scope: SourceScope,
+  input: LatestStateInput,
+  now = Date.now(),
+): LatestCursorState {
+  return scopedCursor(decodeLatestCheckpoint(key, cursor, now), scope, input);
+}
+function scopedCursor(
+  state: CompactLatestState,
+  scope: SourceScope,
+  input: LatestStateInput,
+): LatestCursorState {
   if (state.s !== scopeDigest(scope) || state.q !== queryDigest(input) || state.t !== input.until)
     throw new SourceStorageError("SOURCE_INPUT");
   return {

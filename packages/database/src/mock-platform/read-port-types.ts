@@ -16,6 +16,7 @@ export interface SourceReadPage extends LatestStatePage {
 }
 export interface BoundSourceReadPort {
   read(request: unknown, control?: SourceReadControl): Promise<SourceReadPage | null>;
+  refreshCheckpoint(request: unknown, control?: SourceReadControl): Promise<string | null>;
 }
 export interface SourceReadPorts {
   bind(actor: SourceReadActor, scope: SourceScope): BoundSourceReadPort;
