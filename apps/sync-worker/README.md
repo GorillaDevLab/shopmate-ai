@@ -1,6 +1,8 @@
-# Sync window planner
+# Sync worker building blocks
 
-This package currently provides a pure advisory planner. It has no CLI, runner, connector I/O, database mutations, lease changes or retries.
+This package provides a pure advisory window planner and restricted commerce read composition. It does not yet provide a CLI or durable job runner.
+
+`SyncCommerce` opens the existing read-only connector from a freshly checked server runtime bootstrap and restricted source ports. Factory access rechecks current authority and refreshes the persisted business clock. `CheckpointReadPort` can recover expired signed continuations without changing their original cutoff or committing business cursor progress. All five read streams are supported; windows and business facts still require the separate durable runner.
 
 `planSyncWindows(input)` accepts a closed normalized projection and validates it at runtime, including bounded identifiers, exact canonical UTC milliseconds, five unique stream slots and data-only objects. Accessors, proxies, custom prototypes and unknown fields are rejected without invoking user getters or proxy traps.
 
