@@ -7,8 +7,8 @@ export interface SyncRuntimeFailureRules {
   readonly rules: readonly MockReadFailureRule[];
 }
 
-function ruleJson(value: unknown, depth = 0): boolean {
-  if (depth > 4) return false;
+function ruleJson(value: unknown, depth = 0, maxDepth = 4): boolean {
+  if (depth > maxDepth) return false;
   if (value === null || typeof value === "boolean") return true;
   if (typeof value === "string") return value.length <= 200;
   if (typeof value === "number") return Number.isFinite(value);
@@ -21,7 +21,9 @@ function ruleJson(value: unknown, depth = 0): boolean {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     return (
       typeof key === "string" &&
-      Boolean(descriptor && "value" in descriptor && ruleJson(descriptor.value, depth + 1))
+      Boolean(
+        descriptor && "value" in descriptor && ruleJson(descriptor.value, depth + 1, maxDepth),
+      )
     );
   });
 }
@@ -41,8 +43,11 @@ export function readRuntimeFailureRules(value: unknown): SyncRuntimeFailureRules
     Reflect.ownKeys(value).length !== 2 ||
     !contextField ||
     !("value" in contextField) ||
+    !contextField.enumerable ||
+    !ruleJson(contextField.value, 0, 8) ||
     !rulesField ||
     !("value" in rulesField) ||
+    !rulesField.enumerable ||
     !ruleJson(rulesField.value)
   )
     throw new Error("SYNC_RESULT_INVALID");

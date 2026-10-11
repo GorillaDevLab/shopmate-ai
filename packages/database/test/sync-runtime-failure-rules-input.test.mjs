@@ -103,3 +103,48 @@ test("failure metadata rejects hostile descriptors and nested rule proxies witho
     assert.throws(() => readRuntimeFailureRules(value), /SYNC_RESULT_INVALID/u);
   assert.equal(invoked, false);
 });
+
+test("failure metadata rejects hostile bootstrap context before evaluating its fields", () => {
+  let invoked = false;
+  const input = view();
+  const proxy = new Proxy(input.context, {
+    ownKeys() {
+      invoked = true;
+      return Reflect.ownKeys(input.context);
+    },
+    get() {
+      invoked = true;
+      return undefined;
+    },
+  });
+  const getter = {
+    ...input.context,
+    get provider() {
+      invoked = true;
+      return "MOCK";
+    },
+  };
+  const scope = {
+    ...input.context.scope,
+    get generation() {
+      invoked = true;
+      return 0;
+    },
+  };
+  const config = {
+    ...input.context.config,
+    get historyStart() {
+      invoked = true;
+      return "2026-01-01T00:00:00.000Z";
+    },
+  };
+  for (const context of [
+    proxy,
+    getter,
+    { ...input.context, scope },
+    { ...input.context, config },
+  ]) {
+    assert.throws(() => readRuntimeFailureRules({ ...input, context }), /SYNC_RESULT_INVALID/u);
+    assert.equal(invoked, false);
+  }
+});
