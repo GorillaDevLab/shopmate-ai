@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import process from "node:process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { SyncWorkerPorts } from "@shopmate/database/sync-host";
 import { createMockSourceWorker } from "@shopmate/database/mock-platform";
 import { createMockSourceReadPorts } from "@shopmate/database/mock-platform-read";
-import { SyncCommerce, SyncPageRunner, projectSyncWork } from "../dist/index.js";
+import { SyncCommerce, SyncCoordinator, SyncPageRunner, projectSyncWork } from "../dist/index.js";
 import {
   decodeCompactLatest,
   encodeCompactLatest,
@@ -274,4 +276,64 @@ test("stop after a real source fetch preserves the live job without committing o
   assert.equal(result.reason, "STOPPED");
   assert.equal((await latestJob(opened, "PRODUCTS")).status, "RUNNING");
   assert.deepEqual(await savedCounts(state.scope, job.id), { products: 0, receipts: 0, pages: 0 });
+});
+
+test("the real coordinator shares a target, resumes its pinned lease and waits only after all five streams finish", async () => {
+  const { state } = await preparedRuntime(201);
+  const coordinator = new SyncCoordinator(host, sources);
+  const first = await coordinator.pass({ maxPages: 1 });
+  assert.equal(first.status, "PROGRESSED");
+  assert.equal(first.created.length, 5);
+  assert.deepEqual(new Set(first.created.map((job) => job.until)), new Set([until]));
+  const product = first.outcomes.find((result) => result.job.stream === "PRODUCTS");
+  assert.equal(product.reason, "PAGE_LIMIT");
+  assert.equal(first.outcomes.filter((result) => result.reason === "SUCCEEDED").length, 4);
+  const second = await coordinator.pass();
+  assert.equal(second.status, "PROGRESSED");
+  assert.equal(second.created.length, 0);
+  assert.equal(second.outcomes.length, 1);
+  assert.equal(second.outcomes[0].reason, "SUCCEEDED");
+  const counts = await savedCounts(state.scope, product.job.id);
+  assert.equal(counts.products, 201);
+  assert.equal(counts.receipts, counts.pages);
+  assert.equal((await coordinator.pass()).reason, "CAUGHT_UP");
+});
+
+test("the built CLI runs a real grant-only pass and reports only committed jobs", async () => {
+  const { state, grant } = await preparedRuntime();
+  await host.close();
+  host = undefined;
+  const result = await promisify(execFile)(
+    process.execPath,
+    ["apps/sync-worker/dist/main.js", "--once"],
+    {
+      windowsHide: true,
+      timeout: 30000,
+      env: {
+        ...process.env,
+        ...context.env,
+        APP_ENV: "demo",
+        ENABLE_DEMO_MODE: "true",
+        SYNC_WORKER_GRANT_ID: grant,
+      },
+    },
+  );
+  assert.equal(result.stderr, "");
+  assert.deepEqual(JSON.parse(result.stdout), {
+    status: "PROGRESSED",
+    created: 5,
+    outcomes: 5,
+    succeeded: 5,
+  });
+  const jobs = await database.admin.query(
+    'SELECT id,status FROM sync_host."Job" WHERE "grantId"=$1',
+    [grant],
+  );
+  assert.equal(jobs.rowCount, 5);
+  assert.ok(jobs.rows.every((job) => job.status === "SUCCEEDED"));
+  const products = await database.admin.query(
+    'SELECT count(*)::int AS count FROM commerce."ProductListing" WHERE "storeId"=$1',
+    [state.scope.storeId],
+  );
+  assert.equal(products.rows[0].count, 1);
 });
