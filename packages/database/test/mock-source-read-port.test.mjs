@@ -73,7 +73,7 @@ test("unpublished and insufficient coverage stay unknown without reading entity 
 });
 
 test("the read facade preserves legal commerce identities for certified absence", async () => {
-  for (const id of ["x".repeat(256), "ç•Œ".repeat(256), "\ud800"]) {
+  for (const id of ["x".repeat(256), "界".repeat(256), "\ud800"]) {
     const reader = fakeReader();
     const page = await module
       .bindSourceReadPort(reader, key, actor, scope)
