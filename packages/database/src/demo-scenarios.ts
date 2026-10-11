@@ -38,7 +38,10 @@ export async function scenarioView(
       'configHash',"configHash",'loadedAt',to_char("loadedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
       'businessClock',to_char("businessClock",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
       'plan',config->'scenarioPlan','status',CASE WHEN ${row.status}='DISCONNECTED' AND "configHash"=${row.configHash}
-        AND generation=(SELECT max(previous.generation) FROM demo."DemoScenarioRun" previous WHERE previous."sessionId"=${row.id}) THEN 'DISCONNECTED'
+        AND generation=(SELECT max(previous.generation) FROM demo."DemoScenarioRun" previous WHERE previous."sessionId"=${row.id})
+        AND NOT EXISTS (SELECT 1 FROM demo."DemoControlAudit" control WHERE control."organizationId"=${row.organizationId}
+          AND control."workspaceId"=${row.workspaceId} AND control."sessionId"=${row.id}
+          AND control.kind='RESET' AND control."afterRevision">"DemoScenarioRun"."loadedRevision") THEN 'DISCONNECTED'
         WHEN generation<>${row.generation} THEN 'SUPERSEDED' ELSE 'ACTIVE' END) AS run
     FROM demo."DemoScenarioRun" WHERE "sessionId"=${row.id} AND "organizationId"=${row.organizationId}
       AND "workspaceId"=${row.workspaceId} AND "storeId"=${row.storeId} AND "connectionId"=${row.connectionId}

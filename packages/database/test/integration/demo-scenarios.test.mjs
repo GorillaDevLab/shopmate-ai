@@ -389,3 +389,22 @@ test("run history remains immutable and observes reset/disconnect generation fen
     "CONFLICT",
   );
 });
+test("reset with the same configuration never reclassifies a superseded run as disconnected", async () => {
+  const before = await repo.findDemoSession(actor, scope.storeId);
+  const reset = await repo.resetDemoSession(actor, scope.storeId, {
+    expectedRevision: before.revision,
+    config: before.config,
+    configHash: before.configHash,
+    generatorVersion: before.generatorVersion,
+    clockNow: before.clockNow,
+  });
+  assert.equal(reset.status, "WRITTEN");
+  let view = await repo.findDemoScenarios(actor, scope.storeId);
+  assert.ok(view.runs.every((run) => run.status === "SUPERSEDED"));
+  assert.equal(
+    (await repo.disconnectDemoSession(actor, scope.storeId, view.revision)).status,
+    "WRITTEN",
+  );
+  view = await repo.findDemoScenarios(actor, scope.storeId);
+  assert.ok(view.runs.every((run) => run.status === "SUPERSEDED"));
+});
