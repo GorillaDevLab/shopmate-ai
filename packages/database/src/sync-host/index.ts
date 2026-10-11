@@ -1,6 +1,7 @@
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { readRuntimeBootstrap, type SyncRuntimeBootstrap } from "./bootstrap.js";
+import { readRuntimeFailureRules, type SyncRuntimeFailureRules } from "./failure-rules.js";
 import {
   encodeWorkerPage,
   workerCursor,
@@ -13,6 +14,7 @@ import {
 
 export type { SyncStream } from "./input.js";
 export type { SyncRuntimeBootstrap } from "./bootstrap.js";
+export type { SyncRuntimeFailureRules } from "./failure-rules.js";
 export interface SyncJob {
   id: string;
   stream: SyncStream;
@@ -137,6 +139,13 @@ export class SyncWorkerPorts {
     return readRuntimeBootstrap(
       await this.#rpc("SELECT sync_host.runtime_bootstrap($1) AS result", [this.grantId]),
     );
+  }
+  async runtimeFailureRules(): Promise<SyncRuntimeFailureRules | null> {
+    const result = readRuntimeFailureRules(
+      await this.#rpc("SELECT sync_host.runtime_failure_rules($1) AS result", [this.grantId]),
+    );
+    if (result && result.context.grantId !== this.grantId) throw new Error("SYNC_RESULT_INVALID");
+    return result;
   }
   async createWindow(stream: SyncStream, until: string): Promise<SyncJob> {
     return readJob(
