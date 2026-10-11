@@ -33,9 +33,11 @@ export function workerCursor(value: unknown): string | null {
 }
 function safeRecord(value: unknown): unknown {
   try {
-    const encoded = JSON.stringify(value, (_key: string, item: unknown) => {
+    const encoded = JSON.stringify(value, (key: string, item: unknown) => {
+      if (key.includes(String.fromCharCode(0)) || /\p{Cs}/u.test(key)) throw new Error("INVALID_RECORD");
       if (typeof item === "string" && (item.includes(String.fromCharCode(0)) || /\p{Cs}/u.test(item))) throw new Error("INVALID_RECORD");
-      if (typeof item === "bigint" || typeof item === "function" || typeof item === "symbol") throw new Error("INVALID_RECORD");
+      if (typeof item === "number" && !Number.isSafeInteger(item)) throw new Error("INVALID_RECORD");
+      if (typeof item === "bigint" || typeof item === "function" || typeof item === "symbol" || item === undefined) throw new Error("INVALID_RECORD");
       return item;
     });
     return encoded === undefined ? {} : JSON.parse(encoded) as unknown;

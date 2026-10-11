@@ -21,6 +21,7 @@ test("privileged worker export stays separate from application business modules"
 test("closed bounded page boundary maps non-PostgreSQL text records to fixed quarantine candidates", () => {
   const page = { items: [{ title: "bad\u0000payload" }], nextCursor: null, observedAt: "2026-01-02T00:00:00.000Z", sourceWatermark: null };
   assert.deepEqual(JSON.parse(encodeWorkerPage("PRODUCTS", page)).items, [{}]);
+  assert.deepEqual(JSON.parse(encodeWorkerPage("PRODUCTS", { ...page, items: [{ "bad\u0000key": 1 }, { refundMinor: Infinity }] })).items, [{}, {}]);
   assert.throws(() => encodeWorkerPage("ORDERS", { ...page, items: Array(11).fill({}) }), /SYNC_PAGE_INVALID/u);
   assert.throws(() => encodeWorkerPage("PRODUCTS", { ...page, extra: true }), /SYNC_PAGE_INVALID/u);
   assert.throws(() => encodeWorkerPage("PRODUCTS", { ...page, nextCursor: "x".repeat(1025) }), /SYNC_PAGE_INVALID/u);
