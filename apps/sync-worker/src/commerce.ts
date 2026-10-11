@@ -16,6 +16,7 @@ import {
 import type { SyncRuntimeBootstrap, SyncWorkerPorts } from "@shopmate/database/sync-host";
 import type { SourceReadPorts } from "@shopmate/database/mock-platform-read";
 import { CommerceReadPort, commerceFailure } from "./commerce-read.js";
+import { validReadSignal } from "./checkpoint-read.js";
 
 type BootstrapPort = Pick<SyncWorkerPorts, "runtimeBootstrap">;
 export interface OpenedSyncCommerce {
@@ -25,7 +26,7 @@ export interface OpenedSyncCommerce {
 function options(input: unknown): ReadOptions {
   const { signal, ...json } = optionData(input);
   const parsed = ReadOptionsSchema.safeParse(json);
-  if (!parsed.success || (signal !== undefined && !(signal instanceof AbortSignal)))
+  if (!parsed.success || (signal !== undefined && !validReadSignal(signal)))
     throw new MockConnectorError("INVALID_INPUT");
   return {
     ...parsed.data,

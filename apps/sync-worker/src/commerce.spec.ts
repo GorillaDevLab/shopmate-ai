@@ -408,3 +408,54 @@ it("keeps an existing connector usable after mutable rule session revisions adva
     await c.listProducts({ until: bootstrap().businessNow, limit: 1 }, options()),
   ).toMatchObject({ ok: true, data: { items: [] } });
 });
+
+it.each(["proxied", "unbranded", "overridden"] as const)(
+  "rejects %s signals before bootstrap I/O",
+  async (kind) => {
+    const f = fixture(),
+      invoked = vi.fn();
+    let signal: object = new AbortController().signal;
+    if (kind === "proxied")
+      signal = new Proxy(signal, {
+        getPrototypeOf(target) {
+          invoked();
+          return Reflect.getPrototypeOf(target);
+        },
+      });
+    if (kind === "unbranded") signal = Object.create(AbortSignal.prototype);
+    if (kind === "overridden")
+      Object.defineProperty(signal, "aborted", {
+        get() {
+          invoked();
+          return false;
+        },
+      });
+    expect(await f.commerce.open({ ...options(), signal })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+    expect(invoked).not.toHaveBeenCalled();
+    expect(f.host.runtimeBootstrap).not.toHaveBeenCalled();
+  },
+);
+
+it("rejects signal symbol accessors before bootstrap I/O", async () => {
+  const f = fixture(),
+    invoked = vi.fn(),
+    signal = new AbortController().signal;
+  const slot =
+    Object.getOwnPropertySymbols(signal).find((key) => String(key) === "Symbol(kAborted)") ??
+    Symbol("hostile");
+  Object.defineProperty(signal, slot, {
+    get() {
+      invoked();
+      return false;
+    },
+  });
+  expect(await f.commerce.open({ ...options(), signal })).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+  expect(invoked).not.toHaveBeenCalled();
+  expect(f.host.runtimeBootstrap).not.toHaveBeenCalled();
+});

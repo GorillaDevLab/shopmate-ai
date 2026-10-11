@@ -137,3 +137,71 @@ describe("durable checkpoint read adapter", () => {
     expect(reads).toBe(1);
   });
 });
+
+it.each(["proxied", "unbranded", "overridden"] as const)(
+  "rejects %s signals before checkpoint/source I/O",
+  async (kind) => {
+    let invoked = false,
+      calls = 0;
+    let signal: object = new AbortController().signal;
+    if (kind === "proxied")
+      signal = new Proxy(signal, {
+        getPrototypeOf(target) {
+          invoked = true;
+          return Reflect.getPrototypeOf(target);
+        },
+      });
+    if (kind === "unbranded") signal = Object.create(AbortSignal.prototype);
+    if (kind === "overridden")
+      Object.defineProperty(signal, "aborted", {
+        get() {
+          invoked = true;
+          return false;
+        },
+      });
+    const port = new CheckpointReadPort({
+      async read() {
+        calls++;
+        return null;
+      },
+      async refreshCheckpoint() {
+        calls++;
+        return null;
+      },
+    });
+    await expect(
+      port.read(request, { ...options(), signal: signal as AbortSignal }),
+    ).rejects.toMatchObject({ code: "SOURCE_INPUT" });
+    expect(invoked).toBe(false);
+    expect(calls).toBe(0);
+  },
+);
+
+it("rejects signal symbol accessors before native brand checks or source I/O", async () => {
+  let invoked = false,
+    reads = 0;
+  const signal = new AbortController().signal;
+  const slot =
+    Object.getOwnPropertySymbols(signal).find((key) => String(key) === "Symbol(kAborted)") ??
+    Symbol("hostile");
+  Object.defineProperty(signal, slot, {
+    get() {
+      invoked = true;
+      return false;
+    },
+  });
+  const port = new CheckpointReadPort({
+    async read() {
+      reads++;
+      return null;
+    },
+    async refreshCheckpoint() {
+      return null;
+    },
+  });
+  await expect(port.read(request, { ...options(), signal })).rejects.toMatchObject({
+    code: "SOURCE_INPUT",
+  });
+  expect(invoked).toBe(false);
+  expect(reads).toBe(0);
+});

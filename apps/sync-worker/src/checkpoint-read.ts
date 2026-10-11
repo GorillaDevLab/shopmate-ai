@@ -8,6 +8,27 @@ interface CheckpointReader {
   read(request: unknown, control?: ReadControl): Promise<unknown | null>;
   refreshCheckpoint(request: unknown, control?: ReadControl): Promise<string | null>;
 }
+export function validReadSignal(signal: unknown): signal is AbortSignal {
+  if (
+    !signal ||
+    typeof signal !== "object" ||
+    types.isProxy(signal) ||
+    Object.getPrototypeOf(signal) !== AbortSignal.prototype ||
+    !(signal instanceof AbortSignal) ||
+    Object.getOwnPropertyNames(signal).length > 0
+  )
+    return false;
+  for (const key of Object.getOwnPropertySymbols(signal)) {
+    const descriptor = Object.getOwnPropertyDescriptor(signal, key);
+    if (!descriptor || !("value" in descriptor)) return false;
+  }
+  try {
+    Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")!.get!.call(signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function dataRecord(input: unknown): Record<string, unknown> {
   if (
@@ -58,7 +79,7 @@ function snapshotRequest(input: unknown): Readonly<Record<string, unknown>> {
 function sourceControl(input: ReadOptions) {
   const { signal, ...json } = dataRecord(input);
   const parsed = ReadOptionsSchema.safeParse(json);
-  if (!parsed.success || (signal !== undefined && !(signal instanceof AbortSignal)))
+  if (!parsed.success || (signal !== undefined && !validReadSignal(signal)))
     throw new SourceStorageError("SOURCE_INPUT");
   return Object.freeze({
     deadlineAt: new Date(
