@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { performance } from "node:perf_hooks";
-import { leasePortDatabase, closeLeasePortDatabase } from "../helpers/mock-source-lease-port-fixture.mjs";
-import { preparedAppend, sdkAppend, unchangedAppend } from "../helpers/mock-source-append-port-fixture.mjs";
+import {
+  leasePortDatabase,
+  closeLeasePortDatabase,
+} from "../helpers/mock-source-lease-port-fixture.mjs";
+import {
+  preparedAppend,
+  sdkAppend,
+  unchangedAppend,
+} from "../helpers/mock-source-append-port-fixture.mjs";
 import { eventFor, snapshot, suppression } from "../helpers/mock-source-append-fixture.mjs";
 
 const source = await import("../../dist/src/mock-platform/index.js");
 let context;
 test.before(async () => {
-  context = await leasePortDatabase(source, "append");
+  context = await leasePortDatabase(source, "bulk");
   await context.rawAdmin.query(`
     CREATE TABLE mock_platform.test_append_statements (kind text, rows integer);
     GRANT INSERT ON mock_platform.test_append_statements TO shopmate_mock_source_worker;
@@ -29,10 +36,14 @@ function chunk(state, count) {
   return {
     expectedCheckpointHash: state.lease.checkpointHash,
     next: { processedThrough: state.lease.targetTime, sealed: false },
-    events: Array.from({ length: count }, (_, index) => eventFor(
-      { scope: state.scope, job: { targetTime: state.lease.targetTime } },
-      "STORE", String(index), state.lease.targetTime,
-    )),
+    events: Array.from({ length: count }, (_, index) =>
+      eventFor(
+        { scope: state.scope, job: { targetTime: state.lease.targetTime } },
+        "STORE",
+        String(index),
+        state.lease.targetTime,
+      ),
+    ),
   };
 }
 
@@ -53,11 +64,14 @@ test("bounded append scans its pending suffix once per table while preserving se
     assert.deepEqual(event.payload, facts.versions[index].payload);
     assert.equal(facts.versions[index].versionHash, event.manifest[0].versionHash);
   }
-  const observed = (await context.rawAdmin.query(
-    "SELECT kind,rows FROM mock_platform.test_append_statements ORDER BY kind",
-  )).rows;
+  const observed = (
+    await context.rawAdmin.query(
+      "SELECT kind,rows FROM mock_platform.test_append_statements ORDER BY kind",
+    )
+  ).rows;
   assert.deepEqual(observed, [
-    { kind: "EntityVersion", rows: 20 }, { kind: "SourceEvent", rows: 20 },
+    { kind: "EntityVersion", rows: 20 },
+    { kind: "SourceEvent", rows: 20 },
   ]);
   await unchangedAppend(context, state, input, { ...committed, status: "ALREADY_COMMITTED" });
 });
@@ -69,4 +83,3 @@ for (const table of ["SourceEvent", "EntityVersion"])
       unchangedAppend(context, state, chunk(state, 3), "SOURCE_INTEGRITY"),
     );
   });
-
