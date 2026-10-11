@@ -77,15 +77,23 @@ function integer(value: unknown, min = 0): number {
 }
 export function sqlTime(value: unknown, microseconds = false): string {
   workAssert(typeof value === "string");
-  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|\+00:00)?$/u.exec(
-    value,
-  );
+  const match =
+    /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?(Z|[+-]\d{2}:\d{2})?$/u.exec(value);
   workAssert(match && !value.startsWith("0000") && (microseconds || (match[3]?.length ?? 0) <= 3));
-  const canonical = `${match[1]}T${match[2]}.${(match[3] ?? "").padEnd(3, "0").slice(0, 3)}Z`;
-  workAssert(
-    Number.isFinite(Date.parse(canonical)) && new Date(canonical).toISOString() === canonical,
-  );
+  const local = `${match[1]}T${match[2]}.${(match[3] ?? "").padEnd(3, "0").slice(0, 3)}Z`;
+  const milliseconds = Date.parse(local);
+  // Validate the wall clock before shifting it: Date.parse rolls invalid dates forward.
+  workAssert(Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === local);
+  const canonical = new Date(milliseconds - sqlOffset(match[4]) * 60000).toISOString();
+  workAssert(/^\d{4}-/u.test(canonical) && !canonical.startsWith("0000"));
   return canonical;
+}
+function sqlOffset(offset: string | undefined): number {
+  if (offset === undefined || offset === "Z") return 0;
+  const hours = Number(offset.slice(1, 3)),
+    minutes = Number(offset.slice(4, 6));
+  workAssert(hours <= 23 && minutes <= 59);
+  return (offset[0] === "-" ? -1 : 1) * (hours * 60 + minutes);
 }
 function nullableTime(value: unknown, microseconds = false): string | null {
   return value === null ? null : sqlTime(value, microseconds);

@@ -106,3 +106,28 @@ it("accepts exactly five unique stream slots and rejects extra slots, symbols an
   Object.assign(cursor.jobs[0]!, { cursor: "x".repeat(1025) });
   expect(() => projectSyncWork(cursor, context)).toThrow();
 });
+it.each([
+  ["2026-01-02T13:00:00+13:00", "2026-01-02T00:00:00.000Z"],
+  ["2026-01-01 18:30:00.12-05:30", "2026-01-02T00:00:00.120Z"],
+])("normalizes offset SQL work timestamp %s", (input, canonical) => {
+  const raw = rawWork();
+  Object.assign(raw.jobs[0]!, {
+    observedAt: input,
+    leaseUntil: input,
+    leaseBackendStart: "2026-10-12T03:17:21.095366+13:00",
+  });
+  expect(projectSyncWork(raw, context).jobs[0]?.observedAt).toBe(canonical);
+});
+it.each([
+  "2026-02-30T13:00:00+13:00",
+  "2026-01-02T24:00:00+13:00",
+  "2026-01-02T13:60:00+13:00",
+  "2026-01-02T13:00:60+13:00",
+  "2026-01-02T13:00:00+24:00",
+  "2026-01-02T13:00:00+13:60",
+  "2026-01-02T13:00:00.123456+13:00",
+])("rejects invalid offset timestamp %s", (input) => {
+  const raw = rawWork();
+  Object.assign(raw.jobs[0]!, { observedAt: input });
+  expect(() => projectSyncWork(raw, context)).toThrow("SYNC_WORK_INVALID");
+});

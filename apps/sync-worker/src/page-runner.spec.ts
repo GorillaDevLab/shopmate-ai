@@ -320,3 +320,26 @@ it.each(["getter", "proxy"])(
     expect(f.events).toEqual([]);
   },
 );
+it.each(["2026-01-02T13:00:00+13:00", "2026-01-01T19:00:00-05:00"])(
+  "normalizes committed SQL freshness %s after one durable commit",
+  async (timestamp) => {
+    const f = fixture();
+    f.host.commitPage.mockImplementation(async (job) => ({
+      ...job,
+      status: "SUCCEEDED",
+      pageCount: job.pageCount + 1,
+      observedAt: timestamp,
+      sourceWatermark: timestamp,
+      successfulThrough: timestamp,
+    }));
+    const result = await f.runner.run(f.initial);
+    expect(result.reason).toBe("SUCCEEDED");
+    expect([
+      result.job.observedAt,
+      result.job.sourceWatermark,
+      result.job.successfulThrough,
+    ]).toEqual(Array(3).fill("2026-01-02T00:00:00.000Z"));
+    expect(f.host.commitPage).toHaveBeenCalledTimes(1);
+    expect(f.fetch).toHaveBeenCalledTimes(1);
+  },
+);
