@@ -6,6 +6,10 @@ import { loginUrl, migrateSource, sourceEnv, sourceFixtures } from "./mock-platf
 import { maintenanceClient } from "./mock-source-control-fixture.mjs";
 
 const portDatabases = {
+  synccheckpoint: {
+    name: "shopmate_tenant_test_synccheckpoint",
+    sql: 'CREATE DATABASE "shopmate_tenant_test_synccheckpoint"',
+  },
   history: {
     name: "shopmate_tenant_test_history",
     sql: 'CREATE DATABASE "shopmate_tenant_test_history"',
