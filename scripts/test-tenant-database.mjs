@@ -160,6 +160,9 @@ try {
   await run("packages/database", "test/integration/sync-runtime-sdk.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("packages/database", "test/integration/sync-runtime-failure-rules.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   const runtimeUrl = await prepareTenantApiRuntime(server.url);
   await run(
     "apps/api",

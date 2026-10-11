@@ -26,6 +26,14 @@ test("real sync checkpoint recovery builds its runtime and is mandatory in tenan
   );
 });
 
+test("grant-scoped failure metadata PostgreSQL coverage is mandatory", () => {
+  assert.ok(
+    readFileSync("scripts/test-tenant-database.mjs", "utf8").includes(
+      "test/integration/sync-runtime-failure-rules.test.mjs",
+    ),
+  );
+});
+
 test("real source host recovery is mandatory in tenant CI", () => {
   const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
   assert.match(gate, /await run\("apps\/source-worker", "test\/source-build\.test\.mjs"/u);
