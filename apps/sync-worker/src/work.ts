@@ -147,7 +147,10 @@ function readJob(raw: unknown, checked: SyncRuntimeBootstrap): SyncJob {
     id(record.grantId) === checked.grantId &&
       SYNC_STREAMS.includes(record.stream as SyncJob["stream"]),
   );
-  workAssert(["READY", "RUNNING", "FAILED", "SUCCEEDED"].includes(String(record.status)));
+  workAssert(
+    typeof record.status === "string" &&
+      ["READY", "RUNNING", "FAILED", "SUCCEEDED"].includes(record.status),
+  );
   const since = sqlTime(record.since),
     until = sqlTime(record.until);
   workAssert(
@@ -155,7 +158,18 @@ function readJob(raw: unknown, checked: SyncRuntimeBootstrap): SyncJob {
       since < until &&
       Date.parse(until) - Date.parse(since) <= MAX_WINDOW_MS,
   );
-  const result = {
+  const result = projectedJob(record, checked, since, until);
+  workAssert(result.sourceWatermark === null || result.sourceWatermark <= until);
+  workAssert(result.successfulThrough === null || result.successfulThrough <= until);
+  return Object.freeze(result);
+}
+function projectedJob(
+  record: Record<string, unknown>,
+  checked: SyncRuntimeBootstrap,
+  since: string,
+  until: string,
+): SyncJob {
+  return {
     id: id(record.id),
     stream: record.stream as SyncJob["stream"],
     fence: integer(record.fence),
@@ -175,9 +189,6 @@ function readJob(raw: unknown, checked: SyncRuntimeBootstrap): SyncJob {
     provider: checked.provider,
     generation: checked.scope.generation,
   };
-  workAssert(result.sourceWatermark === null || result.sourceWatermark <= until);
-  workAssert(result.successfulThrough === null || result.successfulThrough <= until);
-  return Object.freeze(result);
 }
 function readJobs(raw: unknown, checked: SyncRuntimeBootstrap): readonly SyncJob[] {
   workAssert(raw && typeof raw === "object" && !types.isProxy(raw) && Array.isArray(raw));
