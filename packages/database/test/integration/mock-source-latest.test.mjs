@@ -535,3 +535,66 @@ test("explicit pins recheck authorization when revocation hides the certificate 
     );
   }
 });
+
+test("authorized restart refreshes an expired checkpoint without changing its immutable snapshot", async () => {
+  const state = await preparedAppend(context);
+  const publication = await publishEvents(state, [product(state, "a"), product(state, "z")]);
+  const input = { until: publication.targetTime, kind: "PRODUCT", limit: 1 };
+  const first = await reader.readLatestStates(readerActor, state.scope, input);
+  const position = { ...first.items[0], eventSeq: first.items[0].eventSeq };
+  const oldNow = Date.now() - 20 * 60_000;
+  const expired = createLatestCursor(
+    context.env.MOCK_SOURCE_CURSOR_KEY,
+    state.scope,
+    publication,
+    input,
+    position,
+    oldNow + 60_000,
+    oldNow,
+  );
+  await assert.rejects(
+    reader.readLatestStates(readerActor, state.scope, { ...input, cursor: expired }),
+    { code: "SOURCE_INPUT" },
+  );
+  const restarted = source.createMockSourceReader(context.env);
+  try {
+    const cursor = await restarted.refreshLatestCheckpoint(readerActor, state.scope, {
+      ...input,
+      cursor: expired,
+    });
+    assert.equal(typeof cursor, "string");
+    const recovered = readLatestCursor(
+      context.env.MOCK_SOURCE_CURSOR_KEY,
+      cursor,
+      state.scope,
+      input,
+    );
+    assert.equal(recovered.certificateHash, publication.certificateHash);
+    assert.equal(recovered.highEventSeq, publication.highEventSeq);
+    assert.equal(recovered.afterEventSeq, position.eventSeq);
+    const next = await restarted.readLatestStates(readerActor, state.scope, { ...input, cursor });
+    assert.deepEqual(
+      next.items.map((item) => item.payload.externalProductId),
+      ["z"],
+    );
+    assert.equal(next.nextCursor, null);
+    for (const change of [{ limit: 2 }, { kind: "ORDER" }, { cursor: expired + "!" }])
+      await assert.rejects(
+        restarted.refreshLatestCheckpoint(readerActor, state.scope, {
+          ...input,
+          cursor: expired,
+          ...change,
+        }),
+        { code: "SOURCE_INPUT" },
+      );
+    assert.equal(
+      await restarted.refreshLatestCheckpoint({ ...readerActor, userId: "unknown" }, state.scope, {
+        ...input,
+        cursor: expired,
+      }),
+      null,
+    );
+  } finally {
+    await restarted.close();
+  }
+});

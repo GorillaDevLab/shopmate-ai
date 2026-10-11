@@ -62,6 +62,12 @@ export interface SourceReadControl {
   readonly deadlineAt?: string;
 }
 export interface MockSourceReader {
+  refreshLatestCheckpoint(
+    actor: SourceReadActor,
+    scope: SourceScope,
+    input: LatestStateInput,
+    control?: SourceReadControl,
+  ): Promise<string | null>;
   findPublication(
     actor: SourceReadActor,
     scope: SourceScope,

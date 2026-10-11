@@ -9,6 +9,7 @@ import { hydrateBuild } from "./hydration.js";
 import { publish } from "./publication.js";
 import { findPublication } from "./publication-certificate.js";
 import { readLatestStates, validateLatestInput } from "./latest.js";
+import { refreshLatestCheckpoint } from "./latest-checkpoint.js";
 import { scanVersions, validateScanInput } from "./scan.js";
 import type {
   ClaimResult,
@@ -52,15 +53,29 @@ export { SourceStorageError, type SourceErrorCode } from "./errors.js";
 export { packSourceChunk, type SourceChunkPlan } from "./chunk-packer.js";
 export { eventTuple, compareEventTuples } from "./record-codec.js";
 
-export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
-  const pool = sourcePool(env, "reader");
+function latestReads(
+  pool: SourcePool,
+  key: string,
+): Pick<MockSourceReader, "refreshLatestCheckpoint" | "readLatestStates"> {
   return {
+    async refreshLatestCheckpoint(actor, scope, input, control) {
+      validateReadActor(actor);
+      validateScope(scope);
+      validateLatestInput(input);
+      return refreshLatestCheckpoint(pool, key, actor, scope, input, control);
+    },
     async readLatestStates(actor, scope, input, control) {
       validateReadActor(actor);
       validateScope(scope);
       validateLatestInput(input);
-      return readLatestStates(pool, env.MOCK_SOURCE_CURSOR_KEY ?? "", actor, scope, input, control);
+      return readLatestStates(pool, key, actor, scope, input, control);
     },
+  };
+}
+export function createMockSourceReader(env: SourceEnvironment): MockSourceReader {
+  const pool = sourcePool(env, "reader");
+  return {
+    ...latestReads(pool, env.MOCK_SOURCE_CURSOR_KEY ?? ""),
     async scanVersions(actor, scope, input, control) {
       validateReadActor(actor);
       validateScope(scope);
