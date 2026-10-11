@@ -19,6 +19,14 @@ test("source bulk insertion and live authorization plan checks are mandatory", (
     assert.ok(gate.includes(`test/integration/${suite}.test.mjs`));
 });
 
+test("typed refund inventory marketing PostgreSQL suite is mandatory in the CI tenant gate", () => {
+  assert.match(readFileSync(workflowPath, "utf8"), /run: pnpm test:tenant/u);
+  assert.match(
+    readFileSync("scripts/test-tenant-database.mjs", "utf8"),
+    /await run\("packages\/database", "test\/integration\/canonical-commerce-facts\.test\.mjs"/u,
+  );
+});
+
 test("typed canonical order PostgreSQL suite is mandatory in the CI tenant gate", () => {
   assert.match(readFileSync(workflowPath, "utf8"), /run: pnpm test:tenant/u);
   assert.match(

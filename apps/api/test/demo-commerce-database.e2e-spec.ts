@@ -18,6 +18,11 @@ import {
   type DemoCommerceRepository,
 } from "../src/demo-commerce/demo-commerce.repository.js";
 
+import {
+  DEMO_FAILURE_RULE_REPOSITORY,
+  type DemoFailureRuleRepository,
+} from "../src/demo-commerce/demo-failure-rules.repository.js";
+
 const operatorUrl = process.env.TENANT_TEST_OPERATOR_URL;
 if (!operatorUrl || !process.env.DATABASE_URL)
   throw new Error("Run pnpm test:tenant with isolated PostgreSQL; this suite cannot be skipped");
@@ -120,6 +125,7 @@ describe("persisted demo controls with actual authenticated AppModule and restri
       app.get<DemoCommerceRepository>(DEMO_COMMERCE_REPOSITORY),
       { enabled: true, origin },
       provider,
+      app.get<DemoFailureRuleRepository>(DEMO_FAILURE_RULE_REPOSITORY),
     );
     const opened = await selected.open(identity(), "demo-api-store-a", options());
     if (!opened.ok) {
@@ -128,6 +134,64 @@ describe("persisted demo controls with actual authenticated AppModule and restri
     }
     return { connector: opened.data, close: () => provider.onModuleDestroy() };
   }
+  it("persists authenticated failure controls and forwards actual source after confirmed removal", async () => {
+    const session = await create();
+    const rulesPath = path() + "/failure-rules";
+    const rule = {
+      id: "api-failure",
+      priority: 10,
+      startsAt: command.observedAt,
+      endsAt: "2026-01-15T00:00:00.000Z",
+      methods: ["getProduct"],
+      effect: { kind: "FAIL", code: "RATE_LIMIT", retryAfterMs: 500 },
+    };
+    await request(app.getHttpServer()).get(rulesPath).expect(401);
+    await request(disabled.getHttpServer()).get(rulesPath).set("Cookie", cookie()).expect(404);
+    await post("/failure-rules", { expectedRevision: 0, rule }).expect(201);
+    await request(app.getHttpServer()).get(rulesPath).set("Cookie", cookie("b")).expect(404);
+    await request(app.getHttpServer())
+      .get(rulesPath + "?namespace=foreign")
+      .set("Cookie", cookie())
+      .expect(400);
+    await post("/failure-rules", { expectedRevision: 0, rule: { ...rule, id: "stale" } }).expect(
+      409,
+    );
+    const selected = await connector();
+    const ref = { externalProductId: 'quoted/"中文' };
+    expect(await selected.getProduct(ref, options())).toMatchObject({
+      ok: false,
+      error: { code: "RATE_LIMIT", retryAfterMs: 500 },
+    });
+    const reopened = await reopenedConnector();
+    try {
+      expect(await reopened.connector.getProduct(ref, options())).toMatchObject({
+        error: { code: "RATE_LIMIT" },
+      });
+    } finally {
+      await reopened.close();
+    }
+    await post("/failure-rules/remove", { expectedRevision: 1, ruleId: rule.id }).expect(400);
+    await post("/failure-rules/remove", {
+      expectedRevision: 1,
+      ruleId: rule.id,
+      confirmSessionId: "wrong",
+    }).expect(409);
+    await post("/failure-rules/remove", {
+      expectedRevision: 1,
+      ruleId: rule.id,
+      confirmSessionId: session.id,
+    }).expect(200);
+    expect(await selected.getProduct(ref, options())).toMatchObject({
+      ok: true,
+      data: { title: "Persisted fixture product" },
+    });
+    await fixture.setRole("VIEWER");
+    await post("/failure-rules", { expectedRevision: 2, rule }).expect(403);
+    await fixture.disableMembership();
+    expect(await selected.getProduct(ref, options())).toMatchObject({
+      error: { code: "PERMISSION_DENIED" },
+    });
+  });
   it("uses unknown publication, certified absence and exact persisted DTOs without replay", async () => {
     await create("demo-api-store-a", command, false);
     const opened = await connector();

@@ -59,6 +59,14 @@ export class DemoCommerceApiFixture {
   async reset() {
     const organization = "legacy-org-demo-api-merchant-a";
     await this.client.query(
+      'DELETE FROM demo."DemoFailureRuleAudit" WHERE "organizationId" = ANY($1::text[])',
+      [[organization, "legacy-org-demo-api-merchant-b"]],
+    );
+    await this.client.query(
+      'DELETE FROM demo."DemoFailureRule" WHERE "organizationId" = ANY($1::text[])',
+      [[organization, "legacy-org-demo-api-merchant-b"]],
+    );
+    await this.client.query(
       'DELETE FROM demo."DemoControlAudit" WHERE "organizationId" = ANY($1::text[])',
       [[organization, "legacy-org-demo-api-merchant-b"]],
     );
