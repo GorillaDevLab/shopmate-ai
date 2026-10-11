@@ -223,6 +223,7 @@ export class SyncCoordinator {
       bounds,
       state,
     );
+    checkRun(bounds.deadline, bounds.signal);
     return { status: "PROGRESSED", ...state };
   }
   async pass(input: PageRunControls = {}): Promise<SyncPassResult> {

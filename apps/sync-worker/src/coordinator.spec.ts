@@ -299,3 +299,15 @@ it("returns stop when a cancelled source read rejects", async () => {
     outcomes: [],
   });
 });
+it("returns stop with all actual terminal receipts when shutdown arrives during the final commit", async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  f.host.commitPage.mockImplementation(async (job) => {
+    if (job.stream === "MARKETING") controller.abort();
+    return { ...job, status: "SUCCEEDED", pageCount: job.pageCount + 1 };
+  });
+  const result = await f.coordinator.pass({ signal: controller.signal });
+  expect(result.status).toBe("STOPPED");
+  expect(result.outcomes).toHaveLength(5);
+  expect(result.outcomes.every((outcome) => outcome.reason === "SUCCEEDED")).toBe(true);
+});
