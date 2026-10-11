@@ -32,7 +32,7 @@ export async function buildSource(
   const initialized = await worker.initializeGeneration(work.actor, work.scope);
   if (initialized.status === "DENIED") return { status: "DENIED" };
   active(signal);
-  const claimed = await worker.claim(work.actor, work.scope);
+  const claimed = await worker.claimSlice(work.actor, work.scope);
   if (claimed.status !== "CLAIMED") return { status: claimed.status };
   const execution = new BuildExecution(worker, work, claimed.lease, tools, signal);
   try {
