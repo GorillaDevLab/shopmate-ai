@@ -1,3 +1,4 @@
+import { types } from "node:util";
 import { describe, expect, it } from "vitest";
 import { SourceStorageError } from "@shopmate/database/mock-platform-read";
 import { CheckpointReadPort } from "./checkpoint-read.js";
@@ -204,4 +205,90 @@ it("rejects signal symbol accessors before native brand checks or source I/O", a
   });
   expect(invoked).toBe(false);
   expect(reads).toBe(0);
+});
+
+it.each(["proxy", "getter", "map-method", "nested-map", "cycle", "oversized"] as const)(
+  "rejects hostile listener %s before source I/O",
+  async (kind) => {
+    let traps = 0,
+      calls = 0;
+    const signal = new AbortController().signal;
+    const slot = Object.getOwnPropertySymbols(signal).find((key) =>
+      types.isMap(Object.getOwnPropertyDescriptor(signal, key)?.value),
+    );
+    const map = Object.getOwnPropertyDescriptor(signal, slot!)!.value as Map<string, unknown>;
+    const node = { size: 0, next: undefined, resistStopPropagation: false };
+    const proxy = new Proxy(node, {
+      get(target, key) {
+        traps++;
+        return Reflect.get(target, key);
+      },
+    });
+    if (kind === "cycle") Map.prototype.set.call(map, "abort", { ...node, next: node });
+    if (kind === "cycle") Object.defineProperty(node, "next", { value: node });
+    if (kind === "oversized")
+      for (let index = 0; index < 257; index++) Map.prototype.set.call(map, String(index), node);
+    if (kind === "proxy") Map.prototype.set.call(map, "abort", proxy);
+    if (kind === "getter") {
+      Object.defineProperty(node, "next", {
+        get() {
+          traps++;
+          return undefined;
+        },
+      });
+      Map.prototype.set.call(map, "abort", node);
+    }
+    if (kind === "map-method")
+      Object.defineProperty(map, "get", {
+        get() {
+          traps++;
+          return undefined;
+        },
+      });
+    if (kind === "nested-map") Map.prototype.set.call(map, "abort", new Map([["nested", proxy]]));
+    const port = new CheckpointReadPort({
+      async read() {
+        calls++;
+        return null;
+      },
+      async refreshCheckpoint() {
+        calls++;
+        return null;
+      },
+    });
+    await expect(port.read(request, { ...options(), signal })).rejects.toMatchObject({
+      code: "SOURCE_INPUT",
+    });
+    expect(traps).toBe(0);
+    expect(calls).toBe(0);
+  },
+);
+
+it("accepts native listeners and factories while ignoring arbitrary abort reasons", async () => {
+  let notified = 0;
+  const controller = new AbortController();
+  controller.signal.addEventListener("abort", () => notified++);
+  const port = new CheckpointReadPort({
+    async read() {
+      return null;
+    },
+    async refreshCheckpoint() {
+      return null;
+    },
+  });
+  for (const signal of [controller.signal, AbortSignal.any([]), AbortSignal.timeout(5000)])
+    expect(await port.read(request, { ...options(), signal })).toBeNull();
+  controller.abort();
+  expect(notified).toBe(1);
+  const reason = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("reason must not be read");
+      },
+    },
+  );
+  await expect(
+    port.read(request, { ...options(), signal: AbortSignal.abort(reason) }),
+  ).rejects.toMatchObject({ code: "SOURCE_ABORTED" });
 });
