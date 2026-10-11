@@ -79,10 +79,16 @@ async function fresh(
   pinned: SyncRuntimeBootstrap,
   call: ReadOptions,
 ): Promise<void> {
-  check(call);
-  const actual = await host.runtimeBootstrap();
-  check(call);
+  const actual = await sdkRead(() => host.runtimeBootstrap(), call);
   requireSameRuntime(actual, pinned);
+}
+async function sdkRead<T>(read: () => Promise<T>, call: ReadOptions): Promise<T> {
+  check(call);
+  try {
+    return await read();
+  } finally {
+    check(call);
+  }
 }
 export function createSyncFailureRuleLoader(
   host: FailureHost,
@@ -97,8 +103,7 @@ export function createSyncFailureRuleLoader(
       )
         throw new MockConnectorError("PERMISSION_DENIED");
       await fresh(host, pinned, call);
-      const view = await host.runtimeFailureRules();
-      check(call);
+      const view = await sdkRead(() => host.runtimeFailureRules(), call);
       if (!view) throw new MockConnectorError("PERMISSION_DENIED");
       requireSameRuntime(view.context, pinned);
       await fresh(host, pinned, call);

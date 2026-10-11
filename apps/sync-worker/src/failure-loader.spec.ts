@@ -143,3 +143,35 @@ it("rejects hostile options without evaluating accessors or proxies", async () =
   expect(getter).not.toHaveBeenCalled();
   expect(f.host.runtimeBootstrap).not.toHaveBeenCalled();
 });
+it("checks cancellation after a rejected SDK rules read", async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  f.host.runtimeFailureRules.mockImplementation(async () => {
+    controller.abort();
+    throw new Error("SDK_UNAVAILABLE");
+  });
+  await expect(
+    f.load(actor, pinned.scope, { ...options(), signal: controller.signal }),
+  ).rejects.toMatchObject({ code: "ABORTED" });
+});
+it("caps the original controls at twenty five seconds", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  f.host.runtimeFailureRules.mockImplementation(async () => {
+    vi.advanceTimersByTime(25001);
+    return { context: pinned, rules: f.rules };
+  });
+  await expect(
+    f.load(actor, pinned.scope, {
+      ...options(),
+      deadlineAt: new Date(Date.now() + 60000).toISOString(),
+    }),
+  ).rejects.toMatchObject({ code: "TIMEOUT" });
+});
+it("maps actual malformed SDK rules failures", async () => {
+  const f = fixture();
+  f.host.runtimeFailureRules.mockRejectedValue(new Error("SYNC_RESULT_INVALID"));
+  await expect(f.load(actor, pinned.scope, options())).rejects.toMatchObject({
+    code: "INVALID_RESPONSE",
+  });
+});
