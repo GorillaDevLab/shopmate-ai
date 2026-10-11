@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./mock-commerce": {
+      "types": "./dist/integrations/mock/mock-worker-commerce.d.ts",
+      "import": "./dist/integrations/mock/mock-worker-commerce.js"
+    },
     "./mock-generator": {
       "types": "./dist/integrations/mock/mock-worker-generation.d.ts",
       "import": "./dist/integrations/mock/mock-worker-generation.js"
