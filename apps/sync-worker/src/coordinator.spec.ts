@@ -324,3 +324,58 @@ it("bounds a stalled readonly bootstrap by the original pass deadline", async ()
   expect(settled).toBe(true);
   expect(await pending).toMatchObject({ status: "BUDGET", created: [], outcomes: [] });
 });
+
+async function replayFixture() {
+  const f = fixture();
+  const record = {
+    ...current,
+    generatorVersion: "mock-source-v2",
+    config: { scenarioPlan: { delivery: { kind: "REPLAY_SAVED_PAGE", repetitions: 1 } } },
+  };
+  const opened = await f.open();
+  f.host.runtimeBootstrap.mockResolvedValue(record);
+  f.open.mockResolvedValue({ ok: true, data: { ...opened.data, bootstrap: record } });
+  f.publication.mockResolvedValue({
+    scope: record.scope,
+    generatorVersion: record.generatorVersion,
+    targetTime: record.businessNow,
+    processedThrough: record.businessNow,
+  });
+  const pending: { id: string; attempt: number; job: SyncJob }[] = [];
+  const host = Object.assign(f.host, {
+    commitDeliveryPage: vi.fn(async (job: SyncJob) => ({
+      ...job,
+      status: "SUCCEEDED" as const,
+      pageCount: job.pageCount + 1,
+    })),
+    pendingDeliveryReplays: vi.fn(async () => [...pending]),
+    replayDelivery: vi.fn(async () => {
+      pending.splice(0, 1);
+      return "REPLAYED" as const;
+    }),
+  });
+  return {
+    ...f,
+    host,
+    pending,
+    coordinator: new SyncCoordinator(host, f.sources, { open: f.open }),
+  };
+}
+it("scenario composition saves pages without sending replay results into runner progress", async () => {
+  const f = await replayFixture();
+  const result = await f.coordinator.pass();
+  expect(result.outcomes).toHaveLength(5);
+  expect(f.host.commitDeliveryPage).toHaveBeenCalledTimes(5);
+  expect(f.host.commitPage).not.toHaveBeenCalled();
+});
+it("scenario recovery drains persisted completed replays before a waiting planner returns", async () => {
+  const f = await replayFixture();
+  f.pending.push({ id: "saved", attempt: 1, job: { ...f.base, status: "SUCCEEDED" } });
+  f.publication.mockResolvedValue(null);
+  expect(await f.coordinator.pass()).toMatchObject({
+    status: "WAITING",
+    reason: "WAITING_PUBLICATION",
+  });
+  expect(f.host.replayDelivery).toHaveBeenCalledTimes(1);
+  expect(f.fetch).not.toHaveBeenCalled();
+});

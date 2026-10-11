@@ -20,6 +20,7 @@ import {
 } from "./page-controls.js";
 import { validReadSignal } from "./checkpoint-read.js";
 import { checkedJob } from "./page-job.js";
+import { scenarioDelivery, type ScenarioHost } from "./scenario-delivery.js";
 type CoordinatorHost = Pick<
   SyncWorkerPorts,
   | "runtimeBootstrap"
@@ -30,7 +31,8 @@ type CoordinatorHost = Pick<
   | "renew"
   | "fail"
   | "commitPage"
->;
+> &
+  ScenarioHost;
 type Bounds = ReturnType<typeof boundedControls>;
 export interface SyncPassResult {
   readonly status: "WAITING" | "PROGRESSED" | "BUDGET" | "STOPPED";
@@ -186,6 +188,7 @@ export class SyncCoordinator {
     connector: CommerceConnector,
     bounds: Bounds,
     state: PassState,
+    delivery: ReturnType<typeof scenarioDelivery>,
   ): Promise<void> {
     const latest = new Set(jobs.map((job) => job.id));
     for (const id of this.runners.keys()) if (!latest.has(id)) this.runners.delete(id);
@@ -197,7 +200,11 @@ export class SyncCoordinator {
       checkRun(bounds.deadline, bounds.signal);
       let runner = this.runners.get(job.id);
       if (!runner) {
-        runner = new SyncPageRunner(this.host, connector, this.pinned!.runtimeOpening!);
+        runner = new SyncPageRunner(
+          delivery?.pageHost ?? this.host,
+          connector,
+          this.pinned!.runtimeOpening!,
+        );
         this.runners.set(job.id, runner);
       } else runner.updateConnector(connector);
       const result = await runner.run(
@@ -210,6 +217,7 @@ export class SyncCoordinator {
         bounds.deadline,
       );
       state.outcomes.push(result);
+      await delivery?.drain(() => checkRun(bounds.deadline, bounds.signal));
       if (result.reason === "SUCCEEDED") this.runners.delete(job.id);
       if (result.reason === "BUDGET" || result.reason === "STOPPED")
         throw new PageRunPause(result.reason);
@@ -218,6 +226,8 @@ export class SyncCoordinator {
   private async execute(bounds: Bounds, state: PassState): Promise<SyncPassResult> {
     const record = await this.fresh(bounds, true);
     if (!record) return { status: "WAITING", reason: "WAITING_RUNTIME", ...state };
+    const delivery = scenarioDelivery(this.host, record);
+    await delivery?.drain(() => checkRun(bounds.deadline, bounds.signal));
     const publication = await this.publication(record, bounds);
     await this.fresh(bounds);
     const raw = await controlled(this.host.listWork(), bounds.deadline, bounds.signal);
@@ -233,6 +243,7 @@ export class SyncCoordinator {
       selected,
       bounds,
       state,
+      delivery,
     );
     checkRun(bounds.deadline, bounds.signal);
     return { status: "PROGRESSED", ...state };

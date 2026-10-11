@@ -100,11 +100,11 @@ BEGIN
  IF j.status<>'SUCCEEDED' AND j."pageCount"<=d."selectedPageCount" THEN
   RAISE EXCEPTION 'SYNC_DELIVERY_NOT_READY' USING ERRCODE='23514'; END IF;
  IF j.status<>'SUCCEEDED' THEN
-  -- Never take an unexpired foreign backend lease. Expired leases use the explicit caller owner.
-  IF j.status='RUNNING' AND j."leaseUntil">clock_timestamp() AND
-   (j."leaseOwner" IS DISTINCT FROM owner_id OR j."leaseBackendPid"<>pg_backend_pid()) THEN
+  -- The generic runner explicitly claims leases; recovery must not claim behind its ownership tracking.
+  IF j.status<>'RUNNING' OR j."leaseUntil"<=clock_timestamp() OR
+   j."leaseOwner" IS DISTINCT FROM owner_id OR j."leaseBackendPid"<>pg_backend_pid() THEN
    RETURN jsonb_build_object('status','BUSY'); END IF;
-  result:=sync_host.control_lease(j.id,CASE WHEN j.status='RUNNING' AND j."leaseUntil">clock_timestamp() THEN 'RENEW' ELSE 'CLAIM' END,j.fence,owner_id);
+  result:=sync_host.control_lease(j.id,'RENEW',j.fence,owner_id);
   j:=sync_host.worker_job(j.id);
  END IF;
  result:=sync_host.commit_worker_page(j.id,j.fence,d."pageId",d."expectedCursor",d."pageBytes"::jsonb);
