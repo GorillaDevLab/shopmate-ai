@@ -24,7 +24,7 @@ export function plannedCandidate(
   return {
     ...candidate,
     sku: plannedSku(config, candidate.sku, candidate.at),
-    discountBps: mutation.discountBps,
+    discountBps: mutation.discountBps === 500 ? candidate.discountBps : mutation.discountBps,
     refund:
       mutation.refundBps === config.refundBps
         ? candidate.refund
