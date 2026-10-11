@@ -109,9 +109,9 @@ export class SyncPageRunner {
   }
   async run(job: SyncJob, controls: PageRunControls = {}): Promise<PageRunResult> {
     if (this.running) throw new Error("SYNC_RUN_BUSY");
-    checkConnectorBinding(this.connector, job);
-    const bounds = boundedControls(controls);
     let current = checkedJob(job, job, "INPUT");
+    checkConnectorBinding(this.connector, current);
+    const bounds = boundedControls(controls);
     this.running = true;
     try {
       checkRun(bounds.deadline, bounds.signal);

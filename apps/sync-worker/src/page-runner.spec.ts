@@ -293,3 +293,30 @@ it("claims again when explicit same-backend retained ownership has expired", asy
     vi.useRealTimers();
   }
 });
+it.each(["getter", "proxy"])(
+  "rejects hostile %s jobs before binding reads or claims",
+  async (kind) => {
+    const f = fixture();
+    let calls = 0;
+    const job = { ...f.initial };
+    const hostile =
+      kind === "proxy"
+        ? new Proxy(job, {
+            get(target, key, receiver) {
+              calls++;
+              return Reflect.get(target, key, receiver);
+            },
+          })
+        : Object.defineProperty(job, "organizationId", {
+            enumerable: true,
+            get() {
+              calls++;
+              return f.initial.organizationId;
+            },
+          });
+    await expect(f.runner.run(hostile)).rejects.toThrow("SYNC_RUN_RESULT_INVALID");
+    expect(calls).toBe(0);
+    expect(f.host.claim).not.toHaveBeenCalled();
+    expect(f.events).toEqual([]);
+  },
+);
