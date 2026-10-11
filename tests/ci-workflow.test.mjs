@@ -12,6 +12,11 @@ test("bounded publication and high-load source history are mandatory in tenant C
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("durable sync restart, expired cursor, lost acknowledgment and revoked authority are mandatory", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  assert.match(gate, /await run\("apps\/sync-worker", "test\/runtime\.test\.mjs"/u);
+});
+
 test("real five-stream sync commerce composition is mandatory in tenant CI", () => {
   const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
   assert.match(gate, /await run\("apps\/sync-worker", "test\/commerce\.test\.mjs"/u);
