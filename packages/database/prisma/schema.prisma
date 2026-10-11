@@ -161,7 +161,7 @@ model MockSourceBuildJob {
 
   @@id([sessionId, generation, revision], map: "BuildJob_pkey")
   @@unique([organizationId, workspaceId, storeId, sessionId, connectionId, externalStoreId, generation, revision], map: "BuildJob_scope_revision_key")
-  @@unique([sessionId, generation, targetClockRevision], map: "BuildJob_target_key")
+  @@unique([sessionId, generation, targetClockRevision, targetTime], map: "BuildJob_target_key")
   @@map("BuildJob")
   @@schema("mock_platform")
 }
