@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Buffer } from "node:buffer";
 import { createHmac } from "node:crypto";
-import { createLatestCursor, readLatestCursor } from "../dist/src/mock-platform/latest-cursor.js";
+import {
+  createLatestCursor,
+  readLatestCursor,
+  readLatestCheckpoint,
+} from "../dist/src/mock-platform/latest-cursor.js";
 
 const key = "k".repeat(32);
 const now = Date.now();
@@ -34,6 +38,57 @@ const position = {
 };
 const expiresAt = now + 60_000;
 const mint = () => createLatestCursor(key, scope, publication, input, position, expiresAt, now);
+
+test("checkpoint decoding preserves every scope and query binding after ordinary expiry", () => {
+  const token = mint();
+  const later = expiresAt + 60_000;
+  assert.throws(() => readLatestCursor(key, token, scope, input, later), { code: "SOURCE_INPUT" });
+  assert.equal(readLatestCheckpoint(key, token, scope, input, later).afterEventSeq, "42");
+  for (const field of Object.keys(scope)) {
+    const changed = { ...scope, [field]: field === "generation" ? 0 : "other" };
+    assert.throws(() => readLatestCheckpoint(key, token, changed, input, later), {
+      code: "SOURCE_INPUT",
+    });
+  }
+  for (const change of [
+    { limit: 1 },
+    { contextHash: "c".repeat(64) },
+    { kind: "ORDER" },
+    { until: "2025-12-31T00:00:00.000Z" },
+  ])
+    assert.throws(() => readLatestCheckpoint(key, token, scope, { ...input, ...change }, later), {
+      code: "SOURCE_INPUT",
+    });
+  for (const altered of [token + "!", token.slice(1), "x".repeat(1025)])
+    assert.throws(() => readLatestCheckpoint(key, altered, scope, input, later), {
+      code: "SOURCE_INPUT",
+    });
+  assert.throws(() => readLatestCheckpoint("z".repeat(32), token, scope, input, later), {
+    code: "SOURCE_INPUT",
+  });
+});
+
+test("recovery still rejects signed malformed witnesses and impossible expiry values", () => {
+  const [payload] = mint().split(".");
+  const state = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  for (const change of [
+    { e: 0 },
+    { e: -1 },
+    { e: now + 900_001 },
+    { a: "0" },
+    { h: "41" },
+    { extra: true },
+  ]) {
+    const altered = Buffer.from(JSON.stringify({ ...state, ...change })).toString("base64url");
+    const mac = createHmac("sha256", key)
+      .update("mock-source-latest-compact-v1\n")
+      .update(altered, "ascii")
+      .digest("base64url");
+    assert.throws(() => readLatestCheckpoint(key, `${altered}.${mac}`, scope, input, now), {
+      code: "SOURCE_INPUT",
+    });
+  }
+});
 
 test("latest witness cursor stays below Connector bounds for maximum scope and key sizes", () => {
   const cursor = mint();

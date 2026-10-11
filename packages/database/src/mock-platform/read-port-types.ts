@@ -1,4 +1,4 @@
-import type { EntityKey, SnapshotKind } from "./publication-types.js";
+import type { EntityKey, Publication, SnapshotKind } from "./publication-types.js";
 import type { LatestStatePage } from "./latest-types.js";
 import type { SourceReadActor, SourceReadControl, SourceScope } from "./types.js";
 
@@ -15,7 +15,9 @@ export interface SourceReadPage extends LatestStatePage {
   readonly effectiveUntil: string;
 }
 export interface BoundSourceReadPort {
+  findPublication(control?: SourceReadControl): Promise<Publication | null>;
   read(request: unknown, control?: SourceReadControl): Promise<SourceReadPage | null>;
+  refreshCheckpoint(request: unknown, control?: SourceReadControl): Promise<string | null>;
 }
 export interface SourceReadPorts {
   bind(actor: SourceReadActor, scope: SourceScope): BoundSourceReadPort;
