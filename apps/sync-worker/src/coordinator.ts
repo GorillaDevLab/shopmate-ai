@@ -13,6 +13,7 @@ import { SyncPageRunner, type PageRunResult } from "./page-runner.js";
 import {
   boundedControls,
   checkRun,
+  controlled,
   pageOptions,
   PageRunPause,
   type PageRunControls,
@@ -77,7 +78,7 @@ export class SyncCoordinator {
   ) {}
   private async fresh(bounds: Bounds, initial = false): Promise<SyncRuntimeBootstrap | null> {
     checkRun(bounds.deadline, bounds.signal);
-    const current = await this.host.runtimeBootstrap();
+    const current = await controlled(this.host.runtimeBootstrap(), bounds.deadline, bounds.signal);
     checkRun(bounds.deadline, bounds.signal);
     if (this.pinned) return requireSameRuntime(current, this.pinned);
     if (!current || current.state !== "READY" || !current.runtimeOpening) {
@@ -101,15 +102,17 @@ export class SyncCoordinator {
       Math.min(bounds.deadline, Date.now() + 25000),
       bounds.signal,
     );
-    const publication = await source
-      .findPublication({
+    const publication = await controlled(
+      source.findPublication({
         deadlineAt: control.deadlineAt,
         signal: control.signal,
-      })
-      .catch((error) => {
-        checkRun(bounds.deadline, bounds.signal);
-        throw error;
-      });
+      }),
+      bounds.deadline,
+      bounds.signal,
+    ).catch((error) => {
+      checkRun(bounds.deadline, bounds.signal);
+      throw error;
+    });
     checkRun(bounds.deadline, bounds.signal);
     if (!publication) return null;
     if (
@@ -165,8 +168,12 @@ export class SyncCoordinator {
     const commerce =
       this.commerce ??
       new SyncCommerce(this.host, this.sources, createSyncFailureRuleLoader(this.host, record));
-    const result = await commerce.open(
-      pageOptions("sync-open", Math.min(bounds.deadline, Date.now() + 25000), bounds.signal),
+    const result = await controlled(
+      commerce.open(
+        pageOptions("sync-open", Math.min(bounds.deadline, Date.now() + 25000), bounds.signal),
+      ),
+      bounds.deadline,
+      bounds.signal,
     );
     checkRun(bounds.deadline, bounds.signal);
     if (!result.ok) throw new MockConnectorError(result.error.code);
@@ -213,7 +220,7 @@ export class SyncCoordinator {
     if (!record) return { status: "WAITING", reason: "WAITING_RUNTIME", ...state };
     const publication = await this.publication(record, bounds);
     await this.fresh(bounds);
-    const raw = await this.host.listWork();
+    const raw = await controlled(this.host.listWork(), bounds.deadline, bounds.signal);
     const latest = await this.fresh(bounds);
     const work = projectSyncWork(raw, latest!);
     const plan = this.plan(latest!, work, publication);

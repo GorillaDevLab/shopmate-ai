@@ -311,3 +311,16 @@ it("returns stop with all actual terminal receipts when shutdown arrives during 
   expect(result.outcomes).toHaveLength(5);
   expect(result.outcomes.every((outcome) => outcome.reason === "SUCCEEDED")).toBe(true);
 });
+it("bounds a stalled readonly bootstrap by the original pass deadline", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  f.host.runtimeBootstrap.mockImplementation(() => new Promise(() => undefined));
+  let settled = false;
+  const pending = f.coordinator.pass({ budgetMs: 50 }).then((result) => {
+    settled = true;
+    return result;
+  });
+  await vi.advanceTimersByTimeAsync(51);
+  expect(settled).toBe(true);
+  expect(await pending).toMatchObject({ status: "BUDGET", created: [], outcomes: [] });
+});
