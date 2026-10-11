@@ -4,6 +4,19 @@ import { DatabaseMockConnectorAccessResolver } from "./database-mock-connector-a
 import { DemoCommerceConnectorHost } from "../../demo-commerce/demo-commerce-connector.host.js";
 import { PersistentMockClock } from "./persistent-mock-clock.js";
 import { emptyPersistentBinder } from "../../../test/helpers/persistent-read.fixture.js";
+function ruleRepository() {
+  return {
+    findDemoFailureRules: vi.fn().mockResolvedValue({
+      sessionId: "session-a",
+      generation: 0,
+      revision: 0,
+      clockNow: "2026-01-01T00:00:00.000Z",
+      rules: [],
+    }),
+    createDemoFailureRule: vi.fn(),
+    removeDemoFailureRule: vi.fn(),
+  };
+}
 const identity = { ...actor, permissions: [] };
 const options = () => ({
   requestId: "read-a",
@@ -19,6 +32,7 @@ describe("database connector composition", () => {
         origin: "https://demo.example.com",
       },
       binder,
+      ruleRepository(),
     );
     const opened = await host.open(identity, "store-a", options());
     if (!opened.ok) throw new Error(opened.error.code);
@@ -39,6 +53,7 @@ describe("database connector composition", () => {
         origin: "https://demo.example.com",
       },
       emptyPersistentBinder,
+      ruleRepository(),
     );
     const opened = await host.open(identity, "store-a", options());
     if (!opened.ok) throw new Error(opened.error.code);
@@ -63,6 +78,7 @@ describe("database connector composition", () => {
         origin: "https://demo.example.com",
       },
       emptyPersistentBinder,
+      ruleRepository(),
     );
     const opened = await host.open(identity, "store-a", options());
     expect(opened.ok).toBe(true);

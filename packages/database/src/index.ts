@@ -3,6 +3,8 @@ export { resolveTenantMembership, type TenantMembershipRecord } from "./tenant-m
 export { verifyPassword } from "./password-hash.js";
 export type * from "./demo-commerce.types.js";
 export { findDemoSession, findDemoStore } from "./demo-commerce.repository.js";
+export { findDemoFailureRules, createDemoFailureRule, removeDemoFailureRule } from "./demo-failure-rules.js";
+export type { DemoFailureRuleView, DemoFailureRuleResult } from "./demo-failure-rules.js";
 export {
   advanceDemoSession,
   createDemoSession,

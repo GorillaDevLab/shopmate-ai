@@ -296,6 +296,8 @@ test("persistent demo controls run under real restricted PostgreSQL RLS", async 
       assert.deepEqual(tables.rows.map((v) => v.tablename).sort(), [
         "DemoCommerceSession",
         "DemoControlAudit",
+        "DemoFailureRule",
+        "DemoFailureRuleAudit",
         "MockWorkerGrant",
       ]);
     });
