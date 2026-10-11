@@ -45,6 +45,11 @@ export interface WorkerBinding {
   grantId: string;
   principalUserId: string;
 }
+export interface PendingDeliveryReplay {
+  readonly id: string;
+  readonly attempt: number;
+  readonly job: SyncJob;
+}
 
 function readJob(value: unknown): SyncJob {
   if (!value || typeof value !== "object") throw new Error("SYNC_RESULT_INVALID");
@@ -193,6 +198,76 @@ export class SyncWorkerPorts {
     if (!result || typeof result !== "object" || !("job" in result))
       throw new Error("SYNC_RESULT_INVALID");
     return readJob(result.job);
+  }
+  async commitDeliveryPage(
+    job: SyncJob,
+    pageId: string,
+    expectedCursor: string | null,
+    page: unknown,
+  ): Promise<SyncJob> {
+    const result = await this.#rpc(
+      "SELECT sync_host.commit_delivery_page($1,$2,$3,$4,$5) AS result",
+      [
+        workerId(job.id),
+        job.fence,
+        workerId(pageId),
+        workerCursor(expectedCursor),
+        encodeWorkerPage(workerStream(job.stream), page),
+      ],
+    );
+    if (!result || typeof result !== "object" || !("job" in result))
+      throw new Error("SYNC_RESULT_INVALID");
+    return readJob(result.job);
+  }
+  async pendingDeliveryReplays(): Promise<readonly PendingDeliveryReplay[]> {
+    const result = await this.#rpc("SELECT sync_host.pending_delivery_replays() AS result");
+    if (!Array.isArray(result) || result.length > 5) throw new Error("SYNC_RESULT_INVALID");
+    return Object.freeze(
+      result.map((value: unknown) => {
+        if (
+          !value ||
+          typeof value !== "object" ||
+          !("id" in value) ||
+          !("attempt" in value) ||
+          !("job" in value) ||
+          !Number.isInteger(value.attempt) ||
+          Number(value.attempt) < 1 ||
+          Number(value.attempt) > 3
+        )
+          throw new Error("SYNC_RESULT_INVALID");
+        return Object.freeze({
+          id: workerId(value.id),
+          attempt: Number(value.attempt),
+          job: readJob(value.job),
+        });
+      }),
+    );
+  }
+  async replayDelivery(
+    delivery: PendingDeliveryReplay,
+  ): Promise<"REPLAYED" | "ACKNOWLEDGED" | "BUSY"> {
+    if (
+      !Number.isSafeInteger(delivery.attempt) ||
+      delivery.attempt < 1 ||
+      delivery.attempt > 3 ||
+      !Number.isSafeInteger(delivery.job.fence) ||
+      delivery.job.fence < 0
+    )
+      throw new Error("SYNC_INPUT_INVALID");
+    const result = await this.#rpc("SELECT sync_host.replay_delivery($1,$2,$3,$4) AS result", [
+      workerId(delivery.id),
+      delivery.job.fence,
+      delivery.attempt,
+      this.owner,
+    ]);
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !("status" in result) ||
+      (result.status !== "REPLAYED" && result.status !== "ACKNOWLEDGED" && result.status !== "BUSY")
+    )
+      throw new Error("SYNC_RESULT_INVALID");
+    return result.status;
   }
   private async fetch(job: SyncJob, fetchPage: SyncPageFetcher): Promise<unknown> {
     for (let attempt = 0; attempt < 3; attempt++) {

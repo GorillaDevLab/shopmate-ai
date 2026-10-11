@@ -378,36 +378,37 @@ model SyncWorkerGrant {
 }
 
 model SyncJob {
-  id                String                    @id
-  grantId           String
-  organizationId    String
-  workspaceId       String
-  storeId           String
-  connectionId      String
-  externalStoreId   String
-  provider          String
-  generation        Int
-  stream            String
-  since             DateTime                  @db.Timestamp(3)
-  until             DateTime                  @db.Timestamp(3)
-  cursor            Json?
-  successfulThrough DateTime?                 @db.Timestamp(3)
-  observedAt        DateTime?                 @db.Timestamptz(3)
-  sourceWatermark   DateTime?                 @db.Timestamptz(3)
-  pageCount         Int                       @default(0)
-  status            String                    @default("READY")
-  fence             Int                       @default(0)
-  leaseOwner        String?
-  leaseUntil        DateTime?                 @db.Timestamptz(3)
-  leaseBackendPid   Int?
-  leaseBackendStart DateTime?                 @db.Timestamptz(6)
-  failureCode       String?
-  grant             SyncWorkerGrant           @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
-  receiptCursor     Json?
-  receivedThrough   DateTime?                 @db.Timestamp(3)
-  pageReceipts      SyncPageReceipt[]
-  productCommits    SyncProductPageCommit[]
-  canonicalCommits  SyncCanonicalPageCommit[]
+  id                 String                    @id
+  grantId            String
+  organizationId     String
+  workspaceId        String
+  storeId            String
+  connectionId       String
+  externalStoreId    String
+  provider           String
+  generation         Int
+  stream             String
+  since              DateTime                  @db.Timestamp(3)
+  until              DateTime                  @db.Timestamp(3)
+  cursor             Json?
+  successfulThrough  DateTime?                 @db.Timestamp(3)
+  observedAt         DateTime?                 @db.Timestamptz(3)
+  sourceWatermark    DateTime?                 @db.Timestamptz(3)
+  pageCount          Int                       @default(0)
+  status             String                    @default("READY")
+  fence              Int                       @default(0)
+  leaseOwner         String?
+  leaseUntil         DateTime?                 @db.Timestamptz(3)
+  leaseBackendPid    Int?
+  leaseBackendStart  DateTime?                 @db.Timestamptz(6)
+  failureCode        String?
+  grant              SyncWorkerGrant           @relation(fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "Job_grantId_fkey")
+  receiptCursor      Json?
+  receivedThrough    DateTime?                 @db.Timestamp(3)
+  pageReceipts       SyncPageReceipt[]
+  productCommits     SyncProductPageCommit[]
+  canonicalCommits   SyncCanonicalPageCommit[]
+  scenarioDeliveries SyncScenarioDelivery[]
 
   @@unique([id, organizationId, workspaceId, storeId], map: "Job_tenant_key")
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation, stream, since], map: "Job_scope_stream_window_key")
@@ -416,19 +417,42 @@ model SyncJob {
 }
 
 model SyncPageReceipt {
-  jobId           String
-  pageId          String
-  expectedCursor  String?
-  nextCursor      String?
-  receivedThrough DateTime                 @db.Timestamp(3)
-  pageHash        String
-  createdAt       DateTime                 @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
-  job             SyncJob                  @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  productCommit   SyncProductPageCommit?
-  canonicalCommit SyncCanonicalPageCommit?
+  jobId              String
+  pageId             String
+  expectedCursor     String?
+  nextCursor         String?
+  receivedThrough    DateTime                 @db.Timestamp(3)
+  pageHash           String
+  createdAt          DateTime                 @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  job                SyncJob                  @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  productCommit      SyncProductPageCommit?
+  canonicalCommit    SyncCanonicalPageCommit?
+  scenarioDeliveries SyncScenarioDelivery[]
 
   @@id([jobId, pageId])
   @@map("PageReceipt")
+  @@schema("sync_host")
+}
+
+model SyncScenarioDelivery {
+  id                String          @id @default(dbgenerated("('delivery-'::text || (gen_random_uuid())::text)"))
+  runId             String
+  jobId             String
+  stream            String
+  pageId            String
+  expectedCursor    String?
+  pageBytes         String
+  envelope          Json
+  envelopeHash      String
+  selectedPageCount Int
+  repetitions       Int
+  attempts          Int             @default(0)
+  run               DemoScenarioRun @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  job               SyncJob         @relation(fields: [jobId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  receipt           SyncPageReceipt @relation(fields: [jobId, pageId], references: [jobId, pageId], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([runId, stream])
+  @@map("ScenarioDelivery")
   @@schema("sync_host")
 }
 
@@ -1160,7 +1184,7 @@ model DemoFailureRuleAudit {
 }
 
 model DemoScenarioRun {
-  id              String                @id
+  id              String                 @id
   organizationId  String
   workspaceId     String
   storeId         String
@@ -1171,11 +1195,12 @@ model DemoScenarioRun {
   loadedRevision  Int
   configHash      String
   config          Json
-  loadedAt        DateTime              @default(dbgenerated("(clock_timestamp() AT TIME ZONE 'UTC'::text)")) @db.Timestamp(3)
-  businessClock   DateTime              @db.Timestamp(3)
+  loadedAt        DateTime               @default(dbgenerated("(clock_timestamp() AT TIME ZONE 'UTC'::text)")) @db.Timestamp(3)
+  businessClock   DateTime               @db.Timestamp(3)
   actorUserId     String
-  session         DemoCommerceSession   @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "DemoScenarioRun_sessionId_organizationId_workspaceId_store_fkey")
+  session         DemoCommerceSession    @relation(fields: [sessionId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "DemoScenarioRun_sessionId_organizationId_workspaceId_store_fkey")
   audit           DemoScenarioRunAudit?
+  deliveries      SyncScenarioDelivery[]
 
   @@unique([sessionId, generation])
   @@index([organizationId, workspaceId, storeId, sessionId, generation(sort: Desc)], map: "DemoScenarioRun_scope_idx")
