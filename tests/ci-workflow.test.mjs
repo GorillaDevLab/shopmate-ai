@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+test("bounded publication and high-load source history are mandatory in tenant CI", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  assert.match(
+    gate,
+    /await run\("packages\/database", "test\/integration\/mock-source-slices\.test\.mjs"/u,
+  );
+  assert.match(gate, /await run\("apps\/source-worker", "test\/source-history\.test\.mjs"/u);
+});
 
 const workflowPath = ".github/workflows/ci.yml";
 
