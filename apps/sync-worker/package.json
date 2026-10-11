@@ -13,9 +13,9 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @shopmate/api build && tsc --noEmit",
     "lint": "eslint src vitest.config.ts --max-warnings=0",
-    "test": "vitest run"
+    "test": "pnpm --filter @shopmate/api build && vitest run"
   },
   "dependencies": {
     "@shopmate/api": "workspace:*",
