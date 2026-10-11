@@ -10,3 +10,5 @@ export type {
   WindowBootstrap,
   WindowPlannerInput,
 } from "./planner-types.js";
+export { SyncCommerce } from "./commerce.js";
+export type { OpenedSyncCommerce } from "./commerce.js";

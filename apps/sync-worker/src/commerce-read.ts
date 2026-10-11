@@ -15,6 +15,13 @@ const failures: Readonly<Record<SourceStorageError["code"], ConnectorFailureCode
   SOURCE_CONFIGURATION: "INVALID_RESPONSE",
   SOURCE_CREDENTIALS: "INVALID_RESPONSE",
 };
+export function commerceFailure(error: unknown): MockConnectorError {
+  if (error instanceof MockConnectorError) return error;
+  if (error instanceof SourceStorageError) return new MockConnectorError(failures[error.code]);
+  if (error instanceof Error && error.message === "SYNC_RESULT_INVALID")
+    return new MockConnectorError("INVALID_RESPONSE");
+  return new MockConnectorError("TEMPORARY");
+}
 
 /** Checkpoint recovery retains its absolute budget before source failures become connector DTOs. */
 export class CommerceReadPort implements PersistentReadPort {
@@ -26,8 +33,7 @@ export class CommerceReadPort implements PersistentReadPort {
     try {
       return await this.checkpoint.read(request, options);
     } catch (error) {
-      if (error instanceof SourceStorageError) throw new MockConnectorError(failures[error.code]);
-      throw error;
+      throw commerceFailure(error);
     }
   }
 }
