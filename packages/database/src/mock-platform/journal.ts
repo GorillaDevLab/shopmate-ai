@@ -14,36 +14,38 @@ import {
 } from "./journal-state.js";
 import { savedReceiptMatches, validateSavedReceipt } from "./journal-receipt.js";
 
-async function insertSnapshot(
+async function insertSnapshots(
   client: pg.PoolClient,
   lease: LeaseRef,
-  event: SnapshotEvent,
+  events: readonly SnapshotEvent[],
 ): Promise<void> {
+  if (!events.length) return;
+  // Each statement guard scans the pending suffix; batching avoids quadratic rescans.
+  // Explicit input order preserves the row guard's DB-derived sequence allocation.
   const inserted = await client.query<{ eventSeq: string }>(
     `INSERT INTO mock_platform."SourceEvent"
     ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision",kind,"occurredAt",ordinal,payload)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8::bigint,$9,$10::timestamp,$11::bigint,$12::jsonb) RETURNING "eventSeq"::text AS "eventSeq"`,
-    [
-      ...journalValues(lease),
-      event.kind,
-      event.occurredAt,
-      event.ordinal,
-      JSON.stringify(event.after),
-    ],
+    SELECT $1,$2,$3,$4,$5,$6,$7,$8::bigint,value->>'kind',
+      (value->>'occurredAt')::timestamp,(value->>'ordinal')::bigint,value->'after'
+    FROM jsonb_array_elements($9::jsonb) WITH ORDINALITY AS input(value,position)
+    ORDER BY position RETURNING "eventSeq"::text AS "eventSeq"`,
+    [...journalValues(lease), JSON.stringify(events)],
   );
   if (
-    inserted.rowCount !== 1 ||
-    !validateUInt(inserted.rows[0]?.eventSeq) ||
-    inserted.rows[0]?.eventSeq === "0"
+    inserted.rowCount !== events.length ||
+    inserted.rows.length !== events.length ||
+    inserted.rows.some((row) => !validateUInt(row.eventSeq) || row.eventSeq === "0") ||
+    new Set(inserted.rows.map((row) => row.eventSeq)).size !== events.length
   )
     throw new SourceStorageError("SOURCE_INTEGRITY");
   const version = await client.query(
     `INSERT INTO mock_platform."EntityVersion"
     ("organizationId","workspaceId","storeId","sessionId","connectionId","externalStoreId",generation,"releaseRevision","eventSeq")
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8::bigint,$9::bigint)`,
-    [...journalValues(lease), inserted.rows[0]?.eventSeq],
+    SELECT $1,$2,$3,$4,$5,$6,$7,$8::bigint,sequence
+    FROM unnest($9::bigint[]) WITH ORDINALITY AS input(sequence,position) ORDER BY position`,
+    [...journalValues(lease), inserted.rows.map((row) => row.eventSeq)],
   );
-  if (version.rowCount !== 1) throw new SourceStorageError("SOURCE_INTEGRITY");
+  if (version.rowCount !== events.length) throw new SourceStorageError("SOURCE_INTEGRITY");
 }
 
 async function commitChunk(
@@ -58,7 +60,7 @@ async function commitChunk(
       JSON.stringify({ eventCount: input.events.length, next: input.next }),
     ],
   );
-  for (const event of input.events) await insertSnapshot(client, lease, event);
+  await insertSnapshots(client, lease, input.events);
   const result = await client.query<{ checkpoint: unknown; checkpointHash: string }>(
     `UPDATE mock_platform."BuildJob"
     SET checkpoint=$9::jsonb WHERE ${journalScopeWhere} AND revision=$8::bigint RETURNING checkpoint,"checkpointHash"`,
