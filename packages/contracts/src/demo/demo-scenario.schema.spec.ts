@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { DemoScenarioLoadSchema } from "./demo-scenario.schema.js";
+import { DemoScenarioLoadSchema, DemoScenarioViewSchema } from "./demo-scenario.schema.js";
 const command = {
   scenarioId: "SCENARIO_008",
   confirmSessionId: "session-a",
@@ -23,4 +23,38 @@ it("accepts only bounded scenario load commands and normalizes the clock", () =>
     { observedAt: "0000-01-01T00:00:00Z" },
   ])
     expect(DemoScenarioLoadSchema.safeParse({ ...command, ...change }).success).toBe(false);
+});
+it("distinguishes database load time from the independently controlled business clock", () => {
+  const run = {
+    id: "run-a",
+    generation: 1,
+    loadedRevision: 1,
+    configHash: "a".repeat(64),
+    loadedAt: "2026-10-11T00:00:00.000Z",
+    businessClock: command.observedAt,
+    status: "ACTIVE",
+    plan: {
+      version: "mock-scenario-v1",
+      scenarioId: "SCENARIO_009",
+      externalStoreId: "m",
+      startDay: 3,
+      endDay: 9,
+      mutations: [],
+      campaignSpendBps: 10000,
+      campaignConversionBps: 10000,
+      delivery: { kind: "INTERRUPT", durationMs: 3600000 },
+    },
+  };
+  const view = {
+    sessionId: "session-a",
+    generation: 1,
+    revision: 1,
+    clockNow: command.observedAt,
+    runs: [run],
+  };
+  expect(DemoScenarioViewSchema.parse(view).runs[0]?.businessClock).toBe(command.observedAt);
+  expect(
+    DemoScenarioViewSchema.safeParse({ ...view, runs: [{ ...run, businessClock: undefined }] })
+      .success,
+  ).toBe(false);
 });

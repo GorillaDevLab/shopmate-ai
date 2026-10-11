@@ -28,6 +28,7 @@ export const DemoScenarioRunSchema = z
     loadedRevision: counter,
     configHash: z.string().regex(/^[a-f0-9]{64}$/u),
     loadedAt: clock,
+    businessClock: clock,
     status: z.enum(["ACTIVE", "SUPERSEDED", "DISCONNECTED"]),
     plan: MockScenarioPlanSchema,
   })
