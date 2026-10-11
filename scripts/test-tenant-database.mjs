@@ -118,6 +118,9 @@ try {
   await run("apps/sync-worker", "test/checkpoint-read.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("apps/sync-worker", "test/commerce.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/mock-source-transaction.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
