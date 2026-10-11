@@ -13,6 +13,10 @@ const nativeMapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size")!.ge
 const signalSample = new AbortController().signal;
 signalSample.addEventListener("abort", () => undefined);
 const signalSlots = Object.getOwnPropertySymbols(signalSample);
+const primitiveSlots = signalSlots.filter((key) => {
+  const value: unknown = Object.getOwnPropertyDescriptor(signalSample, key)!.value;
+  return typeof value === "number" || typeof value === "boolean";
+});
 // Node 24 stores opaque abort reasons separately; registration never consumes that slot.
 const reasonSlot = signalSlots.find((key) => key.description === "kReason");
 const sampleMap = signalSlots
@@ -22,6 +26,12 @@ const listenerPrototype: object = Object.getPrototypeOf(
   Map.prototype.get.call(sampleMap, "abort").next,
 );
 const mapPrototype: object = Object.getPrototypeOf(sampleMap);
+const eventSlot = signalSlots.find(
+  (key) => Object.getOwnPropertyDescriptor(signalSample, key)!.value === sampleMap,
+);
+const sampleRoot: object = Map.prototype.get.call(sampleMap, "abort");
+const rootFields = Reflect.ownKeys(sampleRoot);
+const listenerFields = Reflect.ownKeys(Object.getOwnPropertyDescriptor(sampleRoot, "next")!.value);
 const trustedPrototypes = new Map(
   [mapPrototype, listenerPrototype].map(
     (prototype) => [prototype, Object.getOwnPropertyDescriptors(prototype)] as const,
@@ -48,50 +58,94 @@ function unchangedPrototype(prototype: object): boolean {
   );
 }
 
-function safeNextChain(value: object): boolean {
-  const chain = new Set<object>();
-  let current: unknown = value;
-  while (current !== undefined) {
-    if (!current || typeof current !== "object" || types.isProxy(current) || chain.has(current))
-      return false;
-    if (chain.size >= 256) return false;
-    chain.add(current);
-    const next = Object.getOwnPropertyDescriptor(current, "next");
-    if (!next) return true;
-    if (!("value" in next)) return false;
-    current = next.value;
-  }
-  return true;
+function boundedInteger(value: unknown, maximum: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
 
-// Native registration walks linked listener records; inspect descriptors without executing caller code.
-function safeListenerState(map: object): boolean {
-  const pending: unknown[] = [map],
-    seen = new Set<object>();
-  while (pending.length) {
-    const value = pending.pop();
-    if ((typeof value !== "object" || value === null) && typeof value !== "function") continue;
-    if (types.isProxy(value)) return false;
-    if (typeof value === "function" || seen.has(value)) continue;
-    if (seen.size >= 256) return false;
-    seen.add(value);
-    const prototype: object = Object.getPrototypeOf(value);
-    if (!unchangedPrototype(prototype)) return false;
-    const keys = Reflect.ownKeys(value);
-    if (types.isMap(value)) {
-      if (keys.length || nativeMapSize.call(value) > 256) return false;
-      nativeMapEach.call(value, (entry: unknown, key: unknown) => pending.push(key, entry));
-      continue;
-    }
-    if (keys.length > 32 || !safeNextChain(value)) return false;
-    for (const key of keys) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+function safePrimitiveSlots(signal: object): boolean {
+  return (
+    primitiveSlots.every((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(signal, key);
       if (!descriptor || !("value" in descriptor)) return false;
-      // Registration compares callback identity; it does not consume the callback receiver's payload.
-      if (key !== "listener" && key !== "callback") pending.push(descriptor.value);
-    }
+      const expected: unknown = Object.getOwnPropertyDescriptor(signalSample, key)!.value;
+      return typeof expected === "boolean"
+        ? typeof descriptor.value === "boolean"
+        : descriptor.value === Infinity ||
+            boundedInteger(descriptor.value, Number.MAX_SAFE_INTEGER);
+    }) && types.isMap(Object.getOwnPropertyDescriptor(signal, eventSlot!)?.value)
+  );
+}
+
+function nativeRecord(
+  value: unknown,
+  prototype: object,
+  fields: readonly PropertyKey[],
+): Record<string, unknown> | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    types.isProxy(value) ||
+    Object.getPrototypeOf(value) !== prototype
+  )
+    return null;
+  if (!unchangedPrototype(prototype) || Reflect.ownKeys(value).length !== fields.length)
+    return null;
+  const record: Record<string, unknown> = {};
+  for (const key of fields) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (typeof key !== "string" || !descriptor || !("value" in descriptor) || !descriptor.writable)
+      return null;
+    record[key] = descriptor.value;
   }
-  return true;
+  return record;
+}
+
+function safeEventList(value: unknown, budget: { remaining: number }): boolean {
+  const root = nativeRecord(value, Object.prototype, rootFields);
+  if (!root || !boundedInteger(root.size, 256) || typeof root.resistStopPropagation !== "boolean")
+    return false;
+  const seen = new Set<object>();
+  let current: unknown = root.next,
+    previous: unknown = value;
+  if (--budget.remaining < 0) return false;
+  while (current !== undefined) {
+    const node = nativeRecord(current, listenerPrototype, listenerFields);
+    if (
+      !node ||
+      seen.has(current as object) ||
+      --budget.remaining < 0 ||
+      node.previous !== previous
+    )
+      return false;
+    if (!boundedInteger(node.flags, 127)) return false;
+    // Native registration compares receiver identity; callback payloads remain opaque.
+    seen.add(current as object);
+    previous = current;
+    current = node.next;
+  }
+  return seen.size === root.size;
+}
+
+// Registration calls native Listener methods, so structural lookalikes must never enter its list.
+function safeListenerState(map: object, events: boolean): boolean {
+  if (
+    types.isProxy(map) ||
+    Object.getPrototypeOf(map) !== mapPrototype ||
+    !unchangedPrototype(mapPrototype) ||
+    Reflect.ownKeys(map).length ||
+    nativeMapSize.call(map) > 256
+  )
+    return false;
+  let valid = true;
+  const budget = { remaining: 256 };
+  nativeMapEach.call(map, (entry: unknown, key: unknown) => {
+    if (
+      typeof key !== "string" ||
+      (events ? !safeEventList(entry, budget) : typeof entry !== "function" || types.isProxy(entry))
+    )
+      valid = false;
+  });
+  return valid;
 }
 
 export function validReadSignal(signal: unknown): signal is AbortSignal {
@@ -109,8 +163,10 @@ export function validReadSignal(signal: unknown): signal is AbortSignal {
     if (!descriptor || !("value" in descriptor)) return false;
     if (key === reasonSlot) continue;
     if (types.isProxy(descriptor.value)) return false;
-    if (types.isMap(descriptor.value) && !safeListenerState(descriptor.value)) return false;
+    if (types.isMap(descriptor.value) && !safeListenerState(descriptor.value, key === eventSlot))
+      return false;
   }
+  if (!safePrimitiveSlots(signal)) return false;
   try {
     Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")!.get!.call(signal);
     return true;

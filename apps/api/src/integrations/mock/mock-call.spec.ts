@@ -235,47 +235,121 @@ it("rejects proxy-valued signal internals before listener registration", async (
   expect(work).not.toHaveBeenCalled();
 });
 
-it.each(["proxy", "getter", "map-method", "nested-map", "cycle", "oversized"] as const)(
-  "rejects hostile listener %s without traps or work",
-  async (kind) => {
-    const signal = new AbortController().signal,
-      invoked = vi.fn(),
-      work = vi.fn(async () => ok);
-    const slot = Object.getOwnPropertySymbols(signal).find((key) =>
-      types.isMap(Object.getOwnPropertyDescriptor(signal, key)?.value),
-    );
-    const map = Object.getOwnPropertyDescriptor(signal, slot!)!.value as Map<string, unknown>;
-    const node = { size: 0, next: undefined, resistStopPropagation: false };
-    const proxy = new Proxy(node, {
-      get(target, key) {
-        invoked();
-        return Reflect.get(target, key);
+it.each([
+  "proxy",
+  "getter",
+  "map-method",
+  "nested-map",
+  "cycle",
+  "oversized",
+  "structural-method",
+  "size-coercion",
+  "symbol-coercion",
+  "native-override",
+  "flags-coercion",
+  "map-lookalike",
+] as const)("rejects hostile listener %s without traps or work", async (kind) => {
+  const signal = new AbortController().signal,
+    invoked = vi.fn(),
+    work = vi.fn(async () => ok);
+  const slot = Object.getOwnPropertySymbols(signal).find((key) =>
+    types.isMap(Object.getOwnPropertyDescriptor(signal, key)?.value),
+  );
+  const map = Object.getOwnPropertyDescriptor(signal, slot!)!.value as Map<string, unknown>;
+  const node = { size: 0, next: undefined, resistStopPropagation: false };
+  const proxy = new Proxy(node, {
+    get(target, key) {
+      invoked();
+      return Reflect.get(target, key);
+    },
+  });
+  if (kind === "cycle") Map.prototype.set.call(map, "abort", { ...node, next: node });
+  if (kind === "cycle") Object.defineProperty(node, "next", { value: node });
+  if (kind === "oversized")
+    for (let index = 0; index < 257; index++) Map.prototype.set.call(map, String(index), node);
+  if (kind === "structural-method")
+    Map.prototype.set.call(map, "abort", {
+      size: 1,
+      next: {
+        same() {
+          invoked();
+          return true;
+        },
+        next: undefined,
+      },
+      resistStopPropagation: false,
+    });
+  if (kind === "size-coercion")
+    Map.prototype.set.call(map, "abort", {
+      ...node,
+      size: {
+        [Symbol.toPrimitive]() {
+          invoked();
+          return 0;
+        },
       },
     });
-    if (kind === "cycle") Map.prototype.set.call(map, "abort", { ...node, next: node });
-    if (kind === "cycle") Object.defineProperty(node, "next", { value: node });
-    if (kind === "oversized")
-      for (let index = 0; index < 257; index++) Map.prototype.set.call(map, String(index), node);
-    if (kind === "proxy") Map.prototype.set.call(map, "abort", proxy);
-    if (kind === "getter") {
-      Object.defineProperty(node, "next", {
-        get() {
+  if (kind === "symbol-coercion") {
+    const numeric = Object.getOwnPropertySymbols(signal).find(
+      (key) => typeof Object.getOwnPropertyDescriptor(signal, key)?.value === "number",
+    );
+    Object.defineProperty(signal, numeric!, {
+      value: {
+        valueOf() {
           invoked();
-          return undefined;
+          return 0;
+        },
+      },
+    });
+  }
+  if (kind === "native-override" || kind === "flags-coercion") {
+    signal.addEventListener("abort", () => undefined);
+    const nativeNode = Map.prototype.get.call(map, "abort").next;
+    if (kind === "native-override")
+      Object.defineProperty(nativeNode, "same", {
+        value() {
+          invoked();
+          return true;
         },
       });
-      Map.prototype.set.call(map, "abort", node);
-    }
-    if (kind === "map-method") Object.defineProperty(map, "get", { value: invoked });
-    if (kind === "nested-map") Map.prototype.set.call(map, "abort", new Map([["nested", proxy]]));
-    expect(await executeMockRead({ ...options(), signal }, work)).toMatchObject({
-      ok: false,
-      error: { code: "INVALID_INPUT" },
+    if (kind === "flags-coercion")
+      Object.defineProperty(nativeNode, "flags", {
+        value: {
+          valueOf() {
+            invoked();
+            return 0;
+          },
+        },
+      });
+  }
+  if (kind === "map-lookalike")
+    Object.defineProperty(signal, slot!, {
+      value: {
+        get() {
+          invoked();
+          return node;
+        },
+      },
     });
-    expect(invoked).not.toHaveBeenCalled();
-    expect(work).not.toHaveBeenCalled();
-  },
-);
+  if (kind === "proxy") Map.prototype.set.call(map, "abort", proxy);
+  if (kind === "getter") {
+    Object.defineProperty(node, "next", {
+      get() {
+        invoked();
+        return undefined;
+      },
+    });
+    Map.prototype.set.call(map, "abort", node);
+  }
+  if (kind === "map-method") Object.defineProperty(map, "get", { value: invoked });
+  if (kind === "nested-map") Map.prototype.set.call(map, "abort", new Map([["nested", proxy]]));
+  expect(await executeMockRead({ ...options(), signal }, work)).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+  expect(invoked).not.toHaveBeenCalled();
+  expect(work).not.toHaveBeenCalled();
+});
 
 it("preserves existing native listeners and native signal factories", async () => {
   const controller = new AbortController(),
