@@ -46,7 +46,7 @@ function delivery(scenarioId: string): MockScenarioPlan["delivery"] {
   if (scenarioId === "SCENARIO_010") return { kind: "REPLAY_SAVED_PAGE", repetitions: 1 };
   return { kind: "NORMAL" };
 }
-/** Frozen causal inputs only; delivery policies require a future adapter to execute. */
+/** Frozen causal inputs; the demo sync composition executes persisted delivery policies. */
 export function createScenarioPlan(
   input: unknown,
   idInput: unknown,
