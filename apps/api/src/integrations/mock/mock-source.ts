@@ -74,7 +74,8 @@ export function generateMockSource(input: unknown, asOf: unknown): MockSnapshot 
     observedAt,
     historyUntil: new Date(until).toISOString(),
     store,
-    catalog: config.scenarioPlan ? scenarioCatalog(config, Date.parse(observedAt)) : catalog,
+    catalog:
+      opened && config.scenarioPlan ? scenarioCatalog(config, Date.parse(observedAt)) : catalog,
     orders: Array.from(state.orders.values(), (order) => ConnectorOrderSchema.parse(order)),
     economics: Array.from(state.economics.values()),
     refunds: state.refunds,
