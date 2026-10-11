@@ -536,6 +536,48 @@ test("explicit pins recheck authorization when revocation hides the certificate 
   }
 });
 
+async function assertRecoveredSnapshot(restarted, state, publication, input, position, expired) {
+  const cursor = await restarted.refreshLatestCheckpoint(readerActor, state.scope, {
+    ...input,
+    cursor: expired,
+  });
+  assert.equal(typeof cursor, "string");
+  const recovered = readLatestCursor(
+    context.env.MOCK_SOURCE_CURSOR_KEY,
+    cursor,
+    state.scope,
+    input,
+  );
+  assert.equal(recovered.certificateHash, publication.certificateHash);
+  assert.equal(recovered.highEventSeq, publication.highEventSeq);
+  assert.equal(recovered.afterEventSeq, position.eventSeq);
+  const next = await restarted.readLatestStates(readerActor, state.scope, { ...input, cursor });
+  assert.deepEqual(
+    next.items.map((item) => item.payload.externalProductId),
+    ["z"],
+  );
+  assert.equal(next.nextCursor, null);
+}
+
+async function assertRecoveryDenials(restarted, state, publication, input, position, expired) {
+  for (const change of [{ limit: 2 }, { kind: "ORDER" }, { cursor: expired + "!" }])
+    await assert.rejects(
+      restarted.refreshLatestCheckpoint(readerActor, state.scope, {
+        ...input,
+        cursor: expired,
+        ...change,
+      }),
+      { code: "SOURCE_INPUT" },
+    );
+  assert.equal(
+    await restarted.refreshLatestCheckpoint({ ...readerActor, userId: "unknown" }, state.scope, {
+      ...input,
+      cursor: expired,
+    }),
+    null,
+  );
+}
+
 test("authorized restart refreshes an expired checkpoint without changing its immutable snapshot", async () => {
   const state = await preparedAppend(context);
   const publication = await publishEvents(state, [product(state, "a"), product(state, "z")]);
@@ -558,42 +600,8 @@ test("authorized restart refreshes an expired checkpoint without changing its im
   );
   const restarted = source.createMockSourceReader(context.env);
   try {
-    const cursor = await restarted.refreshLatestCheckpoint(readerActor, state.scope, {
-      ...input,
-      cursor: expired,
-    });
-    assert.equal(typeof cursor, "string");
-    const recovered = readLatestCursor(
-      context.env.MOCK_SOURCE_CURSOR_KEY,
-      cursor,
-      state.scope,
-      input,
-    );
-    assert.equal(recovered.certificateHash, publication.certificateHash);
-    assert.equal(recovered.highEventSeq, publication.highEventSeq);
-    assert.equal(recovered.afterEventSeq, position.eventSeq);
-    const next = await restarted.readLatestStates(readerActor, state.scope, { ...input, cursor });
-    assert.deepEqual(
-      next.items.map((item) => item.payload.externalProductId),
-      ["z"],
-    );
-    assert.equal(next.nextCursor, null);
-    for (const change of [{ limit: 2 }, { kind: "ORDER" }, { cursor: expired + "!" }])
-      await assert.rejects(
-        restarted.refreshLatestCheckpoint(readerActor, state.scope, {
-          ...input,
-          cursor: expired,
-          ...change,
-        }),
-        { code: "SOURCE_INPUT" },
-      );
-    assert.equal(
-      await restarted.refreshLatestCheckpoint({ ...readerActor, userId: "unknown" }, state.scope, {
-        ...input,
-        cursor: expired,
-      }),
-      null,
-    );
+    await assertRecoveredSnapshot(restarted, state, publication, input, position, expired);
+    await assertRecoveryDenials(restarted, state, publication, input, position, expired);
   } finally {
     await restarted.close();
   }

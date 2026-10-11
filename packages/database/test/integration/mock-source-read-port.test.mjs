@@ -200,6 +200,18 @@ test("unknown publication and coverage are distinct from an explicitly empty pub
   );
 });
 
+async function assertWaitingRecoveryAbort(port, checkpoint) {
+  const controller = new globalThis.AbortController();
+  const timer = setTimeout(() => controller.abort(), 200);
+  try {
+    await assert.rejects(port.refreshCheckpoint(checkpoint, { signal: controller.signal }), {
+      code: "SOURCE_ABORTED",
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 test("broker deadline cancels real source lock waits and returns a usable pool", async () => {
   const state = await preparedAppend(context);
   const publication = await publishReadProducts(context, state);
@@ -220,15 +232,7 @@ test("broker deadline cancels real source lock waits and returns a usable pool",
       port.refreshCheckpoint(checkpoint, { deadlineAt: new Date(Date.now() + 200).toISOString() }),
       { code: "SOURCE_DEADLINE" },
     );
-    const controller = new globalThis.AbortController();
-    const timer = setTimeout(() => controller.abort(), 200);
-    try {
-      await assert.rejects(port.refreshCheckpoint(checkpoint, { signal: controller.signal }), {
-        code: "SOURCE_ABORTED",
-      });
-    } finally {
-      clearTimeout(timer);
-    }
+    await assertWaitingRecoveryAbort(port, checkpoint);
   } finally {
     await context.rawAdmin.query("ROLLBACK");
   }
