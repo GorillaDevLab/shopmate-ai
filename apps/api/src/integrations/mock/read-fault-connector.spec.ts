@@ -144,6 +144,20 @@ function deferred<T>() {
 afterEach(() => vi.useRealTimers());
 
 describe("read-only fault injecting connector", () => {
+  it("rechecks authorization after rule loading before returning an injected failure", async () => {
+    let allowed = true;
+    const { wrapper } = create(
+      [],
+      async () => allowed,
+      async () => {
+        allowed = false;
+        return [rule(fail())];
+      },
+    );
+    expect(await wrapper.getStore(options())).toMatchObject({
+      error: { code: "PERMISSION_DENIED" },
+    });
+  });
   it.each(methods)(
     "delegates actual %s source reads exactly when no rule matches",
     async (method) => {
@@ -329,16 +343,18 @@ describe("read-only fault injecting connector", () => {
     };
     const { wrapper } = create([], access, load);
     for (const method of methods) await reads[method](wrapper, options());
-    expect(permissions).toEqual([
-      "tenant:read",
-      "products:read",
-      "products:read",
-      "orders:read",
-      "orders:read",
-      "orders:read",
-      "inventory:read",
-      "tenant:read",
-    ]);
+    expect(permissions).toEqual(
+      [
+        "tenant:read",
+        "products:read",
+        "products:read",
+        "orders:read",
+        "orders:read",
+        "orders:read",
+        "inventory:read",
+        "tenant:read",
+      ].flatMap((permission) => [permission, permission]),
+    );
     allowed = false;
     expect(await wrapper.getStore(options())).toMatchObject({
       error: { code: "PERMISSION_DENIED" },

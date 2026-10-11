@@ -1,62 +1,17 @@
-import { ConnectorTimestampSchema, TenantIdSchema } from "@shopmate/contracts";
-import { z } from "zod";
+import {
+  MockReadFailureRulesSchema,
+  MockReadMethodSchema,
+  MockReadFailureEffectSchema,
+  DemoFailureRuleTimestampSchema,
+} from "@shopmate/contracts";
+import type { z } from "zod";
 import { MockConnectorError } from "./mock-call.js";
-
-export const MockReadMethodSchema = z.enum([
-  "getStore",
-  "listProducts",
-  "getProduct",
-  "listOrders",
-  "getOrder",
-  "listRefunds",
-  "getInventory",
-  "getMarketingMetrics",
-]);
+export {
+  MockReadFailureRulesSchema,
+  MockReadMethodSchema,
+  MockReadFailureEffectSchema,
+} from "@shopmate/contracts";
 export type MockReadMethod = z.infer<typeof MockReadMethodSchema>;
-
-const failureEffectSchema = z
-  .strictObject({
-    kind: z.literal("FAIL"),
-    code: z.enum(["TIMEOUT", "RATE_LIMIT", "AUTH_EXPIRED", "TEMPORARY", "INVALID_RESPONSE"]),
-    retryAfterMs: z.number().int().min(1).max(86_400_000).nullable(),
-  })
-  .refine((effect) => (effect.code === "RATE_LIMIT") === (effect.retryAfterMs !== null));
-
-export const MockReadFailureEffectSchema = z
-  .discriminatedUnion("kind", [
-    failureEffectSchema,
-    z.strictObject({ kind: z.literal("DELAY"), delayMs: z.number().int().min(1).max(30_000) }),
-  ])
-  .readonly();
-
-const timestampSchema = ConnectorTimestampSchema.refine(
-  (value) => value.slice(0, 4) !== "0000" && Number.isFinite(Date.parse(value)),
-)
-  .transform((value) => new Date(value).toISOString())
-  .pipe(ConnectorTimestampSchema.refine((value) => value.slice(0, 4) !== "0000"));
-
-export const MockReadFailureRulesSchema = z
-  .array(
-    z
-      .strictObject({
-        id: TenantIdSchema,
-        priority: z.number().int().min(0).max(1000),
-        startsAt: timestampSchema,
-        endsAt: timestampSchema,
-        methods: z
-          .array(MockReadMethodSchema)
-          .min(1)
-          .max(8)
-          .refine((methods) => new Set(methods).size === methods.length)
-          .readonly(),
-        effect: MockReadFailureEffectSchema,
-      })
-      .refine((rule) => Date.parse(rule.endsAt) > Date.parse(rule.startsAt))
-      .readonly(),
-  )
-  .max(32)
-  .refine((rules) => new Set(rules.map((rule) => rule.id)).size === rules.length)
-  .readonly();
 
 export interface MockReadFailureDecision {
   readonly ruleId: string;
@@ -70,7 +25,7 @@ export function selectMockReadFailure(
   observedAt: unknown,
 ): Readonly<MockReadFailureDecision> | null {
   const rules = MockReadFailureRulesSchema.safeParse(unknownRules);
-  const at = timestampSchema.safeParse(observedAt);
+  const at = DemoFailureRuleTimestampSchema.safeParse(observedAt);
   if (!rules.success || !at.success) throw new MockConnectorError("INVALID_RESPONSE");
   const now = Date.parse(at.data);
   const winner = rules.data
