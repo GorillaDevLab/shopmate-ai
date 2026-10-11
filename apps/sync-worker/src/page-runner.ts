@@ -29,10 +29,14 @@ export class SyncPageRunner {
   private running = false;
   constructor(
     private readonly host: PageHost,
-    private readonly connector: CommerceConnector,
+    private connector: CommerceConnector,
     private readonly runtimeOpening: string,
   ) {
     if (sqlTime(runtimeOpening) !== runtimeOpening) throw new Error("SYNC_RUN_INPUT_INVALID");
+  }
+  updateConnector(connector: CommerceConnector): void {
+    if (this.running) throw new Error("SYNC_RUN_BUSY");
+    this.connector = connector;
   }
   private async acquire(job: SyncJob): Promise<SyncJob> {
     // Only a lease captured by this instance on this pinned host proves ownership.
