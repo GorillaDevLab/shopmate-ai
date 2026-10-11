@@ -49,6 +49,26 @@ async function readBound(
   return page ? { ...page, effectiveUntil: until } : null;
 }
 
+async function refreshBound(
+  reader: MockSourceReader,
+  key: string,
+  actor: SourceReadActor,
+  scope: SourceScope,
+  request: SourceReadRequest,
+  control?: SourceReadControl,
+): Promise<string | null> {
+  if (!request.cursor) throw new SourceStorageError("SOURCE_INPUT");
+  const until = decodeLatestCheckpoint(key, request.cursor, Date.now()).t;
+  if (until > request.requestedUntil || until > request.businessNow)
+    throw new SourceStorageError("SOURCE_INPUT");
+  return reader.refreshLatestCheckpoint(
+    actor,
+    scope,
+    latestReadInput(request, until),
+    fixedPortControl(control),
+  );
+}
+
 export function bindSourceReadPort(
   reader: MockSourceReader,
   key: string,
@@ -61,19 +81,13 @@ export function bindSourceReadPort(
   const fixedActor = Object.freeze({ ...actor }),
     fixedScope = Object.freeze({ ...scope });
   return Object.freeze({
+    async findPublication(control?: SourceReadControl) {
+      if (!available()) throw new SourceStorageError("SOURCE_STORAGE");
+      return reader.findPublication(fixedActor, fixedScope, fixedPortControl(control));
+    },
     async refreshCheckpoint(input: unknown, control?: SourceReadControl) {
       if (!available()) throw new SourceStorageError("SOURCE_STORAGE");
-      const request = checkedReadRequest(input);
-      if (!request.cursor) throw new SourceStorageError("SOURCE_INPUT");
-      const until = decodeLatestCheckpoint(key, request.cursor, Date.now()).t;
-      if (until > request.requestedUntil || until > request.businessNow)
-        throw new SourceStorageError("SOURCE_INPUT");
-      return reader.refreshLatestCheckpoint(
-        fixedActor,
-        fixedScope,
-        latestReadInput(request, until),
-        fixedPortControl(control),
-      );
+      return refreshBound(reader, key, fixedActor, fixedScope, checkedReadRequest(input), control);
     },
     async read(input: unknown, control?: SourceReadControl) {
       if (!available()) throw new SourceStorageError("SOURCE_STORAGE");

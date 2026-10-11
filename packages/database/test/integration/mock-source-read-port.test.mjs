@@ -86,6 +86,7 @@ async function assertRecoveryBoundaries(port, resumed, scope) {
   );
   try {
     assert.equal(await port.refreshCheckpoint(resumed, options()), null);
+    assert.equal(await port.findPublication(options()), null);
   } finally {
     await context.admin.query(
       'UPDATE "OrganizationMember" SET status=$1 WHERE "organizationId"=$2 AND "userId"=$3',
@@ -111,6 +112,7 @@ test("generation replacement fences checkpoint recovery even with its valid orig
     throw error;
   }
   assert.equal(await port.refreshCheckpoint({ ...request, cursor: expired }, options()), null);
+  assert.equal(await port.findPublication(options()), null);
 });
 
 test("expired persisted read-port checkpoint resumes the original publication after new releases", async () => {
@@ -181,10 +183,12 @@ test("unknown publication and coverage are distinct from an explicitly empty pub
   const state = await preparedAppend(context);
   const request = requestFor(state.lease.targetTime);
   const port = ports.bind(readerActor, state.scope);
+  assert.equal(await port.findPublication(options()), null);
   assert.equal(await port.read(request, options()), null);
   const surrogate = { ...request, entityKey: ["PRODUCT", "\ud800"] };
   assert.equal(await port.read(surrogate, options()), null);
-  await publishReadProducts(context, state, []);
+  const published = await publishReadProducts(context, state, []);
+  assert.deepEqual(await port.findPublication(options()), published);
   const empty = await port.read(request, options());
   assert.deepEqual(empty.items, []);
   assert.equal(empty.nextCursor, null);
@@ -201,14 +205,17 @@ test("unknown publication and coverage are distinct from an explicitly empty pub
 });
 
 async function assertWaitingRecoveryAbort(port, checkpoint) {
-  const controller = new globalThis.AbortController();
-  const timer = setTimeout(() => controller.abort(), 200);
-  try {
-    await assert.rejects(port.refreshCheckpoint(checkpoint, { signal: controller.signal }), {
-      code: "SOURCE_ABORTED",
-    });
-  } finally {
-    clearTimeout(timer);
+  for (const operation of [
+    (control) => port.refreshCheckpoint(checkpoint, control),
+    (control) => port.findPublication(control),
+  ]) {
+    const controller = new globalThis.AbortController();
+    const timer = setTimeout(() => controller.abort(), 200);
+    try {
+      await assert.rejects(operation({ signal: controller.signal }), { code: "SOURCE_ABORTED" });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -229,6 +236,10 @@ test("broker deadline cancels real source lock waits and returns a usable pool",
     );
     assert.ok(Date.now() - started < 2500);
     await assert.rejects(
+      port.findPublication({ deadlineAt: new Date(Date.now() + 200).toISOString() }),
+      { code: "SOURCE_DEADLINE" },
+    );
+    await assert.rejects(
       port.refreshCheckpoint(checkpoint, { deadlineAt: new Date(Date.now() + 200).toISOString() }),
       { code: "SOURCE_DEADLINE" },
     );
@@ -237,6 +248,7 @@ test("broker deadline cancels real source lock waits and returns a usable pool",
     await context.rawAdmin.query("ROLLBACK");
   }
   assert.equal((await port.read(request, options())).items.length, 1);
+  assert.deepEqual(await port.findPublication(options()), publication);
   assert.equal(
     (
       await port.read(
