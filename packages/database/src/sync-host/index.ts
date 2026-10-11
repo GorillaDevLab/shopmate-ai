@@ -1,5 +1,6 @@
 import pg from "pg";
 import { randomUUID } from "node:crypto";
+import { readRuntimeBootstrap, type SyncRuntimeBootstrap } from "./bootstrap.js";
 import {
   encodeWorkerPage,
   workerCursor,
@@ -11,6 +12,7 @@ import {
 } from "./input.js";
 
 export type { SyncStream } from "./input.js";
+export type { SyncRuntimeBootstrap } from "./bootstrap.js";
 export interface SyncJob {
   id: string;
   stream: SyncStream;
@@ -68,12 +70,40 @@ export class SyncWorkerPorts {
   private readonly owner = `worker-${randomUUID()}`;
   private running = false;
   readonly #client: pg.Client;
-  private constructor(client: pg.Client) {
+  private constructor(
+    client: pg.Client,
+    private readonly grantId: string,
+  ) {
     this.#client = client;
   }
   static async connect(binding: WorkerBinding): Promise<SyncWorkerPorts> {
     workerId(binding.grantId);
     workerId(binding.principalUserId);
+    return this.open(binding.grantId, async (client) => {
+      await client.query(
+        "SELECT set_config('app.user_id',$1,false),set_config('sync.grant_id',$2,false)",
+        [binding.principalUserId, binding.grantId],
+      );
+    });
+  }
+  static async connectGrant(grantId: string): Promise<SyncWorkerPorts> {
+    workerId(grantId);
+    return this.open(grantId, async (client) => {
+      const result = await client.query("SELECT sync_host.runtime_bootstrap($1) AS result", [
+        grantId,
+      ]);
+      const context = readRuntimeBootstrap(result.rows[0]?.result);
+      if (!context || context.grantId !== grantId) throw new Error("SYNC_AUTHORITY_DENIED");
+      await client.query(
+        "SELECT set_config('app.user_id',$1,false),set_config('sync.grant_id',$2,false)",
+        [context.principalUserId, context.grantId],
+      );
+    });
+  }
+  private static async open(
+    grantId: string,
+    initialize: (client: pg.Client) => Promise<void>,
+  ): Promise<SyncWorkerPorts> {
     const client = new pg.Client({
       connectionString: workerDatabaseUrl(process.env),
       application_name: "shopmate-sync-worker",
@@ -84,11 +114,8 @@ export class SyncWorkerPorts {
         "SELECT session_user=current_user AND sync_host.safe_login(session_user) AS safe",
       );
       if (check.rows[0]?.safe !== true) throw new Error("SYNC_AUTHORITY_DENIED");
-      await client.query(
-        "SELECT set_config('app.user_id',$1,false),set_config('sync.grant_id',$2,false)",
-        [binding.principalUserId, binding.grantId],
-      );
-      const ports = new SyncWorkerPorts(client);
+      await initialize(client);
+      const ports = new SyncWorkerPorts(client, grantId);
       await ports.listWork();
       return ports;
     } catch {
@@ -105,6 +132,11 @@ export class SyncWorkerPorts {
   }
   async listWork(): Promise<unknown> {
     return this.#rpc("SELECT sync_host.list_work() AS result");
+  }
+  async runtimeBootstrap(): Promise<SyncRuntimeBootstrap | null> {
+    return readRuntimeBootstrap(
+      await this.#rpc("SELECT sync_host.runtime_bootstrap($1) AS result", [this.grantId]),
+    );
   }
   async createWindow(stream: SyncStream, until: string): Promise<SyncJob> {
     return readJob(
