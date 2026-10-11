@@ -12,6 +12,14 @@ test("bounded publication and high-load source history are mandatory in tenant C
 
 const workflowPath = ".github/workflows/ci.yml";
 
+test("grant-scoped failure metadata PostgreSQL coverage is mandatory", () => {
+  assert.ok(
+    readFileSync("scripts/test-tenant-database.mjs", "utf8").includes(
+      "test/integration/sync-runtime-failure-rules.test.mjs",
+    ),
+  );
+});
+
 test("real source host recovery is mandatory in tenant CI", () => {
   const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
   assert.match(gate, /await run\("apps\/source-worker", "test\/source-build\.test\.mjs"/u);
