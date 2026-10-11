@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import process from "node:process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { SyncCoordinator, SyncCommerce, SyncPageRunner } from "../dist/index.js";
 import {
   createScenarioFixture,
@@ -23,6 +27,7 @@ async function snapshot(state) {
   return (
     await f.admin.query(
       `SELECT
+  (SELECT jsonb_build_object('count',count(*),'hash',md5(string_agg(to_jsonb(e)::text,'' ORDER BY e."eventSeq"))) FROM mock_platform."SourceEvent" e WHERE e."storeId"=$1) source,
   (SELECT jsonb_agg(to_jsonb(p) ORDER BY p."externalProductId") FROM commerce."ProductListing" p WHERE p."storeId"=$1) products,
   (SELECT jsonb_agg(to_jsonb(o) ORDER BY o."externalOrderId") FROM commerce."OrderListing" o WHERE o."storeId"=$1) orders,
   (SELECT jsonb_agg(to_jsonb(l) ORDER BY l."externalOrderId",l."externalLineId") FROM commerce."OrderLineListing" l WHERE l."storeId"=$1) lines,
@@ -75,6 +80,22 @@ test("LOAD 010 pipeline persists real multi-page source envelopes and drains ter
   const before = await snapshot(state);
   await host.close();
   f.hosts.delete(host);
+  const restartedProcess = await promisify(execFile)(
+    process.execPath,
+    [fileURLToPath(new URL("../dist/main.js", import.meta.url)), "--once"],
+    {
+      env: {
+        ...process.env,
+        ...f.env,
+        APP_ENV: "demo",
+        ENABLE_DEMO_MODE: "true",
+        SYNC_WORKER_GRANT_ID: state.grant,
+      },
+      windowsHide: true,
+      timeout: 60000,
+    },
+  );
+  assert.equal(JSON.parse(restartedProcess.stdout.trim()).status, "WAITING");
   const restarted = await connectScenario(f, state);
   const caught = await new SyncCoordinator(restarted, f.sources).pass();
   assert.equal(caught.reason, "CAUGHT_UP");
@@ -126,5 +147,3 @@ test("a restarted RUNNING replay cannot acquire a lease behind the generic runne
   assert.ok(result.outcomes.every((v) => v.reason === "SUCCEEDED"));
   assert.deepEqual(await restarted.pendingDeliveryReplays(), []);
 });
-
-

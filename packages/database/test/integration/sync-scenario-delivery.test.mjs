@@ -143,6 +143,13 @@ test("saved nonterminal bytes replay only after a later accepted page and retain
   const before = await snapshot(job.id),
     pending = (await host.pendingDeliveryReplays())[0];
   assert.equal(pending.job.pageCount, 2);
+  const foreignLease = await SyncWorkerPorts.connectGrant("delivery-sync");
+  try {
+    assert.equal(await foreignLease.replayDelivery(pending), "BUSY");
+    assert.deepEqual(await snapshot(job.id), before);
+  } finally {
+    await foreignLease.close();
+  }
   await assert.rejects(
     host.replayDelivery({ ...pending, job: { ...pending.job, fence: pending.job.fence - 1 } }),
     /SYNC_WORKER_OPERATION_FAILED/,
@@ -153,6 +160,20 @@ test("saved nonterminal bytes replay only after a later accepted page and retain
     ["page-1", null, { ...original, observedAt: "2026-01-02T00:00:00.001Z" }],
   ])
     await assert.rejects(host.commitPage(job, id, cursor, bytes), /SYNC_WORKER_OPERATION_FAILED/);
+  await database.admin.query(
+    `CREATE FUNCTION sync_host.test_replay_crash() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'TEST_REPLAY_ACK_CRASH'; END $$`,
+  );
+  await database.admin.query(
+    'CREATE TRIGGER test_replay_crash BEFORE UPDATE ON sync_host."ScenarioDelivery" FOR EACH ROW EXECUTE FUNCTION sync_host.test_replay_crash()',
+  );
+  try {
+    await assert.rejects(host.replayDelivery(pending), /SYNC_WORKER_OPERATION_FAILED/);
+  } finally {
+    await database.admin.query('DROP TRIGGER test_replay_crash ON sync_host."ScenarioDelivery"');
+    await database.admin.query("DROP FUNCTION sync_host.test_replay_crash()");
+  }
+  assert.deepEqual(await snapshot(job.id), before);
+  assert.equal((await host.pendingDeliveryReplays())[0].attempt, 1);
   assert.equal(await host.replayDelivery(pending), "REPLAYED");
   // Lease renewal is permitted; causal progress, decisions and receipt bytes must remain exact.
   const after = await snapshot(job.id);
@@ -254,4 +275,77 @@ test("saved envelopes have no direct role access and are immutable even to accid
     ).rows[0].protected,
     true,
   );
+});
+
+test("replay and discovery recheck membership, grant and foreign-tenant authority without side effects", async () => {
+  const job = await host.claim(await host.createWindow("REFUNDS", until));
+  await host.commitDeliveryPage(job, "page-1", null, page);
+  const pending = (await host.pendingDeliveryReplays())[0],
+    before = await snapshot(job.id);
+  for (const [sql, values, restore] of [
+    [
+      'UPDATE sync_host."WorkerGrant" SET status=$1 WHERE id=$2',
+      ["REVOKED", "delivery-sync"],
+      ["ACTIVE", "delivery-sync"],
+    ],
+    [
+      'UPDATE "OrganizationMember" SET status=$1 WHERE "organizationId"=$2 AND "userId"=$3',
+      ["INACTIVE", scope.organizationId, "source-worker"],
+      ["ACTIVE", scope.organizationId, "source-worker"],
+    ],
+  ]) {
+    await database.admin.query(sql, values);
+    try {
+      await assert.rejects(host.pendingDeliveryReplays(), /SYNC_WORKER_OPERATION_FAILED/);
+      await assert.rejects(host.replayDelivery(pending), /SYNC_WORKER_OPERATION_FAILED/);
+    } finally {
+      await database.admin.query(sql, restore);
+    }
+    assert.deepEqual(await snapshot(job.id), before);
+  }
+  await assert.rejects(
+    host.replayDelivery({ ...pending, id: "foreign-delivery" }),
+    /SYNC_WORKER_OPERATION_FAILED/,
+  );
+  // A valid other-merchant worker owns its own ready runtime, yet cannot name this saved page.
+  const foreignScope = scopeFor("b");
+  await source.initializeGeneration({ grantId: "source-grant-b" }, foreignScope);
+  await createSyncGrant(
+    database.admin,
+    foreignScope,
+    "foreign-delivery-sync",
+    "sync_foreign_login",
+  );
+  process.env.SYNC_WORKER_DATABASE_URL = loginUrl(database.url, "sync_foreign_login");
+  let foreign;
+  try {
+    foreign = await SyncWorkerPorts.connectGrant("foreign-delivery-sync");
+    assert.deepEqual(await foreign.pendingDeliveryReplays(), []);
+    await assert.rejects(foreign.replayDelivery(pending), /SYNC_WORKER_OPERATION_FAILED/);
+  } finally {
+    await foreign?.close();
+    process.env.SYNC_WORKER_DATABASE_URL = loginUrl(database.url, "sync_worker_login");
+  }
+  assert.deepEqual(await snapshot(job.id), before);
+});
+test("current generation reset and disconnect revoke saved-page replay and discovery", async () => {
+  const pending = (await host.pendingDeliveryReplays())[0],
+    before = await snapshot(pending.job.id);
+  const current = await repo.findDemoSession(readerActor, scope.storeId);
+  const reset = await repo.resetDemoSession(readerActor, scope.storeId, {
+    expectedRevision: current.revision,
+    config: current.config,
+    configHash: current.configHash,
+    generatorVersion: current.generatorVersion,
+    clockNow: current.clockNow,
+  });
+  assert.equal(reset.status, "WRITTEN");
+  await assert.rejects(host.replayDelivery(pending), /SYNC_WORKER_OPERATION_FAILED/);
+  await assert.rejects(host.pendingDeliveryReplays(), /SYNC_WORKER_OPERATION_FAILED/);
+  assert.equal(
+    (await repo.disconnectDemoSession(readerActor, scope.storeId, reset.record.revision)).status,
+    "WRITTEN",
+  );
+  await assert.rejects(host.replayDelivery(pending), /SYNC_WORKER_OPERATION_FAILED/);
+  assert.deepEqual(await snapshot(pending.job.id), before);
 });
