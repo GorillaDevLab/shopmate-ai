@@ -3,8 +3,14 @@ export { resolveTenantMembership, type TenantMembershipRecord } from "./tenant-m
 export { verifyPassword } from "./password-hash.js";
 export type * from "./demo-commerce.types.js";
 export { findDemoSession, findDemoStore } from "./demo-commerce.repository.js";
-export { findDemoFailureRules, createDemoFailureRule, removeDemoFailureRule } from "./demo-failure-rules.js";
+export {
+  findDemoFailureRules,
+  createDemoFailureRule,
+  removeDemoFailureRule,
+} from "./demo-failure-rules.js";
 export type { DemoFailureRuleView, DemoFailureRuleResult } from "./demo-failure-rules.js";
+export { findDemoScenarios, loadDemoScenario } from "./demo-scenarios.js";
+export type { DemoScenarioInput, DemoScenarioResult } from "./demo-scenarios.js";
 export {
   advanceDemoSession,
   createDemoSession,
