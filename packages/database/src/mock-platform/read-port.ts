@@ -1,6 +1,6 @@
 import { SourceStorageError } from "./errors.js";
 import { createMockSourceReader } from "./index.js";
-import { decodeCompactLatest } from "./latest-cursor-codec.js";
+import { decodeCompactLatest, decodeLatestCheckpoint } from "./latest-cursor-codec.js";
 import { fixedPortControl } from "./read-port-control.js";
 import { checkedReadRequest, latestReadInput } from "./read-port-validation.js";
 import type {
@@ -61,6 +61,20 @@ export function bindSourceReadPort(
   const fixedActor = Object.freeze({ ...actor }),
     fixedScope = Object.freeze({ ...scope });
   return Object.freeze({
+    async refreshCheckpoint(input: unknown, control?: SourceReadControl) {
+      if (!available()) throw new SourceStorageError("SOURCE_STORAGE");
+      const request = checkedReadRequest(input);
+      if (!request.cursor) throw new SourceStorageError("SOURCE_INPUT");
+      const until = decodeLatestCheckpoint(key, request.cursor, Date.now()).t;
+      if (until > request.requestedUntil || until > request.businessNow)
+        throw new SourceStorageError("SOURCE_INPUT");
+      return reader.refreshLatestCheckpoint(
+        fixedActor,
+        fixedScope,
+        latestReadInput(request, until),
+        fixedPortControl(control),
+      );
+    },
     async read(input: unknown, control?: SourceReadControl) {
       if (!available()) throw new SourceStorageError("SOURCE_STORAGE");
       return readBound(reader, key, fixedActor, fixedScope, checkedReadRequest(input), control);

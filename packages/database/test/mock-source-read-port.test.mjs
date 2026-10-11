@@ -154,9 +154,10 @@ test("the read-only package facade exposes no signing codec, key or worker opera
   });
   const port = factory.bind(actor, scope);
   assert.deepEqual(Object.keys(factory).sort(), ["bind", "close"]);
-  assert.deepEqual(Object.keys(port), ["read"]);
+  assert.deepEqual(Object.keys(port), ["refreshCheckpoint", "read"]);
   await factory.close();
   await assert.rejects(port.read(request), { code: "SOURCE_STORAGE" });
+  await assert.rejects(port.refreshCheckpoint(request), { code: "SOURCE_STORAGE" });
   assert.throws(() => factory.bind(actor, scope), { code: "SOURCE_STORAGE" });
 });
 
