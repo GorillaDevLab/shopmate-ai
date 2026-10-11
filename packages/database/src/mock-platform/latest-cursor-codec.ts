@@ -24,7 +24,7 @@ function invalid(): never {
   throw new SourceStorageError("SOURCE_INPUT");
 }
 
-function checked(value: unknown, now: number): CompactLatestState {
+function checked(value: unknown, now: number, checkpoint = false): CompactLatestState {
   if (!exact(value, fields) || !Number.isSafeInteger(now)) invalid();
   if (
     value.v !== 1 ||
@@ -39,7 +39,7 @@ function checked(value: unknown, now: number): CompactLatestState {
     !positiveUInt(value.a) ||
     BigInt(value.a) > BigInt(value.h) ||
     !validateUtc(value.t) ||
-    !integer(value.e, now + 1, now + 15 * 60_000)
+    !integer(value.e, checkpoint ? 1 : now + 1, now + 15 * 60_000)
   )
     invalid();
   return value as unknown as CompactLatestState;
@@ -71,7 +71,12 @@ function parsed(payload: string): unknown {
   }
 }
 
-export function decodeCompactLatest(key: string, token: string, now: number): CompactLatestState {
+function decodeSignedLatest(
+  key: string,
+  token: string,
+  now: number,
+  checkpoint: boolean,
+): CompactLatestState {
   validateScanKey(key);
   if (typeof token !== "string" || token.length > 1024) invalid();
   const parts = token.split(".");
@@ -84,5 +89,16 @@ export function decodeCompactLatest(key: string, token: string, now: number): Co
     !timingSafeEqual(bytes, signature(key, payload))
   )
     invalid();
-  return checked(parsed(payload), now);
+  return checked(parsed(payload), now, checkpoint);
+}
+export function decodeCompactLatest(key: string, token: string, now: number): CompactLatestState {
+  return decodeSignedLatest(key, token, now, false);
+}
+/** Only the explicit authorized recovery operation may accept an expired MAC. */
+export function decodeLatestCheckpoint(
+  key: string,
+  token: string,
+  now: number,
+): CompactLatestState {
+  return decodeSignedLatest(key, token, now, true);
 }
