@@ -191,6 +191,20 @@ async function files(directory) {
 }
 
 const sourceImport = /(?:from\s*|(?:import|require)\s*(?:\(\s*)?)\s*["'][^"']*mock-platform/u;
+function withoutBootstrapValidation(code, bootstrap) {
+  if (!bootstrap) return code;
+  // Bootstrap metadata checks reuse only pure validators, never source I/O or signing codecs.
+  return code
+    .replace(
+      /^import \{ frozenConfiguration \} from "\.\.\/mock-platform\/configuration\.js";\r?$/gmu,
+      "",
+    )
+    .replace(
+      /^import \{ exact, integer, validateScope \} from "\.\.\/mock-platform\/validation\.js";\r?$/gmu,
+      "",
+    )
+    .replace(/^import type \{ SourceScope \} from "\.\.\/mock-platform\/types\.js";\r?$/gmu, "");
+}
 function withoutScenarioValidation(code, scenario) {
   if (!scenario) return code;
   // Management reuses pure frozen-config validation, without worker/read ports or credentials.
@@ -249,6 +263,23 @@ test("scenario management can reuse only the two named pure validation imports",
   ])
     assert.match(withoutScenarioValidation(code, true), sourceImport);
 });
+test("bootstrap metadata can reuse only fixed pure validation and scope type imports", () => {
+  const pure =
+    'import { frozenConfiguration } from "../mock-platform/configuration.js";\nimport { exact, integer, validateScope } from "../mock-platform/validation.js";\nimport type { SourceScope } from "../mock-platform/types.js";';
+  assert.doesNotMatch(withoutBootstrapValidation(pure, true), sourceImport);
+  assert.match(withoutBootstrapValidation(pure, false), sourceImport);
+  for (const code of [
+    'import { createMockSourceWorker } from "../mock-platform/index.js";',
+    'import { sourcePool } from "../mock-platform/clients.js";',
+    'import { encodeCompactLatest } from "../mock-platform/latest-cursor-codec.js";',
+    'import { frozenConfiguration, sourcePool } from "../mock-platform/configuration.js";',
+    'import * as validation from "../mock-platform/validation.js";',
+    'const validation = import("../mock-platform/configuration.js");',
+    'import "../mock-platform/types.js";',
+  ])
+    assert.match(withoutBootstrapValidation(code, true), sourceImport);
+});
+
 test("normal domain modules cannot import the privileged source subpath", async () => {
   for (const directory of ["../../../apps/api/src/", "../../../apps/web/src/", "../src/"]) {
     for (const file of await files(new URL(directory, import.meta.url))) {
@@ -257,9 +288,12 @@ test("normal domain modules cannot import the privileged source subpath", async 
         "/apps/api/src/demo-commerce/database-persistent-read-ports.ts",
       );
       const scenario = file.pathname.endsWith("/packages/database/src/demo-scenarios.ts");
-      const code = withoutScenarioValidation(
-        withoutReadComposition(await readFile(file, "utf8"), provider),
-        scenario,
+      const code = withoutBootstrapValidation(
+        withoutScenarioValidation(
+          withoutReadComposition(await readFile(file, "utf8"), provider),
+          scenario,
+        ),
+        file.pathname.endsWith("/packages/database/src/sync-host/bootstrap.ts"),
       );
       assert.doesNotMatch(code, sourceImport, file.pathname);
     }

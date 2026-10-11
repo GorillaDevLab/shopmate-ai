@@ -97,3 +97,9 @@ test("scenario management PostgreSQL suite is mandatory in the tenant gate", () 
     ),
   );
 });
+
+test("server-derived sync bootstrap and grant-only SDK PostgreSQL suites are mandatory", () => {
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  for (const suite of ["sync-runtime-bootstrap", "sync-runtime-sdk"])
+    assert.ok(gate.includes(`test/integration/${suite}.test.mjs`));
+});
