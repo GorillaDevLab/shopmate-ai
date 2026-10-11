@@ -60,3 +60,22 @@ test("jsonb reordered v2 data hashes in schema order", () => {
     frozenConfiguration(config, hash(config), "mock-source-v1", scope),
   );
 });
+
+test("all fifteen API plans freeze with the same canonical database hash", async () => {
+  const { createScenarioConfig } = await import(
+    "../../../apps/api/src/integrations/mock/mock-scenario-plans.ts"
+  );
+  for (let i = 1; i <= 15; i++) {
+    const planned = createScenarioConfig(config, `SCENARIO_${String(i).padStart(3, "0")}`, 3, 9);
+    const reordered = JSON.parse(JSON.stringify(planned));
+    reordered.scenarioPlan.mutations = reordered.scenarioPlan.mutations.map((m) =>
+      Object.fromEntries(Object.entries(m).reverse()),
+    );
+    reordered.scenarioPlan.delivery = Object.fromEntries(
+      Object.entries(reordered.scenarioPlan.delivery).reverse(),
+    );
+    assert.doesNotThrow(() =>
+      frozenConfiguration(reordered, hash(planned), "mock-source-v2", scope),
+    );
+  }
+});
