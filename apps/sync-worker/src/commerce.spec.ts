@@ -320,3 +320,60 @@ it.each(["SOURCE_INTEGRITY", "SOURCE_CONFIGURATION"] as const)(
     });
   },
 );
+
+describe("hostile read controls", () => {
+  it("rejects accessors without invoking them or contacting the host", async () => {
+    const f = fixture(),
+      getter = vi.fn(() => "commerce-a");
+    const input = Object.defineProperty({ deadlineAt: options().deadlineAt }, "requestId", {
+      get: getter,
+      enumerable: true,
+    });
+    expect(await f.commerce.open(input)).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+    expect(getter).not.toHaveBeenCalled();
+    expect(f.host.runtimeBootstrap).not.toHaveBeenCalled();
+  });
+  it("rejects proxies without invoking traps or contacting the host", async () => {
+    const f = fixture(),
+      trap = vi.fn();
+    const input = new Proxy(options(), {
+      ownKeys(target) {
+        trap();
+        return Reflect.ownKeys(target);
+      },
+      get(target, key) {
+        trap();
+        return Reflect.get(target, key);
+      },
+      getPrototypeOf(target) {
+        trap();
+        return Reflect.getPrototypeOf(target);
+      },
+    });
+    expect(await f.commerce.open(input)).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+    expect(trap).not.toHaveBeenCalled();
+    expect(f.host.runtimeBootstrap).not.toHaveBeenCalled();
+  });
+  it.each(["symbol", "nonenumerable", "nonplain"] as const)(
+    "rejects %s controls before host I/O",
+    async (kind) => {
+      const f = fixture();
+      const input = options();
+      if (kind === "symbol")
+        Object.defineProperty(input, Symbol("extra"), { value: true, enumerable: true });
+      if (kind === "nonenumerable") Object.defineProperty(input, "extra", { value: true });
+      if (kind === "nonplain") Object.setPrototypeOf(input, { inherited: true });
+      expect(await f.commerce.open(input)).toMatchObject({
+        ok: false,
+        error: { code: "INVALID_INPUT" },
+      });
+      expect(f.host.runtimeBootstrap).not.toHaveBeenCalled();
+    },
+  );
+});

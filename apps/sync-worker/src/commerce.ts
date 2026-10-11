@@ -1,3 +1,4 @@
+import { types } from "node:util";
 import {
   MockConnectorFactory,
   MockConnectorError,
@@ -22,8 +23,7 @@ export interface OpenedSyncCommerce {
   readonly connector: CommerceConnector;
 }
 function options(input: unknown): ReadOptions {
-  if (!input || typeof input !== "object") throw new MockConnectorError("INVALID_INPUT");
-  const { signal, ...json } = input as Record<string, unknown>;
+  const { signal, ...json } = optionData(input);
   const parsed = ReadOptionsSchema.safeParse(json);
   if (!parsed.success || (signal !== undefined && !(signal instanceof AbortSignal)))
     throw new MockConnectorError("INVALID_INPUT");
@@ -34,6 +34,29 @@ function options(input: unknown): ReadOptions {
       Math.min(Date.parse(parsed.data.deadlineAt), Date.now() + 25000),
     ).toISOString(),
   };
+}
+function optionData(input: unknown): Record<string, unknown> {
+  if (
+    !input ||
+    typeof input !== "object" ||
+    types.isProxy(input) ||
+    Object.getPrototypeOf(input) !== Object.prototype
+  )
+    throw new MockConnectorError("INVALID_INPUT");
+  const data: Record<string, unknown> = {};
+  for (const key of Reflect.ownKeys(input)) {
+    const descriptor = Object.getOwnPropertyDescriptor(input, key);
+    if (
+      typeof key !== "string" ||
+      !["requestId", "deadlineAt", "signal"].includes(key) ||
+      !descriptor ||
+      !("value" in descriptor) ||
+      !descriptor.enumerable
+    )
+      throw new MockConnectorError("INVALID_INPUT");
+    data[key] = descriptor.value;
+  }
+  return data;
 }
 function check(call: ReadOptions): void {
   if (call.signal?.aborted) throw new MockConnectorError("ABORTED");
