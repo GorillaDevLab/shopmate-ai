@@ -374,6 +374,8 @@ export type {
 } from "./ai/assistant-memory.schema.js";
 export { MockScenarioIdSchema, MockScenarioPlanSchema } from "./commerce/mock-scenario.schema.js";
 export type { MockScenarioPlan, MockScenarioMutation } from "./commerce/mock-scenario.schema.js";
+export { DemoScenarioLoadSchema, DemoScenarioViewSchema } from "./demo/demo-scenario.schema.js";
+export type { DemoScenarioLoad, DemoScenarioView } from "./demo/demo-scenario.schema.js";
 export {
   MockReadMethodSchema,
   MockReadFailureEffectSchema,
