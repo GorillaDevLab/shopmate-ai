@@ -20,3 +20,5 @@ export type { PageRunControls, PageRunReason } from "./page-controls.js";
 export { createSyncFailureRuleLoader } from "./failure-loader.js";
 export { SyncCoordinator } from "./coordinator.js";
 export type { SyncPassResult } from "./coordinator.js";
+export { runSyncWorker } from "./cli.js";
+export type { SyncWorkerDependencies } from "./cli.js";

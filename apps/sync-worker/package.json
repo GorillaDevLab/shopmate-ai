@@ -15,7 +15,8 @@
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "pnpm --filter @shopmate/api build && tsc --noEmit",
     "lint": "eslint src vitest.config.ts --max-warnings=0",
-    "test": "pnpm --filter @shopmate/api build && vitest run"
+    "test": "pnpm --filter @shopmate/api build && pnpm run build && vitest run",
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "@shopmate/api": "workspace:*",

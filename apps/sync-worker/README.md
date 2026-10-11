@@ -1,6 +1,6 @@
-# Sync worker building blocks
+# Durable demo sync worker
 
-This package provides a pure advisory window planner, restricted commerce read composition, strict persisted-work projection, and a bounded single-job durable page runner. Common-target coordination, fault-loader wiring, and the CLI remain to be implemented and accepted together as the durable-sync capability.
+This package provides a verified common-target coordinator, restricted commerce read composition, strict persisted-work projection, bounded durable page runners, a fresh grant-scoped fault loader, and a demo-only CLI. PostgreSQL/profile/scenario acceptance is required before declaring the complete P2 capability accepted.
 
 `SyncCommerce` opens the existing read-only connector from a freshly checked server runtime bootstrap and restricted source ports. Factory access rechecks current authority and refreshes the persisted business clock. `CheckpointReadPort` can recover expired signed continuations without changing their original cutoff or committing business cursor progress. All five read streams are supported. `SyncPageRunner` commits business facts and cursors through the existing atomic sync-host SDK; startup composition must supply the checked connector and runtime opening.
 
@@ -27,4 +27,18 @@ A `PLANNED` result contains the target, whether it is frozen, windows to create,
 
 Each page renews before and after fetching, shares an absolute deadline of at most 25 seconds across at most three attempts, and commits using the original persisted cursor and `page-${pageCount + 1}`. Products, orders, refunds, and inventory omit incremental `since`; marketing reads from the checked runtime opening. Only actual TEMPORARY/TIMEOUT/RATE_LIMIT result failures retry, with signal-aware delays bounded by remaining page time. Exhausted retryable failures mark the job failed; stop/budget results do not. Unknown thrown errors and uncertain commit acknowledgements propagate without refetching. SDK results are checked for stable identity and expected lease/progress transitions, and freshness is normalized.
 
-These helpers do not own connection cleanup, source publication verification, grant selection, fault-loader configuration, or coordinator creation of windows. Startup composition must check current authority and verified publication, use the planner, and close pinned/source connections on every path. Final restricted PostgreSQL profile acceptance remains required before declaring P2 complete.
+`SyncCoordinator(pinnedHost, sourceReader).pass(controls)` verifies physical publication through the restricted reader and rechecks runtime authority after publication/work reads and immediately before each window creation. It pins grant, principal, merchant, provider, full scope, initial opening, configuration/hash, generator and runtime opening. Current clock/session revisions may advance; the latest business clock bounds every creation. Partial creation leaves durable windows that freeze the next pass target. Each latest unfinished job retains its own runner on the same backend, while the selected connector is refreshed each pass. Drift/revocation and foreign active leases propagate errors.
+
+The pass shares one absolute budget across discovery, planning, creation and all runners. Controls use the same bounds as the page runner. Results are `WAITING`, `PROGRESSED`, `BUDGET` or `STOPPED`, with actual `created` jobs and actual page `outcomes`; waiting results include the planner reason. Window/commit RPCs are awaited even when a signal arrives so their actual receipts can be preserved. A thrown uncertain acknowledgement remains an error and is never reported as a successful mutation.
+
+`createSyncFailureRuleLoader(host, checkedBootstrap)` validates its actor/full scope and reads fresh SDK-validated immutable rules between bootstrap authority checks. Read controls reject accessors/proxies and nonnative signals, retain the original absolute deadline and cap each read at 25 seconds. Immutable drift or unavailable authority denies access; clock/session revisions may advance. The coordinator wires this loader into each freshly composed MOCK connector; business page runners select streams through the generic connector contract.
+
+Build first with `pnpm --filter @shopmate/sync-worker build`, then run `pnpm --filter @shopmate/sync-worker start --once` for one pass, or `pnpm --filter @shopmate/sync-worker start` for daemon polling every five seconds. Only `--once` or no arguments are supported. Required environment variables:
+
+- `APP_ENV=demo` and `ENABLE_DEMO_MODE=true`.
+- `SYNC_WORKER_GRANT_ID`: a bounded SDK grant identifier; the principal and all bindings come from the server.
+- `SYNC_WORKER_DATABASE_URL`: a dedicated restricted sync-host login.
+- `MOCK_PLATFORM_READ_DATABASE_URL`: a separate restricted source reader login; no application database fallback.
+- `MOCK_SOURCE_CURSOR_KEY`: the existing source cursor secret, 32–4096 UTF-8 bytes.
+
+No caller identities or target timestamps are accepted. The SDK verifies database-role restrictions on actual connections. The CLI validates configuration before opening resources, closes both connections on startup failure and every exit, removes signal handlers, and uses abort-aware polling for SIGINT/SIGTERM. Only normal waiting results continue polling; thrown permission, generation, malformed-response and storage failures terminate without automatic retries. Output contains only status/reason and actual job/outcome counts; errors emit `SYNC_WORKER_FAILED` without raw SDK errors or credentials. Importing the package does not start the CLI.
