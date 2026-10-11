@@ -209,3 +209,28 @@ it("rejects signal symbol accessors before native brand checks or work", async (
   expect(invoked).not.toHaveBeenCalled();
   expect(work).not.toHaveBeenCalled();
 });
+
+it("rejects proxy-valued signal internals before listener registration", async () => {
+  const signal = new AbortController().signal,
+    invoked = vi.fn(),
+    work = vi.fn(async () => ok);
+  const slot = Object.getOwnPropertySymbols(signal).find((key) =>
+    types.isMap(Object.getOwnPropertyDescriptor(signal, key)?.value),
+  );
+  expect(slot).toBeDefined();
+  Object.defineProperty(signal, slot!, {
+    value: new Proxy(new Map(), {
+      get(target, key) {
+        invoked();
+        return Reflect.get(target, key);
+      },
+    }),
+  });
+  expect(await executeMockRead({ ...options(), signal }, work)).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+  expect(invoked).not.toHaveBeenCalled();
+  expect(work).not.toHaveBeenCalled();
+});
+import { types } from "node:util";

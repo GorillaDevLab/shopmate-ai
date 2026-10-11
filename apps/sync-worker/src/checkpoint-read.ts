@@ -20,7 +20,7 @@ export function validReadSignal(signal: unknown): signal is AbortSignal {
     return false;
   for (const key of Object.getOwnPropertySymbols(signal)) {
     const descriptor = Object.getOwnPropertyDescriptor(signal, key);
-    if (!descriptor || !("value" in descriptor)) return false;
+    if (!descriptor || !("value" in descriptor) || types.isProxy(descriptor.value)) return false;
   }
   try {
     Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted")!.get!.call(signal);
