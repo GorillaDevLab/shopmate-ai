@@ -193,11 +193,15 @@ export class SyncCoordinator {
         runner = new SyncPageRunner(this.host, connector, this.pinned!.runtimeOpening!);
         this.runners.set(job.id, runner);
       } else runner.updateConnector(connector);
-      const result = await runner.run(job, {
-        maxPages: bounds.maxPages,
-        budgetMs: Math.max(1, bounds.deadline - Date.now()),
-        ...(bounds.signal ? { signal: bounds.signal } : {}),
-      });
+      const result = await runner.run(
+        job,
+        {
+          maxPages: bounds.maxPages,
+          budgetMs: Math.max(1, bounds.deadline - Date.now()),
+          ...(bounds.signal ? { signal: bounds.signal } : {}),
+        },
+        bounds.deadline,
+      );
       state.outcomes.push(result);
       if (result.reason === "SUCCEEDED") this.runners.delete(job.id);
       if (result.reason === "BUDGET" || result.reason === "STOPPED")

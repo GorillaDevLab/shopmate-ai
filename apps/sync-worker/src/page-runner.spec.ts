@@ -122,6 +122,14 @@ it("preserves committed progress at page limit and retains explicit same-runner 
   expect(f.host.claim).toHaveBeenCalledTimes(1);
   expect(f.host.fail).not.toHaveBeenCalled();
 });
+it("honors the coordinator original deadline without extending a relative job budget", async () => {
+  const f = fixture();
+  expect(await f.runner.run(f.initial, { budgetMs: 1000 }, Date.now() - 1)).toMatchObject({
+    reason: "BUDGET",
+    job: f.initial,
+  });
+  expect(f.host.claim).not.toHaveBeenCalled();
+});
 it("never fails or refetches a foreign lease or uncertain commit", async () => {
   const f = fixture();
   f.host.claim.mockRejectedValueOnce(new Error("LEASE_BUSY"));

@@ -10,7 +10,7 @@ export class PageRunPause extends Error {
     super(reason);
   }
 }
-export function boundedControls(input: PageRunControls) {
+export function boundedControls(input: PageRunControls, absoluteDeadline?: number) {
   const maxPages = input.maxPages ?? 100,
     budgetMs = input.budgetMs ?? 60000;
   if (
@@ -19,10 +19,16 @@ export function boundedControls(input: PageRunControls) {
     maxPages > 1000 ||
     !Number.isInteger(budgetMs) ||
     budgetMs < 1 ||
-    budgetMs > 3600000
+    budgetMs > 3600000 ||
+    (absoluteDeadline !== undefined &&
+      (!Number.isSafeInteger(absoluteDeadline) || absoluteDeadline < 0))
   )
     throw new Error("SYNC_RUN_INPUT_INVALID");
-  return { maxPages, deadline: Date.now() + budgetMs, signal: input.signal };
+  return {
+    maxPages,
+    deadline: Math.min(Date.now() + budgetMs, absoluteDeadline ?? Infinity),
+    signal: input.signal,
+  };
 }
 export function checkRun(deadline: number, signal?: AbortSignal): void {
   if (signal?.aborted) throw new PageRunPause("STOPPED");
