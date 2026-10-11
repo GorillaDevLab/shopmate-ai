@@ -17,3 +17,4 @@ export type { ProjectedSyncWork } from "./work.js";
 export { SyncPageRunner } from "./page-runner.js";
 export type { PageRunResult } from "./page-runner.js";
 export type { PageRunControls, PageRunReason } from "./page-controls.js";
+export { createSyncFailureRuleLoader } from "./failure-loader.js";
