@@ -294,9 +294,22 @@ test("read-port signals reject symbol accessors before native brand checks or so
 });
 
 test("read-port rejects nested listener traps before source I/O", async () => {
-  for (const kind of ["proxy", "getter", "map-method", "nested-map", "cycle", "oversized"]) {
+  for (const kind of [
+    "proxy",
+    "getter",
+    "map-method",
+    "nested-map",
+    "cycle",
+    "oversized",
+    "structural-method",
+    "size-coercion",
+    "symbol-coercion",
+    "native-override",
+    "flags-coercion",
+    "map-lookalike",
+  ]) {
     let traps = 0;
-    const signal = new AbortController().signal,
+    const signal = new globalThis.AbortController().signal,
       reader = fakeReader();
     const slot = Object.getOwnPropertySymbols(signal).find((key) =>
       types.isMap(Object.getOwnPropertyDescriptor(signal, key)?.value),
@@ -313,6 +326,70 @@ test("read-port rejects nested listener traps before source I/O", async () => {
     if (kind === "cycle") Object.defineProperty(node, "next", { value: node });
     if (kind === "oversized")
       for (let index = 0; index < 257; index++) Map.prototype.set.call(map, String(index), node);
+    if (kind === "structural-method")
+      Map.prototype.set.call(map, "abort", {
+        size: 1,
+        next: {
+          same() {
+            traps++;
+            return true;
+          },
+          next: undefined,
+        },
+        resistStopPropagation: false,
+      });
+    if (kind === "size-coercion")
+      Map.prototype.set.call(map, "abort", {
+        ...node,
+        size: {
+          [Symbol.toPrimitive]() {
+            traps++;
+            return 0;
+          },
+        },
+      });
+    if (kind === "symbol-coercion") {
+      const numeric = Object.getOwnPropertySymbols(signal).find(
+        (key) => typeof Object.getOwnPropertyDescriptor(signal, key)?.value === "number",
+      );
+      Object.defineProperty(signal, numeric, {
+        value: {
+          valueOf() {
+            traps++;
+            return 0;
+          },
+        },
+      });
+    }
+    if (kind === "native-override" || kind === "flags-coercion") {
+      signal.addEventListener("abort", () => undefined);
+      const nativeNode = Map.prototype.get.call(map, "abort").next;
+      if (kind === "native-override")
+        Object.defineProperty(nativeNode, "same", {
+          value() {
+            traps++;
+            return true;
+          },
+        });
+      if (kind === "flags-coercion")
+        Object.defineProperty(nativeNode, "flags", {
+          value: {
+            valueOf() {
+              traps++;
+              return 0;
+            },
+          },
+        });
+    }
+    if (kind === "map-lookalike")
+      Object.defineProperty(signal, slot, {
+        value: {
+          get() {
+            traps++;
+            return node;
+          },
+        },
+      });
     if (kind === "proxy") Map.prototype.set.call(map, "abort", proxy);
     if (kind === "getter") {
       Object.defineProperty(node, "next", {
@@ -341,9 +418,13 @@ test("read-port rejects nested listener traps before source I/O", async () => {
 
 test("read-port preserves native listeners and signal factories without inspecting abort reasons", async () => {
   let notified = 0;
-  const controller = new AbortController();
+  const controller = new globalThis.AbortController();
   controller.signal.addEventListener("abort", () => notified++);
-  for (const signal of [controller.signal, AbortSignal.any([]), AbortSignal.timeout(5000)])
+  for (const signal of [
+    controller.signal,
+    globalThis.AbortSignal.any([]),
+    globalThis.AbortSignal.timeout(5000),
+  ])
     await module.bindSourceReadPort(fakeReader(), key, actor, scope).read(request, { signal });
   controller.abort();
   assert.equal(notified, 1);
@@ -357,5 +438,5 @@ test("read-port preserves native listeners and signal factories without inspecti
   );
   await module
     .bindSourceReadPort(fakeReader(), key, actor, scope)
-    .read(request, { signal: AbortSignal.abort(reason) });
+    .read(request, { signal: globalThis.AbortSignal.abort(reason) });
 });
