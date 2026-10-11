@@ -372,3 +372,13 @@ export type {
   AssistantWorkspaceReadResponse,
   AssistantWorkspaceSaveRequest,
 } from "./ai/assistant-memory.schema.js";
+export {
+  MockReadMethodSchema,
+  MockReadFailureEffectSchema,
+  MockReadFailureRuleSchema,
+  MockReadFailureRulesSchema,
+  DemoFailureRuleTimestampSchema,
+  DemoFailureRuleCreateSchema,
+  DemoFailureRuleRemoveSchema,
+} from "./demo/demo-failure-rules.schema.js";
+export type { MockReadFailureRule } from "./demo/demo-failure-rules.schema.js";

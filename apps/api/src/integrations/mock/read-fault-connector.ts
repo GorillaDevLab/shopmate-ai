@@ -259,7 +259,9 @@ export class ReadFaultInjectingConnector implements CommerceConnector {
     assertActive(call);
     if (allowed !== true) return mockFailure("PERMISSION_DENIED");
     const rules = await this.loadRules(call);
+    const current = await this.authorize(permission, call);
     assertActive(call);
+    if (current !== true) return mockFailure("PERMISSION_DENIED");
     const decision = selectMockReadFailure(rules, method, this.clock.snapshot().now);
     const effect = decision?.effect;
     if (effect?.kind === "FAIL" && effect.code !== "TIMEOUT") {
