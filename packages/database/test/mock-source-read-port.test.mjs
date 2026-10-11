@@ -154,11 +154,30 @@ test("the read-only package facade exposes no signing codec, key or worker opera
   });
   const port = factory.bind(actor, scope);
   assert.deepEqual(Object.keys(factory).sort(), ["bind", "close"]);
-  assert.deepEqual(Object.keys(port), ["refreshCheckpoint", "read"]);
+  assert.deepEqual(Object.keys(port), ["findPublication", "refreshCheckpoint", "read"]);
   await factory.close();
+  await assert.rejects(port.findPublication(), { code: "SOURCE_STORAGE" });
   await assert.rejects(port.read(request), { code: "SOURCE_STORAGE" });
   await assert.rejects(port.refreshCheckpoint(request), { code: "SOURCE_STORAGE" });
   assert.throws(() => factory.bind(actor, scope), { code: "SOURCE_STORAGE" });
+});
+
+test("publication discovery keeps the bound identity and scope and preserves unknown coverage", async () => {
+  for (const found of [publication, null]) {
+    const reader = fakeReader(found);
+    const identity = { ...actor },
+      selected = { ...scope };
+    const port = module.bindSourceReadPort(reader, key, identity, selected);
+    identity.userId = "other";
+    selected.connectionId = "other";
+    const control = {
+      signal: new globalThis.AbortController().signal,
+      deadlineAt: new Date(Date.now() + 5000).toISOString(),
+    };
+    assert.deepEqual(await port.findPublication(control), found);
+    assert.equal(reader.calls.length, 1);
+    assert.deepEqual(reader.calls[0].slice(1), [actor, scope, control]);
+  }
 });
 
 test("bound identity, scope and request stay fixed while publication discovery is in flight", async () => {
@@ -215,7 +234,11 @@ test("read-port controls reject accessors and proxies before invoking them or so
     },
   );
   for (const control of [accessor, proxy, { extra: true }, { signal: {} }])
-    await assert.rejects(port.read(request, control), { code: "SOURCE_INPUT" });
+    for (const operation of [
+      () => port.read(request, control),
+      () => port.findPublication(control),
+    ])
+      await assert.rejects(operation(), { code: "SOURCE_INPUT" });
   assert.equal(invoked, false);
   assert.equal(reader.calls.length, 0);
 });
