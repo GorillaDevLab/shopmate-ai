@@ -169,5 +169,47 @@ export async function canonicalFacts(admin, state, facts) {
     );
     counts[kind] = actual.length;
   }
+  Object.assign(counts, await canonicalChildren(admin, state, facts));
   return counts;
+}
+
+function sortedChildren(records) {
+  const key = (record) =>
+    JSON.stringify([
+      record.externalProductId,
+      record.externalSkuId,
+      record.externalOrderId,
+      record.externalLineId,
+    ]);
+  return [...records].sort((left, right) => key(left).localeCompare(key(right)));
+}
+
+async function canonicalChildren(admin, state, facts) {
+  const skus = await admin.query(
+    "SELECT to_jsonb(s)-ARRAY['scopeId','organizationId','workspaceId','storeId'] AS record FROM commerce.\"SkuListing\" s WHERE \"storeId\"=$1",
+    [state.scope.storeId],
+  );
+  const lines = await admin.query(
+    "SELECT to_jsonb(l)-ARRAY['scopeId','organizationId','workspaceId','storeId'] AS record FROM commerce.\"OrderLineListing\" l WHERE \"storeId\"=$1",
+    [state.scope.storeId],
+  );
+  const expectedSkus = facts
+    .filter((row) => row.kind === "PRODUCT")
+    .flatMap((row) => row.payload.skus);
+  const expectedLines = facts
+    .filter((row) => row.kind === "ORDER")
+    .flatMap((row) =>
+      row.payload.items.map((item) => ({ ...item, externalOrderId: row.payload.externalOrderId })),
+    );
+  assert.deepEqual(
+    sortedChildren(skus.rows.map((row) => row.record)),
+    sortedChildren(expectedSkus),
+    "complete SKU identities, attributes, prices and nullable costs",
+  );
+  assert.deepEqual(
+    sortedChildren(lines.rows.map((row) => row.record)),
+    sortedChildren(expectedLines),
+    "complete order-line identities, quantities and minor-unit amounts",
+  );
+  return { SKU: skus.rowCount, ORDER_LINE: lines.rowCount };
 }
