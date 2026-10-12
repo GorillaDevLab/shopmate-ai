@@ -64,16 +64,28 @@ async function syncProfile(state, grant) {
     const jobs = [];
     for (const stream of SYNC_STREAMS) {
       const job = await host.createWindow(stream, state.until);
-      const result = await runner.run(job, { maxPages: 1000, budgetMs: 3600000 });
-      assert.equal(result.reason, "SUCCEEDED");
-      assert.equal(result.job.successfulThrough, state.until);
-      assert.equal(result.job.sourceWatermark, state.until);
-      jobs.push({ stream, pages: result.job.pageCount });
+      const completed = await completeProfileWindow(runner, job);
+      assert.equal(completed.successfulThrough, state.until);
+      assert.equal(completed.sourceWatermark, state.until);
+      jobs.push({ stream, pages: completed.pageCount });
     }
     return jobs;
   } finally {
     await host.close();
   }
+}
+
+async function completeProfileWindow(runner, job) {
+  // A bounded pass is not a complete history: the generator permits up to 150,000 orders.
+  let current = job;
+  for (let pass = 0; pass < 20; pass++) {
+    const result = await runner.run(current, { maxPages: 1000, budgetMs: 3600000 });
+    if (result.reason === "SUCCEEDED") return result.job;
+    assert.equal(result.reason, "PAGE_LIMIT");
+    assert.ok(result.job.pageCount > current.pageCount);
+    current = result.job;
+  }
+  assert.fail("Profile history exceeded the bounded 20,000-page acceptance limit");
 }
 
 async function acceptProfile(profile) {
