@@ -3,6 +3,7 @@ import test from "node:test";
 import process from "node:process";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { SyncWorkerPorts } from "@shopmate/database/sync-host";
 import { createMockSourceWorker } from "@shopmate/database/mock-platform";
 import { createMockSourceReadPorts } from "@shopmate/database/mock-platform-read";
@@ -305,7 +306,7 @@ test("the built CLI runs a real grant-only pass and reports only committed jobs"
   host = undefined;
   const result = await promisify(execFile)(
     process.execPath,
-    ["apps/sync-worker/dist/main.js", "--once"],
+    [fileURLToPath(new URL("../dist/main.js", import.meta.url)), "--once"],
     {
       windowsHide: true,
       timeout: 30000,
