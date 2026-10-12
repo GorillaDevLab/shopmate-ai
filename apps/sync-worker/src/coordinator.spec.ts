@@ -379,3 +379,33 @@ it("scenario recovery drains persisted completed replays before a waiting planne
   expect(f.host.replayDelivery).toHaveBeenCalledTimes(1);
   expect(f.fetch).not.toHaveBeenCalled();
 });
+it.each(["BUDGET", "STOPPED"] as const)(
+  "bounds stalled replay discovery by the original pass %s control",
+  async (status) => {
+    vi.useFakeTimers();
+    const f = await replayFixture();
+    const controller = new AbortController();
+    let release!: (pending: typeof f.pending) => void;
+    f.host.pendingDeliveryReplays.mockImplementation(
+      () => new Promise((resolve) => (release = resolve)),
+    );
+    let settled = false;
+    const pending = f.coordinator
+      .pass({ budgetMs: 50, signal: controller.signal })
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    await vi.advanceTimersByTimeAsync(20);
+    expect(f.host.pendingDeliveryReplays).toHaveBeenCalledTimes(1);
+    if (status === "STOPPED") controller.abort();
+    await vi.advanceTimersByTimeAsync(status === "BUDGET" ? 31 : 0);
+    expect(settled).toBe(true);
+    expect(await pending).toMatchObject({ status, created: [], outcomes: [] });
+    release([{ id: "saved", attempt: 1, job: { ...f.base, status: "SUCCEEDED" } }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.host.replayDelivery).not.toHaveBeenCalled();
+    expect(f.publication).not.toHaveBeenCalled();
+    expect(f.host.createWindow).not.toHaveBeenCalled();
+  },
+);

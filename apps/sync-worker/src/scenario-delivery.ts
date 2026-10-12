@@ -1,4 +1,5 @@
 import type { SyncRuntimeBootstrap, SyncWorkerPorts } from "@shopmate/database/sync-host";
+import { checkRun, controlled } from "./page-controls.js";
 
 type PageHost = Pick<SyncWorkerPorts, "claim" | "renew" | "fail" | "commitPage">;
 type DeliveryPorts = Pick<
@@ -7,18 +8,19 @@ type DeliveryPorts = Pick<
 >;
 export type ScenarioHost = PageHost & Partial<DeliveryPorts>;
 
-async function drainDelivery(ports: DeliveryPorts, check: () => void) {
+async function drainDelivery(ports: DeliveryPorts, deadline: number, signal?: AbortSignal) {
   // Five streams, at most three extra attempts each; retries resume durable ordinals next pass.
   for (let round = 0; round < 3; round++) {
-    check();
-    const pending = await ports.pendingDeliveryReplays();
-    check();
+    checkRun(deadline, signal);
+    const pending = await controlled(ports.pendingDeliveryReplays(), deadline, signal);
+    checkRun(deadline, signal);
     if (!pending.length) return;
     let progressed = false;
     for (const saved of pending) {
-      check();
+      checkRun(deadline, signal);
+      // Await the mutative replay and ordinal ACK to preserve uncertain-mutation semantics.
       if ((await ports.replayDelivery(saved)) !== "BUSY") progressed = true;
-      check();
+      checkRun(deadline, signal);
     }
     if (!progressed) return;
   }
@@ -44,5 +46,8 @@ export function scenarioDelivery(host: ScenarioHost, record: SyncRuntimeBootstra
       return ports.commitDeliveryPage(job, pageId, expectedCursor, page);
     },
   };
-  return { pageHost, drain: (check: () => void) => drainDelivery(ports, check) };
+  return {
+    pageHost,
+    drain: (deadline: number, signal?: AbortSignal) => drainDelivery(ports, deadline, signal),
+  };
 }
