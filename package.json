@@ -8,6 +8,8 @@
   },
   "scripts": {
     "test:tenant": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build && pnpm --filter @shopmate/api build && pnpm --filter @shopmate/source-worker build && pnpm --filter @shopmate/sync-worker build && node scripts/test-tenant-database.mjs",
+    "test:profiles": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build && pnpm --filter @shopmate/api build && pnpm --filter @shopmate/source-worker build && pnpm --filter @shopmate/sync-worker build && node apps/sync-worker/test/profiles.test.mjs",
+    "test:scenarios": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build && pnpm --filter @shopmate/api build && pnpm --filter @shopmate/source-worker build && pnpm --filter @shopmate/sync-worker build && node apps/sync-worker/test/scenarios.test.mjs",
     "predev": "pnpm --filter @shopmate/contracts build && pnpm --filter @shopmate/database build",
     "dev": "pnpm -r --parallel --if-present run dev",
     "build": "pnpm -r --if-present run build",

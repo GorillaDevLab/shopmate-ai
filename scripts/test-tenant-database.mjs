@@ -121,6 +121,15 @@ try {
   await run("apps/sync-worker", "test/commerce.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
+  await run("apps/sync-worker", "test/runtime.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("apps/sync-worker", "test/scenario-delivery.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("apps/sync-worker", "test/scenario-interruption.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
   await run("packages/database", "test/integration/mock-source-transaction.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
@@ -161,6 +170,9 @@ try {
     TEST_DATABASE_URL: server.url,
   });
   await run("packages/database", "test/integration/sync-runtime-failure-rules.test.mjs", [], {
+    TEST_DATABASE_URL: server.url,
+  });
+  await run("packages/database", "test/integration/sync-scenario-delivery.test.mjs", [], {
     TEST_DATABASE_URL: server.url,
   });
   const runtimeUrl = await prepareTenantApiRuntime(server.url);
