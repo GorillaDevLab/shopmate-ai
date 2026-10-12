@@ -4,6 +4,59 @@ import type { CommerceConnector, ConnectorResult, ConnectorPage } from "@shopmat
 import { projectSyncWork } from "./work.js";
 import { context, rawWork } from "../test/work-fixtures.js";
 import { SyncPageRunner } from "./page-runner.js";
+import type { PageRunControls } from "./page-controls.js";
+
+it.each(["fake signal", "accessor", "proxy", "custom prototype", "unknown field"])(
+  "rejects %s controls without evaluating caller code or mutating leases",
+  async (kind) => {
+    const f = fixture();
+    const evaluated = vi.fn(() => 1);
+    const inputs: Record<string, unknown> = {
+      "fake signal": { signal: { aborted: false } },
+      accessor: Object.defineProperty({}, "maxPages", { get: evaluated, enumerable: true }),
+      proxy: new Proxy(
+        {},
+        {
+          get: evaluated,
+          getPrototypeOf: () => {
+            evaluated();
+            return Object.prototype;
+          },
+          getOwnPropertyDescriptor: () => {
+            evaluated();
+            return undefined;
+          },
+          ownKeys: () => {
+            evaluated();
+            return [];
+          },
+        },
+      ),
+      "custom prototype": Object.create({ maxPages: 1 }),
+      "unknown field": { extra: true },
+    };
+    await expect(f.runner.run(f.initial, inputs[kind] as PageRunControls)).rejects.toThrow(
+      "SYNC_RUN_INPUT_INVALID",
+    );
+    expect(evaluated).not.toHaveBeenCalled();
+    expect(f.events).toEqual([]);
+    for (const operation of Object.values(f.host)) expect(operation).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["controller", "timeout", "any"])("accepts native %s signals", async (kind) => {
+  const f = fixture();
+  const controller = new AbortController();
+  const signal =
+    kind === "controller"
+      ? controller.signal
+      : kind === "timeout"
+        ? AbortSignal.timeout(10000)
+        : AbortSignal.any([controller.signal]);
+  signal.onabort = () => undefined;
+  signal.addEventListener("abort", { handleEvent() {} });
+  expect((await f.runner.run(f.initial, { signal })).reason).toBe("SUCCEEDED");
+});
 function fixture() {
   const initial = projectSyncWork(rawWork(), context).jobs[0]!;
   const page = {

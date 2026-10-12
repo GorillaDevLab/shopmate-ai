@@ -1,3 +1,5 @@
+import { types } from "node:util";
+import { validReadSignal } from "./checkpoint-read.js";
 import type { ReadOptions } from "@shopmate/contracts";
 export interface PageRunControls {
   readonly maxPages?: number;
@@ -10,9 +12,35 @@ export class PageRunPause extends Error {
     super(reason);
   }
 }
+function normalizeControls(input: PageRunControls): PageRunControls {
+  if (
+    !input ||
+    typeof input !== "object" ||
+    types.isProxy(input) ||
+    Object.getPrototypeOf(input) !== Object.prototype
+  )
+    throw new Error("SYNC_RUN_INPUT_INVALID");
+  const value: Record<string, unknown> = {};
+  for (const key of Reflect.ownKeys(input)) {
+    const field = Object.getOwnPropertyDescriptor(input, key);
+    if (
+      typeof key !== "string" ||
+      !["maxPages", "budgetMs", "signal"].includes(key) ||
+      !field ||
+      !("value" in field) ||
+      !field.enumerable
+    )
+      throw new Error("SYNC_RUN_INPUT_INVALID");
+    value[key] = field.value;
+  }
+  if (value.signal !== undefined && !validReadSignal(value.signal))
+    throw new Error("SYNC_RUN_INPUT_INVALID");
+  return value as PageRunControls;
+}
 export function boundedControls(input: PageRunControls, absoluteDeadline?: number) {
-  const maxPages = input.maxPages ?? 100,
-    budgetMs = input.budgetMs ?? 60000;
+  const normalized = normalizeControls(input);
+  const maxPages = normalized.maxPages ?? 100,
+    budgetMs = normalized.budgetMs ?? 60000;
   if (
     !Number.isInteger(maxPages) ||
     maxPages < 1 ||
@@ -27,7 +55,7 @@ export function boundedControls(input: PageRunControls, absoluteDeadline?: numbe
   return {
     maxPages,
     deadline: Math.min(Date.now() + budgetMs, absoluteDeadline ?? Infinity),
-    signal: input.signal,
+    signal: normalized.signal,
   };
 }
 export function checkRun(deadline: number, signal?: AbortSignal): void {

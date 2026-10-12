@@ -1,4 +1,3 @@
-import { types } from "node:util";
 import { MockConnectorError } from "@shopmate/api/mock-commerce";
 import type { SyncJob, SyncRuntimeBootstrap, SyncWorkerPorts } from "@shopmate/database/sync-host";
 import type { SourceReadPorts } from "@shopmate/database/mock-platform-read";
@@ -18,7 +17,6 @@ import {
   PageRunPause,
   type PageRunControls,
 } from "./page-controls.js";
-import { validReadSignal } from "./checkpoint-read.js";
 import { checkedJob } from "./page-job.js";
 import { scenarioDelivery, type ScenarioHost } from "./scenario-delivery.js";
 type CoordinatorHost = Pick<
@@ -43,31 +41,6 @@ export interface SyncPassResult {
 interface PassState {
   created: SyncJob[];
   outcomes: PageRunResult[];
-}
-function controls(input: PageRunControls): Bounds {
-  if (
-    !input ||
-    typeof input !== "object" ||
-    types.isProxy(input) ||
-    Object.getPrototypeOf(input) !== Object.prototype
-  )
-    throw new Error("SYNC_RUN_INPUT_INVALID");
-  const value: Record<string, unknown> = {};
-  for (const key of Reflect.ownKeys(input)) {
-    const field = Object.getOwnPropertyDescriptor(input, key);
-    if (
-      typeof key !== "string" ||
-      !["maxPages", "budgetMs", "signal"].includes(key) ||
-      !field ||
-      !("value" in field) ||
-      !field.enumerable
-    )
-      throw new Error("SYNC_RUN_INPUT_INVALID");
-    value[key] = field.value;
-  }
-  if (value.signal !== undefined && !validReadSignal(value.signal))
-    throw new Error("SYNC_RUN_INPUT_INVALID");
-  return boundedControls(value as PageRunControls);
 }
 export class SyncCoordinator {
   private pinned: SyncRuntimeBootstrap | null = null;
@@ -249,7 +222,7 @@ export class SyncCoordinator {
     return { status: "PROGRESSED", ...state };
   }
   async pass(input: PageRunControls = {}): Promise<SyncPassResult> {
-    const bounds = controls(input);
+    const bounds = boundedControls(input);
     if (this.running) throw new Error("SYNC_RUN_BUSY");
     const state: PassState = { created: [], outcomes: [] };
     this.running = true;
