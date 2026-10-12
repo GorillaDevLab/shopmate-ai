@@ -12,21 +12,40 @@ test("bounded publication and high-load source history are mandatory in tenant C
 
 const workflowPath = ".github/workflows/ci.yml";
 
+function jobBlock(workflow, name) {
+  const normalized = workflow.replaceAll("\r\n", "\n");
+  const start = normalized.indexOf(`\n  ${name}:\n`);
+  assert.ok(start >= 0, `Missing required CI job ${name}`);
+  return normalized.slice(start + 1).split(/\n {2}[A-Za-z_][\w-]*:/u)[0];
+}
+
 test("four persistent history profiles run as independent required CI jobs", () => {
   const workflow = readFileSync(workflowPath, "utf8");
-  assert.match(workflow, /^  sync-profiles:/mu);
+  const profiles = jobBlock(workflow, "sync-profiles");
   for (const profile of ["growing", "problematic", "mature", "new"])
-    assert.match(workflow, new RegExp(`profile: ${profile}\\b`, "u"));
-  assert.match(workflow, /profile: new\s+full: "true"/u);
-  assert.match(workflow, /P2_ACCEPTANCE_PROFILE: \$\{\{ matrix\.profile \}\}/u);
-  assert.match(workflow, /P2_ACCEPTANCE_FULL: \$\{\{ matrix\.full \}\}/u);
-  assert.match(workflow, /run: pnpm test:profiles/u);
+    assert.match(profiles, new RegExp(`profile: ${profile}\\b`, "u"));
+  assert.match(profiles, /profile: new\s+full: "true"/u);
+  assert.match(profiles, /P2_ACCEPTANCE_PROFILE: \$\{\{ matrix\.profile \}\}/u);
+  assert.match(profiles, /P2_ACCEPTANCE_FULL: \$\{\{ matrix\.full \}\}/u);
+  assert.match(profiles, /run: pnpm test:profiles/u);
   assert.doesNotMatch(workflow, /continue-on-error:/u);
   const command = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:profiles"];
   assert.equal(typeof command, "string");
   for (const dependency of ["contracts", "database", "api", "source-worker", "sync-worker"])
     assert.ok(command.includes(`--filter @shopmate/${dependency} build`));
   assert.ok(command.endsWith("node apps/sync-worker/test/profiles.test.mjs"));
+});
+
+test("all fifteen persistent scenarios and delivery boundaries are mandatory CI gates", () => {
+  const workflow = readFileSync(workflowPath, "utf8");
+  assert.match(jobBlock(workflow, "sync-scenarios"), /run: pnpm test:scenarios/u);
+  const command = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:scenarios"];
+  assert.equal(typeof command, "string");
+  assert.ok(command.endsWith("node apps/sync-worker/test/scenarios.test.mjs"));
+  const gate = readFileSync("scripts/test-tenant-database.mjs", "utf8");
+  for (const suite of ["scenario-delivery", "scenario-interruption"])
+    assert.ok(gate.includes(`test/${suite}.test.mjs`));
+  assert.ok(gate.includes("test/integration/sync-scenario-delivery.test.mjs"));
 });
 
 test("durable sync restart, expired cursor, lost acknowledgment and revoked authority are mandatory", () => {
