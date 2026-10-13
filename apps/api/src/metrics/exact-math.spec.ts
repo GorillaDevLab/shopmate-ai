@@ -1,6 +1,14 @@
-import type { ExactMinorMath, MinorRounding } from "@shopmate/contracts";
+import type { ExactMinorMath, MinorAllocationWeight, MinorRounding } from "@shopmate/contracts";
 import { expect, it } from "vitest";
-import { add, EXACT_MINOR_MATH_VERSION, multiply, ratio, subtract } from "./exact-math.js";
+import {
+  add,
+  allocate,
+  EXACT_MINOR_MATH_VERSION,
+  exactMinorMath,
+  multiply,
+  ratio,
+  subtract,
+} from "./exact-math.js";
 
 const MAX = Number.MAX_SAFE_INTEGER;
 const invalid = { ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] } };
@@ -113,4 +121,202 @@ it.each([MAX, -MAX])("rejects unsafe rounded ratio %s", (numerator) => {
 it("requires valid explicit rounding before zero denominator handling", () => {
   expect(ratio(1, 0, "HALF_EVEN" as MinorRounding)).toEqual(invalid);
   expect(ratio(1, 1, undefined as unknown as MinorRounding)).toEqual(invalid);
+});
+
+const fullMath: ExactMinorMath = exactMinorMath;
+const equalWeights = [
+  { key: "b", weight: 1 },
+  { key: "a", weight: 1 },
+] as const;
+
+it("exports the complete public ExactMinorMath port", () => {
+  expect(Object.keys(fullMath).sort()).toEqual([
+    "add",
+    "allocate",
+    "multiply",
+    "ratio",
+    "subtract",
+  ]);
+  expect(fullMath.allocate).toBe(allocate);
+});
+
+it.each([
+  [100, "TOWARD_ZERO", [33, 67]],
+  [-100, "TOWARD_ZERO", [-33, -67]],
+  [100, "HALF_AWAY_FROM_ZERO", [33, 67]],
+  [-100, "HALF_AWAY_FROM_ZERO", [-33, -67]],
+] as const)("conserves %s with weighted %s shares", (amount, rounding, expected) => {
+  expect(
+    allocate(
+      amount,
+      [
+        { key: "a", weight: 1 },
+        { key: "b", weight: 2 },
+      ],
+      rounding,
+    ),
+  ).toEqual({
+    ok: true,
+    value: [
+      { key: "a", amountMinor: expected[0] },
+      { key: "b", amountMinor: expected[1] },
+    ],
+  });
+});
+
+it.each([
+  [1, "TOWARD_ZERO", [0, 1]],
+  [-1, "TOWARD_ZERO", [0, -1]],
+  [1, "HALF_AWAY_FROM_ZERO", [1, 0]],
+  [-1, "HALF_AWAY_FROM_ZERO", [-1, 0]],
+  [0, "HALF_AWAY_FROM_ZERO", [0, 0]],
+  [-0, "TOWARD_ZERO", [0, 0]],
+] as const)("reconciles signed equal shares %s %s by ascending key", (amount, mode, expected) => {
+  expect(allocate(amount, equalWeights, mode)).toEqual({
+    ok: true,
+    value: [
+      { key: "b", amountMinor: expected[0] },
+      { key: "a", amountMinor: expected[1] },
+    ],
+  });
+});
+
+it("uses locale independent key order and retains caller order", () => {
+  const weights = [
+    { key: "ä", weight: 1 },
+    { key: "Z", weight: 1 },
+    { key: "a", weight: 1 },
+  ];
+  expect(allocate(1, weights, "TOWARD_ZERO")).toEqual({
+    ok: true,
+    value: [
+      { key: "ä", amountMinor: 0 },
+      { key: "Z", amountMinor: 1 },
+      { key: "a", amountMinor: 0 },
+    ],
+  });
+});
+
+it("freezes ascending UTF-16 ordering for supplementary key characters", () => {
+  const weights = [
+    { key: "\uE000", weight: 1 },
+    { key: "\u{10000}", weight: 1 },
+  ];
+  expect(allocate(1, weights, "TOWARD_ZERO")).toEqual({
+    ok: true,
+    value: [
+      { key: "\uE000", amountMinor: 0 },
+      { key: "\u{10000}", amountMinor: 1 },
+    ],
+  });
+});
+
+it.each([1, -1])("reconciles many rounded shares for amount %s", (amount) => {
+  const weights = ["e", "d", "c", "b", "a"].map((key) => ({ key, weight: 1 }));
+  expect(allocate(amount * 4, weights, "TOWARD_ZERO")).toEqual({
+    ok: true,
+    value: [
+      { key: "e", amountMinor: 0 },
+      { key: "d", amountMinor: amount },
+      { key: "c", amountMinor: amount },
+      { key: "b", amountMinor: amount },
+      { key: "a", amountMinor: amount },
+    ],
+  });
+  expect(allocate(amount * 4, weights, "HALF_AWAY_FROM_ZERO")).toEqual({
+    ok: true,
+    value: weights.map(({ key }) => ({ key, amountMinor: key === "a" ? 0 : amount })),
+  });
+});
+
+it.each([1, -1])("prioritizes exact signed errors rather than input order for %s", (sign) => {
+  const weights = [
+    { key: "a", weight: 3 },
+    { key: "b", weight: 2 },
+    { key: "c", weight: 1 },
+  ];
+  expect(allocate(sign * 2, weights, "TOWARD_ZERO")).toEqual({
+    ok: true,
+    value: [
+      { key: "a", amountMinor: sign },
+      { key: "b", amountMinor: sign },
+      { key: "c", amountMinor: 0 },
+    ],
+  });
+});
+
+it.each([MAX, -MAX])("uses exact wide weight sums at safe amount boundary %s", (amount) => {
+  const weights = [
+    { key: "b", weight: MAX },
+    { key: "a", weight: MAX },
+  ];
+  const smaller = amount > 0 ? 4503599627370495 : -4503599627370495;
+  const larger = amount > 0 ? 4503599627370496 : -4503599627370496;
+  expect(allocate(amount, weights, "TOWARD_ZERO")).toEqual({
+    ok: true,
+    value: [
+      { key: "b", amountMinor: smaller },
+      { key: "a", amountMinor: larger },
+    ],
+  });
+  expect(allocate(amount, weights, "HALF_AWAY_FROM_ZERO")).toEqual({
+    ok: true,
+    value: [
+      { key: "b", amountMinor: larger },
+      { key: "a", amountMinor: smaller },
+    ],
+  });
+});
+
+it("never gives zero weights a residual or mutates inputs", () => {
+  const weights = Object.freeze([
+    Object.freeze({ key: "a", weight: -0 }),
+    Object.freeze({ key: "b", weight: MAX }),
+  ]);
+  expect(allocate(-MAX, weights, "HALF_AWAY_FROM_ZERO")).toEqual({
+    ok: true,
+    value: [
+      { key: "a", amountMinor: 0 },
+      { key: "b", amountMinor: -MAX },
+    ],
+  });
+});
+
+it.each(badNumbers)("rejects invalid allocation amount or weight %s", (value) => {
+  expect(allocate(value, equalWeights, "TOWARD_ZERO")).toEqual(invalid);
+  expect(allocate(0, [{ key: "a", weight: value }], "TOWARD_ZERO")).toEqual(invalid);
+});
+
+it.each([
+  { weights: [] },
+  { weights: [{ key: "a", weight: 0 }] },
+  { weights: [{ key: "a", weight: -1 }] },
+  { weights: [{ key: "", weight: 1 }] },
+  { weights: [{ key: " \t", weight: 1 }] },
+  {
+    weights: [
+      { key: "a", weight: 1 },
+      { key: "a", weight: 2 },
+    ],
+  },
+  {
+    weights: [
+      { key: "a", weight: 0 },
+      { key: "a", weight: 1 },
+    ],
+  },
+  { weights: [{ key: 1, weight: 1 }] },
+  { weights: [null] },
+  { weights: [{}] },
+  { weights: null },
+  { weights: "a" },
+  { weights: new Array(1) },
+])("rejects malformed allocation weights %j", ({ weights }) => {
+  expect(
+    allocate(0, weights as unknown as readonly MinorAllocationWeight[], "TOWARD_ZERO"),
+  ).toEqual(invalid);
+});
+
+it("validates allocation rounding even for a zero amount", () => {
+  expect(allocate(0, equalWeights, "HALF_EVEN" as MinorRounding)).toEqual(invalid);
 });

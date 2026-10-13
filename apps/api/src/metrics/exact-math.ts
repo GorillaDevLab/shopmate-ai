@@ -1,6 +1,13 @@
-import type { BasisPointRatio, MetricResult, MinorRounding } from "@shopmate/contracts";
+import type {
+  BasisPointRatio,
+  ExactMinorMath,
+  MetricResult,
+  MinorAllocation,
+  MinorAllocationWeight,
+  MinorRounding,
+} from "@shopmate/contracts";
 
-/** Policy v1: safe integer inputs, checked prefixes, explicit signed exact rounding. */
+/** Policy v1: safe inputs, checked prefixes, signed exact rounding and error-ranked allocation. */
 export const EXACT_MINOR_MATH_VERSION = 1;
 
 const MAX_MINOR = BigInt(Number.MAX_SAFE_INTEGER);
@@ -80,3 +87,81 @@ export function ratio(
   );
   return result.ok ? success({ value: result.value, reason: null }) : result;
 }
+
+interface ExactShare {
+  readonly key: string;
+  readonly weight: bigint;
+  readonly error: bigint;
+  amount: bigint;
+}
+
+function validWeights(weights: readonly MinorAllocationWeight[]): boolean {
+  if (!Array.isArray(weights) || weights.length === 0) return false;
+  const keys = new Set<string>();
+  let hasPositiveWeight = false;
+  for (const item of weights) {
+    if (typeof item !== "object" || item === null) return false;
+    if (typeof item.key !== "string" || item.key.trim().length === 0 || keys.has(item.key)) {
+      return false;
+    }
+    if (!Number.isSafeInteger(item.weight) || item.weight < 0) return false;
+    keys.add(item.key);
+    hasPositiveWeight ||= item.weight > 0;
+  }
+  return hasPositiveWeight;
+}
+
+function weightedShare(
+  amount: bigint,
+  item: MinorAllocationWeight,
+  totalWeight: bigint,
+  rounding: MinorRounding,
+): ExactShare {
+  const weight = BigInt(item.weight);
+  const numerator = amount * weight;
+  const rounded = roundQuotient(numerator, totalWeight, rounding);
+  return { key: item.key, weight, amount: rounded, error: numerator - rounded * totalWeight };
+}
+
+function compareShares(left: ExactShare, right: ExactShare, direction: bigint): number {
+  if (left.error !== right.error)
+    return left.error > right.error ? -Number(direction) : Number(direction);
+  return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;
+}
+
+/**
+ * Round exact quotas first, then correct the signed residual by rounding error:
+ * positive residual favors underallocated shares; negative favors overallocated.
+ * Errors share one exact denominator; ties use ascending UTF-16 key order.
+ * Each positive-weight share needs at most one unit; zero weights are excluded.
+ */
+function reconcileShares(shares: readonly ExactShare[], amount: bigint): void {
+  let residual = amount - shares.reduce((total, share) => total + share.amount, 0n);
+  const direction = residual < 0n ? -1n : 1n;
+  const candidates = shares.filter((share) => share.weight > 0n);
+  candidates.sort((left, right) => compareShares(left, right, direction));
+  for (const share of candidates) {
+    if (residual === 0n) break;
+    share.amount += direction;
+    residual -= direction;
+  }
+}
+
+export function allocate(
+  amountMinor: number,
+  weights: readonly MinorAllocationWeight[],
+  rounding: MinorRounding,
+): MetricResult<readonly MinorAllocation[]> {
+  if (!Number.isSafeInteger(amountMinor) || !validWeights(weights) || !validRounding(rounding)) {
+    return failure("INVALID_INPUT");
+  }
+  const amount = BigInt(amountMinor);
+  const totalWeight = weights.reduce((total, item) => total + BigInt(item.weight), 0n);
+  const shares = weights.map((item) => weightedShare(amount, item, totalWeight, rounding));
+  reconcileShares(shares, amount);
+  if (shares.some((share) => !safeRange(share.amount))) return failure("OVERFLOW");
+  return success(shares.map((share) => ({ key: share.key, amountMinor: Number(share.amount) })));
+}
+
+/** Pure policy-v1 currency arithmetic; no clocks, sources or runtime dependencies. */
+export const exactMinorMath: ExactMinorMath = { add, subtract, multiply, ratio, allocate };
