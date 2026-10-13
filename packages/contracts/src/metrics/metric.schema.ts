@@ -662,9 +662,10 @@ function sameSubject(left: MetricSubject, right: MetricSubject): boolean {
   return true;
 }
 function knownPayments(input: MetricInputV1, kind: MetricKind): boolean {
-  if (kind === "GMV" || !requiredCollections[kind].includes("paymentFacts")) return true;
+  if (!requiredCollections[kind].includes("paymentFacts")) return true;
   return (input.paymentFacts ?? []).every(
     ({ data }) =>
+      !data.source.quality.issues.includes("PAYMENT_UNKNOWN") &&
       data.paidMinor !== null &&
       (data.paidAt !== null ||
         (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status))),

@@ -652,6 +652,110 @@ it("keeps revenue verifiable when only refund data is unknown", () => {
     }).success,
   ).toBe(true);
 });
+const gmvInput = { ...input, metricCoverage: [{ ...revenueCoverage, kind: "GMV" }] };
+const gmvSnapshot = { ...snapshot, metric: { ...snapshot.metric, kind: "GMV" } };
+it.each([
+  { field: "paidAt", value: 0 },
+  { field: "paidAt", value: 12000 },
+  { field: "paidMinor", value: 0 },
+  { field: "paidMinor", value: 12000 },
+])("rejects VERIFIED GMV $value with explicitly unknown $field", ({ field, value }) => {
+  const data = {
+    ...order,
+    [field]: null,
+    source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+  };
+  const partial = { ...gmvInput, paymentFacts: [{ ...provenance, data }] };
+  const result = { ...gmvSnapshot, metric: { ...gmvSnapshot.metric, value } };
+  expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+  expect(MetricComputationV1Schema.safeParse({ input: partial, snapshot: result }).success).toBe(
+    false,
+  );
+});
+it.each([
+  { kind: "GMV", unit: "minorCNY" },
+  { kind: "PAID_REVENUE", unit: "minorCNY" },
+  { kind: "AOV", unit: "minorCNY" },
+  { kind: "PAID_ORDERS", unit: "units" },
+  { kind: "PAID_UNITS", unit: "units" },
+])("rejects VERIFIED $kind when payment quality explicitly declares unknown", ({ kind, unit }) => {
+  const data = {
+    ...order,
+    source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+  };
+  const partial = {
+    ...input,
+    paymentFacts: [{ ...provenance, data }],
+    metricCoverage: [{ ...revenueCoverage, kind }],
+  };
+  const result = { ...snapshot, metric: { kind, unit, value: 0 } };
+  expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+  expect(MetricComputationV1Schema.safeParse({ input: partial, snapshot: result }).success).toBe(
+    false,
+  );
+});
+it("allows VERIFIED GMV zero from an observed empty payment collection", () => {
+  expect(
+    MetricComputationV1Schema.safeParse({ input: gmvInput, snapshot: gmvSnapshot }).success,
+  ).toBe(true);
+});
+it("allows VERIFIED GMV with confirmed payment facts", () => {
+  const confirmed = { ...gmvInput, paymentFacts: [{ ...provenance, data: order }] };
+  const result = { ...gmvSnapshot, metric: { ...gmvSnapshot.metric, value: 12000 } };
+  expect(MetricComputationV1Schema.safeParse({ input: confirmed, snapshot: result }).success).toBe(
+    true,
+  );
+});
+it.each(["PENDING_PAYMENT", "CANCELLED", "CLOSED"])(
+  "preserves known unpaid %s records as excluded-capable payment facts",
+  (status) => {
+    const data = { ...order, status, paidAt: null, paidMinor: 0 };
+    const unpaid = { ...gmvInput, paymentFacts: [{ ...provenance, data }] };
+    expect(MetricInputV1Schema.safeParse(unpaid).success).toBe(true);
+    expect(
+      MetricComputationV1Schema.safeParse({ input: unpaid, snapshot: gmvSnapshot }).success,
+    ).toBe(true);
+  },
+);
+it("retains confirmed payment facts after order cancellation", () => {
+  const data = { ...order, status: "CANCELLED" };
+  const cancelled = { ...gmvInput, paymentFacts: [{ ...provenance, data }] };
+  const result = { ...gmvSnapshot, metric: { ...gmvSnapshot.metric, value: 12000 } };
+  expect(MetricComputationV1Schema.safeParse({ input: cancelled, snapshot: result }).success).toBe(
+    true,
+  );
+});
+it("preserves explicitly unknown payments in an insufficient GMV computation", () => {
+  const data = {
+    ...order,
+    paidAt: null,
+    paidMinor: null,
+    source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+  };
+  const partial = { ...gmvInput, paymentFacts: [{ ...provenance, data }] };
+  const result = {
+    ...gmvSnapshot,
+    status: "INSUFFICIENT",
+    coverageBasisPoints: 0,
+    metric: { ...gmvSnapshot.metric, value: null },
+    issues: [{ code: "PAYMENT_UNKNOWN", field: "paymentFacts", evidenceIds: ["sync-a"] }],
+  };
+  const parsed = MetricComputationV1Schema.parse({ input: partial, snapshot: result });
+  expect(parsed.input.paymentFacts?.[0]?.data.paidAt).toBeNull();
+  expect(parsed.input.paymentFacts?.[0]?.data.paidMinor).toBeNull();
+});
+it("keeps GMV verifiable when only refund facts are unknown", () => {
+  const data = {
+    ...order,
+    refundedMinor: null,
+    source: { ...source, quality: { state: "PARTIAL", issues: ["REFUND_UNKNOWN"] } },
+  };
+  const confirmed = { ...gmvInput, paymentFacts: [{ ...provenance, data }] };
+  const result = { ...gmvSnapshot, metric: { ...gmvSnapshot.metric, value: 12000 } };
+  expect(MetricComputationV1Schema.safeParse({ input: confirmed, snapshot: result }).success).toBe(
+    true,
+  );
+});
 it("allows source readers to receive explicit metric and subject coverage requests", () => {
   expectTypeOf<Parameters<MetricSourceReader["read"]>[0]["coverageRequests"]>().toEqualTypeOf<
     readonly Readonly<{
