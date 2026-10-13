@@ -80,7 +80,7 @@ Payment-window membership uses `paidAt`. Successful-refund settlement membership
 
 The cross-day refund is requested at 2026-10-02T23:00:00Z and succeeds at 2026-10-03T00:00:00Z. It is absent at the day1 cutoff. Its next-day settlement reduces only day2 net; the original day1 paid fact stays 10500. Hand conservation across the two days is 10500 + (−2000) = 8500. Input period and visibility cutoff are separate: the later day2 cutoff provides 48 hours of mature observation after day1 end without expanding the settlement interval.
 
-In `shanghai-partial-window`, one payment occurs exactly at the UTC start/Shanghai midnight and one exactly at the UTC end/Shanghai 14:00. Both source records are visible at the cutoff, but only the start payment belongs to the partial interval. Paid revenue is therefore 10500. A half-day window must not be treated as a full Shanghai day or compared to a full-day baseline without an explicit aligned-window policy.
+In `shanghai-partial-window`, one payment occurs exactly at the UTC start/Shanghai midnight and one exactly at the UTC end/Shanghai 14:00. Both source records are visible at the cutoff, but only the start payment belongs to the partial interval. Paid revenue is therefore 10500. A partial-day window must not be treated as a full Shanghai day or compared to a full-day baseline without an explicit aligned-window policy.
 
 ## Distinct refund rates, rounding and maturity
 
