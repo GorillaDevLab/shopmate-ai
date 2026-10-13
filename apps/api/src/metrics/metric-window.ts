@@ -6,6 +6,8 @@ import {
   type MetricResult,
   type MetricWindow,
   type MetricWindowRequest,
+  type MetricWindowResolver,
+  type AlignedComparisonWindow,
 } from "@shopmate/contracts";
 import { z } from "zod";
 
@@ -158,6 +160,81 @@ function validatedWindow(input: MetricWindow): MetricWindow | null {
   )
     return null;
   return parsed.data;
+}
+
+function businessDate(milliseconds: number): string {
+  const { year, month, day } = localParts(milliseconds);
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function currentBounds(input: MetricWindow, visible: number) {
+  const start = Date.parse(input.periodStart);
+  const end = Date.parse(input.periodEnd);
+  const date = businessDate(start);
+  const bounds = dayBounds(date);
+  if (!bounds || start !== bounds.start || end > bounds.end || end > visible) return null;
+  return { start, end, date };
+}
+function cutoff(milliseconds: number): string {
+  const { hour, minute, second, millisecond } = localParts(milliseconds);
+  return `${hour}:${minute}:${second}:${millisecond}`;
+}
+function weekday(date: string): number {
+  return new Date(`${date}T00:00:00.000Z`).getUTCDay();
+}
+function comparison(
+  current: MetricWindow,
+  baseline: MetricWindow,
+  currentDate: string,
+  candidateDate: string,
+): AlignedComparisonWindow {
+  const elapsed = Date.parse(current.periodEnd) - Date.parse(current.periodStart);
+  const baselineElapsed = Date.parse(baseline.periodEnd) - Date.parse(baseline.periodStart);
+  const sameCutoff =
+    cutoff(Date.parse(current.periodEnd)) === cutoff(Date.parse(baseline.periodEnd));
+  const reason =
+    weekday(currentDate) !== weekday(candidateDate)
+      ? "WEEKDAY_MISMATCH"
+      : elapsed !== baselineElapsed || !sameCutoff
+        ? "CUTOFF_MISMATCH"
+        : null;
+  return Object.freeze({
+    current,
+    baseline,
+    elapsedHours: elapsed / 3_600_000,
+    aligned: reason === null,
+    reason,
+  });
+}
+function alignMetricWindow(
+  clock: MetricBusinessClock,
+  input: MetricWindow,
+  candidateBusinessDate: string,
+  visibleAt: string,
+): MetricResult<AlignedComparisonWindow> {
+  const window = validatedWindow(input);
+  if (!window || typeof candidateBusinessDate !== "string") return failure();
+  const visible = visibility(clock, visibleAt);
+  if (visible === null) return failure();
+  const current = currentBounds(window, visible);
+  const candidate = dayBounds(candidateBusinessDate);
+  if (!current || !candidate || candidateBusinessDate >= current.date) return failure();
+  const currentWindow = windowValue(current.start, current.end);
+  const end = Math.min(candidate.start + current.end - current.start, candidate.end, visible);
+  const baseline = windowValue(candidate.start, end);
+  if (!currentWindow.ok || !baseline.ok) return failure();
+  return success(
+    comparison(currentWindow.value, baseline.value, current.date, candidateBusinessDate),
+  );
+}
+
+/** Pure window resolution; the injected business clock only fences observation visibility. */
+export function createMetricWindowResolver(clock: MetricBusinessClock): MetricWindowResolver {
+  return Object.freeze({
+    businessDay: (request: MetricWindowRequest) => resolveMetricBusinessDay(clock, request),
+    elapsed: (request: MetricWindowRequest) => resolveMetricElapsed(clock, request),
+    align: (current: MetricWindow, candidateBusinessDate: string, visibleAt: string) =>
+      alignMetricWindow(clock, current, candidateBusinessDate, visibleAt),
+  });
 }
 
 /** The exclusive end keeps events at midnight in exactly one observed interval. */
