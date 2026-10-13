@@ -456,15 +456,15 @@ function validCampaignWindows(input: InputObject): boolean {
   return (input.campaignFacts ?? []).every(
     ({ measuredCoverage }) =>
       measuredCoverage === null ||
-      (measuredCoverage.periodStart === input.periodStart &&
-        measuredCoverage.periodEnd === input.periodEnd),
+      (Date.parse(measuredCoverage.periodStart) >= Date.parse(input.periodStart) &&
+        Date.parse(measuredCoverage.periodEnd) <= Date.parse(input.periodEnd)),
   );
 }
 export const MetricInputV1Schema = InputObjectSchema.refine(
   validVisibility,
   "Invalid metric window or future source watermark",
 )
-  .refine(validCampaignWindows, "Known campaign measurement must match the metric window")
+  .refine(validCampaignWindows, "Known campaign measurement must stay inside the metric window")
   .refine(validInputFacts, "Every fact must match metric scope and visibility cutoff")
   .refine(validCoverage, "Coverage must retain source scope, revision, window, cutoff and evidence")
   .refine(validInputAvailability, "Unsynchronized input must preserve null facts and UNAVAILABLE")
@@ -670,12 +670,27 @@ function knownPayments(input: MetricInputV1, kind: MetricKind): boolean {
         (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status))),
   );
 }
+function matchesApplicableCampaignDay(
+  window: MetricWindow,
+  date: string,
+  coverage: MetricMeasuredCoverage,
+): boolean {
+  const dayStart = Date.parse(`${date}T00:00:00+08:00`);
+  // A complete query claim cannot fill an unexplained gap inside a supplied daily measurement.
+  const applicableStart = Math.max(Date.parse(window.periodStart), dayStart);
+  const applicableEnd = Math.min(Date.parse(window.periodEnd), dayStart + 24 * 60 * 60 * 1000);
+  return (
+    Date.parse(coverage.periodStart) === applicableStart &&
+    Date.parse(coverage.periodEnd) === applicableEnd
+  );
+}
 function knownCampaigns(input: MetricInputV1, snapshot: MetricSnapshotV1): boolean {
   if (snapshot.metric.kind !== "ROAS") return true;
   return (input.campaignFacts ?? []).every(
     ({ data, measuredCoverage }) =>
       measuredCoverage !== null &&
       measuredCoverage.coverageBasisPoints === 10000 &&
+      matchesApplicableCampaignDay(input, data.date, measuredCoverage) &&
       data.spendMinor !== null &&
       data.attributedRevenueMinor !== null &&
       measuredCoverage.evidenceIds.every((id) => snapshot.evidenceIds.includes(id)),

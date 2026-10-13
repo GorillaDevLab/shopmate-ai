@@ -720,7 +720,7 @@ it("preserves unknown measured intervals as usable unavailable evidence", () => 
 it.each([
   { periodEnd: later },
   { periodStart: end },
-  { periodStart: "2026-10-01T17:00:00Z" },
+  { periodStart: "2026-10-01T15:00:00Z" },
   { periodStart: "2026-10-02T00:00:00+08:00" },
   { timezone: "UTC" },
   { currency: "USD" },
@@ -794,6 +794,118 @@ it("distinguishes explicit full-day coverage from partial-day coverage", () => {
     false,
   );
 });
+const dayMiddle = "2026-10-02T16:00:00Z";
+const twoDayEnd = "2026-10-03T16:00:00Z";
+function campaignSlice(date: string, periodStart: string, periodEnd: string) {
+  return {
+    ...measuredFact,
+    observedAt: twoDayEnd,
+    data: { ...campaign, date },
+    measuredCoverage: { ...measuredCoverage, periodStart, periodEnd, observedAt: twoDayEnd },
+  };
+}
+function campaignPeriod(periodEnd: string, periodStart = start) {
+  const times = { periodStart, periodEnd, visibleAt: twoDayEnd, sourceWatermark: twoDayEnd };
+  return {
+    input: {
+      ...measuredInput,
+      ...times,
+      metricCoverage: [{ ...roasCoverage, ...times, observedAt: twoDayEnd }],
+      campaignFacts: [
+        campaignSlice("2026-10-02", periodStart, dayMiddle),
+        campaignSlice("2026-10-03", dayMiddle, periodEnd),
+      ],
+    },
+    snapshot: { ...measuredSnapshot, ...times, computedAt: twoDayEnd },
+  };
+}
+it.each(["source", "public"])(
+  "accepts two full measured campaign days through %s",
+  async (entry) => {
+    const contract =
+      entry === "source" ? await import("./metric.schema.js") : await import("@shopmate/contracts");
+    const period = campaignPeriod(twoDayEnd);
+    expect(contract.MetricInputV1Schema.safeParse(period.input).success).toBe(true);
+    expect(contract.MetricComputationV1Schema.safeParse(period).success).toBe(true);
+  },
+);
+it("accepts a full measured campaign day followed by the clipped final day", () => {
+  expect(MetricComputationV1Schema.safeParse(campaignPeriod(later)).success).toBe(true);
+});
+it("accepts the clipped first and final campaign day intersections", () => {
+  const period = campaignPeriod(later, "2026-10-02T06:00:00Z");
+  expect(MetricComputationV1Schema.safeParse(period).success).toBe(true);
+});
+it("retains measured daily campaign facts in a multi-day payment query", () => {
+  const period = campaignPeriod(twoDayEnd);
+  const paymentInput = {
+    ...period.input,
+    metricCoverage: [
+      { ...period.input.metricCoverage[0], kind: "PAID_REVENUE", collections: ["paymentFacts"] },
+    ],
+  };
+  const paymentSnapshot = { ...period.snapshot, metric: snapshot.metric };
+  expect(
+    MetricComputationV1Schema.safeParse({ input: paymentInput, snapshot: paymentSnapshot }).success,
+  ).toBe(true);
+});
+it.each([{ periodStart: "2026-10-01T17:00:00Z" }, { periodEnd: "2026-10-02T06:00:00Z" }])(
+  "does not promote an unexplained shorter daily measurement %j",
+  (patch) => {
+    const period = campaignPeriod(twoDayEnd);
+    const first = period.input.campaignFacts[0];
+    const partial = {
+      ...period.input,
+      campaignFacts: [
+        { ...first, measuredCoverage: { ...first.measuredCoverage, ...patch } },
+        period.input.campaignFacts[1],
+      ],
+    };
+    expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+    expect(
+      MetricComputationV1Schema.safeParse({ input: partial, snapshot: period.snapshot }).success,
+    ).toBe(false);
+  },
+);
+it.each([
+  null,
+  {
+    ...campaignSlice("2026-10-03", dayMiddle, twoDayEnd).measuredCoverage,
+    coverageBasisPoints: 9999,
+  },
+])("rejects unknown or incomplete final-day measurement for VERIFIED ROAS %j", (finalCoverage) => {
+  const period = campaignPeriod(twoDayEnd);
+  const partial = {
+    ...period.input,
+    campaignFacts: [
+      period.input.campaignFacts[0],
+      { ...period.input.campaignFacts[1], measuredCoverage: finalCoverage },
+    ],
+  };
+  expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+  expect(
+    MetricComputationV1Schema.safeParse({ input: partial, snapshot: period.snapshot }).success,
+  ).toBe(false);
+});
+it("rejects a full-day measure substituted for the query's clipped final day", () => {
+  const period = campaignPeriod(later);
+  const outside = {
+    ...period.input,
+    campaignFacts: [
+      period.input.campaignFacts[0],
+      campaignSlice("2026-10-03", dayMiddle, twoDayEnd),
+    ],
+  };
+  expect(MetricInputV1Schema.safeParse(outside).success).toBe(false);
+});
+it("rejects a measured interval before the query's clipped first day", () => {
+  const period = campaignPeriod(twoDayEnd, end);
+  const outside = {
+    ...period.input,
+    campaignFacts: [campaignSlice("2026-10-02", start, dayMiddle), period.input.campaignFacts[1]],
+  };
+  expect(MetricInputV1Schema.safeParse(outside).success).toBe(false);
+});
 it("types both ratio sides with nullable source measurement provenance", () => {
   type Ratio = import("./metric-ports.js").RatioEvidence<"ROAS">;
   expectTypeOf<Ratio["numeratorCoverage"]>().toEqualTypeOf<
@@ -856,3 +968,29 @@ it("preserves null ratio provenance for unknown marketing evidence", async () =>
   expect(schema.MetricRatioEvidenceSchema.safeParse(unknown).success).toBe(true);
   expect(schema.MetricRatioEvidenceSchema.safeParse(ratioEvidence).success).toBe(true);
 });
+it("accepts aggregate ratio provenance for the complete multi-day query", async () => {
+  const { MetricRatioEvidenceSchema } = await import("./metric.schema.js");
+  const aggregateCoverage = { ...measuredCoverage, periodEnd: twoDayEnd, observedAt: twoDayEnd };
+  const ratio = {
+    ...ratioEvidence,
+    window: { ...window, periodEnd: twoDayEnd },
+    numeratorCoverage: aggregateCoverage,
+    denominatorCoverage: aggregateCoverage,
+  };
+  expect(MetricRatioEvidenceSchema.safeParse(ratio).success).toBe(true);
+});
+it.each(["numeratorCoverage", "denominatorCoverage"])(
+  "rejects a single-day %s substituted for the multi-day aggregate ratio",
+  async (side) => {
+    const { MetricRatioEvidenceSchema } = await import("./metric.schema.js");
+    const aggregateCoverage = { ...measuredCoverage, periodEnd: twoDayEnd, observedAt: twoDayEnd };
+    const ratio = {
+      ...ratioEvidence,
+      window: { ...window, periodEnd: twoDayEnd },
+      numeratorCoverage: aggregateCoverage,
+      denominatorCoverage: aggregateCoverage,
+      [side]: campaignSlice("2026-10-02", start, dayMiddle).measuredCoverage,
+    };
+    expect(MetricRatioEvidenceSchema.safeParse(ratio).success).toBe(false);
+  },
+);
