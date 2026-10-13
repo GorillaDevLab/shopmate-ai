@@ -526,3 +526,78 @@ it("rejects invalid runtime rounding rather than assuming a default", () => {
     error: { code: "INVALID_INPUT" },
   });
 });
+
+it("keeps merchandise GMV for a fully discounted paid free order", () => {
+  const items = original.data.items.map((item) => ({
+    ...item,
+    discountMinor: item.grossMinor,
+    netMinor: 0,
+  }));
+  const free = payment({
+    items,
+    discountMinor: 12000,
+    shippingMinor: 0,
+    payableMinor: 0,
+    paidMinor: 0,
+  });
+  expect(values(value(calculate(input({ paymentFacts: [free] }))))).toEqual([12000, 0, 1, 3, 0]);
+});
+it("checks unit aggregation overflow even for free orders", () => {
+  const free = amount(0, "free");
+  const item = { ...free.data.items[0]!, quantity: Number.MAX_SAFE_INTEGER };
+  const huge = { ...free, data: { ...free.data, items: [item] } };
+  expect(calculate(input({ paymentFacts: [huge, amount(0, "extra")] }))).toMatchObject({
+    ok: false,
+    error: { code: "OVERFLOW" },
+  });
+});
+it("retains both conflicting source versions as duplicate evidence", () => {
+  const revised = {
+    ...original,
+    sourceVersion: "revised-v2",
+    evidenceIds: ["revision-proof"],
+    data: { ...original.data, status: "CANCELLED" as const },
+  };
+  const result = calculate(input({ paymentFacts: [original, revised] }));
+  expect(result).toEqual({
+    ok: false,
+    error: { code: "CONFLICT", evidenceIds: ["payment-a", "revision-proof"] },
+  });
+  if (!result.ok) expect(Object.isFrozen(result.error.evidenceIds)).toBe(true);
+});
+it("retains explicit source inconsistency even when amounts reconcile", () => {
+  const result = value(
+    calculate(input({ paymentFacts: [payment({ source: anomaly("SOURCE_INCONSISTENT") })] })),
+  );
+  expect(values(result)).toEqual([null, null, null, null, null]);
+  expect(result.paidRevenue.quality.issues).toEqual([
+    { code: "SOURCE_INCONSISTENT", field: "paymentFacts.source", evidenceIds: ["order-a"] },
+  ]);
+});
+it("preserves unsynchronized null facts as unavailable", () => {
+  const data = input({
+    paymentFacts: null,
+    refundFacts: null,
+    frozenCosts: null,
+    refundAllocations: null,
+    returnReceipts: null,
+    fees: null,
+    sourceWatermark: null,
+    status: "UNAVAILABLE",
+    metricCoverage: [],
+  });
+  const result = value(calculate(data));
+  expect(values(result)).toEqual([null, null, null, null, null]);
+  expect(Object.values(result).every((measure) => measure.quality.status === "UNAVAILABLE")).toBe(
+    true,
+  );
+});
+it("rejects malformed evidence and mismatched payment external store", () => {
+  expect(calculate(input({ evidenceIds: [] }))).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+  expect(
+    calculate(input({ paymentFacts: [payment({ externalStoreId: "other-external-store" })] })),
+  ).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+});
