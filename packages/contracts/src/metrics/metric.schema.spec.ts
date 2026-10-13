@@ -1,4 +1,26 @@
-import { expect, it } from "vitest";
+// These adapters are intentionally synthetic: they demonstrate injection, not runtime integration.
+
+import type {
+  MetricSourceReader,
+  MetricCalculator,
+  MetricSnapshotRepository,
+  MetricReadPort,
+  ExactMinorMath,
+  MetricWindowResolver,
+  PaymentMetricCalculator,
+  RefundMetricCalculator,
+  FrozenCostCalculator,
+  ContributionCalculator,
+  InventoryCoverageCalculator,
+  FunnelMarketingCalculator,
+  ProfitDeltaAttributionV1,
+  MetricQualityReducer,
+  QualityPolicy,
+  MetricLeafPorts,
+} from "./metric-ports.js";
+import type { MetricInputV1, MetricComputationV1 } from "./metric.schema.js";
+
+import { expect, expectTypeOf, it } from "vitest";
 import {
   MetricInputV1Schema,
   MetricSnapshotV1Schema,
@@ -417,4 +439,80 @@ it("allows snapshot evidence retained from a normalized fact", () => {
       snapshot: { ...snapshot, evidenceIds: ["sync-a", "fact-a"] },
     }).success,
   ).toBe(true);
+});
+
+it("accepts readonly source, pure calculator, append-only repository and authorized read adapters", async () => {
+  const parsed = MetricInputV1Schema.parse(input);
+  const computed = MetricComputationV1Schema.parse({ input, snapshot });
+  const sourceReader: MetricSourceReader = { read: async () => ({ ok: true, value: parsed }) };
+  const calculator: MetricCalculator = { calculate: () => ({ ok: true, value: computed }) };
+  const repository: MetricSnapshotRepository = {
+    append: async () => ({ ok: true, value: computed.snapshot }),
+    read: async () => ({ ok: true, value: [computed.snapshot] }),
+  };
+  const reader: MetricReadPort = { read: async () => ({ ok: true, value: [computed.snapshot] }) };
+  expectTypeOf(sourceReader.read).returns.resolves.toMatchTypeOf<{ readonly ok: boolean }>();
+  expectTypeOf<
+    Parameters<MetricSnapshotRepository["append"]>[0]
+  >().toEqualTypeOf<MetricComputationV1>();
+  expectTypeOf<
+    Parameters<MetricCalculator["calculate"]>[0]["input"]
+  >().toEqualTypeOf<MetricInputV1>();
+  expect(
+    calculator.calculate({
+      input: parsed,
+      computedAt: end,
+      kind: "PAID_REVENUE",
+      subject: { kind: "STORE" },
+    }).ok,
+  ).toBe(true);
+  expect((await repository.append(computed)).ok).toBe(true);
+  expect(reader).toHaveProperty("read");
+});
+it("exposes independently injectable leaf calculations", () => {
+  expectTypeOf<MetricLeafPorts["math"]>().toEqualTypeOf<ExactMinorMath>();
+  expectTypeOf<MetricLeafPorts["windows"]>().toEqualTypeOf<MetricWindowResolver>();
+  expectTypeOf<MetricLeafPorts["payments"]>().toEqualTypeOf<PaymentMetricCalculator>();
+  expectTypeOf<MetricLeafPorts["refunds"]>().toEqualTypeOf<RefundMetricCalculator>();
+  expectTypeOf<MetricLeafPorts["frozenCosts"]>().toEqualTypeOf<FrozenCostCalculator>();
+  expectTypeOf<MetricLeafPorts["contribution"]>().toEqualTypeOf<ContributionCalculator>();
+  expectTypeOf<MetricLeafPorts["inventory"]>().toEqualTypeOf<InventoryCoverageCalculator>();
+  expectTypeOf<MetricLeafPorts["funnelMarketing"]>().toEqualTypeOf<FunnelMarketingCalculator>();
+  expectTypeOf<MetricLeafPorts["profitDelta"]>().toEqualTypeOf<ProfitDeltaAttributionV1>();
+  expectTypeOf<MetricLeafPorts["quality"]>().toEqualTypeOf<MetricQualityReducer>();
+  expectTypeOf<QualityPolicy["version"]>().toEqualTypeOf<string>();
+});
+
+it("permits test-only leaf adapters without a provider, repository or oracle", () => {
+  const unavailable = () =>
+    ({ ok: false, error: { code: "SOURCE_UNAVAILABLE", evidenceIds: ["test-only"] } }) as const;
+  const quality = {
+    status: "UNAVAILABLE",
+    sampleSize: 0,
+    coverageBasisPoints: 0,
+    evidenceIds: ["test-only"],
+    issues: [],
+  } as const;
+  const leafPorts: MetricLeafPorts = {
+    math: {
+      add: unavailable,
+      subtract: unavailable,
+      multiply: unavailable,
+      ratio: unavailable,
+      allocate: unavailable,
+    },
+    clock: { snapshot: () => ({ now: end, revision: 1 }) },
+    windows: { businessDay: unavailable, elapsed: unavailable, align: unavailable },
+    payments: { calculate: unavailable },
+    refunds: { calculate: unavailable },
+    frozenCosts: { calculate: unavailable },
+    contribution: { calculate: unavailable },
+    inventory: { calculate: unavailable },
+    funnelMarketing: { calculate: unavailable },
+    profitDelta: { calculate: unavailable },
+    quality: { reduce: () => quality },
+  };
+  expect(leafPorts.payments.calculate(MetricInputV1Schema.parse(input))).toEqual(unavailable());
+  expect(leafPorts.math.ratio(0, 0, "HALF_AWAY_FROM_ZERO")).toEqual(unavailable());
+  expect(leafPorts.clock.snapshot().now).toBe(end);
 });
