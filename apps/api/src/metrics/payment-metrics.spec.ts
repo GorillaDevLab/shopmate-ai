@@ -1,13 +1,16 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   DataQualityIssueV1Schema,
   MetricComputationV1Schema,
+  MetricInputV1Schema,
   MetricValueSchema,
   type ConnectorOrder,
   type MetricInputV1,
   type MetricResult,
   type MinorRounding,
   type PaymentMetrics,
+  type ExactMinorMath,
+  type MetricWindowResolver,
 } from "@shopmate/contracts";
 import {
   financeBaseGolden,
@@ -210,5 +213,316 @@ it("returns conflict evidence for identical duplicate orders", () => {
   expect(calculate(input({ paymentFacts: [original, original] }))).toMatchObject({
     ok: false,
     error: { code: "CONFLICT", evidenceIds: ["payment-a"] },
+  });
+});
+
+it("uses conservative minimum coverage for each metric kind", () => {
+  const complete = input();
+  const revenue = complete.metricCoverage.find((proof) => proof.kind === "PAID_REVENUE")!;
+  const partial = { ...revenue, coverageBasisPoints: 6000 };
+  const result = value(
+    calculate({ ...complete, metricCoverage: [...complete.metricCoverage, partial] }),
+  );
+  expect(result.paidRevenue.metric.value).toBe(10500);
+  expect(result.paidRevenue.quality).toMatchObject({
+    status: "ESTIMATED",
+    coverageBasisPoints: 6000,
+  });
+  expect(result.gmv.quality.status).toBe("VERIFIED");
+});
+it("does not accept SKU proof or another collection as STORE payment completeness", () => {
+  const data = input();
+  const metricCoverage = data.metricCoverage.map((proof) =>
+    proof.kind === "GMV"
+      ? { ...proof, subject: { kind: "SKU" as const, externalSkuId: "sku-a" } }
+      : { ...proof, collections: ["refundFacts" as const] },
+  );
+  for (const measure of Object.values(value(calculate({ ...data, metricCoverage })))) {
+    expect(measure.quality).toMatchObject({ status: "ESTIMATED", coverageBasisPoints: 0 });
+  }
+});
+it("labels known values stale when the source watermark precedes periodEnd", () => {
+  const result = value(calculate(input({ sourceWatermark: "2026-10-02T15:00:00Z" })));
+  expect(values(result)).toEqual([12000, 10500, 1, 3, 10500]);
+  expect(result.gmv.quality).toMatchObject({ status: "STALE", coverageBasisPoints: 10000 });
+  expect(result.gmv.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "STALE_SOURCE" }),
+  );
+});
+it("retains unknown null values when stale quality outranks insufficiency", () => {
+  const result = value(
+    calculate(
+      input({
+        sourceWatermark: "2026-10-02T15:00:00Z",
+        paymentFacts: [payment({ paidMinor: null, source: anomaly("PAYMENT_UNKNOWN") })],
+      }),
+    ),
+  );
+  expect(values(result)).toEqual([null, null, null, null, null]);
+  expect(result.gmv.quality).toMatchObject({ status: "STALE", coverageBasisPoints: 0 });
+  expect(result.gmv.quality.issues.map((item) => item.code)).toContain("PAYMENT_UNKNOWN");
+  expect(result.gmv.quality.issues.map((item) => item.code)).toContain("STALE_SOURCE");
+});
+it("does not fabricate AOV zero for a stale empty source", () => {
+  const result = value(
+    calculate(input({ paymentFacts: [], sourceWatermark: "2026-10-02T15:00:00Z" })),
+  );
+  expect(result.aov.metric.value).toBeNull();
+  expect(result.aov.quality.status).toBe("STALE");
+  expect(result.aov.quality.issues.map((item) => item.code)).toEqual([
+    "ZERO_DENOMINATOR",
+    "STALE_SOURCE",
+  ]);
+});
+it("retains known payment values while reporting missing source time", () => {
+  const source = { ...anomaly("SOURCE_TIME_MISSING"), updatedAt: null };
+  const result = value(calculate(input({ paymentFacts: [payment({ source })] })));
+  expect(values(result)).toEqual([12000, 10500, 1, 3, 10500]);
+  expect(result.gmv.quality.status).toBe("ESTIMATED");
+  expect(result.gmv.quality.issues).toContainEqual({
+    code: "SOURCE_TIME_MISSING",
+    field: "paymentFacts.source",
+    evidenceIds: ["order-a"],
+  });
+});
+it("ignores unrelated source issues and blanket input status", () => {
+  const result = value(
+    calculate(
+      input({
+        status: "INSUFFICIENT",
+        paymentFacts: [
+          payment({ refundedMinor: null, source: anomaly("COST_MISSING", "REFUND_UNKNOWN") }),
+        ],
+      }),
+    ),
+  );
+  expect(values(result)).toEqual([12000, 10500, 1, 3, 10500]);
+  expect(result.gmv.quality.status).toBe("VERIFIED");
+  expect(result.gmv.quality.issues).toEqual([]);
+});
+it("retains associated evidence and known sample size for a mixed uncertain collection", () => {
+  const known = payment({}, "known");
+  const unknown = payment({ paidAt: null, source: anomaly("PAYMENT_UNKNOWN") }, "unknown");
+  const result = value(calculate(input({ paymentFacts: [known, unknown] })));
+  expect(result.paidOrders.metric.value).toBeNull();
+  expect(result.paidOrders.quality.sampleSize).toBe(1);
+  expect(result.gmv.quality.evidenceIds).toEqual(["golden-sync", "known", "unknown"]);
+  expect(result.aov.quality.issues.map((item) => item.code)).not.toContain("ZERO_DENOMINATOR");
+});
+it("does not guess window membership for an unknown payment", () => {
+  const unknown = payment({
+    paidMinor: null,
+    source: anomaly("PAYMENT_UNKNOWN"),
+    paidAt: "2026-10-01T16:00:00Z",
+  });
+  const result = value(
+    calculate(input({ periodStart: "2026-10-01T17:00:00Z", paymentFacts: [unknown] })),
+  );
+  expect(values(result)).toEqual([null, null, null, null, null]);
+});
+it("returns deeply immutable results without mutating frozen inputs", () => {
+  const before = JSON.stringify(financeBaseGolden.input);
+  const result = calculate(financeBaseGolden.input);
+  expect(JSON.stringify(financeBaseGolden.input)).toBe(before);
+  expect(Object.isFrozen(result)).toBe(true);
+  for (const measure of Object.values(value(result))) {
+    expect(
+      [
+        measure,
+        measure.metric,
+        measure.quality,
+        measure.quality.evidenceIds,
+        measure.quality.issues,
+      ].every(Object.isFrozen),
+    ).toBe(true);
+    for (const issue of measure.quality.issues) {
+      expect(Object.isFrozen(issue)).toBe(true);
+      expect(Object.isFrozen(issue.evidenceIds)).toBe(true);
+    }
+  }
+});
+
+it.each([
+  { ...input(), unexpected: true },
+  { ...input(), currency: "USD" },
+  { ...input(), visibleAt: "2026-10-02T01:00:00Z" },
+  { ...input(), periodStart: base.periodEnd },
+  { ...input(), paymentFacts: [{ ...original, binding: { ...base.binding, storeId: "other" } }] },
+  { ...input(), paymentFacts: [{ ...original, observedAt: "2026-10-03T00:00:00Z" }] },
+])("rejects malformed scope/window/visibility input %#", (data) => {
+  expect(calculate(data as MetricInputV1)).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
+it.each(["periodStart", "periodEnd", "visibleAt", "sourceWatermark"] as const)(
+  "rejects submillisecond %s",
+  (field) => {
+    const data = input({ [field]: base[field]!.replace("Z", ".0001Z") });
+    expect(calculate(data)).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+  },
+);
+it.each(["orderedAt", "paidAt"] as const)("rejects submillisecond connector %s", (field) => {
+  const data = input({
+    paymentFacts: [payment({ [field]: original.data[field]!.replace("Z", ".0001Z") })],
+  });
+  expect(calculate(data)).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+});
+it("rejects submillisecond source time and future fact observation within a millisecond", () => {
+  const updatedAt = original.data.source.updatedAt!.replace("Z", ".0001Z");
+  const future = { ...original, observedAt: base.visibleAt.replace("Z", ".0001Z") };
+  expect(
+    calculate(
+      input({ paymentFacts: [payment({ source: { ...original.data.source, updatedAt } })] }),
+    ),
+  ).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+  expect(calculate(input({ paymentFacts: [future] }))).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
+it("rejects submillisecond proof observations that Date.parse would truncate", () => {
+  const data = input();
+  const metricCoverage = data.metricCoverage.map((proof) => ({
+    ...proof,
+    observedAt: data.visibleAt.replace("Z", ".0001Z"),
+  }));
+  expect(MetricInputV1Schema.safeParse({ ...data, metricCoverage }).success).toBe(true);
+  expect(calculate({ ...data, metricCoverage })).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
+it("uses actual offset instants and accepts additional zero timestamp precision", () => {
+  const paidAt = "2026-10-02T08:00:00.000000+08:00";
+  expect(
+    value(calculate(input({ paymentFacts: [payment({ paidAt })] }))).paidRevenue.metric.value,
+  ).toBe(10500);
+  expect(
+    value(calculate(input({ paymentFacts: [payment({ paidAt: "2026-10-02T00:00:00+08:00" })] })))
+      .paidOrders.metric.value,
+  ).toBe(1);
+});
+it("rejects nonzero submillisecond offsets", () => {
+  expect(
+    calculate(input({ paymentFacts: [payment({ paidAt: "2026-10-02T08:00:00.000001+08:00" })] })),
+  ).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+});
+it("fences multi-day input on its last included Shanghai business day once", () => {
+  const elapsed = vi.fn(windows.elapsed);
+  const data = input({
+    periodStart: "2026-09-30T17:00:00Z",
+    periodEnd: "2026-10-03T06:00:00Z",
+    visibleAt: "2026-10-03T06:00:00Z",
+    sourceWatermark: "2026-10-03T06:00:00Z",
+  });
+  const calculator = createPaymentMetricCalculator({
+    math: exactMinorMath,
+    windows: { ...windows, elapsed },
+    rounding: "HALF_AWAY_FROM_ZERO",
+  });
+  expect(value(calculator.calculate(data)).paidRevenue.metric.value).toBe(10500);
+  expect(elapsed).toHaveBeenCalledExactlyOnceWith({
+    businessDate: "2026-10-03",
+    timezone: "Asia/Shanghai",
+    visibleAt: data.visibleAt,
+  });
+});
+it("fences a midnight exclusive end through the preceding business day", () => {
+  const elapsed = vi.fn(windows.elapsed);
+  const calculator = createPaymentMetricCalculator({
+    math: exactMinorMath,
+    windows: { ...windows, elapsed },
+    rounding: "HALF_AWAY_FROM_ZERO",
+  });
+  expect(value(calculator.calculate(input())).paidOrders.metric.value).toBe(1);
+  expect(elapsed.mock.calls[0]![0].businessDate).toBe("2026-10-02");
+});
+it("uses paidAt rather than the resolver whole-day start for a partial interval", () => {
+  const data = input({ periodStart: "2026-10-02T01:00:00Z", periodEnd: "2026-10-02T06:00:00Z" });
+  expect(values(value(calculate(data)))).toEqual([0, 0, 0, 0, null]);
+});
+it("respects injected business clock future fences", () => {
+  const early = createMetricWindowResolver({
+    snapshot: () => ({ now: "2026-10-02T01:00:00Z", revision: 1 }),
+  });
+  const calculator = createPaymentMetricCalculator({
+    math: exactMinorMath,
+    windows: early,
+    rounding: "TOWARD_ZERO",
+  });
+  expect(calculator.calculate(input())).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
+it.each(["multiply", "subtract", "add"] as const)(
+  "propagates injected %s failure evidence",
+  (method) => {
+    const math: ExactMinorMath = {
+      ...exactMinorMath,
+      [method]: () => ({ ok: false, error: { code: "OVERFLOW", evidenceIds: ["math-proof"] } }),
+    };
+    const calculator = createPaymentMetricCalculator({ math, windows, rounding: "TOWARD_ZERO" });
+    expect(calculator.calculate(input())).toEqual({
+      ok: false,
+      error: { code: "OVERFLOW", evidenceIds: ["math-proof"] },
+    });
+  },
+);
+it("propagates injected resolver failure evidence", () => {
+  const port: MetricWindowResolver = {
+    ...windows,
+    elapsed: () => ({
+      ok: false,
+      error: { code: "SOURCE_UNAVAILABLE", evidenceIds: ["clock-proof"] },
+    }),
+  };
+  const calculator = createPaymentMetricCalculator({
+    math: exactMinorMath,
+    windows: port,
+    rounding: "TOWARD_ZERO",
+  });
+  expect(calculator.calculate(input())).toEqual({
+    ok: false,
+    error: { code: "SOURCE_UNAVAILABLE", evidenceIds: ["clock-proof"] },
+  });
+});
+it.each([
+  { ...context(base), periodEnd: "2026-10-02T15:00:00Z" },
+  { ...context(base), periodEnd: "2026-10-03T16:00:00Z" },
+  { ...context(base), periodStart: "2026-09-30T16:00:00Z" },
+])("rejects an injected resolver window that cannot fence the requested interval %#", (patch) => {
+  const port = {
+    ...windows,
+    elapsed: () => ({
+      ok: true as const,
+      value: {
+        periodStart: patch.periodStart,
+        periodEnd: patch.periodEnd,
+        currency: "CNY" as const,
+        timezone: "Asia/Shanghai" as const,
+      },
+    }),
+  };
+  const calculator = createPaymentMetricCalculator({
+    math: exactMinorMath,
+    windows: port,
+    rounding: "TOWARD_ZERO",
+  });
+  expect(calculator.calculate(input())).toMatchObject({
+    ok: false,
+    error: { code: "WINDOW_MISMATCH" },
+  });
+});
+it("rejects invalid runtime rounding rather than assuming a default", () => {
+  const calculator = createPaymentMetricCalculator({
+    math: exactMinorMath,
+    windows,
+    rounding: "INVALID" as MinorRounding,
+  });
+  expect(calculator.calculate(input())).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
   });
 });

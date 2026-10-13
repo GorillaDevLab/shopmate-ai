@@ -252,8 +252,8 @@ function paymentEvidence(
   ];
 }
 function paymentStatus(issues: readonly DataQualityIssueV1[]): MetricStatus {
-  if (uncertain(issues)) return "INSUFFICIENT";
   if (issues.some((item) => item.code === "STALE_SOURCE")) return "STALE";
+  if (uncertain(issues)) return "INSUFFICIENT";
   if (issues.some((item) => item.code === "ZERO_DENOMINATOR")) return "INSUFFICIENT";
   return issues.length ? "ESTIMATED" : "VERIFIED";
 }
