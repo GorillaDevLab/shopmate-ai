@@ -6,6 +6,7 @@ import type {
   MetricFeeKind,
   MetricInputV1,
   MetricKind,
+  MetricRatioEvidence,
   MetricSnapshotV1,
   MetricStatus,
   MetricSubject,
@@ -246,13 +247,11 @@ export interface InventoryCoverageMetrics {
 export interface InventoryCoverageCalculator {
   readonly calculate: (request: InventoryCoverageRequest) => MetricResult<InventoryCoverageMetrics>;
 }
-export interface RatioEvidence<K extends MetricKind> {
-  readonly measure: MetricMeasure<K>;
-  readonly numerator: number | null;
-  readonly denominator: number | null;
-  readonly window: MetricWindow;
-  readonly coverageBasisPoints: number;
-}
+/** Validate with MetricRatioEvidenceSchema before returning a leaf result. */
+export type RatioEvidence<K extends MetricKind> = MetricRatioEvidence &
+  Readonly<{
+    measure: MetricMeasure<K>;
+  }>;
 export interface FunnelMarketingMetrics {
   readonly conversion: RatioEvidence<"CONVERSION_RATE">;
   readonly cart: RatioEvidence<"CART_RATE">;

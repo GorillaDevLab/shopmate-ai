@@ -372,7 +372,11 @@ it.each([
   ["inventoryFacts", inventory],
   ["campaignFacts", campaign],
 ])("reuses normalized %s validation", (key, data) => {
-  const fact = { ...provenance, data };
+  const fact = {
+    ...provenance,
+    data,
+    ...(key === "campaignFacts" ? { measuredCoverage: null } : {}),
+  };
   expect(parsedInput({ ...input, [String(key)]: [fact] })[String(key)]).toEqual([fact]);
 });
 it("preserves nullable normalized inventory and source metadata", () => {
@@ -570,7 +574,9 @@ it.each(["source", "public"])(
 );
 it("rejects globally VERIFIED all-null collections despite a connection watermark", () => {
   const absent = Object.fromEntries(Object.keys(collections).map((key) => [key, null]));
-  expect(MetricInputV1Schema.safeParse({ ...input, ...absent }).success).toBe(false);
+  expect(MetricInputV1Schema.safeParse({ ...input, ...absent, metricCoverage: [] }).success).toBe(
+    false,
+  );
 });
 
 it("requires metric-specific coverage rather than snapshot self-assertion", () => {
@@ -620,16 +626,19 @@ it("links completeness evidence into the resulting snapshot", () => {
   );
 });
 
-it("does not promote explicitly unknown payment values using complete coverage", () => {
-  const data = {
-    ...order,
-    paidMinor: null,
-    source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
-  };
-  const partial = { ...input, paymentFacts: [{ ...provenance, data }] };
-  expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
-  expect(MetricComputationV1Schema.safeParse({ input: partial, snapshot }).success).toBe(false);
-});
+it.each(["paidMinor", "paidAt"])(
+  "does not promote explicitly unknown payment %s using complete coverage",
+  (field) => {
+    const data = {
+      ...order,
+      [field]: null,
+      source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+    };
+    const partial = { ...input, paymentFacts: [{ ...provenance, data }] };
+    expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+    expect(MetricComputationV1Schema.safeParse({ input: partial, snapshot }).success).toBe(false);
+  },
+);
 it("keeps revenue verifiable when only refund data is unknown", () => {
   const data = {
     ...order,
@@ -650,4 +659,200 @@ it("allows source readers to receive explicit metric and subject coverage reques
       subject: import("./metric.schema.js").MetricSubject;
     }>[]
   >();
+});
+
+const roasCoverage = { ...revenueCoverage, kind: "ROAS", collections: ["campaignFacts"] };
+const roasSnapshot = { ...snapshot, metric: { kind: "ROAS", unit: "basisPoints", value: 30000 } };
+it("rejects date-only campaign evidence as VERIFIED partial-day ROAS", () => {
+  const daily = {
+    ...input,
+    metricCoverage: [roasCoverage],
+    campaignFacts: [{ ...provenance, data: campaign, measuredCoverage: null }],
+  };
+  expect(MetricInputV1Schema.safeParse(daily).success).toBe(true);
+  expect(
+    MetricComputationV1Schema.safeParse({ input: daily, snapshot: roasSnapshot }).success,
+  ).toBe(false);
+});
+
+const measuredCoverage = { ...provenance, ...window, coverageBasisPoints: 10000 };
+const measuredFact = { ...provenance, data: campaign, measuredCoverage };
+const measuredInput = { ...input, campaignFacts: [measuredFact], metricCoverage: [roasCoverage] };
+const measuredSnapshot = { ...roasSnapshot, evidenceIds: ["sync-a", "fact-a"] };
+it.each(["source", "public"])(
+  "accepts explicit measured partial-day campaign coverage through %s",
+  async (entry) => {
+    const contract =
+      entry === "source" ? await import("./metric.schema.js") : await import("@shopmate/contracts");
+    expect(
+      contract.MetricComputationV1Schema.safeParse({
+        input: measuredInput,
+        snapshot: measuredSnapshot,
+      }).success,
+    ).toBe(true);
+  },
+);
+it("requires an explicit nullable measured coverage field", () => {
+  const fact = { ...provenance, data: campaign };
+  expect(MetricInputV1Schema.safeParse({ ...input, campaignFacts: [fact] }).success).toBe(false);
+});
+it("preserves unknown measured intervals as usable unavailable evidence", () => {
+  const unknown = {
+    ...measuredInput,
+    campaignFacts: [{ ...measuredFact, measuredCoverage: null }],
+  };
+  const result = {
+    ...measuredSnapshot,
+    status: "UNAVAILABLE",
+    coverageBasisPoints: 0,
+    metric: { ...roasSnapshot.metric, value: null },
+    issues: [
+      {
+        code: "ATTRIBUTION_MISSING",
+        field: "campaignFacts.measuredCoverage",
+        evidenceIds: ["fact-a"],
+      },
+    ],
+  };
+  const parsed = MetricComputationV1Schema.parse({ input: unknown, snapshot: result });
+  expect(parsed.input.campaignFacts?.[0]?.measuredCoverage).toBeNull();
+});
+it.each([
+  { periodEnd: later },
+  { periodStart: end },
+  { periodStart: "2026-10-01T17:00:00Z" },
+  { periodStart: "2026-10-02T00:00:00+08:00" },
+  { timezone: "UTC" },
+  { currency: "USD" },
+  { observedAt: later },
+  { binding: { ...binding, connectionId: "foreign" } },
+  { evidenceIds: ["foreign"] },
+  { evidenceIds: [] },
+  { sourceVersion: "" },
+  { coverageBasisPoints: 10001 },
+  { unexpected: true },
+])("rejects detached or invalid measured campaign intervals %j", (patch) => {
+  const fact = { ...measuredFact, measuredCoverage: { ...measuredCoverage, ...patch } };
+  expect(MetricInputV1Schema.safeParse({ ...measuredInput, campaignFacts: [fact] }).success).toBe(
+    false,
+  );
+});
+it("rejects a measured interval outside the daily DTO date", () => {
+  const fact = { ...measuredFact, data: { ...campaign, date: "2026-10-01" } };
+  expect(MetricInputV1Schema.safeParse({ ...measuredInput, campaignFacts: [fact] }).success).toBe(
+    false,
+  );
+});
+it("rejects incomplete measured coverage for VERIFIED ROAS", () => {
+  const fact = {
+    ...measuredFact,
+    measuredCoverage: { ...measuredCoverage, coverageBasisPoints: 9000 },
+  };
+  const partial = { ...measuredInput, campaignFacts: [fact] };
+  expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+  expect(
+    MetricComputationV1Schema.safeParse({ input: partial, snapshot: measuredSnapshot }).success,
+  ).toBe(false);
+});
+it.each(["spendMinor", "attributedRevenueMinor"])(
+  "rejects explicitly unknown campaign %s for VERIFIED ROAS",
+  (field) => {
+    const data = {
+      ...campaign,
+      [field]: null,
+      source: { ...source, quality: { state: "PARTIAL", issues: ["MARKETING_UNKNOWN"] } },
+    };
+    const partial = { ...measuredInput, campaignFacts: [{ ...measuredFact, data }] };
+    expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+    expect(
+      MetricComputationV1Schema.safeParse({ input: partial, snapshot: measuredSnapshot }).success,
+    ).toBe(false);
+  },
+);
+it("requires measured campaign evidence in the resulting snapshot", () => {
+  expect(
+    MetricComputationV1Schema.safeParse({ input: measuredInput, snapshot: roasSnapshot }).success,
+  ).toBe(false);
+});
+it("distinguishes explicit full-day coverage from partial-day coverage", () => {
+  const dayEnd = "2026-10-02T16:00:00Z";
+  const times = { periodEnd: dayEnd, visibleAt: dayEnd, sourceWatermark: dayEnd };
+  const fact = {
+    ...measuredFact,
+    observedAt: dayEnd,
+    measuredCoverage: { ...measuredCoverage, periodEnd: dayEnd, observedAt: dayEnd },
+  };
+  const full = {
+    ...measuredInput,
+    ...times,
+    campaignFacts: [fact],
+    metricCoverage: [{ ...roasCoverage, ...times, observedAt: dayEnd }],
+  };
+  const result = { ...measuredSnapshot, ...times, computedAt: dayEnd };
+  expect(MetricComputationV1Schema.safeParse({ input: full, snapshot: result }).success).toBe(true);
+  expect(MetricInputV1Schema.safeParse({ ...measuredInput, campaignFacts: [fact] }).success).toBe(
+    false,
+  );
+});
+it("types both ratio sides with nullable source measurement provenance", () => {
+  type Ratio = import("./metric-ports.js").RatioEvidence<"ROAS">;
+  expectTypeOf<Ratio["numeratorCoverage"]>().toEqualTypeOf<
+    import("./metric.schema.js").MetricMeasuredCoverage | null
+  >();
+  expectTypeOf<Ratio["denominatorCoverage"]>().toEqualTypeOf<
+    import("./metric.schema.js").MetricMeasuredCoverage | null
+  >();
+});
+
+const ratioEvidence = {
+  measure: {
+    metric: roasSnapshot.metric,
+    quality: {
+      status: "VERIFIED",
+      sampleSize: 10,
+      coverageBasisPoints: 10000,
+      evidenceIds: ["fact-a"],
+      issues: [],
+    },
+  },
+  numerator: 30000,
+  denominator: 10000,
+  window,
+  coverageBasisPoints: 10000,
+  numeratorCoverage: measuredCoverage,
+  denominatorCoverage: measuredCoverage,
+};
+it("validates known same-window provenance for both ratio sides", async () => {
+  const schema = await import("./metric.schema.js");
+  expect(schema).toHaveProperty("MetricRatioEvidenceSchema");
+});
+it.each([
+  { numeratorCoverage: null },
+  { denominatorCoverage: null },
+  { numerator: null },
+  { denominator: null },
+  { numeratorCoverage: { ...measuredCoverage, periodStart: "2026-10-01T17:00:00Z" } },
+  { denominatorCoverage: { ...measuredCoverage, coverageBasisPoints: 9000 } },
+  {
+    denominatorCoverage: { ...measuredCoverage, binding: { ...binding, connectionId: "foreign" } },
+  },
+])("rejects VERIFIED ratio sides without matching known provenance %j", async (patch) => {
+  const schema = await import("./metric.schema.js");
+  expect(schema.MetricRatioEvidenceSchema.safeParse({ ...ratioEvidence, ...patch }).success).toBe(
+    false,
+  );
+});
+it("preserves null ratio provenance for unknown marketing evidence", async () => {
+  const schema = await import("./metric.schema.js");
+  const unknown = {
+    ...ratioEvidence,
+    numerator: null,
+    numeratorCoverage: null,
+    measure: {
+      ...ratioEvidence.measure,
+      quality: { ...ratioEvidence.measure.quality, status: "UNAVAILABLE" },
+    },
+  };
+  expect(schema.MetricRatioEvidenceSchema.safeParse(unknown).success).toBe(true);
+  expect(schema.MetricRatioEvidenceSchema.safeParse(ratioEvidence).success).toBe(true);
 });

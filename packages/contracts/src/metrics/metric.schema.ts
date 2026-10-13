@@ -88,10 +88,50 @@ export const MetricInventoryFactSchema = factSchema(ConnectorInventorySchema).re
   (fact) => visibleFact(fact, []),
   factVisibilityError,
 );
-export const MetricCampaignFactSchema = factSchema(ConnectorCampaignMetricSchema).refine(
-  (fact) => visibleFact(fact, [`${fact.data.date}T00:00:00+08:00`]),
-  factVisibilityError,
-);
+/** Actual source-measured interval; neither a daily date nor observation time establishes it. */
+export const MetricMeasuredCoverageSchema = z
+  .strictObject({
+    ...provenanceFields,
+    ...windowFields,
+    coverageBasisPoints: BasisPointsSchema,
+  })
+  .refine(validWindow, "Invalid measured window")
+  .refine(
+    (coverage) => Date.parse(coverage.periodEnd) <= Date.parse(coverage.observedAt),
+    "Measured window is not yet visible",
+  )
+  .readonly();
+export type MetricMeasuredCoverage = z.infer<typeof MetricMeasuredCoverageSchema>;
+export const MetricCampaignFactSchema = z
+  .strictObject({
+    ...provenanceFields,
+    data: ConnectorCampaignMetricSchema,
+    measuredCoverage: MetricMeasuredCoverageSchema.nullable(),
+  })
+  .refine((fact) => visibleFact(fact, [`${fact.data.date}T00:00:00+08:00`]), factVisibilityError)
+  .refine(
+    validCampaignCoverage,
+    "Measured campaign coverage must retain fact scope, date and evidence",
+  )
+  .readonly();
+function validCampaignCoverage(fact: {
+  readonly binding: ConnectorBinding;
+  readonly observedAt: string;
+  readonly evidenceIds: readonly string[];
+  readonly data: { readonly date: string };
+  readonly measuredCoverage: MetricMeasuredCoverage | null;
+}): boolean {
+  const coverage = fact.measuredCoverage;
+  if (coverage === null) return true;
+  const dayStart = Date.parse(`${fact.data.date}T00:00:00+08:00`);
+  return (
+    sameBinding(fact.binding, coverage.binding) &&
+    Date.parse(coverage.observedAt) <= Date.parse(fact.observedAt) &&
+    Date.parse(coverage.periodStart) >= dayStart &&
+    Date.parse(coverage.periodEnd) <= dayStart + 24 * 60 * 60 * 1000 &&
+    coverage.evidenceIds.every((id) => fact.evidenceIds.includes(id))
+  );
+}
 // Nullable extension facts are independent sources; existing Connector DTOs do not provide them.
 export const MetricFrozenCostSchema = factSchema(
   z
@@ -412,10 +452,19 @@ function validCoverage(input: InputObject): boolean {
       coverage.collections.every((key) => input[key] !== null),
   );
 }
+function validCampaignWindows(input: InputObject): boolean {
+  return (input.campaignFacts ?? []).every(
+    ({ measuredCoverage }) =>
+      measuredCoverage === null ||
+      (measuredCoverage.periodStart === input.periodStart &&
+        measuredCoverage.periodEnd === input.periodEnd),
+  );
+}
 export const MetricInputV1Schema = InputObjectSchema.refine(
   validVisibility,
   "Invalid metric window or future source watermark",
 )
+  .refine(validCampaignWindows, "Known campaign measurement must match the metric window")
   .refine(validInputFacts, "Every fact must match metric scope and visibility cutoff")
   .refine(validCoverage, "Coverage must retain source scope, revision, window, cutoff and evidence")
   .refine(validInputAvailability, "Unsynchronized input must preserve null facts and UNAVAILABLE")
@@ -493,6 +542,55 @@ export const MetricSnapshotV1Schema = SnapshotObjectSchema.refine(
     "Quality issue evidence must belong to snapshot",
   )
   .readonly();
+
+const RatioEvidenceObjectSchema = z.strictObject({
+  measure: z
+    .strictObject({
+      metric: MetricValueSchema,
+      quality: SnapshotObjectSchema.pick({
+        status: true,
+        sampleSize: true,
+        coverageBasisPoints: true,
+        evidenceIds: true,
+        issues: true,
+      }).readonly(),
+    })
+    .readonly(),
+  numerator: QuantitySchema.nullable(),
+  denominator: QuantitySchema.nullable(),
+  numeratorCoverage: MetricMeasuredCoverageSchema.nullable(),
+  denominatorCoverage: MetricMeasuredCoverageSchema.nullable(),
+  window: MetricWindowSchema,
+  coverageBasisPoints: BasisPointsSchema,
+});
+function validVerifiedRatio(ratio: z.infer<typeof RatioEvidenceObjectSchema>): boolean {
+  const { numeratorCoverage, denominatorCoverage, measure, window } = ratio;
+  if (measure.quality.status !== "VERIFIED") return true;
+  return (
+    numeratorCoverage !== null &&
+    denominatorCoverage !== null &&
+    ratio.numerator !== null &&
+    ratio.denominator !== null &&
+    measure.metric.value !== null &&
+    ratio.coverageBasisPoints === 10000 &&
+    measure.quality.coverageBasisPoints === 10000 &&
+    measure.quality.issues.length === 0 &&
+    sameBinding(numeratorCoverage.binding, denominatorCoverage.binding) &&
+    [numeratorCoverage, denominatorCoverage].every(
+      (coverage) =>
+        coverage.periodStart === window.periodStart &&
+        coverage.periodEnd === window.periodEnd &&
+        coverage.coverageBasisPoints === 10000 &&
+        coverage.evidenceIds.every((id) => measure.quality.evidenceIds.includes(id)),
+    )
+  );
+}
+/** Leaf ratio boundary checks supplied provenance only; it does not compute a ratio. */
+export const MetricRatioEvidenceSchema = RatioEvidenceObjectSchema.refine(
+  validVerifiedRatio,
+  "Verified ratio sides require complete matching measurement provenance",
+).readonly();
+export type MetricRatioEvidence = z.infer<typeof MetricRatioEvidenceSchema>;
 
 export type MetricWindow = z.infer<typeof MetricWindowSchema>;
 export type MetricProvenance = z.infer<typeof MetricProvenanceSchema>;
@@ -572,9 +670,20 @@ function knownPayments(input: MetricInputV1, kind: MetricKind): boolean {
         (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status))),
   );
 }
+function knownCampaigns(input: MetricInputV1, snapshot: MetricSnapshotV1): boolean {
+  if (snapshot.metric.kind !== "ROAS") return true;
+  return (input.campaignFacts ?? []).every(
+    ({ data, measuredCoverage }) =>
+      measuredCoverage !== null &&
+      measuredCoverage.coverageBasisPoints === 10000 &&
+      data.spendMinor !== null &&
+      data.attributedRevenueMinor !== null &&
+      measuredCoverage.evidenceIds.every((id) => snapshot.evidenceIds.includes(id)),
+  );
+}
 function verifiedSources(input: MetricInputV1, snapshot: MetricSnapshotV1): boolean {
   if (snapshot.status !== "VERIFIED") return true;
-  if (!knownPayments(input, snapshot.metric.kind)) return false;
+  if (!knownPayments(input, snapshot.metric.kind) || !knownCampaigns(input, snapshot)) return false;
   const required = requiredCollections[snapshot.metric.kind];
   return input.metricCoverage.some(
     (coverage) =>
