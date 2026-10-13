@@ -516,3 +516,15 @@ it("permits test-only leaf adapters without a provider, repository or oracle", (
   expect(leafPorts.math.ratio(0, 0, "HALF_AWAY_FROM_ZERO")).toEqual(unavailable());
   expect(leafPorts.clock.snapshot().now).toBe(end);
 });
+
+it("exports metric boundary schemas from the built public package", async () => {
+  const publicContracts = await import("@shopmate/contracts");
+  expect(publicContracts).toHaveProperty("MetricInputV1Schema");
+  expect(publicContracts).toHaveProperty("MetricSnapshotV1Schema");
+  expect(publicContracts).toHaveProperty("MetricComputationV1Schema");
+});
+
+it("exports metric ports and immutable inputs as public types", () => {
+  expectTypeOf<import("@shopmate/contracts").MetricLeafPorts>().toEqualTypeOf<MetricLeafPorts>();
+  expectTypeOf<import("@shopmate/contracts").MetricInputV1>().toEqualTypeOf<MetricInputV1>();
+});
