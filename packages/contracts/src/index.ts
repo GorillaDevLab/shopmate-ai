@@ -386,3 +386,6 @@ export {
   DemoFailureRuleRemoveSchema,
 } from "./demo/demo-failure-rules.schema.js";
 export type { MockReadFailureRule } from "./demo/demo-failure-rules.schema.js";
+
+export * from "./metrics/metric.schema.js";
+export type * from "./metrics/metric-ports.js";
