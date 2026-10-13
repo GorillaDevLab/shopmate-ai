@@ -28,7 +28,13 @@ export interface MetricError {
   readonly evidenceIds: readonly string[];
 }
 export type MetricResult<T> = Readonly<{ ok: true; value: T } | { ok: false; error: MetricError }>;
+export interface MetricCoverageRequest {
+  readonly kind: MetricKind;
+  readonly subject: MetricSubject;
+}
 export interface MetricSourceQuery {
+  /** Bound the metric/subject completeness evidence requested from normalized sources. */
+  readonly coverageRequests: readonly MetricCoverageRequest[];
   readonly binding: ConnectorBinding;
   readonly window: MetricWindow;
   readonly visibleAt: string;

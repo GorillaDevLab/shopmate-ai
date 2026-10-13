@@ -88,7 +88,7 @@ const collections = {
   traffic: null,
   inventoryExtensions: null,
 };
-const input = {
+const baseInput = {
   schemaVersion: 1,
   definitionVersion: "g4-v1",
   inputRevision: "revision-a",
@@ -100,6 +100,21 @@ const input = {
   evidenceIds: ["sync-a"],
   ...collections,
 };
+const revenueCoverage = {
+  schemaVersion: 1,
+  definitionVersion: "g4-v1",
+  inputRevision: "revision-a",
+  ...provenance,
+  ...window,
+  visibleAt: end,
+  sourceWatermark: end,
+  evidenceIds: ["sync-a"],
+  kind: "PAID_REVENUE",
+  subject: { kind: "STORE" },
+  collections: ["paymentFacts"],
+  coverageBasisPoints: 10000,
+};
+const input = { ...baseInput, metricCoverage: [revenueCoverage] };
 const snapshot = {
   schemaVersion: 1,
   definitionVersion: "g4-v1",
@@ -129,7 +144,13 @@ it("accepts synchronized evidence-backed empty periods", () => {
 });
 it("preserves unsynchronized null facts and unavailable snapshots", () => {
   const absent = Object.fromEntries(Object.keys(collections).map((key) => [key, null]));
-  const unavailable = { ...input, ...absent, sourceWatermark: null, status: "UNAVAILABLE" };
+  const unavailable = {
+    ...input,
+    ...absent,
+    metricCoverage: [],
+    sourceWatermark: null,
+    status: "UNAVAILABLE",
+  };
   expect(parsedInput(unavailable).paymentFacts).toBeNull();
   const result = {
     ...snapshot,
@@ -428,7 +449,13 @@ it.each([
 });
 it("rejects promotion of unsynchronized input to VERIFIED zero", () => {
   const absent = Object.fromEntries(Object.keys(collections).map((key) => [key, null]));
-  const unavailable = { ...input, ...absent, sourceWatermark: null, status: "UNAVAILABLE" };
+  const unavailable = {
+    ...input,
+    ...absent,
+    metricCoverage: [],
+    sourceWatermark: null,
+    status: "UNAVAILABLE",
+  };
   expect(MetricComputationV1Schema.safeParse({ input: unavailable, snapshot }).success).toBe(false);
 });
 it("allows snapshot evidence retained from a normalized fact", () => {
@@ -527,4 +554,100 @@ it("exports metric boundary schemas from the built public package", async () => 
 it("exports metric ports and immutable inputs as public types", () => {
   expectTypeOf<import("@shopmate/contracts").MetricLeafPorts>().toEqualTypeOf<MetricLeafPorts>();
   expectTypeOf<import("@shopmate/contracts").MetricInputV1>().toEqualTypeOf<MetricInputV1>();
+});
+
+it.each(["source", "public"])(
+  "rejects crossed-null VERIFIED revenue through %s contracts",
+  async (entry) => {
+    const contract =
+      entry === "source" ? await import("./metric.schema.js") : await import("@shopmate/contracts");
+    const crossed = { ...input, paymentFacts: null, inventoryFacts: [], metricCoverage: [] };
+    expect(contract.MetricInputV1Schema.safeParse(crossed).success).toBe(true);
+    expect(contract.MetricComputationV1Schema.safeParse({ input: crossed, snapshot }).success).toBe(
+      false,
+    );
+  },
+);
+it("rejects globally VERIFIED all-null collections despite a connection watermark", () => {
+  const absent = Object.fromEntries(Object.keys(collections).map((key) => [key, null]));
+  expect(MetricInputV1Schema.safeParse({ ...input, ...absent }).success).toBe(false);
+});
+
+it("requires metric-specific coverage rather than snapshot self-assertion", () => {
+  expect(
+    MetricComputationV1Schema.safeParse({ input: { ...input, metricCoverage: [] }, snapshot })
+      .success,
+  ).toBe(false);
+});
+it("preserves verified revenue when unrelated costs are unknown", () => {
+  const partial = { ...input, status: "ESTIMATED", frozenCosts: null };
+  expect(MetricComputationV1Schema.safeParse({ input: partial, snapshot }).success).toBe(true);
+});
+it.each([
+  { kind: "GMV" },
+  { subject: { kind: "SKU", externalSkuId: "sku-a" } },
+  { collections: ["inventoryFacts"] },
+  { coverageBasisPoints: 9999 },
+])("rejects unrelated or incomplete revenue coverage %j", (patch) => {
+  const covered = { ...input, metricCoverage: [{ ...revenueCoverage, ...patch }] };
+  expect(MetricComputationV1Schema.safeParse({ input: covered, snapshot }).success).toBe(false);
+});
+it.each([
+  { binding: { ...binding, storeId: "foreign" } },
+  { inputRevision: "foreign" },
+  { definitionVersion: "foreign" },
+  { periodStart: "2026-10-01T17:00:00Z" },
+  { visibleAt: later },
+  { sourceWatermark: start },
+  { observedAt: later },
+  { evidenceIds: ["foreign"] },
+  { collections: ["paymentFacts", "paymentFacts"] },
+  { collections: [] },
+  { sourceVersion: "" },
+  { unexpected: true },
+])("rejects detached completeness provenance %j", (patch) => {
+  const covered = { ...input, metricCoverage: [{ ...revenueCoverage, ...patch }] };
+  expect(MetricInputV1Schema.safeParse(covered).success).toBe(false);
+});
+it("rejects coverage claims for an unobserved payment collection", () => {
+  expect(MetricInputV1Schema.safeParse({ ...input, paymentFacts: null }).success).toBe(false);
+});
+it("links completeness evidence into the resulting snapshot", () => {
+  const withFact = { ...input, paymentFacts: [{ ...provenance, data: order }] };
+  const factOnly = { ...snapshot, evidenceIds: ["fact-a"] };
+  expect(MetricComputationV1Schema.safeParse({ input: withFact, snapshot: factOnly }).success).toBe(
+    false,
+  );
+});
+
+it("does not promote explicitly unknown payment values using complete coverage", () => {
+  const data = {
+    ...order,
+    paidMinor: null,
+    source: { ...source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+  };
+  const partial = { ...input, paymentFacts: [{ ...provenance, data }] };
+  expect(MetricInputV1Schema.safeParse(partial).success).toBe(true);
+  expect(MetricComputationV1Schema.safeParse({ input: partial, snapshot }).success).toBe(false);
+});
+it("keeps revenue verifiable when only refund data is unknown", () => {
+  const data = {
+    ...order,
+    refundedMinor: null,
+    source: { ...source, quality: { state: "PARTIAL", issues: ["REFUND_UNKNOWN"] } },
+  };
+  expect(
+    MetricComputationV1Schema.safeParse({
+      input: { ...input, paymentFacts: [{ ...provenance, data }] },
+      snapshot,
+    }).success,
+  ).toBe(true);
+});
+it("allows source readers to receive explicit metric and subject coverage requests", () => {
+  expectTypeOf<Parameters<MetricSourceReader["read"]>[0]["coverageRequests"]>().toEqualTypeOf<
+    readonly Readonly<{
+      kind: import("./metric.schema.js").MetricKind;
+      subject: import("./metric.schema.js").MetricSubject;
+    }>[]
+  >();
 });

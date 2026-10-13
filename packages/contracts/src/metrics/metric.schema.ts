@@ -261,49 +261,6 @@ function validVisibility(value: VisibilityFields): boolean {
       Date.parse(value.sourceWatermark) <= Date.parse(value.visibleAt))
   );
 }
-const InputObjectSchema = z.strictObject({
-  ...versionFields,
-  status: MetricStatusSchema,
-  ...collectionFields,
-});
-type InputObject = z.infer<typeof InputObjectSchema>;
-function factCollections(input: InputObject) {
-  return [
-    input.paymentFacts,
-    input.refundFacts,
-    input.inventoryFacts,
-    input.campaignFacts,
-    input.frozenCosts,
-    input.refundAllocations,
-    input.returnReceipts,
-    input.fees,
-    input.traffic,
-    input.inventoryExtensions,
-  ];
-}
-function validInputFacts(input: InputObject): boolean {
-  return factCollections(input).every(
-    (facts) =>
-      facts === null ||
-      facts.every(
-        (fact) =>
-          sameBinding(input.binding, fact.binding) &&
-          Date.parse(fact.observedAt) <= Date.parse(input.visibleAt),
-      ),
-  );
-}
-function validInputAvailability(input: InputObject): boolean {
-  if (input.sourceWatermark !== null) return input.status !== "UNAVAILABLE";
-  return input.status === "UNAVAILABLE" && factCollections(input).every((facts) => facts === null);
-}
-export const MetricInputV1Schema = InputObjectSchema.refine(
-  validVisibility,
-  "Invalid metric window or future source watermark",
-)
-  .refine(validInputFacts, "Every fact must match metric scope and visibility cutoff")
-  .refine(validInputAvailability, "Unsynchronized input must preserve null facts and UNAVAILABLE")
-  .readonly();
-
 function metricValue<
   const K extends readonly [string, ...string[]],
   const U extends string,
@@ -351,6 +308,119 @@ export const MetricValueSchema = z.discriminatedUnion("kind", [
   metricValue(["ROAS"], "basisPoints", QuantitySchema),
   metricValue(["INVENTORY_HOURS_REMAINING", "LEAD_TIME_HOURS"], "hours", hours),
 ]);
+export const MetricSubjectSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("STORE") }).readonly(),
+  z.strictObject({ kind: z.literal("SKU"), externalSkuId: ExternalIdSchema }).readonly(),
+  z.strictObject({ kind: z.literal("CAMPAIGN"), externalCampaignId: ExternalIdSchema }).readonly(),
+]);
+export const MetricCollectionSchema = z.enum([
+  "paymentFacts",
+  "refundFacts",
+  "inventoryFacts",
+  "campaignFacts",
+  "frozenCosts",
+  "refundAllocations",
+  "returnReceipts",
+  "fees",
+  "traffic",
+  "inventoryExtensions",
+]);
+/** Source-reader completeness evidence, never a calculator's assertion about its output. */
+export const MetricCoverageV1Schema = z
+  .strictObject({
+    ...versionFields,
+    observedAt: MetricTimestampSchema,
+    sourceVersion: SourceVersionSchema,
+    kind: z.union(MetricValueSchema.options.map((option) => option.unwrap().shape.kind)),
+    subject: MetricSubjectSchema,
+    collections: z
+      .array(MetricCollectionSchema)
+      .min(1)
+      .refine((values) => new Set(values).size === values.length, "Duplicate source collection")
+      .readonly(),
+    coverageBasisPoints: BasisPointsSchema,
+  })
+  .refine(validVisibility, "Invalid coverage visibility")
+  .readonly();
+export type MetricCoverageV1 = z.infer<typeof MetricCoverageV1Schema>;
+const InputObjectSchema = z.strictObject({
+  ...versionFields,
+  status: MetricStatusSchema,
+  ...collectionFields,
+  metricCoverage: z.array(MetricCoverageV1Schema).readonly(),
+});
+type InputObject = z.infer<typeof InputObjectSchema>;
+function factCollections(input: InputObject) {
+  return [
+    input.paymentFacts,
+    input.refundFacts,
+    input.inventoryFacts,
+    input.campaignFacts,
+    input.frozenCosts,
+    input.refundAllocations,
+    input.returnReceipts,
+    input.fees,
+    input.traffic,
+    input.inventoryExtensions,
+  ];
+}
+function validInputFacts(input: InputObject): boolean {
+  return factCollections(input).every(
+    (facts) =>
+      facts === null ||
+      facts.every(
+        (fact) =>
+          sameBinding(input.binding, fact.binding) &&
+          Date.parse(fact.observedAt) <= Date.parse(input.visibleAt),
+      ),
+  );
+}
+function validInputAvailability(input: InputObject): boolean {
+  if (input.sourceWatermark !== null)
+    return (
+      input.status !== "UNAVAILABLE" &&
+      (input.status !== "VERIFIED" || factCollections(input).some((facts) => facts !== null))
+    );
+  return input.status === "UNAVAILABLE" && factCollections(input).every((facts) => facts === null);
+}
+const contextKeys = [
+  "definitionVersion",
+  "inputRevision",
+  "periodStart",
+  "periodEnd",
+  "timezone",
+  "currency",
+  "visibleAt",
+  "sourceWatermark",
+] as const;
+function inputEvidence(input: InputObject): ReadonlySet<string> {
+  const evidence = new Set(input.evidenceIds);
+  for (const facts of factCollections(input)) {
+    for (const fact of facts ?? []) fact.evidenceIds.forEach((id) => evidence.add(id));
+  }
+  return evidence;
+}
+function validCoverage(input: InputObject): boolean {
+  const evidence = inputEvidence(input);
+  return input.metricCoverage.every(
+    (coverage) =>
+      sameBinding(input.binding, coverage.binding) &&
+      contextKeys.every((key) => input[key] === coverage[key]) &&
+      Date.parse(coverage.observedAt) <= Date.parse(input.visibleAt) &&
+      Date.parse(coverage.periodEnd) <= Date.parse(coverage.observedAt) &&
+      coverage.evidenceIds.every((id) => evidence.has(id)) &&
+      coverage.collections.every((key) => input[key] !== null),
+  );
+}
+export const MetricInputV1Schema = InputObjectSchema.refine(
+  validVisibility,
+  "Invalid metric window or future source watermark",
+)
+  .refine(validInputFacts, "Every fact must match metric scope and visibility cutoff")
+  .refine(validCoverage, "Coverage must retain source scope, revision, window, cutoff and evidence")
+  .refine(validInputAvailability, "Unsynchronized input must preserve null facts and UNAVAILABLE")
+  .readonly();
+
 export const MetricIssueCodeSchema = z.enum([
   "NOT_SYNCHRONIZED",
   "SOURCE_INCONSISTENT",
@@ -381,11 +451,6 @@ export const DataQualityIssueV1Schema = z
     evidenceIds: MetricEvidenceIdsSchema,
   })
   .readonly();
-export const MetricSubjectSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("STORE") }).readonly(),
-  z.strictObject({ kind: z.literal("SKU"), externalSkuId: ExternalIdSchema }).readonly(),
-  z.strictObject({ kind: z.literal("CAMPAIGN"), externalCampaignId: ExternalIdSchema }).readonly(),
-]);
 const SnapshotObjectSchema = z.strictObject({
   ...versionFields,
   computedAt: MetricTimestampSchema,
@@ -451,23 +516,78 @@ export type MetricTraffic = z.infer<typeof MetricTrafficSchema>;
 export type MetricInventoryExtension = z.infer<typeof MetricInventoryExtensionSchema>;
 
 function matchesInput(input: MetricInputV1, snapshot: MetricSnapshotV1): boolean {
-  const keys = [
-    "definitionVersion",
-    "inputRevision",
-    "periodStart",
-    "periodEnd",
-    "visibleAt",
-    "sourceWatermark",
-  ] as const;
-  const evidence = new Set(input.evidenceIds);
-  for (const facts of factCollections(input)) {
-    for (const fact of facts ?? []) fact.evidenceIds.forEach((id) => evidence.add(id));
-  }
+  const evidence = inputEvidence(input);
   return (
     sameBinding(input.binding, snapshot.binding) &&
-    keys.every((key) => input[key] === snapshot[key]) &&
+    contextKeys.every((key) => input[key] === snapshot[key]) &&
     snapshot.evidenceIds.every((id) => evidence.has(id)) &&
     (input.status !== "UNAVAILABLE" || snapshot.status === "UNAVAILABLE")
+  );
+}
+type Collection = z.infer<typeof MetricCollectionSchema>;
+const payment = ["paymentFacts"] as const;
+const refund = ["paymentFacts", "refundFacts"] as const;
+const cost = [...refund, "frozenCosts", "refundAllocations", "returnReceipts"] as const;
+const contribution = [...cost, "fees"] as const;
+/** Minimum source domains are part of the contract; no values or quality states are calculated here. */
+const requiredCollections: Readonly<Record<MetricKind, readonly Collection[]>> = {
+  GMV: payment,
+  PAID_REVENUE: payment,
+  AOV: payment,
+  PAID_ORDERS: payment,
+  PAID_UNITS: payment,
+  REFUND_SETTLED_AMOUNT: ["refundFacts"],
+  NET_REVENUE_SETTLEMENT: refund,
+  REFUNDED_COHORT_ORDERS: refund,
+  REFUND_COHORT_ORDER_RATE: refund,
+  REFUND_COHORT_AMOUNT_RATE: refund,
+  NET_MERCHANDISE_REVENUE: [...refund, "refundAllocations"],
+  COGS: cost,
+  GROSS_PROFIT: cost,
+  CONTRIBUTION: contribution,
+  ESTIMATED_NET_PROFIT: contribution,
+  PROFIT_DELTA: contribution,
+  INVENTORY_AVAILABLE: ["inventoryFacts"],
+  INVENTORY_HOURS_REMAINING: ["inventoryFacts", "paymentFacts", "inventoryExtensions"],
+  LEAD_TIME_HOURS: ["inventoryExtensions"],
+  CONVERSION_RATE: ["traffic"],
+  CART_RATE: ["traffic"],
+  CHECKOUT_RATE: ["traffic"],
+  ROAS: ["campaignFacts"],
+};
+function sameSubject(left: MetricSubject, right: MetricSubject): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "SKU" && right.kind === "SKU")
+    return left.externalSkuId === right.externalSkuId;
+  if (left.kind === "CAMPAIGN" && right.kind === "CAMPAIGN")
+    return left.externalCampaignId === right.externalCampaignId;
+  return true;
+}
+function knownPayments(input: MetricInputV1, kind: MetricKind): boolean {
+  if (kind === "GMV" || !requiredCollections[kind].includes("paymentFacts")) return true;
+  return (input.paymentFacts ?? []).every(
+    ({ data }) =>
+      data.paidMinor !== null &&
+      (data.paidAt !== null ||
+        (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status))),
+  );
+}
+function verifiedSources(input: MetricInputV1, snapshot: MetricSnapshotV1): boolean {
+  if (snapshot.status !== "VERIFIED") return true;
+  if (!knownPayments(input, snapshot.metric.kind)) return false;
+  const required = requiredCollections[snapshot.metric.kind];
+  return input.metricCoverage.some(
+    (coverage) =>
+      coverage.kind === snapshot.metric.kind &&
+      sameSubject(coverage.subject, snapshot.subject) &&
+      coverage.coverageBasisPoints === 10000 &&
+      coverage.evidenceIds.every((id) => snapshot.evidenceIds.includes(id)) &&
+      required.every(
+        (key) =>
+          coverage.collections.includes(key) &&
+          input[key] !== null &&
+          input[key].every((fact) => fact.data !== null),
+      ),
   );
 }
 /** Validate at calculation/append boundaries so unavailable inputs cannot become verified zero. */
@@ -479,6 +599,10 @@ export const MetricComputationV1Schema = z
   .refine(
     ({ input, snapshot }) => matchesInput(input, snapshot),
     "Snapshot must retain source scope, revision, cutoff and evidence",
+  )
+  .refine(
+    ({ input, snapshot }) => verifiedSources(input, snapshot),
+    "Verified metrics require observed relevant collections and source completeness evidence",
   )
   .readonly();
 export type MetricComputationV1 = z.infer<typeof MetricComputationV1Schema>;
