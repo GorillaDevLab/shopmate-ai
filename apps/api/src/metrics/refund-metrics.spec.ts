@@ -280,3 +280,24 @@ it.each(["REQUESTED", "APPROVED", "PROCESSING", "FAILED", "REJECTED", "CANCELLED
     expect(result.settledRefund.quality.status).toBe("VERIFIED");
   },
 );
+
+it("uses the IANA Shanghai date during the 1991 summer offset", () => {
+  const periodStart = "1991-06-30T15:00:00Z",
+    periodEnd = "1991-06-30T15:30:00Z";
+  const data = input({
+    periodStart,
+    periodEnd,
+    visibleAt: periodEnd,
+    sourceWatermark: periodEnd,
+    paymentFacts: [],
+    refundFacts: [],
+  });
+  const result = value(
+    calculator.calculate({
+      input: data,
+      paymentCohort: { periodStart, periodEnd, timezone: "Asia/Shanghai", currency: "CNY" },
+      maturityHours: 0,
+    }),
+  );
+  expect(values(result)).toEqual([0, 0, 0, null, null]);
+});

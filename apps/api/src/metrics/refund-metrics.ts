@@ -49,6 +49,14 @@ const requestSchema = z.strictObject({
   paymentCohort: MetricWindowSchema,
   maturityHours: z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER),
 });
+const dateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+  calendar: "iso8601",
+  numberingSystem: "latn",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 function freeze<T>(value: T): T {
   if (typeof value === "object" && value !== null) {
@@ -112,7 +120,10 @@ function contains(window: MetricWindow, time: string | null): boolean {
   );
 }
 function businessDate(time: number): string {
-  return new Date(time + 8 * 3600000).toISOString().slice(0, 10);
+  const parts = dateFormatter.formatToParts(new Date(time));
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)!.value;
+  return `${read("year").padStart(4, "0")}-${read("month")}-${read("day")}`;
 }
 function fence(
   window: MetricWindow,
