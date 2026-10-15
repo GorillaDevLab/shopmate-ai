@@ -199,6 +199,7 @@ function boundRefund(
     externalRefundId: string;
   },
   evidenceIds: readonly string[],
+  unavailable = false,
 ): Line | undefined {
   const refund = refunds.find((row) => row.data.externalRefundId === data.externalRefundId);
   if (
@@ -208,7 +209,7 @@ function boundRefund(
   )
     reject("CONFLICT", ids(refund.evidenceIds, evidenceIds));
   const row = boundLine(rows, data, evidenceIds);
-  if (row && !refund) reject("CONFLICT", ids(row.payment.evidenceIds, evidenceIds));
+  if (row && !refund && !unavailable) reject("CONFLICT", ids(row.payment.evidenceIds, evidenceIds));
   return row;
 }
 function validateAllocations(
@@ -217,7 +218,8 @@ function validateAllocations(
   refunds: readonly Refund[],
 ): void {
   for (const fact of input.refundAllocations ?? [])
-    if (fact.data) boundRefund(rows, refunds, fact.data, fact.evidenceIds);
+    if (fact.data)
+      boundRefund(rows, refunds, fact.data, fact.evidenceIds, input.refundFacts === null);
 }
 function validateAllocationBounds(
   input: MetricInputV1,
@@ -259,7 +261,7 @@ function validateReceipts(
   for (const fact of input.returnReceipts ?? []) {
     const data = fact.data;
     if (!data) continue;
-    const row = boundRefund(rows, refunds, data, fact.evidenceIds);
+    const row = boundRefund(rows, refunds, data, fact.evidenceIds, input.refundFacts === null);
     if (!row || data.acceptedAt === null) continue;
     if (Date.parse(data.acceptedAt) < Date.parse(row.payment.data.paidAt!))
       reject("CONFLICT", ids(row.payment.evidenceIds, fact.evidenceIds));
@@ -339,7 +341,7 @@ function allocationTotals(
     valid: Allocation[] = [],
     issues: DataQualityIssueV1[] = [];
   for (const refund of refunds) {
-    if (!successful(refund) || refund.data.succeededMinor === 0) continue;
+    if (!successful(refund)) continue;
     const allocation = refundAllocation(input, refund, deps);
     issues.push(...allocation.issues);
     valid.push(...allocation.valid);
@@ -360,6 +362,7 @@ function refundAllocation(
   const rows = (input.refundAllocations ?? []).filter(
     (row) => row.data?.externalRefundId === refund.data.externalRefundId,
   );
+  if (!rows.length && refund.data.succeededMinor === 0) return { total: 0, valid: [], issues: [] };
   const evidenceIds = ids(refund.evidenceIds, ...rows.map((row) => row.evidenceIds));
   const total = checked(
     deps.math.add(
