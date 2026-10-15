@@ -877,17 +877,19 @@ it("deep freezes results and errors while preserving caller-owned objects", () =
   expect(Object.isFrozen(data.paymentFacts![0]!.data.items)).toBe(false);
 });
 function snapshotContext(data: MetricInputV1) {
-  const proof = data.metricCoverage[0]!;
-  const {
-    kind: _kind,
-    subject: _subject,
-    collections: _collections,
-    coverageBasisPoints: _coverage,
-    observedAt: _observed,
-    sourceVersion: _source,
-    ...context
-  } = proof;
-  return context;
+  return {
+    schemaVersion: data.schemaVersion,
+    definitionVersion: data.definitionVersion,
+    inputRevision: data.inputRevision,
+    binding: data.binding,
+    periodStart: data.periodStart,
+    periodEnd: data.periodEnd,
+    timezone: data.timezone,
+    currency: data.currency,
+    visibleAt: data.visibleAt,
+    sourceWatermark: data.sourceWatermark,
+    evidenceIds: data.evidenceIds,
+  };
 }
 it("validates every public metric, issue and context-wrapped snapshot", () => {
   const result = run(financeMissingCostGolden.input);
