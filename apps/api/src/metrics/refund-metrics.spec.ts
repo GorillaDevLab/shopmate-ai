@@ -783,3 +783,19 @@ it("zero-pads early Shanghai business years before passing them to the resolver"
     ).ok,
   ).toBe(true);
 });
+
+it("resolves equivalent UTC interval spellings once", () => {
+  const fixture = financeCrossDayPaymentGolden,
+    elapsed = vi.fn(windows.elapsed);
+  const cohort = {
+    ...fixture.context.paymentCohort,
+    periodStart: fixture.input.periodStart.replace("Z", ".000Z"),
+    periodEnd: fixture.input.periodEnd.replace("Z", ".000Z"),
+  };
+  expect(
+    custom({ windows: { ...windows, elapsed } }).calculate(
+      request(fixture.input, { paymentCohort: cohort }),
+    ).ok,
+  ).toBe(true);
+  expect(elapsed).toHaveBeenCalledTimes(1);
+});

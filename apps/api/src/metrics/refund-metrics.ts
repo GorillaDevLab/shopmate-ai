@@ -162,8 +162,8 @@ function validateWindows(
   const settlement = fence(input, input, windows);
   if (!settlement.ok) return settlement;
   if (
-    input.periodStart === paymentCohort.periodStart &&
-    input.periodEnd === paymentCohort.periodEnd
+    Date.parse(input.periodStart) === Date.parse(paymentCohort.periodStart) &&
+    Date.parse(input.periodEnd) === Date.parse(paymentCohort.periodEnd)
   )
     return settlement;
   return fence(paymentCohort, input, windows);
