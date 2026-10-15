@@ -161,10 +161,13 @@ Freshness requires `sourceWatermark >= visibleAt` for this policy. A watermark t
 reaches the original sale-window end does not prove a later as-of observation fresh.
 Missing source time prevents verified output. Applicable payment/refund uncertainty and
 source-time reasons are retained; unrelated cost/fee source flags do not erase net
-merchandise revenue. Status precedence is `UNAVAILABLE > STALE > INSUFFICIENT > ESTIMATED
+merchandise revenue. Status precedence is:
 
-> VERIFIED`. Unknown dependent amounts remain null even when stale status outranks
-> insufficient status.
+```text
+UNAVAILABLE > STALE > INSUFFICIENT > ESTIMATED > VERIFIED
+```
+
+Unknown dependent amounts remain null even when stale status outranks insufficient status.
 
 Explicit unrelated order IDs in extension rows are excluded from cohort amounts, even
 if those orders' payments were not supplied. Included-order wrong line/SKU/refund links
