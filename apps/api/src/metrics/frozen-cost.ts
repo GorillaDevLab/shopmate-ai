@@ -81,6 +81,59 @@ function reject(code: MetricErrorCode, evidenceIds: readonly string[]): never {
 function issue(code: DataQualityIssueV1["code"], field: string, evidenceIds: readonly string[]) {
   return { code, field, evidenceIds: ids(evidenceIds) };
 }
+function exact(time: string | null): boolean {
+  if (time === null) return true;
+  const fraction = /\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/.exec(time)?.[1] ?? "";
+  return !/[1-9]/.test(fraction.slice(3)) && Number.isFinite(Date.parse(time));
+}
+function precision(input: MetricInputV1): boolean {
+  const times = [input.periodStart, input.periodEnd, input.visibleAt, input.sourceWatermark];
+  for (const proof of input.metricCoverage)
+    times.push(
+      proof.periodStart,
+      proof.periodEnd,
+      proof.visibleAt,
+      proof.observedAt,
+      proof.sourceWatermark,
+    );
+  for (const fact of input.paymentFacts ?? [])
+    times.push(fact.observedAt, fact.data.orderedAt, fact.data.paidAt, fact.data.source.updatedAt);
+  for (const fact of input.refundFacts ?? [])
+    times.push(
+      fact.observedAt,
+      fact.data.requestedAt,
+      fact.data.succeededAt,
+      fact.data.source.updatedAt,
+    );
+  for (const fact of input.frozenCosts ?? [])
+    times.push(fact.observedAt, fact.data?.frozenAt ?? null);
+  for (const fact of input.refundAllocations ?? []) times.push(fact.observedAt);
+  for (const fact of input.returnReceipts ?? [])
+    times.push(fact.observedAt, fact.data?.acceptedAt ?? null);
+  return times.every(exact);
+}
+function unique<T extends { readonly evidenceIds: readonly string[] }>(
+  rows: readonly T[],
+  key: (row: T) => string | null,
+): void {
+  const seen = new Map<string, readonly string[]>();
+  for (const row of rows) {
+    const id = key(row);
+    if (id === null) continue;
+    const prior = seen.get(id);
+    if (prior) reject("CONFLICT", ids(prior, row.evidenceIds));
+    seen.set(id, row.evidenceIds);
+  }
+}
+function duplicates(input: MetricInputV1): void {
+  unique(input.frozenCosts ?? [], ({ data }) =>
+    data ? JSON.stringify([data.externalOrderId, data.externalLineId]) : null,
+  );
+  unique(input.refundAllocations ?? [], ({ data }) =>
+    data ? JSON.stringify([data.externalRefundId, data.externalLineId]) : null,
+  );
+  unique(input.returnReceipts ?? [], ({ data }) => data?.externalReceiptId ?? null);
+}
 function included(input: MetricInputV1): Payment[] {
   return (input.paymentFacts ?? []).filter(({ data }) => {
     return (
@@ -109,6 +162,131 @@ function findCost(input: MetricInputV1, row: Line): Cost | undefined {
       data.externalLineId === row.item.externalLineId,
   );
 }
+function boundLine(
+  rows: readonly Line[],
+  data: { externalOrderId: string; externalLineId: string; externalSkuId: string },
+  evidenceIds: readonly string[],
+): Line | undefined {
+  const payment = rows.find(
+    (row) => row.payment.data.externalOrderId === data.externalOrderId,
+  )?.payment;
+  if (!payment) return undefined;
+  const row = findLine(rows, data.externalOrderId, data.externalLineId);
+  if (!row || row.item.externalSkuId !== data.externalSkuId)
+    reject("CONFLICT", ids(payment.evidenceIds, evidenceIds));
+  return row;
+}
+function validateCosts(input: MetricInputV1, rows: readonly Line[]): void {
+  for (const fact of input.frozenCosts ?? []) {
+    const data = fact.data;
+    if (!data) continue;
+    const row = boundLine(rows, data, fact.evidenceIds);
+    if (!row) continue;
+    if (
+      data.quantity !== row.item.quantity ||
+      Date.parse(data.frozenAt) !== Date.parse(row.payment.data.paidAt!)
+    )
+      reject("CONFLICT", ids(row.payment.evidenceIds, fact.evidenceIds));
+  }
+}
+function boundRefund(
+  rows: readonly Line[],
+  refunds: readonly Refund[],
+  data: {
+    externalOrderId: string;
+    externalLineId: string;
+    externalSkuId: string;
+    externalRefundId: string;
+  },
+  evidenceIds: readonly string[],
+): Line | undefined {
+  const refund = refunds.find((row) => row.data.externalRefundId === data.externalRefundId);
+  if (
+    refund &&
+    (refund.data.externalOrderId !== data.externalOrderId ||
+      (refund.data.externalSkuId !== null && refund.data.externalSkuId !== data.externalSkuId))
+  )
+    reject("CONFLICT", ids(refund.evidenceIds, evidenceIds));
+  const row = boundLine(rows, data, evidenceIds);
+  if (row && !refund) reject("CONFLICT", ids(row.payment.evidenceIds, evidenceIds));
+  return row;
+}
+function validateAllocations(
+  input: MetricInputV1,
+  rows: readonly Line[],
+  refunds: readonly Refund[],
+): void {
+  for (const fact of input.refundAllocations ?? [])
+    if (fact.data) boundRefund(rows, refunds, fact.data, fact.evidenceIds);
+}
+function validateAllocationBounds(
+  input: MetricInputV1,
+  lines: readonly Line[],
+  refunds: readonly Refund[],
+  deps: Dependencies,
+): void {
+  const succeeded = new Set(refunds.filter(successful).map((row) => row.data.externalRefundId));
+  const rows = (input.refundAllocations ?? []).filter(
+    (row) => row.data && succeeded.has(row.data.externalRefundId),
+  );
+  for (const line of lines) {
+    const allocated = rows.filter(
+      (row) =>
+        row.data!.externalOrderId === line.payment.data.externalOrderId &&
+        row.data!.externalLineId === line.item.externalLineId,
+    );
+    const total = checked(deps.math.add(allocated.map((row) => row.data!.merchandiseMinor ?? 0)));
+    if (total > line.item.netMinor)
+      reject("CONFLICT", ids(line.payment.evidenceIds, ...allocated.map((row) => row.evidenceIds)));
+  }
+  const payments = new Set(lines.map((line) => line.payment));
+  for (const payment of payments) {
+    const allocated = rows.filter(
+      (row) => row.data!.externalOrderId === payment.data.externalOrderId,
+    );
+    const total = checked(deps.math.add(allocated.map((row) => row.data!.buyerShippingMinor ?? 0)));
+    if (total > payment.data.shippingMinor)
+      reject("CONFLICT", ids(payment.evidenceIds, ...allocated.map((row) => row.evidenceIds)));
+  }
+}
+function validateReceipts(
+  input: MetricInputV1,
+  rows: readonly Line[],
+  refunds: readonly Refund[],
+  deps: Dependencies,
+): void {
+  const quantities = new Map<Line, Receipt[]>();
+  for (const fact of input.returnReceipts ?? []) {
+    const data = fact.data;
+    if (!data) continue;
+    const row = boundRefund(rows, refunds, data, fact.evidenceIds);
+    if (!row || data.acceptedAt === null) continue;
+    if (Date.parse(data.acceptedAt) < Date.parse(row.payment.data.paidAt!))
+      reject("CONFLICT", ids(row.payment.evidenceIds, fact.evidenceIds));
+    const receipts = [...(quantities.get(row) ?? []), fact];
+    const total = checked(
+      deps.math.add(receipts.map((receipt) => receipt.data!.resellableQuantity ?? 0)),
+    );
+    if (total > row.item.quantity)
+      reject(
+        "CONFLICT",
+        ids(row.payment.evidenceIds, ...receipts.map((receipt) => receipt.evidenceIds)),
+      );
+    quantities.set(row, receipts);
+  }
+}
+function validateAssociations(
+  input: MetricInputV1,
+  rows: readonly Line[],
+  refunds: readonly Refund[],
+  deps: Dependencies,
+): void {
+  duplicates(input);
+  validateCosts(input, rows);
+  validateAllocations(input, rows, refunds);
+  validateAllocationBounds(input, rows, refunds, deps);
+  validateReceipts(input, rows, refunds, deps);
+}
 function costTotals(input: MetricInputV1, rows: readonly Line[], deps: Dependencies): CostTotals {
   const amounts: number[] = [],
     known: number[] = [],
@@ -127,6 +305,8 @@ function costTotals(input: MetricInputV1, rows: readonly Line[], deps: Dependenc
     if (data.basis === "ESTIMATED")
       issues.push(issue("COST_ESTIMATED", "frozenCosts", fact!.evidenceIds));
   }
+  const ambiguous = (input.frozenCosts ?? []).filter((fact) => fact.data === null);
+  issues.push(...ambiguous.map((fact) => issue("COST_MISSING", "frozenCosts", fact.evidenceIds)));
   const sold = checked(deps.math.add(rows.map((row) => row.item.quantity)));
   const knownUnits = checked(deps.math.add(known));
   const coverage =
@@ -160,33 +340,48 @@ function allocationTotals(
     issues: DataQualityIssueV1[] = [];
   for (const refund of refunds) {
     if (!successful(refund) || refund.data.succeededMinor === 0) continue;
-    const rows = (input.refundAllocations ?? []).filter(
-      (row) => row.data?.externalRefundId === refund.data.externalRefundId,
-    );
-    if (
-      !rows.length ||
-      rows.some((row) => row.data?.merchandiseMinor == null || row.data.buyerShippingMinor === null)
-    ) {
-      issues.push(
-        issue(
-          "REFUND_UNKNOWN",
-          "refundAllocations",
-          ids(refund.evidenceIds, ...rows.map((row) => row.evidenceIds)),
-        ),
-      );
-      continue;
-    }
-    const total = checked(
-      deps.math.add(
-        rows.flatMap((row) => [row.data!.merchandiseMinor!, row.data!.buyerShippingMinor!]),
-      ),
-    );
-    if (total !== refund.data.succeededMinor)
-      reject("CONFLICT", ids(refund.evidenceIds, ...rows.map((row) => row.evidenceIds)));
-    valid.push(...rows);
-    amounts.push(...rows.map((row) => row.data!.merchandiseMinor!));
+    const allocation = refundAllocation(input, refund, deps);
+    issues.push(...allocation.issues);
+    valid.push(...allocation.valid);
+    amounts.push(allocation.total);
   }
+  issues.push(
+    ...(input.refundAllocations ?? [])
+      .filter((row) => row.data === null)
+      .map((row) => issue("REFUND_UNKNOWN", "refundAllocations", row.evidenceIds)),
+  );
   return { total: checked(deps.math.add(amounts)), valid, issues };
+}
+function refundAllocation(
+  input: MetricInputV1,
+  refund: Refund,
+  deps: Dependencies,
+): AllocationTotals {
+  const rows = (input.refundAllocations ?? []).filter(
+    (row) => row.data?.externalRefundId === refund.data.externalRefundId,
+  );
+  const evidenceIds = ids(refund.evidenceIds, ...rows.map((row) => row.evidenceIds));
+  const total = checked(
+    deps.math.add(
+      rows.flatMap((row) => [row.data!.merchandiseMinor ?? 0, row.data!.buyerShippingMinor ?? 0]),
+    ),
+  );
+  if (total > refund.data.succeededMinor!) reject("CONFLICT", evidenceIds);
+  if (
+    !rows.length ||
+    rows.some((row) => row.data!.merchandiseMinor === null || row.data!.buyerShippingMinor === null)
+  )
+    return {
+      total: 0,
+      valid: [],
+      issues: [issue("REFUND_UNKNOWN", "refundAllocations", evidenceIds)],
+    };
+  if (total !== refund.data.succeededMinor) reject("CONFLICT", evidenceIds);
+  return {
+    total: checked(deps.math.add(rows.map((row) => row.data!.merchandiseMinor!))),
+    valid: rows,
+    issues: [],
+  };
 }
 function reversal(
   input: MetricInputV1,
@@ -236,10 +431,11 @@ function returns(
     if (!row) continue;
     const refund = refunds.find((fact) => fact.data.externalRefundId === data.externalRefundId);
     if (!refund || !successful(refund) || data.resellableQuantity === 0) continue;
-    if (data.acceptedAt === null || data.resellableQuantity === null) {
+    if (data.resellableQuantity === null) {
       issues.push(issue("RETURN_UNKNOWN", "returnReceipts", receipt.evidenceIds));
       continue;
     }
+    if (data.acceptedAt === null) continue;
     const allocation = allocations.valid.find(
       (fact) =>
         fact.data?.externalRefundId === data.externalRefundId &&
@@ -399,6 +595,7 @@ function assemble(input: MetricInputV1, deps: Dependencies): FrozenCostMetrics {
   const payments = included(input),
     sold = lines(payments),
     refunds = cohortRefunds(input, payments);
+  validateAssociations(input, sold, refunds, deps);
   const allocations = allocationTotals(input, refunds, deps);
   const costs = costTotals(input, sold, deps);
   const returned = returns(input, sold, refunds, allocations, deps);
@@ -435,6 +632,7 @@ function calculate(
   const parsed = MetricInputV1Schema.safeParse(input);
   if (
     !parsed.success ||
+    !precision(parsed.data) ||
     !policySchema.safeParse(policy).success ||
     !["HALF_AWAY_FROM_ZERO", "TOWARD_ZERO"].includes(deps.rounding)
   )
