@@ -269,3 +269,14 @@ it.each(["paymentFacts", "refundFacts"] as const)("rejects duplicate %s even ide
     error: { code: "CONFLICT", evidenceIds: fact.evidenceIds },
   });
 });
+
+it.each(["REQUESTED", "APPROVED", "PROCESSING", "FAILED", "REJECTED", "CANCELLED"] as const)(
+  "accepts %s explicit zero without a success timestamp",
+  (status) => {
+    const result = value(
+      run(input({ refundFacts: [refund({ status, succeededMinor: 0, succeededAt: null })] })),
+    );
+    expect(values(result)).toEqual([0, 0, 0, 0, 0]);
+    expect(result.settledRefund.quality.status).toBe("VERIFIED");
+  },
+);

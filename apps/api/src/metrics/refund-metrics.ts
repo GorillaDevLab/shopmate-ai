@@ -194,7 +194,7 @@ function refundIssues(fact: Refund): DataQualityIssueV1[] {
   const flags = new Set(data.source.quality.issues);
   if (data.status === "SUCCEEDED" && (data.succeededMinor === null || data.succeededAt === null))
     flags.add("REFUND_UNKNOWN");
-  if (data.status !== "SUCCEEDED" && (data.succeededAt !== null || data.succeededMinor !== null))
+  if (data.status !== "SUCCEEDED" && (data.succeededAt !== null || (data.succeededMinor ?? 0) > 0))
     flags.add("SOURCE_INCONSISTENT");
   return [...flags].flatMap((code) =>
     ["REFUND_UNKNOWN", "SOURCE_INCONSISTENT", "SOURCE_TIME_MISSING"].includes(code)
