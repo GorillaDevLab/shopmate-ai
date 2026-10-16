@@ -311,7 +311,7 @@ function sourceQuality(input: MetricInputV1, kind: Kind) {
       sources.every((key) => row.collections.includes(key)),
   );
   const coverage = proofs.length ? Math.min(...proofs.map((row) => row.coverageBasisPoints)) : 0;
-  const issues = sources
+  const issues: DataQualityIssueV1[] = sources
     .filter((key) => input[key] === null)
     .map((key) => issue("NOT_SYNCHRONIZED", key, input.evidenceIds));
   issues.push(...paymentUncertainty(input));

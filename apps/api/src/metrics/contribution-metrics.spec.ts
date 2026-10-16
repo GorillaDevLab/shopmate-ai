@@ -108,7 +108,7 @@ function rejected(
   expect(result.ok).toBe(false);
   if (result.ok) throw new Error("Expected rejection");
   expect(result.error.code).toBe(code);
-  expect(result.error.evidenceIds).toEqual(expect.arrayContaining(evidence));
+  expect(result.error.evidenceIds).toEqual(expect.arrayContaining([...evidence]));
 }
 function anchoredRequest(): ContributionRequest {
   const req = request();
