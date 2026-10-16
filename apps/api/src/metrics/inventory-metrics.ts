@@ -28,6 +28,7 @@ import {
   type MetricQuality,
   type MetricResult,
   type MetricStatus,
+  type QualityPolicy,
 } from "@shopmate/contracts";
 
 type Dependencies = Readonly<{ math: ExactMinorMath; clock: MetricBusinessClock }>;
@@ -38,6 +39,16 @@ type Selected = Readonly<{
 }>;
 const kinds = ["INVENTORY_AVAILABLE", "INVENTORY_HOURS_REMAINING", "LEAD_TIME_HOURS"] as const;
 const precedence = ["UNAVAILABLE", "STALE", "INSUFFICIENT", "ESTIMATED", "VERIFIED"] as const;
+// Logical requiredFields vocabulary; no implicit dependency on legacy leadTimeDays/safetyStock.
+const stockFields = ["available", "onHand", "reserved"];
+const extensionFields = ["quarantine", "asOf", "leadTimeHours", "safetyBufferHours", "eta"];
+const salesFields = ["soldUnits", "salesWindowHours"];
+const supportedFields = [...stockFields, ...extensionFields, ...salesFields];
+const domains = {
+  INVENTORY_AVAILABLE: ["inventoryFacts"],
+  INVENTORY_HOURS_REMAINING: ["inventoryFacts", "paymentFacts", "inventoryExtensions"],
+  LEAD_TIME_HOURS: ["inventoryExtensions"],
+} as const;
 const collections = [
   "paymentFacts",
   "refundFacts",
@@ -82,7 +93,12 @@ const policySchema = z
   .refine(
     (policy) =>
       new Set(policy.rules.map((rule) => rule.kind)).size === policy.rules.length &&
-      kinds.every((kind) => policy.rules.some((rule) => rule.kind === kind)),
+      kinds.every((kind) => policy.rules.some((rule) => rule.kind === kind)) &&
+      policy.rules.every(
+        (rule) =>
+          !kinds.includes(rule.kind as Kind) ||
+          rule.requiredFields.every((field) => supportedFields.includes(field)),
+      ),
   );
 const requestSchema = z.strictObject({
   input: MetricInputV1Schema,
@@ -252,82 +268,338 @@ function reconcile(selected: Selected, deps: Dependencies): void {
   if (sum > stock.onHand)
     reject("CONFLICT", ids(selected.stock!.evidenceIds, selected.extension!.evidenceIds));
 }
-function quality(
-  request: InventoryCoverageRequest,
-  selected: Selected,
-  kind: Kind,
-  missing = false,
-): MetricQuality {
-  const input = request.input;
-  const rule = request.policy.rules.find((row) => row.kind === kind)!;
-  const updatedAt =
-    kind === "LEAD_TIME_HOURS"
-      ? selected.extension?.data?.asOf
-      : selected.stock?.data.source.updatedAt;
-  const stale =
-    updatedAt != null &&
-    Date.parse(input.visibleAt) - Date.parse(updatedAt) > rule.maximumAgeHours * 3600000;
-  const issues: DataQualityIssueV1[] = [];
-  if (missing)
-    issues.push({
-      code: kind === "LEAD_TIME_HOURS" ? "LEAD_TIME_MISSING" : "ZERO_DENOMINATOR",
-      field: kind,
-      evidenceIds: [...input.evidenceIds],
-    });
-  if (stale)
-    issues.push({
-      code: "STALE_SOURCE",
-      field: "inventoryFacts.source.updatedAt",
-      evidenceIds: [...input.evidenceIds],
-    });
-  const status: MetricStatus = missing ? "UNAVAILABLE" : stale ? "STALE" : "VERIFIED";
+function issue(
+  code: DataQualityIssueV1["code"],
+  field: string,
+  evidenceIds: readonly string[],
+): DataQualityIssueV1 {
+  return { code, field, evidenceIds: ids(evidenceIds) };
+}
+type Evaluation = Readonly<{ quality: MetricQuality; blocked: boolean }>;
+type Frame = Readonly<{
+  request: InventoryCoverageRequest;
+  selected: Selected;
+  sourceEvidence: ReadonlySet<string>;
+  salesWindowHours: number;
+}>;
+type Rule = QualityPolicy["rules"][number];
+function fields(frame: Frame): Readonly<Record<string, number | string | null>> {
+  const stock = frame.selected.stock?.data,
+    ext = frame.selected.extension?.data;
   return {
-    status,
-    issues,
-    evidenceIds: evidence(input),
-    sampleSize: kind === "INVENTORY_HOURS_REMAINING" ? request.soldUnits.quality.sampleSize : 1,
-    coverageBasisPoints: 10000,
+    available: stock?.available ?? null,
+    onHand: stock?.onHand ?? null,
+    reserved: stock?.reserved ?? null,
+    quarantine: ext?.quarantine ?? null,
+    asOf: ext?.asOf ?? null,
+    soldUnits: frame.request.soldUnits.metric.value,
+    salesWindowHours: frame.salesWindowHours,
+    leadTimeHours: ext?.leadTimeHours ?? null,
+    safetyBufferHours: ext?.safetyBufferHours ?? null,
+    eta: ext?.eta ?? null,
+  };
+}
+function dependencies(kind: Kind, rule: Rule) {
+  return {
+    stock:
+      kind !== "LEAD_TIME_HOURS" ||
+      rule.requiredFields.some((field) => stockFields.includes(field)),
+    extension:
+      kind !== "INVENTORY_AVAILABLE" ||
+      rule.requiredFields.some((field) => extensionFields.includes(field)),
+    sales:
+      kind === "INVENTORY_HOURS_REMAINING" ||
+      rule.requiredFields.some((field) => salesFields.includes(field)),
+  };
+}
+function requiredCollections(kind: Kind, rule: Rule): readonly (typeof collections)[number][] {
+  const uses = dependencies(kind, rule);
+  return [
+    ...new Set([
+      ...domains[kind],
+      ...(uses.stock ? ["inventoryFacts" as const] : []),
+      ...(uses.extension ? ["inventoryExtensions" as const] : []),
+      ...(uses.sales ? ["paymentFacts" as const] : []),
+    ]),
+  ];
+}
+function sourceCoverage(frame: Frame, kind: Kind, rule: Rule): number {
+  const { input } = frame.request;
+  const required = requiredCollections(kind, rule);
+  if (required.some((key) => input[key] === null)) return 0;
+  const proofs = input.metricCoverage.filter(
+    (proof) =>
+      proof.kind === kind &&
+      proof.subject.kind === "SKU" &&
+      proof.subject.externalSkuId === frame.request.externalSkuId,
+  );
+  const proofValues = proofs.map((proof) =>
+    required.every((key) => proof.collections.includes(key)) ? proof.coverageBasisPoints : 0,
+  );
+  return Math.min(
+    ...(proofValues.length ? proofValues : [0]),
+    dependencies(kind, rule).sales ? frame.request.soldUnits.quality.coverageBasisPoints : 10000,
+  );
+}
+function missingFields(frame: Frame, rule: Rule): DataQualityIssueV1[] {
+  const values = fields(frame);
+  return rule.requiredFields
+    .filter((field) => values[field] === null)
+    .map((field) => {
+      const isLead = ["leadTimeHours", "safetyBufferHours", "eta"].includes(field);
+      const path = extensionFields.includes(field)
+        ? `inventoryExtensions.${field}`
+        : salesFields.includes(field)
+          ? field
+          : `inventoryFacts.${field}`;
+      return issue(isLead ? "LEAD_TIME_MISSING" : "INVENTORY_UNKNOWN", path, [
+        ...frame.sourceEvidence,
+      ]);
+    });
+}
+function stockIssues(frame: Frame): DataQualityIssueV1[] {
+  const row = frame.selected.stock;
+  if (!row) return [issue("INVENTORY_UNKNOWN", "inventoryFacts", frame.request.input.evidenceIds)];
+  return row.data.source.quality.issues.flatMap((code) => {
+    if (
+      ![
+        "INVENTORY_UNKNOWN",
+        "INVENTORY_STALE",
+        "SOURCE_TIME_MISSING",
+        "SOURCE_INCONSISTENT",
+      ].includes(code)
+    )
+      return [];
+    return [
+      issue(
+        code === "INVENTORY_STALE" ? "STALE_SOURCE" : (code as DataQualityIssueV1["code"]),
+        "inventoryFacts.source",
+        row.evidenceIds,
+      ),
+    ];
+  });
+}
+function extensionIssues(frame: Frame, kind: Kind): DataQualityIssueV1[] {
+  const { input } = frame.request;
+  const result: DataQualityIssueV1[] = [];
+  if (
+    !frame.selected.extension?.data ||
+    (input.inventoryExtensions ?? []).some((row) => row.data === null)
+  )
+    result.push(issue("INVENTORY_UNKNOWN", "inventoryExtensions", input.evidenceIds));
+  if (kind === "LEAD_TIME_HOURS" && frame.selected.extension?.data?.leadTimeHours == null)
+    result.push(issue("LEAD_TIME_MISSING", "inventoryExtensions.leadTimeHours", input.evidenceIds));
+  return result;
+}
+function paymentIssues(frame: Frame): DataQualityIssueV1[] {
+  return (frame.request.input.paymentFacts ?? []).flatMap((row) => {
+    const data = row.data;
+    const result: DataQualityIssueV1[] = [];
+    if (
+      data.paidMinor === null ||
+      data.source.quality.issues.includes("PAYMENT_UNKNOWN") ||
+      (data.paidAt === null &&
+        (data.paidMinor !== 0 || ["PAID", "FULFILLED", "COMPLETED"].includes(data.status)))
+    )
+      result.push(issue("PAYMENT_UNKNOWN", "paymentFacts", row.evidenceIds));
+    for (const code of ["SOURCE_INCONSISTENT", "SOURCE_TIME_MISSING"] as const)
+      if (data.source.quality.issues.includes(code))
+        result.push(issue(code, "paymentFacts.source", row.evidenceIds));
+    return result;
+  });
+}
+function freshness(frame: Frame, kind: Kind, rule: Rule): DataQualityIssueV1[] {
+  const uses = dependencies(kind, rule),
+    { selected, request } = frame;
+  const times: [string, string | null | undefined, readonly string[]][] = [
+    ["sourceWatermark", request.input.sourceWatermark, request.input.evidenceIds],
+  ];
+  if (uses.stock && selected.stock)
+    times.push([
+      "inventoryFacts.source.updatedAt",
+      selected.stock.data.source.updatedAt,
+      selected.stock.evidenceIds,
+    ]);
+  if (uses.extension && selected.extension?.data)
+    times.push([
+      "inventoryExtensions.asOf",
+      selected.extension.data.asOf,
+      selected.extension.evidenceIds,
+    ]);
+  return times.flatMap(([field, time, evidence]) => {
+    if (time == null) return [issue("SOURCE_TIME_MISSING", field, evidence)];
+    return (Date.parse(request.input.visibleAt) - Date.parse(time)) / 3600000 > rule.maximumAgeHours
+      ? [issue("STALE_SOURCE", field, evidence)]
+      : [];
+  });
+}
+function sample(frame: Frame, kind: Kind, unsynced: boolean): number {
+  if (unsynced) return 0;
+  if (kind === "INVENTORY_HOURS_REMAINING") return frame.request.soldUnits.quality.sampleSize;
+  return Number(
+    kind === "INVENTORY_AVAILABLE" ? !!frame.selected.stock : !!frame.selected.extension?.data,
+  );
+}
+function baseIssues(frame: Frame, kind: Kind, rule: Rule): DataQualityIssueV1[] {
+  const uses = dependencies(kind, rule),
+    input = frame.request.input;
+  const issues = requiredCollections(kind, rule)
+    .filter((key) => input[key] === null)
+    .map((key) => issue("NOT_SYNCHRONIZED", key, input.evidenceIds));
+  if (uses.stock) issues.push(...stockIssues(frame));
+  if (uses.extension) issues.push(...extensionIssues(frame, kind));
+  if (uses.sales) issues.push(...frame.request.soldUnits.quality.issues, ...paymentIssues(frame));
+  issues.push(...missingFields(frame, rule), ...freshness(frame, kind, rule));
+  if (kind === "INVENTORY_HOURS_REMAINING" && frame.request.soldUnits.metric.value === 0)
+    issues.push(
+      issue("ZERO_DENOMINATOR", "soldUnits", frame.request.soldUnits.quality.evidenceIds),
+    );
+  return issues;
+}
+function evaluatedStatus(
+  frame: Frame,
+  kind: Kind,
+  rule: Rule,
+  issues: readonly DataQualityIssueV1[],
+  unavailable: boolean,
+): MetricStatus {
+  const statuses: MetricStatus[] = [issues.length ? "ESTIMATED" : "VERIFIED"];
+  if (dependencies(kind, rule).sales) statuses.push(frame.request.soldUnits.quality.status);
+  if (unavailable) statuses.push("UNAVAILABLE");
+  if (issues.some((row) => row.code === "STALE_SOURCE")) statuses.push("STALE");
+  if (
+    issues.some((row) =>
+      [
+        "INVENTORY_UNKNOWN",
+        "LEAD_TIME_MISSING",
+        "SOURCE_INCONSISTENT",
+        "PAYMENT_UNKNOWN",
+        "LOW_SAMPLE",
+      ].includes(row.code),
+    )
+  )
+    statuses.push("INSUFFICIENT");
+  return precedence.find((status) => statuses.includes(status))!;
+}
+function ownMissing(frame: Frame, kind: Kind): boolean {
+  const data = fields(frame);
+  if (kind === "INVENTORY_AVAILABLE") return data.available === null;
+  if (kind === "LEAD_TIME_HOURS") return data.leadTimeHours === null;
+  return data.available === null || data.soldUnits === null || !frame.selected.extension?.data;
+}
+function blockedForecast(
+  frame: Frame,
+  issues: readonly DataQualityIssueV1[],
+  status: MetricStatus,
+  low: boolean,
+): boolean {
+  return (
+    low ||
+    status === "INSUFFICIENT" ||
+    frame.request.soldUnits.quality.status === "UNAVAILABLE" ||
+    issues.some((row) => ["LOW_SAMPLE", "PAYMENT_UNKNOWN", "INVENTORY_UNKNOWN"].includes(row.code))
+  );
+}
+function resultEvidence(frame: Frame, issues: readonly DataQualityIssueV1[]): string[] {
+  return ids(
+    [...frame.sourceEvidence],
+    frame.request.soldUnits.quality.evidenceIds,
+    ...issues.map((row) => row.evidenceIds),
+  );
+}
+function evaluate(frame: Frame, kind: Kind): Evaluation {
+  const rule = frame.request.policy.rules.find((row) => row.kind === kind)!;
+  const issues = baseIssues(frame, kind, rule),
+    coverage = sourceCoverage(frame, kind, rule);
+  const unsynced = issues.some((row) => row.code === "NOT_SYNCHRONIZED");
+  const sampleSize = sample(frame, kind, unsynced);
+  const lowSample = sampleSize < rule.minimumSampleSize,
+    lowCoverage = coverage < rule.minimumCoverageBasisPoints;
+  if (lowSample) issues.push(issue("LOW_SAMPLE", kind, [...frame.sourceEvidence]));
+  if (coverage < 10000)
+    issues.push(issue("PARTIAL_COVERAGE", "metricCoverage", [...frame.sourceEvidence]));
+  const unavailable =
+    unsynced || ownMissing(frame, kind) || issues.some((row) => row.code === "ZERO_DENOMINATOR");
+  const status = lowCoverage
+    ? precedence.find((status) =>
+        [evaluatedStatus(frame, kind, rule, issues, unavailable), "INSUFFICIENT"].includes(status),
+      )!
+    : evaluatedStatus(frame, kind, rule, issues, unavailable);
+  const badSource = issues.some((row) => row.code === "SOURCE_INCONSISTENT");
+  const blocked =
+    unavailable ||
+    badSource ||
+    missingFields(frame, rule).length > 0 ||
+    (kind === "INVENTORY_HOURS_REMAINING" &&
+      blockedForecast(frame, issues, status, lowSample || lowCoverage));
+  return {
+    blocked,
+    quality: {
+      status,
+      sampleSize,
+      coverageBasisPoints: unsynced ? 0 : coverage,
+      evidenceIds: resultEvidence(frame, issues),
+      issues,
+    },
   };
 }
 function measure<K extends Kind>(
-  request: InventoryCoverageRequest,
-  selected: Selected,
   kind: K,
   value: number | null,
+  evaluation: Evaluation,
 ): MetricMeasure<K> {
   return {
     metric: {
       kind,
       unit: kind === "INVENTORY_AVAILABLE" ? "units" : "hours",
-      value,
+      value: evaluation.blocked ? null : value,
     } as MetricMeasure<K>["metric"],
-    quality: quality(request, selected, kind, value === null),
+    quality: evaluation.quality,
   };
 }
-function compute(request: InventoryCoverageRequest, selected: Selected): InventoryCoverageMetrics {
-  const available = selected.stock?.data.available ?? null;
-  const ext = selected.extension?.data;
-  const soldUnits = request.soldUnits.metric.value;
-  const salesWindowHours =
-    (Date.parse(request.salesWindow.periodEnd) - Date.parse(request.salesWindow.periodStart)) /
-    3600000;
-  const salesUnitsPerHour = soldUnits === null ? null : soldUnits / salesWindowHours;
-  const hours =
-    available === null || !soldUnits || !ext ? null : (available / soldUnits) * salesWindowHours;
-  const lead = ext?.leadTimeHours ?? null,
-    buffer = ext?.safetyBufferHours ?? null;
+function durations(hours: number | null, lead: number | null, buffer: number | null) {
   return {
-    available: measure(request, selected, "INVENTORY_AVAILABLE", available),
+    daysRemaining: hours === null ? null : hours / 24,
+    belowLeadTimeWithBuffer:
+      hours === null || lead === null || buffer === null ? null : hours < lead + buffer,
+  };
+}
+function compute(frame: Frame): InventoryCoverageMetrics {
+  const { request, selected, salesWindowHours } = frame;
+  const available = measure(
+    "INVENTORY_AVAILABLE",
+    selected.stock?.data.available ?? null,
+    evaluate(frame, "INVENTORY_AVAILABLE"),
+  );
+  const ext = selected.extension?.data,
+    soldUnits = request.soldUnits.metric.value;
+  const salesUnitsPerHour =
+    soldUnits === null || request.input.paymentFacts === null ? null : soldUnits / salesWindowHours;
+  const rawHours =
+    available.metric.value === null || !soldUnits
+      ? null
+      : (available.metric.value / soldUnits) * salesWindowHours;
+  const hoursRemaining = measure(
+    "INVENTORY_HOURS_REMAINING",
+    rawHours,
+    evaluate(frame, "INVENTORY_HOURS_REMAINING"),
+  );
+  const leadTimeHours = measure(
+    "LEAD_TIME_HOURS",
+    ext?.leadTimeHours ?? null,
+    evaluate(frame, "LEAD_TIME_HOURS"),
+  );
+  const buffer = ext?.safetyBufferHours ?? null;
+  return {
+    available,
     soldUnits,
     salesWindowHours,
     salesUnitsPerHour,
-    hoursRemaining: measure(request, selected, "INVENTORY_HOURS_REMAINING", hours),
-    daysRemaining: hours === null ? null : hours / 24,
-    leadTimeHours: measure(request, selected, "LEAD_TIME_HOURS", lead),
+    hoursRemaining,
+    leadTimeHours,
     safetyBufferHours: buffer,
     eta: ext?.eta ?? null,
-    belowLeadTimeWithBuffer:
-      hours === null || lead === null || buffer === null ? null : hours < lead + buffer,
+    ...durations(hoursRemaining.metric.value, leadTimeHours.metric.value, buffer),
   };
 }
 function calculate(
@@ -343,7 +615,18 @@ function calculate(
     const selected = select(request);
     validate(request, selected, deps, sourceEvidence);
     reconcile(selected, deps);
-    return freeze({ ok: true, value: compute(request, selected) });
+    return freeze({
+      ok: true,
+      value: compute({
+        request,
+        selected,
+        sourceEvidence,
+        salesWindowHours:
+          (Date.parse(request.salesWindow.periodEnd) -
+            Date.parse(request.salesWindow.periodStart)) /
+          3600000,
+      }),
+    });
   } catch (error) {
     if (error instanceof Rejected)
       return freeze({

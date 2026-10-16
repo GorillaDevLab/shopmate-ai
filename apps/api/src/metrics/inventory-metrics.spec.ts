@@ -340,3 +340,320 @@ it("rejects invalid clock snapshots and future visible input", () => {
     });
   }
 });
+
+type Rule = QualityPolicy["rules"][number];
+function ruled(kind: (typeof kinds)[number], patch: Partial<Rule>): QualityPolicy {
+  const base = policy();
+  return {
+    ...base,
+    rules: base.rules.map((rule) => (rule.kind === kind ? { ...rule, ...patch } : rule)),
+  };
+}
+function sales(
+  units: number | null,
+  patch: Partial<InventoryCoverageRequest["soldUnits"]["quality"]> = {},
+) {
+  const base = request().soldUnits;
+  return { metric: { ...base.metric, value: units }, quality: { ...base.quality, ...patch } };
+}
+function sourceIssue(
+  code: "INVENTORY_UNKNOWN" | "INVENTORY_STALE" | "SOURCE_INCONSISTENT" | "SOURCE_TIME_MISSING",
+) {
+  const row = stock();
+  return {
+    ...row,
+    data: {
+      ...row.data,
+      source: { ...row.data.source, quality: { state: "PARTIAL" as const, issues: [code] } },
+    },
+  };
+}
+function issue(code: "LOW_SAMPLE" | "STALE_SOURCE" | "PAYMENT_UNKNOWN") {
+  return { code, field: "soldUnits", evidenceIds: ["sync"] };
+}
+function withoutCollection(key: "inventoryFacts" | "paymentFacts" | "inventoryExtensions") {
+  const base = input({ [key]: null });
+  return {
+    ...base,
+    metricCoverage: base.metricCoverage.filter(
+      (proof) => !proof.collections.includes(key as never),
+    ),
+  };
+}
+it("retains observed sales rate but withholds low sample cover", () => {
+  const result = run(
+    request({
+      soldUnits: sales(12, { sampleSize: 2 }),
+      policy: ruled("INVENTORY_HOURS_REMAINING", { minimumSampleSize: 3 }),
+    }),
+  );
+  expect(result.salesUnitsPerHour).toBe(3);
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.hoursRemaining.quality.status).toBe("INSUFFICIENT");
+  expect(result.hoursRemaining.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "LOW_SAMPLE" }),
+  );
+  expect(result.available.quality.status).toBe("VERIFIED");
+});
+it("uses sales sample size rather than stock snapshot count", () => {
+  const result = run(
+    request({ policy: ruled("INVENTORY_HOURS_REMAINING", { minimumSampleSize: 12 }) }),
+  );
+  expect(result.hoursRemaining.metric.value).toBe(4);
+  expect(result.hoursRemaining.quality.sampleSize).toBe(12);
+});
+it.each(kinds)("enforces per-output minimum sample for %s", (kind) => {
+  const result = run(request({ policy: ruled(kind, { minimumSampleSize: 13 }) }));
+  const measures = {
+    INVENTORY_AVAILABLE: result.available,
+    INVENTORY_HOURS_REMAINING: result.hoursRemaining,
+    LEAD_TIME_HOURS: result.leadTimeHours,
+  };
+  expect(measures[kind].quality.status).toBe("INSUFFICIENT");
+  if (kind === "INVENTORY_HOURS_REMAINING") expect(measures[kind].metric.value).toBeNull();
+});
+it("retains stale plus low sample reasons while withholding cover", () => {
+  const result = run(
+    request({
+      input: input({ inventoryFacts: [sourceIssue("INVENTORY_STALE")] }),
+      policy: ruled("INVENTORY_HOURS_REMAINING", { minimumSampleSize: 13 }),
+    }),
+  );
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.hoursRemaining.quality.status).toBe("STALE");
+  expect(result.hoursRemaining.quality.issues.map((row) => row.code)).toEqual(
+    expect.arrayContaining(["STALE_SOURCE", "LOW_SAMPLE"]),
+  );
+});
+it.each(["inventoryFacts", "paymentFacts", "inventoryExtensions"] as const)(
+  "respects null required domain %s",
+  (key) => {
+    const result = run(request({ input: withoutCollection(key) }));
+    expect(result.hoursRemaining.metric.value).toBeNull();
+    expect(result.hoursRemaining.quality).toMatchObject({
+      status: "UNAVAILABLE",
+      sampleSize: 0,
+      coverageBasisPoints: 0,
+    });
+    expect(result.hoursRemaining.quality.issues).toContainEqual(
+      expect.objectContaining({ code: "NOT_SYNCHRONIZED", field: key }),
+    );
+    if (key !== "inventoryFacts") expect(result.available.metric.value).toBe(12);
+  },
+);
+it("retains every matching proof including a low proof behind a complete one", () => {
+  const base = input();
+  const proof = base.metricCoverage[1]!;
+  const metricCoverage = [
+    ...base.metricCoverage,
+    { ...proof, coverageBasisPoints: 4000, evidenceIds: ["extension"] },
+  ];
+  const result = run(request({ input: { ...base, metricCoverage } }));
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.hoursRemaining.quality).toMatchObject({
+    status: "INSUFFICIENT",
+    coverageBasisPoints: 4000,
+  });
+  expect(result.hoursRemaining.quality.evidenceIds).toContain("extension");
+});
+it("cannot hide incomplete source domains behind a complete proof", () => {
+  const base = input();
+  const proof = base.metricCoverage[1]!;
+  const result = run(
+    request({
+      input: {
+        ...base,
+        metricCoverage: [...base.metricCoverage, { ...proof, collections: ["paymentFacts"] }],
+      },
+    }),
+  );
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.hoursRemaining.quality.coverageBasisPoints).toBe(0);
+});
+it.each(["STORE", "OTHER_SKU", "OTHER_KIND"])(
+  "ignores unrelated %s completeness proofs",
+  (variant) => {
+    const base = input();
+    const metricCoverage = base.metricCoverage.map((proof) =>
+      variant === "STORE"
+        ? { ...proof, subject: { kind: "STORE" as const } }
+        : variant === "OTHER_SKU"
+          ? { ...proof, subject: { kind: "SKU" as const, externalSkuId: "other" } }
+          : { ...proof, kind: "GMV" as const },
+    );
+    const result = run(request({ input: { ...base, metricCoverage } }));
+    expect(result.available.quality.coverageBasisPoints).toBe(0);
+    expect(result.hoursRemaining.metric.value).toBeNull();
+  },
+);
+it("accepts coverage equality and retains partial coverage disclosure", () => {
+  const base = input();
+  const metricCoverage = base.metricCoverage.map((proof) =>
+    proof.kind === "INVENTORY_HOURS_REMAINING" ? { ...proof, coverageBasisPoints: 7000 } : proof,
+  );
+  const result = run(
+    request({
+      input: { ...base, metricCoverage },
+      policy: ruled("INVENTORY_HOURS_REMAINING", { minimumCoverageBasisPoints: 7000 }),
+    }),
+  );
+  expect(result.hoursRemaining.metric.value).toBe(4);
+  expect(result.hoursRemaining.quality.status).toBe("ESTIMATED");
+});
+it("takes upstream coverage and issues into forecast quality", () => {
+  const result = run(
+    request({
+      soldUnits: sales(12, {
+        status: "INSUFFICIENT",
+        coverageBasisPoints: 5000,
+        issues: [issue("LOW_SAMPLE")],
+      }),
+    }),
+  );
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.hoursRemaining.quality.coverageBasisPoints).toBe(5000);
+  expect(result.hoursRemaining.quality.issues).toContainEqual(issue("LOW_SAMPLE"));
+});
+it("keeps unknown upstream sales null without erasing stock", () => {
+  const result = run(
+    request({
+      soldUnits: sales(null, { status: "UNAVAILABLE", issues: [issue("PAYMENT_UNKNOWN")] }),
+    }),
+  );
+  expect(result.salesUnitsPerHour).toBeNull();
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.hoursRemaining.quality.status).toBe("UNAVAILABLE");
+  expect(result.available.metric.value).toBe(12);
+});
+it("retains numeric cover for stale known sales", () => {
+  const result = run(
+    request({ soldUnits: sales(12, { status: "STALE", issues: [issue("STALE_SOURCE")] }) }),
+  );
+  expect(result.hoursRemaining.metric.value).toBe(4);
+  expect(result.hoursRemaining.quality.status).toBe("STALE");
+});
+it.each([
+  "available",
+  "onHand",
+  "reserved",
+  "quarantine",
+  "asOf",
+  "soldUnits",
+  "salesWindowHours",
+  "leadTimeHours",
+  "safetyBufferHours",
+  "eta",
+])("supports declared logical dependency %s", (field) => {
+  const result = run(
+    request({ policy: ruled("INVENTORY_AVAILABLE", { requiredFields: [field] }) }),
+  );
+  expect(result.available.metric.value).toBe(field === "eta" ? null : 12);
+  if (field === "eta")
+    expect(result.available.quality.issues).toContainEqual(
+      expect.objectContaining({ code: "LEAD_TIME_MISSING", field: "inventoryExtensions.eta" }),
+    );
+});
+it("does not erase explicit available for independent missing on-hand", () => {
+  const row = sourceIssue("INVENTORY_UNKNOWN");
+  const data = { ...row.data, onHand: null };
+  const base = input({ inventoryFacts: [{ ...row, data }] });
+  const result = run(request({ input: base }));
+  expect(result.available.metric.value).toBe(12);
+  expect(result.available.quality.status).toBe("INSUFFICIENT");
+  const required = run(
+    request({
+      input: base,
+      policy: ruled("INVENTORY_AVAILABLE", { requiredFields: ["available", "onHand"] }),
+    }),
+  );
+  expect(required.available.metric.value).toBeNull();
+});
+it("invalidates inconsistent stock values while preserving independent lead", () => {
+  const result = run(
+    request({ input: input({ inventoryFacts: [sourceIssue("SOURCE_INCONSISTENT")] }) }),
+  );
+  expect(result.available.metric.value).toBeNull();
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.leadTimeHours.metric.value).toBe(3);
+});
+it("does not use newer observedAt to mask source freshness or clock time to age replay", () => {
+  const row = stock();
+  const old = {
+    ...row,
+    data: { ...row.data, source: { ...row.data.source, updatedAt: "2026-10-09T04:00:00Z" } },
+  };
+  const req = request({ input: input({ inventoryFacts: [old] }) });
+  const calc = createInventoryCoverageCalculator({
+    math: exactMinorMath,
+    clock: { snapshot: () => ({ now: "2027-10-10T04:00:00Z", revision: 500 }) },
+  });
+  expect(value(calc.calculate(req)).available.quality.status).toBe("VERIFIED");
+  const strict = { ...req, policy: ruled("INVENTORY_AVAILABLE", { maximumAgeHours: 23.99 }) };
+  expect(value(calc.calculate(strict)).available.quality.status).toBe("STALE");
+});
+it("includes extension and watermark freshness in forecast independently", () => {
+  const ext = extension();
+  const base = input({
+    inventoryExtensions: [{ ...ext, data: { ...ext.data, asOf: "2026-10-09T03:00:00Z" } }],
+  });
+  const result = run(request({ input: base }));
+  expect(result.hoursRemaining.quality.status).toBe("STALE");
+  expect(result.available.quality.status).toBe("VERIFIED");
+  expect(result.leadTimeHours.quality.status).toBe("STALE");
+});
+it.each([
+  "version",
+  "precedence",
+  "duplicate",
+  "missing",
+  "field",
+  "sample",
+  "age",
+  "coverage",
+  "flag",
+])("rejects malformed policy %s", (variant) => {
+  const base = policy();
+  const changes = {
+    version: { ...base, version: "" },
+    precedence: { ...base, precedence: [...base.precedence].reverse() },
+    duplicate: { ...base, rules: [...base.rules, base.rules[0]!] },
+    missing: { ...base, rules: base.rules.slice(1) },
+    field: ruled("INVENTORY_AVAILABLE", { requiredFields: ["invented"] }),
+    sample: ruled("INVENTORY_AVAILABLE", { minimumSampleSize: -1 }),
+    age: ruled("INVENTORY_AVAILABLE", { maximumAgeHours: Infinity }),
+    coverage: ruled("INVENTORY_AVAILABLE", { minimumCoverageBasisPoints: 10001 }),
+    flag: {
+      ...base,
+      rules: [{ ...base.rules[0]!, allowVerifiedEmptyWindow: "yes" }, ...base.rules.slice(1)],
+    },
+  };
+  rejected({ ...request(), policy: changes[variant as keyof typeof changes] });
+});
+it("preserves representable global unsynchronized state", () => {
+  const base = input();
+  const unsynced = {
+    ...base,
+    status: "UNAVAILABLE" as const,
+    sourceWatermark: null,
+    metricCoverage: [],
+    inventoryFacts: null,
+    paymentFacts: null,
+    inventoryExtensions: null,
+    refundFacts: null,
+    campaignFacts: null,
+    frozenCosts: null,
+    refundAllocations: null,
+    returnReceipts: null,
+    fees: null,
+    traffic: null,
+  };
+  const result = run(
+    request({
+      input: unsynced,
+      soldUnits: sales(null, { status: "UNAVAILABLE", issues: [issue("PAYMENT_UNKNOWN")] }),
+    }),
+  );
+  expect(result.available.quality.status).toBe("UNAVAILABLE");
+  expect(result.hoursRemaining.quality.status).toBe("UNAVAILABLE");
+  expect(result.leadTimeHours.quality.status).toBe("UNAVAILABLE");
+});
