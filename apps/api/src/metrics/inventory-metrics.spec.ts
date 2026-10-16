@@ -1032,3 +1032,243 @@ it("rejects configured lead plus buffer overflow", () => {
     "OVERFLOW",
   );
 });
+
+it.each(["periodStart", "periodEnd", "visibleAt", "sourceWatermark"] as const)(
+  "rejects nonzero submillisecond context %s",
+  (key) => {
+    const base = input();
+    const changed = { ...base, [key]: base[key]!.replace("Z", ".0001Z") };
+    rejected(request({ input: { ...changed, metricCoverage: [] } }));
+  },
+);
+it.each(["observedAt", "sourceWatermark"] as const)(
+  "rejects nonzero submillisecond proof %s",
+  (key) => {
+    const base = input();
+    const metricCoverage = base.metricCoverage.map((proof) => ({
+      ...proof,
+      [key]: proof[key]!.replace("Z", ".0001Z"),
+    }));
+    rejected(request({ input: { ...base, metricCoverage } }));
+  },
+);
+it.each(["asOf", "eta"] as const)("rejects selected extension precision in %s", (key) => {
+  const ext = extension();
+  rejected(
+    request({
+      input: input({
+        inventoryExtensions: [
+          { ...ext, data: { ...ext.data, [key]: "2026-10-10T03:00:00.0001Z" } },
+        ],
+      }),
+    }),
+  );
+});
+it("rejects ambiguous extension observation with unrepresentable precision", () => {
+  rejected(
+    request({
+      input: input({
+        inventoryExtensions: [
+          { ...fact(null, "ambiguous"), observedAt: "2026-10-10T03:00:00.0001Z" },
+        ],
+      }),
+    }),
+  );
+});
+it.each(["observedAt", "updatedAt"] as const)(
+  "rejects selected stock precision in %s including connector offsets",
+  (key) => {
+    const row = stock();
+    const time = "2026-10-10T11:00:00.0001+08:00";
+    const changed =
+      key === "observedAt"
+        ? {
+            ...row,
+            observedAt: "2026-10-10T03:00:00.0001Z",
+            data: {
+              ...row.data,
+              source: { ...row.data.source, updatedAt: "2026-10-10T02:00:00Z" },
+            },
+          }
+        : { ...row, data: { ...row.data, source: { ...row.data.source, updatedAt: time } } };
+    rejected(request({ input: input({ inventoryFacts: [changed] }) }));
+  },
+);
+it("compares aligned connector offsets by actual instant", () => {
+  const row = stock();
+  const ext = extension();
+  const inventoryFacts = [
+    {
+      ...row,
+      data: { ...row.data, source: { ...row.data.source, updatedAt: "2026-10-10T12:00:00+08:00" } },
+    },
+  ];
+  rejected(
+    request({
+      input: input({
+        inventoryFacts,
+        inventoryExtensions: [{ ...ext, data: { ...ext.data, quarantine: 7 } }],
+      }),
+    }),
+    "CONFLICT",
+  );
+});
+it("accepts zero submillisecond padding without rounding nonzero digits", () => {
+  const salesWindow = { ...window, periodStart: "2026-10-10T00:00:00.0000Z" };
+  expect(run(request({ salesWindow })).hoursRemaining.metric.value).toBe(4);
+});
+it.each(["binding", "proofBinding", "futureFact", "futureExtension", "unknownNested", "quality"])(
+  "rejects invalid public source %s before selecting",
+  (variant) => {
+    const base = input(),
+      row = stock(),
+      ext = extension();
+    const invalidSource = {
+      ...row.data.source,
+      quality: { state: "COMPLETE", issues: ["INVENTORY_UNKNOWN"] },
+    };
+    const changed = {
+      binding: {
+        ...base,
+        inventoryFacts: [{ ...row, binding: { ...binding, workspaceId: "other" } }],
+      },
+      proofBinding: {
+        ...base,
+        metricCoverage: base.metricCoverage.map((proof) => ({
+          ...proof,
+          binding: { ...binding, connectionId: "other" },
+        })),
+      },
+      futureFact: { ...base, inventoryFacts: [{ ...row, observedAt: "2026-10-11T00:00:00Z" }] },
+      futureExtension: {
+        ...base,
+        inventoryExtensions: [{ ...ext, data: { ...ext.data, asOf: "2026-10-11T00:00:00Z" } }],
+      },
+      unknownNested: { ...base, inventoryFacts: [{ ...row, data: { ...row.data, extra: true } }] },
+      quality: {
+        ...base,
+        inventoryFacts: [{ ...row, data: { ...row.data, source: invalidSource } }],
+      },
+    };
+    rejected({ ...request(), input: changed[variant as keyof typeof changed] });
+  },
+);
+it.each(["status", "sample", "coverage", "issueEvidence", "extra"])(
+  "rejects invalid upstream quality %s",
+  (variant) => {
+    const base = request();
+    const quality = base.soldUnits.quality;
+    const changed = {
+      status: { ...quality, status: "UNAVAILABLE" },
+      sample: { ...quality, sampleSize: 0.5 },
+      coverage: { ...quality, coverageBasisPoints: 10001 },
+      issueEvidence: {
+        ...quality,
+        status: "STALE",
+        issues: [{ code: "STALE_SOURCE", field: "sales", evidenceIds: ["invented"] }],
+      },
+      extra: { ...quality, extra: true },
+    };
+    rejected({
+      ...base,
+      soldUnits: { ...base.soldUnits, quality: changed[variant as keyof typeof changed] },
+    });
+  },
+);
+it("copies all allowed proof and upstream issue evidence", () => {
+  const base = input({ paymentFacts: [paid()] });
+  const metricCoverage = base.metricCoverage.map((proof) => ({
+    ...proof,
+    evidenceIds: ["payment", "extension"],
+    collections: [...proof.collections, "fees" as const],
+  }));
+  const soldUnits = sales(12, {
+    status: "ESTIMATED",
+    evidenceIds: ["payment"],
+    issues: [{ code: "PARTIAL_COVERAGE", field: "sales", evidenceIds: ["payment"] }],
+  });
+  const req = request({ input: { ...base, metricCoverage }, soldUnits });
+  const result = run(req);
+  expect(result.hoursRemaining.quality.evidenceIds).toEqual(
+    expect.arrayContaining(["sync", "stock", "payment", "extension"]),
+  );
+  expect(result.hoursRemaining.quality.issues).toContainEqual(soldUnits.quality.issues[0]);
+  wrapped(req, result);
+});
+it("ignores unrelated cost and category stock issues", () => {
+  const row = stock();
+  const source = {
+    ...row.data.source,
+    quality: {
+      state: "PARTIAL" as const,
+      issues: ["COST_MISSING" as const, "CATEGORY_MISSING" as const],
+    },
+  };
+  const result = run(
+    request({ input: input({ inventoryFacts: [{ ...row, data: { ...row.data, source } }] }) }),
+  );
+  expect(result.available.quality.status).toBe("VERIFIED");
+  expect(result.hoursRemaining.quality.status).toBe("VERIFIED");
+});
+it("allows unrelated metric policy rules after validating their shape", () => {
+  const base = policy();
+  const extra = { ...base.rules[0]!, kind: "GMV" as const, requiredFields: ["unrelatedField"] };
+  expect(
+    run(
+      request({ policy: { ...base, version: "any-valid-version", rules: [...base.rules, extra] } }),
+    ).hoursRemaining.metric.value,
+  ).toBe(4);
+  rejected({
+    ...request(),
+    policy: { ...base, rules: [...base.rules, { ...extra, maximumAgeHours: -1 }] },
+  });
+});
+it("prevents zero upstream demand from hiding unknown payment evidence", () => {
+  const source = {
+    ...stock().data.source,
+    quality: { state: "PARTIAL" as const, issues: ["PAYMENT_UNKNOWN" as const] },
+  };
+  const result = run(
+    request({
+      input: input({ paymentFacts: [paid({ source, paidAt: null, paidMinor: null })] }),
+      soldUnits: sales(0),
+    }),
+  );
+  expect(result.soldUnits).toBeNull();
+  expect(result.salesUnitsPerHour).toBeNull();
+  expect(result.hoursRemaining.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "PAYMENT_UNKNOWN" }),
+  );
+});
+it("rejects aligned inventory arithmetic overflow with the real math dependency", () => {
+  const row = stock(Number.MAX_SAFE_INTEGER),
+    ext = extension();
+  const inventoryFacts = [
+    { ...row, data: { ...row.data, onHand: Number.MAX_SAFE_INTEGER, reserved: 0 } },
+  ];
+  rejected(
+    request({
+      input: input({
+        inventoryFacts,
+        inventoryExtensions: [{ ...ext, data: { ...ext.data, quarantine: 1 } }],
+      }),
+    }),
+    "OVERFLOW",
+  );
+});
+it.each([
+  null,
+  { now, revision: 1, extra: true },
+  { now, revision: 0.5 },
+  { now: "invalid", revision: 1 },
+])("rejects strict malformed clock snapshot %#", (raw) => {
+  const clock = { snapshot: () => raw as { now: string; revision: number } };
+  const calc = createInventoryCoverageCalculator({ math: exactMinorMath, clock });
+  expect(calc.calculate(request())).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+});
+it("keeps unavailable results and issue evidence deeply immutable", () => {
+  const result = run(request({ input: input({ inventoryFacts: [] }) }));
+  expect(Object.isFrozen(result.hoursRemaining.quality.issues)).toBe(true);
+  expect(Object.isFrozen(result.hoursRemaining.quality.issues[0])).toBe(true);
+  expect(Object.isFrozen(result.hoursRemaining.quality.issues[0]!.evidenceIds)).toBe(true);
+});

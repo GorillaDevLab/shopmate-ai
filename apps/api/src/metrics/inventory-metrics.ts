@@ -217,7 +217,10 @@ function precision(request: InventoryCoverageRequest, selected: Selected): boole
       selected.extension.data?.asOf ?? null,
       selected.extension.data?.eta ?? null,
     );
-  return times.every(exact);
+  return (
+    times.every(exact) &&
+    (input.inventoryExtensions ?? []).every((row) => row.data !== null || exact(row.observedAt))
+  );
 }
 function validUpstream(
   request: InventoryCoverageRequest,
