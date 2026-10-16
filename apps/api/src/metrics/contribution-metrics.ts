@@ -1,4 +1,16 @@
+import { z } from "zod";
 import {
+  BasisPointsSchema,
+  DataQualityIssueV1Schema,
+  ExternalIdSchema,
+  MetricComputationV1Schema,
+  MetricEvidenceIdsSchema,
+  MetricInputV1Schema,
+  MetricSnapshotV1Schema,
+  MetricStatusSchema,
+  MetricValueSchema,
+  MinorAmountSchema,
+  SourceVersionSchema,
   type ContributionCalculator,
   type ContributionRequest,
   type DataQualityIssueV1,
@@ -46,6 +58,146 @@ const sources = [
   "returnReceipts",
   "fees",
 ] as const;
+const qualitySchema = z.strictObject({
+  status: MetricStatusSchema,
+  sampleSize: MinorAmountSchema,
+  coverageBasisPoints: BasisPointsSchema,
+  evidenceIds: MetricEvidenceIdsSchema,
+  issues: z.array(DataQualityIssueV1Schema),
+});
+function measureSchema(kind: string) {
+  return z.strictObject({
+    metric: MetricValueSchema.refine((metric) => metric.kind === kind),
+    quality: qualitySchema,
+  });
+}
+const reversalSchema = z.strictObject({
+  externalOrderId: ExternalIdSchema,
+  externalLineId: ExternalIdSchema,
+  externalReceiptId: ExternalIdSchema,
+  skuCostVersion: SourceVersionSchema,
+  reversedQuantity: MinorAmountSchema,
+  reversedMinor: MinorAmountSchema,
+  evidenceIds: MetricEvidenceIdsSchema,
+});
+const requestSchema = z.strictObject({
+  input: MetricInputV1Schema,
+  frozenCosts: z.strictObject({
+    netMerchandiseRevenue: measureSchema("NET_MERCHANDISE_REVENUE"),
+    cogs: measureSchema("COGS"),
+    grossProfit: measureSchema("GROSS_PROFIT"),
+    policyVersion: SourceVersionSchema,
+    reversals: z.array(reversalSchema),
+  }),
+  netBuyerShipping: z.strictObject({
+    amountMinor: MinorAmountSchema.nullable(),
+    quality: qualitySchema,
+  }),
+});
+function context(input: MetricInputV1) {
+  const {
+    schemaVersion,
+    definitionVersion,
+    inputRevision,
+    binding,
+    periodStart,
+    periodEnd,
+    timezone,
+    currency,
+    visibleAt,
+    sourceWatermark,
+  } = input;
+  return {
+    schemaVersion,
+    definitionVersion,
+    inputRevision,
+    binding,
+    periodStart,
+    periodEnd,
+    timezone,
+    currency,
+    visibleAt,
+    sourceWatermark,
+  };
+}
+function evidence(input: MetricInputV1): string[] {
+  return ids(
+    input.evidenceIds,
+    ...sources.flatMap((key) => (input[key] ?? []).map((row) => row.evidenceIds)),
+  );
+}
+function validMeasure(
+  input: MetricInputV1,
+  metric:
+    | MetricMeasure<"GROSS_PROFIT">["metric"]
+    | MetricMeasure<"COGS">["metric"]
+    | MetricMeasure<"NET_MERCHANDISE_REVENUE">["metric"],
+  quality: MetricQuality,
+): boolean {
+  return (
+    quality.evidenceIds.every((id) => evidence(input).includes(id)) &&
+    MetricSnapshotV1Schema.safeParse({
+      ...context(input),
+      ...quality,
+      metric,
+      subject: { kind: "STORE" },
+      computedAt: input.visibleAt,
+    }).success
+  );
+}
+function exact(time: string | null): boolean {
+  if (time === null) return true;
+  return (
+    !/[1-9]/.test((/\.(\d+)Z$/.exec(time)?.[1] ?? "").slice(3)) && Number.isFinite(Date.parse(time))
+  );
+}
+function precision(input: MetricInputV1): boolean {
+  const times = [input.periodStart, input.periodEnd, input.visibleAt, input.sourceWatermark];
+  for (const proof of input.metricCoverage)
+    times.push(
+      proof.periodStart,
+      proof.periodEnd,
+      proof.visibleAt,
+      proof.observedAt,
+      proof.sourceWatermark,
+    );
+  for (const row of input.fees ?? [])
+    times.push(row.observedAt, row.data?.periodStart ?? null, row.data?.periodEnd ?? null);
+  for (const row of input.paymentFacts ?? []) times.push(row.observedAt, row.data.paidAt);
+  return times.every(exact);
+}
+function validRequest(request: ContributionRequest): boolean {
+  const { input, frozenCosts, netBuyerShipping } = request;
+  const measures = [frozenCosts.netMerchandiseRevenue, frozenCosts.cogs, frozenCosts.grossProfit];
+  const shippingMetric = {
+    kind: "NET_MERCHANDISE_REVENUE",
+    unit: "minorCNY",
+    value: netBuyerShipping.amountMinor,
+  } as const;
+  return (
+    precision(input) &&
+    measures.every((row) => validMeasure(input, row.metric, row.quality)) &&
+    validMeasure(input, shippingMetric, netBuyerShipping.quality) &&
+    frozenCosts.reversals.every((row) =>
+      row.evidenceIds.every((id) => evidence(input).includes(id)),
+    )
+  );
+}
+function validOutput(input: MetricInputV1, result: EstimatedNetProfit): boolean {
+  return [result.contribution, result.estimatedNetProfit].every(
+    (row) =>
+      MetricComputationV1Schema.safeParse({
+        input,
+        snapshot: {
+          ...context(input),
+          ...row.quality,
+          metric: row.metric,
+          subject: { kind: "STORE" },
+          computedAt: input.visibleAt,
+        },
+      }).success,
+  );
+}
 function freeze<T>(value: T): T {
   if (typeof value === "object" && value !== null) {
     Object.values(value).forEach(freeze);
@@ -162,6 +314,7 @@ function sourceQuality(input: MetricInputV1, kind: Kind) {
   const issues = sources
     .filter((key) => input[key] === null)
     .map((key) => issue("NOT_SYNCHRONIZED", key, input.evidenceIds));
+  issues.push(...paymentUncertainty(input));
   if (!issues.length && coverage < 10000)
     issues.push(issue("PARTIAL_COVERAGE", "metricCoverage", input.evidenceIds));
   if (
@@ -170,6 +323,23 @@ function sourceQuality(input: MetricInputV1, kind: Kind) {
   )
     issues.push(issue("STALE_SOURCE", "sourceWatermark", input.evidenceIds));
   return { coverage, issues };
+}
+function paymentUncertainty(input: MetricInputV1): DataQualityIssueV1[] {
+  return (input.paymentFacts ?? []).flatMap((row) => {
+    const unknown =
+      row.data.paidMinor === null ||
+      row.data.source.quality.issues.includes("PAYMENT_UNKNOWN") ||
+      (row.data.paidAt === null &&
+        (row.data.paidMinor !== 0 || ["PAID", "FULFILLED", "COMPLETED"].includes(row.data.status)));
+    return unknown ? [issue("PAYMENT_UNKNOWN", "paymentFacts", row.evidenceIds)] : [];
+  });
+}
+function uncertain(issues: readonly DataQualityIssueV1[]): boolean {
+  return issues.some((row) =>
+    ["PAYMENT_UNKNOWN", "REFUND_UNKNOWN", "RETURN_UNKNOWN", "SOURCE_INCONSISTENT"].includes(
+      row.code,
+    ),
+  );
 }
 function overallStatus(
   upstream: readonly MetricQuality[],
@@ -181,6 +351,7 @@ function overallStatus(
   ];
   if (issues.some((row) => row.code === "NOT_SYNCHRONIZED")) statuses.push("UNAVAILABLE");
   if (issues.some((row) => row.code === "STALE_SOURCE")) statuses.push("STALE");
+  if (uncertain(issues)) statuses.push("INSUFFICIENT");
   return precedence.find((candidate) => statuses.includes(candidate))!;
 }
 function categoryCoverage(selected: readonly Category[], deps: Dependencies): number {
@@ -235,7 +406,10 @@ function measure<K extends Kind>(
   const shipping = request.netBuyerShipping.amountMinor;
   const resultQuality = quality(request, kind, selected, deps);
   const amount =
-    gross === null || shipping === null || resultQuality.status === "UNAVAILABLE"
+    gross === null ||
+    shipping === null ||
+    resultQuality.status === "UNAVAILABLE" ||
+    uncertain(resultQuality.issues)
       ? null
       : checked(
           deps.math.subtract(
@@ -248,21 +422,53 @@ function measure<K extends Kind>(
     quality: resultQuality,
   };
 }
+function netMeasure(
+  request: ContributionRequest,
+  fees: readonly Category[],
+  contribution: MetricMeasure<"CONTRIBUTION">,
+  deps: Dependencies,
+): MetricMeasure<"ESTIMATED_NET_PROFIT"> {
+  const resultQuality = quality(request, "ESTIMATED_NET_PROFIT", fees, deps);
+  const amount =
+    contribution.metric.value === null ||
+    resultQuality.status === "UNAVAILABLE" ||
+    uncertain(resultQuality.issues)
+      ? null
+      : checked(deps.math.subtract(contribution.metric.value, fees[4]!.amount));
+  return {
+    metric: { kind: "ESTIMATED_NET_PROFIT", unit: "minorCNY", value: amount },
+    quality: resultQuality,
+  };
+}
 function calculate(
   request: ContributionRequest,
   deps: Dependencies,
 ): MetricResult<EstimatedNetProfit> {
-  try {
-    const fees = categories(request.input, deps);
+  const parsed = requestSchema.safeParse(request);
+  if (!parsed.success || !["HALF_AWAY_FROM_ZERO", "TOWARD_ZERO"].includes(deps.rounding))
+    return freeze({ ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] } });
+  // The port omits upstream revision/window provenance; readers and hosts must bind it before calling.
+  const validated = parsed.data as ContributionRequest;
+  if (!validRequest(validated))
     return freeze({
-      ok: true,
-      value: {
-        contribution: measure(request, "CONTRIBUTION", fees.slice(0, 4), deps),
-        estimatedNetProfit: measure(request, "ESTIMATED_NET_PROFIT", fees, deps),
-        excludedFeeKinds: fees.filter((row) => row.coverage < 10000).map((row) => row.kind),
-        feeCoverage: fees.map((row) => ({ kind: row.kind, coverageBasisPoints: row.coverage })),
-      },
+      ok: false,
+      error: { code: "INVALID_INPUT", evidenceIds: ids(validated.input.evidenceIds) },
     });
+  try {
+    const fees = categories(validated.input, deps);
+    const contribution = measure(validated, "CONTRIBUTION", fees.slice(0, 4), deps);
+    const result = {
+      contribution,
+      estimatedNetProfit: netMeasure(validated, fees, contribution, deps),
+      excludedFeeKinds: fees.filter((row) => row.coverage < 10000).map((row) => row.kind),
+      feeCoverage: fees.map((row) => ({ kind: row.kind, coverageBasisPoints: row.coverage })),
+    };
+    return validOutput(validated.input, result)
+      ? freeze({ ok: true, value: result })
+      : freeze({
+          ok: false,
+          error: { code: "INVALID_INPUT", evidenceIds: ids(validated.input.evidenceIds) },
+        });
   } catch (error) {
     if (error instanceof Rejected)
       return freeze({
