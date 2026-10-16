@@ -195,3 +195,148 @@ it("discloses stale source inventory", () => {
   expect(result.available.quality.status).toBe("STALE");
   expect(result.hoursRemaining.quality.status).toBe("STALE");
 });
+
+function rejected(raw: unknown, code = "INVALID_INPUT", evidence: readonly string[] = []) {
+  const result = calculator.calculate(raw as InventoryCoverageRequest);
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected rejection");
+  expect(result.error.code).toBe(code);
+  expect(result.error.evidenceIds).toEqual(expect.arrayContaining([...evidence]));
+}
+it.each([null, {}, { ...request(), extra: true }, { ...request(), externalSkuId: " " }])(
+  "rejects malformed request %#",
+  (raw) => rejected(raw),
+);
+it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity])(
+  "rejects unsafe sold units %s",
+  (units) => {
+    const req = request();
+    rejected({
+      ...req,
+      soldUnits: { ...req.soldUnits, metric: { ...req.soldUnits.metric, value: units } },
+    });
+  },
+);
+it.each(["periodStart", "periodEnd"] as const)("rejects submillisecond sales %s", (key) => {
+  const salesWindow = { ...window, [key]: window[key].replace("Z", ".0001Z") };
+  rejected(request({ salesWindow }));
+});
+it("rejects upstream kind, unit, evidence and quality mismatch", () => {
+  const req = request();
+  rejected({
+    ...req,
+    soldUnits: { ...req.soldUnits, metric: { kind: "PAID_ORDERS", unit: "units", value: 12 } },
+  });
+  rejected({
+    ...req,
+    soldUnits: { ...req.soldUnits, metric: { ...req.soldUnits.metric, unit: "hours" } },
+  });
+  rejected({
+    ...req,
+    soldUnits: {
+      ...req.soldUnits,
+      quality: { ...req.soldUnits.quality, evidenceIds: ["invented"] },
+    },
+  });
+  rejected({
+    ...req,
+    soldUnits: { ...req.soldUnits, quality: { ...req.soldUnits.quality, status: "STALE" } },
+  });
+});
+it("rejects future sales or nonpositive and mismatched windows", () => {
+  rejected(request({ salesWindow: { ...window, periodEnd: "2026-10-11T00:00:00Z" } }));
+  rejected(request({ salesWindow: { ...window, periodStart: now } }));
+  rejected({ ...request(), salesWindow: { ...window, timezone: "UTC" } });
+  rejected({ ...request(), salesWindow: { ...window, currency: "USD" } });
+});
+it.each(["inventoryFacts", "inventoryExtensions"] as const)(
+  "rejects duplicate selected %s with all evidence",
+  (key) => {
+    const req = request();
+    const row = req.input[key]![0]!;
+    const rows = [row, { ...row, sourceVersion: "v2", evidenceIds: ["duplicate"] }];
+    rejected({ ...req, input: { ...req.input, [key]: rows } }, "CONFLICT", [
+      row.evidenceIds[0]!,
+      "duplicate",
+    ]);
+  },
+);
+it("rejects aligned stock counts that exceed on-hand", () => {
+  const ext = extension();
+  rejected(
+    request({
+      input: input({ inventoryExtensions: [{ ...ext, data: { ...ext.data, quarantine: 7 } }] }),
+    }),
+    "CONFLICT",
+    ["stock", "extension"],
+  );
+});
+it("does not combine stock counts across observation instants", () => {
+  const ext = extension();
+  const result = run(
+    request({
+      input: input({
+        inventoryExtensions: [
+          { ...ext, data: { ...ext.data, asOf: "2026-10-10T03:00:00Z", quarantine: 100 } },
+        ],
+      }),
+    }),
+  );
+  expect(result.available.metric.value).toBe(12);
+});
+it("isolates exact location and SKU including their stale values", () => {
+  const row = stock(0);
+  const other = {
+    ...row,
+    data: {
+      ...row.data,
+      externalLocationId: "elsewhere",
+      source: { ...row.data.source, updatedAt: "2026-10-01T00:00:00Z" },
+    },
+  };
+  const result = run(request({ input: input({ inventoryFacts: [other, stock()] }) }));
+  expect(result.available.metric.value).toBe(12);
+  expect(result.available.quality.status).toBe("VERIFIED");
+});
+it.each(["inventoryFacts", "inventoryExtensions"] as const)(
+  "does not fabricate absent %s",
+  (key) => {
+    const result = run(request({ input: input({ [key]: [] }) }));
+    expect(result.hoursRemaining.metric.value).toBeNull();
+    if (key === "inventoryFacts") expect(result.available.metric.value).toBeNull();
+    else expect(result.available.metric.value).toBe(12);
+  },
+);
+it("checks aligned quantities with injected math and preserves typed errors", () => {
+  const math = {
+    ...exactMinorMath,
+    add: () => ({
+      ok: false as const,
+      error: { code: "OVERFLOW" as const, evidenceIds: ["math-proof"] },
+    }),
+  };
+  const calc = createInventoryCoverageCalculator({
+    math,
+    clock: { snapshot: () => ({ now, revision: 1 }) },
+  });
+  expect(calc.calculate(request())).toEqual({
+    ok: false,
+    error: { code: "OVERFLOW", evidenceIds: ["math-proof"] },
+  });
+});
+it("rejects invalid clock snapshots and future visible input", () => {
+  for (const snapshot of [
+    { now, revision: -1 },
+    { now: now.replace("Z", ".0001Z"), revision: 1 },
+    { now: "2026-10-10T03:00:00Z", revision: 1 },
+  ]) {
+    const calc = createInventoryCoverageCalculator({
+      math: exactMinorMath,
+      clock: { snapshot: () => snapshot },
+    });
+    expect(calc.calculate(request())).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+  }
+});
