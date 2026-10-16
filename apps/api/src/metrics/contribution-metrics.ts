@@ -140,9 +140,10 @@ function validMeasure(
     | MetricMeasure<"COGS">["metric"]
     | MetricMeasure<"NET_MERCHANDISE_REVENUE">["metric"],
   quality: MetricQuality,
+  sourceEvidence: ReadonlySet<string>,
 ): boolean {
   return (
-    quality.evidenceIds.every((id) => evidence(input).includes(id)) &&
+    quality.evidenceIds.every((id) => sourceEvidence.has(id)) &&
     MetricSnapshotV1Schema.safeParse({
       ...context(input),
       ...quality,
@@ -175,6 +176,7 @@ function precision(input: MetricInputV1): boolean {
 }
 function validRequest(request: ContributionRequest): boolean {
   const { input, frozenCosts, netBuyerShipping } = request;
+  const sourceEvidence = new Set(evidence(input));
   const measures = [frozenCosts.netMerchandiseRevenue, frozenCosts.cogs, frozenCosts.grossProfit];
   const shippingMetric = {
     kind: "NET_MERCHANDISE_REVENUE",
@@ -183,11 +185,9 @@ function validRequest(request: ContributionRequest): boolean {
   } as const;
   return (
     precision(input) &&
-    measures.every((row) => validMeasure(input, row.metric, row.quality)) &&
-    validMeasure(input, shippingMetric, netBuyerShipping.quality) &&
-    frozenCosts.reversals.every((row) =>
-      row.evidenceIds.every((id) => evidence(input).includes(id)),
-    )
+    measures.every((row) => validMeasure(input, row.metric, row.quality, sourceEvidence)) &&
+    validMeasure(input, shippingMetric, netBuyerShipping.quality, sourceEvidence) &&
+    frozenCosts.reversals.every((row) => row.evidenceIds.every((id) => sourceEvidence.has(id)))
   );
 }
 function validOutput(input: MetricInputV1, result: EstimatedNetProfit): boolean {
