@@ -631,8 +631,27 @@ function validOutput(frame: Frame, result: InventoryCoverageMetrics): boolean {
       }).success,
   );
 }
+function derived(frame: Frame, output: InventoryCoverageMetrics): void {
+  const lead = output.leadTimeHours.metric.value,
+    buffer = output.safetyBufferHours;
+  const numbers = [
+    output.salesWindowHours,
+    output.salesUnitsPerHour,
+    output.hoursRemaining.metric.value,
+    output.daysRemaining,
+    lead === null || buffer === null ? null : lead + buffer,
+  ];
+  if (
+    numbers.some(
+      (value) =>
+        value !== null && (!Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER),
+    )
+  )
+    reject("OVERFLOW", [...frame.sourceEvidence]);
+}
 function result(frame: Frame): InventoryCoverageMetrics {
   const output = compute(frame);
+  derived(frame, output);
   if (!validOutput(frame, output)) reject("INVALID_INPUT", frame.request.input.evidenceIds);
   return output;
 }

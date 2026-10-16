@@ -996,3 +996,39 @@ it("reads the injected clock exactly once per valid calculation", () => {
   expect(calc.calculate(request())).toEqual(first);
   expect(calls).toBe(2);
 });
+it("rejects derived coverage overflow", () => {
+  const row = stock(Number.MAX_SAFE_INTEGER);
+  const ext = extension();
+  rejected(
+    request({
+      input: input({
+        inventoryFacts: [
+          { ...row, data: { ...row.data, onHand: Number.MAX_SAFE_INTEGER, reserved: 0 } },
+        ],
+        inventoryExtensions: [{ ...ext, data: { ...ext.data, quarantine: 0 } }],
+      }),
+      soldUnits: sales(1),
+    }),
+    "OVERFLOW",
+  );
+});
+it("rejects derived velocity overflow", () => {
+  const salesWindow = { ...window, periodStart: "2026-10-10T03:59:59.999Z" };
+  rejected(request({ salesWindow, soldUnits: sales(Number.MAX_SAFE_INTEGER) }), "OVERFLOW");
+});
+it("rejects configured lead plus buffer overflow", () => {
+  const ext = extension();
+  rejected(
+    request({
+      input: input({
+        inventoryExtensions: [
+          {
+            ...ext,
+            data: { ...ext.data, leadTimeHours: Number.MAX_SAFE_INTEGER, safetyBufferHours: 1 },
+          },
+        ],
+      }),
+    }),
+    "OVERFLOW",
+  );
+});
