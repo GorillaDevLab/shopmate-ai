@@ -773,3 +773,63 @@ it("accepts publicly valid upstream evidence from an optional supplied fact", ()
   );
   expect(result.contribution.quality.evidenceIds).toContain("optional-proof");
 });
+it.each(["CONTRIBUTION", "ESTIMATED_NET_PROFIT"] as const)(
+  "combines complete and incomplete %s proofs conservatively",
+  (kind) => {
+    const proof = base.metricCoverage.find((row) => row.kind === kind)!;
+    const metricCoverage = [
+      ...base.metricCoverage,
+      {
+        ...proof,
+        collections: proof.collections.filter((key) => key !== "fees"),
+        coverageBasisPoints: 0,
+      },
+    ];
+    const result = run(input({ metricCoverage }));
+    const selected = kind === "CONTRIBUTION" ? result.contribution : result.estimatedNetProfit;
+    const independent = kind === "CONTRIBUTION" ? result.estimatedNetProfit : result.contribution;
+    expect(selected.metric.value).toBe(kind === "CONTRIBUTION" ? 600 : 400);
+    expect(selected.quality).toMatchObject({ status: "ESTIMATED", coverageBasisPoints: 0 });
+    expect(selected.quality.issues.map((row) => row.code)).toContain("PARTIAL_COVERAGE");
+    expect(independent.quality).toMatchObject({ status: "VERIFIED", coverageBasisPoints: 10000 });
+  },
+);
+it.each(["CONTRIBUTION", "ESTIMATED_NET_PROFIT"] as const)(
+  "incomplete %s proof claims no coverage even when its supplied ratio is complete",
+  (kind) => {
+    const proof = base.metricCoverage.find((row) => row.kind === kind)!;
+    const metricCoverage = [
+      ...base.metricCoverage,
+      { ...proof, collections: proof.collections.filter((key) => key !== "fees") },
+    ];
+    const result = run(input({ metricCoverage }));
+    const selected = kind === "CONTRIBUTION" ? result.contribution : result.estimatedNetProfit;
+    expect(selected.quality).toMatchObject({ status: "ESTIMATED", coverageBasisPoints: 0 });
+  },
+);
+it("ignores incomplete proofs for unrelated kinds and subjects", () => {
+  const proof = base.metricCoverage.find((row) => row.kind === "CONTRIBUTION")!;
+  const incomplete = {
+    ...proof,
+    collections: proof.collections.filter((key) => key !== "fees"),
+    coverageBasisPoints: 0,
+  };
+  const metricCoverage = [
+    ...base.metricCoverage,
+    { ...incomplete, kind: "GMV" as const },
+    { ...incomplete, subject: { kind: "SKU" as const, externalSkuId: "sku-a" } },
+    {
+      ...incomplete,
+      kind: "ESTIMATED_NET_PROFIT" as const,
+      subject: { kind: "CAMPAIGN" as const, externalCampaignId: "campaign-a" },
+    },
+  ];
+  const result = run(input({ metricCoverage }));
+  for (const row of [result.contribution, result.estimatedNetProfit]) {
+    expect(row.quality).toMatchObject({
+      status: "VERIFIED",
+      coverageBasisPoints: 10000,
+      issues: [],
+    });
+  }
+});

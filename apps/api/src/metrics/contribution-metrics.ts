@@ -312,12 +312,15 @@ function categories(input: MetricInputV1, deps: Dependencies): Category[] {
 }
 function sourceQuality(input: MetricInputV1, kind: Kind) {
   const proofs = input.metricCoverage.filter(
-    (row) =>
-      row.kind === kind &&
-      row.subject.kind === "STORE" &&
-      sources.every((key) => row.collections.includes(key)),
+    (row) => row.kind === kind && row.subject.kind === "STORE",
   );
-  const coverage = proofs.length ? Math.min(...proofs.map((row) => row.coverageBasisPoints)) : 0;
+  const coverage = proofs.length
+    ? Math.min(
+        ...proofs.map((row) =>
+          sources.every((key) => row.collections.includes(key)) ? row.coverageBasisPoints : 0,
+        ),
+      )
+    : 0;
   const issues: DataQualityIssueV1[] = sources
     .filter((key) => input[key] === null)
     .map((key) => issue("NOT_SYNCHRONIZED", key, input.evidenceIds));
