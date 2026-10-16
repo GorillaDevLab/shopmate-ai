@@ -748,3 +748,28 @@ it("uses minimum independent upstream sample and coverage", () => {
     coverageBasisPoints: 3210,
   });
 });
+it("retains matching output proof evidence from optional source collections", () => {
+  const traffic = [{ ...base.fees![0]!, evidenceIds: ["optional-proof"], data: null }];
+  const metricCoverage = base.metricCoverage.map((row) =>
+    row.kind === "CONTRIBUTION" ? { ...row, evidenceIds: ["optional-proof"] } : row,
+  );
+  const result = run(input({ traffic, metricCoverage }));
+  expect(result.contribution.quality.status).toBe("VERIFIED");
+  expect(result.contribution.quality.evidenceIds).toContain("optional-proof");
+});
+it("accepts publicly valid upstream evidence from an optional supplied fact", () => {
+  const req = anchoredRequest();
+  const traffic = [{ ...base.fees![0]!, evidenceIds: ["optional-proof"], data: null }];
+  const grossProfit = {
+    ...req.frozenCosts.grossProfit,
+    quality: { ...req.frozenCosts.grossProfit.quality, evidenceIds: ["optional-proof"] },
+  };
+  const result = value(
+    calculator.calculate({
+      ...req,
+      input: input({ traffic }),
+      frozenCosts: { ...req.frozenCosts, grossProfit },
+    }),
+  );
+  expect(result.contribution.quality.evidenceIds).toContain("optional-proof");
+});

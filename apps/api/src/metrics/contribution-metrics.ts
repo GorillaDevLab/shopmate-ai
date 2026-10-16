@@ -58,6 +58,13 @@ const sources = [
   "returnReceipts",
   "fees",
 ] as const;
+const collections = [
+  ...sources,
+  "inventoryFacts",
+  "campaignFacts",
+  "traffic",
+  "inventoryExtensions",
+] as const;
 const qualitySchema = z.strictObject({
   status: MetricStatusSchema,
   sampleSize: MinorAmountSchema,
@@ -123,7 +130,7 @@ function context(input: MetricInputV1) {
 function evidence(input: MetricInputV1): string[] {
   return ids(
     input.evidenceIds,
-    ...sources.flatMap((key) => (input[key] ?? []).map((row) => row.evidenceIds)),
+    ...collections.flatMap((key) => (input[key] ?? []).map((row) => row.evidenceIds)),
   );
 }
 function validMeasure(
@@ -388,9 +395,8 @@ function quality(
       ? 0
       : Math.min(coverage, source.coverage, ...upstream.map((row) => row.coverageBasisPoints)),
     evidenceIds: ids(
-      input.evidenceIds,
+      evidence(input),
       ...upstream.map((row) => row.evidenceIds),
-      ...sources.flatMap((key) => (input[key] ?? []).map((row) => row.evidenceIds)),
       ...issues.map((row) => row.evidenceIds),
     ),
     issues,
