@@ -1272,3 +1272,13 @@ it("keeps unavailable results and issue evidence deeply immutable", () => {
   expect(Object.isFrozen(result.hoursRemaining.quality.issues[0])).toBe(true);
   expect(Object.isFrozen(result.hoursRemaining.quality.issues[0]!.evidenceIds)).toBe(true);
 });
+it("retains window-only dependency with unavailable sales units", () => {
+  const req = request({
+    soldUnits: sales(null, { status: "UNAVAILABLE", issues: [issue("PAYMENT_UNKNOWN")] }),
+    policy: ruled("LEAD_TIME_HOURS", { requiredFields: ["leadTimeHours", "salesWindowHours"] }),
+  });
+  const result = run(req);
+  expect(result.leadTimeHours.metric.value).toBe(3);
+  expect(result.leadTimeHours.quality.status).toBe("VERIFIED");
+  wrapped(req, result);
+});

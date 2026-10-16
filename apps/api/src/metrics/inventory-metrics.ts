@@ -310,9 +310,8 @@ function dependencies(kind: Kind, rule: Rule) {
     extension:
       kind !== "INVENTORY_AVAILABLE" ||
       rule.requiredFields.some((field) => extensionFields.includes(field)),
-    sales:
-      kind === "INVENTORY_HOURS_REMAINING" ||
-      rule.requiredFields.some((field) => salesFields.includes(field)),
+    // A supplied window is independently known even when its observed units are unavailable.
+    sales: kind === "INVENTORY_HOURS_REMAINING" || rule.requiredFields.includes("soldUnits"),
   };
 }
 function requiredCollections(kind: Kind, rule: Rule): readonly (typeof collections)[number][] {
