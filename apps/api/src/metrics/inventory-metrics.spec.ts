@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
 import {
+  DataQualityIssueV1Schema,
+  MetricComputationV1Schema,
+  MetricInputV1Schema,
+  MetricValueSchema,
+  type ConnectorOrder,
   type InventoryCoverageRequest,
   type MetricInputV1,
   type MetricResult,
@@ -656,4 +661,338 @@ it("preserves representable global unsynchronized state", () => {
   expect(result.available.quality.status).toBe("UNAVAILABLE");
   expect(result.hoursRemaining.quality.status).toBe("UNAVAILABLE");
   expect(result.leadTimeHours.quality.status).toBe("UNAVAILABLE");
+});
+
+function paid(patch: Partial<ConnectorOrder> = {}) {
+  return fact(
+    {
+      externalStoreId: binding.externalStoreId,
+      externalOrderId: "order",
+      status: "PAID" as const,
+      orderedAt: "2026-10-10T00:00:00Z",
+      paidAt: "2026-10-10T01:00:00Z",
+      currency: "CNY" as const,
+      items: [
+        {
+          externalLineId: "line",
+          externalProductId: "product",
+          externalSkuId: "sku",
+          quantity: 12,
+          unitPriceMinor: 1,
+          grossMinor: 12,
+          discountMinor: 0,
+          netMinor: 12,
+        },
+      ],
+      grossMinor: 12,
+      discountMinor: 0,
+      shippingMinor: 0,
+      payableMinor: 12,
+      paidMinor: 12,
+      refundedMinor: 0,
+      source: stock().data.source,
+      ...patch,
+    },
+    "payment",
+  );
+}
+function snapshotContext(data: MetricInputV1) {
+  const {
+    schemaVersion,
+    definitionVersion,
+    inputRevision,
+    binding,
+    periodStart,
+    periodEnd,
+    timezone,
+    currency,
+    visibleAt,
+    sourceWatermark,
+    evidenceIds,
+  } = data;
+  return {
+    schemaVersion,
+    definitionVersion,
+    inputRevision,
+    binding,
+    periodStart,
+    periodEnd,
+    timezone,
+    currency,
+    visibleAt,
+    sourceWatermark,
+    evidenceIds,
+  };
+}
+function wrapped(req: InventoryCoverageRequest, result = run(req)) {
+  for (const row of [result.available, result.hoursRemaining, result.leadTimeHours]) {
+    expect(MetricValueSchema.safeParse(row.metric).success).toBe(true);
+    expect(
+      row.quality.issues.every((item) => DataQualityIssueV1Schema.safeParse(item).success),
+    ).toBe(true);
+    expect(
+      MetricComputationV1Schema.safeParse({
+        input: req.input,
+        snapshot: {
+          ...snapshotContext(req.input),
+          ...row.quality,
+          metric: row.metric,
+          subject: { kind: "SKU", externalSkuId: req.externalSkuId },
+          computedAt: req.input.visibleAt,
+        },
+      }).success,
+    ).toBe(true);
+  }
+}
+it.each(["PAYMENT_UNKNOWN", "SOURCE_INCONSISTENT"] as const)(
+  "does not trust optimistic supplied sales over %s source",
+  (code) => {
+    const source = {
+      ...stock().data.source,
+      quality: { state: "PARTIAL" as const, issues: [code] },
+    };
+    const row = paid({
+      source,
+      ...(code === "PAYMENT_UNKNOWN" ? { paidAt: null, paidMinor: null } : {}),
+    });
+    const req = request({ input: input({ paymentFacts: [row] }) });
+    const result = run(req);
+    expect(result.soldUnits).toBeNull();
+    expect(result.salesUnitsPerHour).toBeNull();
+    expect(result.hoursRemaining.metric.value).toBeNull();
+    expect(result.available.metric.value).toBe(12);
+    expect(result.hoursRemaining.quality.issues).toContainEqual(
+      expect.objectContaining({ code, evidenceIds: ["payment"] }),
+    );
+    wrapped(req, result);
+  },
+);
+it("discloses missing payment source time with a known observed rate", () => {
+  const source = {
+    ...stock().data.source,
+    updatedAt: null,
+    quality: { state: "PARTIAL" as const, issues: ["SOURCE_TIME_MISSING" as const] },
+  };
+  const req = request({ input: input({ paymentFacts: [paid({ source })] }) });
+  const result = run(req);
+  expect(result.salesUnitsPerHour).toBe(3);
+  expect(result.hoursRemaining.quality.status).toBe("ESTIMATED");
+  wrapped(req, result);
+});
+it("does not retain optimistic denominator when its source is unsynchronized", () => {
+  const result = run(request({ input: withoutCollection("paymentFacts") }));
+  expect(result.soldUnits).toBeNull();
+  expect(result.salesUnitsPerHour).toBeNull();
+});
+it("keeps independent sales when inventory is missing", () => {
+  const result = run(request({ input: input({ inventoryFacts: [] }) }));
+  expect(result.soldUnits).toBe(12);
+  expect(result.salesUnitsPerHour).toBe(3);
+});
+it("does not feed an independently policy-gated available measure into coverage", () => {
+  const req = request({ policy: ruled("INVENTORY_AVAILABLE", { requiredFields: ["eta"] }) });
+  const result = run(req);
+  expect(result.available.metric.value).toBeNull();
+  expect(result.hoursRemaining.metric.value).toBe(4);
+  wrapped(req, result);
+});
+it("prevents uncovered watermark from claiming public VERIFIED", () => {
+  const base = input();
+  const sourceWatermark = "2026-10-10T03:00:00Z";
+  const req = request({
+    input: {
+      ...base,
+      sourceWatermark,
+      metricCoverage: base.metricCoverage.map((proof) => ({ ...proof, sourceWatermark })),
+    },
+    soldUnits: sales(12, {
+      status: "ESTIMATED",
+      issues: [{ code: "PARTIAL_COVERAGE", field: "sourceWatermark", evidenceIds: ["sync"] }],
+    }),
+  });
+  const result = run(req);
+  expect(result.available.quality.status).not.toBe("VERIFIED");
+  expect(result.hoursRemaining.metric.value).toBe(4);
+  wrapped(req, result);
+});
+it("checks public wrappers without replacing the input context", () => {
+  const req = request();
+  expect(MetricInputV1Schema.safeParse(req.input).success).toBe(true);
+  wrapped(req);
+});
+it.each(["inventoryFacts", "inventoryExtensions"] as const)(
+  "keeps public wrappers for missing %s",
+  (key) => {
+    wrapped(request({ input: input({ [key]: [] }) }));
+  },
+);
+it.each([
+  "INVENTORY_UNKNOWN",
+  "SOURCE_TIME_MISSING",
+  "SOURCE_INCONSISTENT",
+  "INVENTORY_STALE",
+] as const)("keeps public wrappers for %s", (code) => {
+  const req = request({ input: input({ inventoryFacts: [sourceIssue(code)] }) });
+  wrapped(req);
+});
+it.each(["future", "passed"])(
+  "retains %s ETA without changing lead or receiving stock",
+  (variant) => {
+    const ext = extension();
+    const eta = variant === "future" ? "2026-10-20T00:00:00Z" : "2026-10-01T00:00:00Z";
+    const result = run(
+      request({ input: input({ inventoryExtensions: [{ ...ext, data: { ...ext.data, eta } }] }) }),
+    );
+    expect(result.eta).toBe(eta);
+    expect(result.available.metric.value).toBe(12);
+    expect(result.leadTimeHours.metric.value).toBe(3);
+    expect(result.hoursRemaining.metric.value).toBe(4);
+  },
+);
+it.each([0, 3, 4, 5])("compares strict configured lead threshold %s", (leadTimeHours) => {
+  const ext = extension();
+  const result = run(
+    request({
+      input: input({
+        inventoryExtensions: [
+          { ...ext, data: { ...ext.data, leadTimeHours, safetyBufferHours: 0 } },
+        ],
+      }),
+    }),
+  );
+  expect(result.belowLeadTimeWithBuffer).toBe(leadTimeHours > 4);
+});
+it("keeps missing buffer independent of known lead and forecast", () => {
+  const ext = extension();
+  const result = run(
+    request({
+      input: input({
+        inventoryExtensions: [{ ...ext, data: { ...ext.data, safetyBufferHours: null } }],
+      }),
+    }),
+  );
+  expect(result.safetyBufferHours).toBeNull();
+  expect(result.leadTimeHours.metric.value).toBe(3);
+  expect(result.hoursRemaining.metric.value).toBe(4);
+  expect(result.belowLeadTimeWithBuffer).toBeNull();
+});
+it("does not treat ambiguous extension as zero or verified", () => {
+  const req = request({
+    input: input({ inventoryExtensions: [extension(), fact(null, "ambiguous")] }),
+  });
+  const result = run(req);
+  expect(result.available.metric.value).toBe(12);
+  expect(result.hoursRemaining.metric.value).toBeNull();
+  expect(result.leadTimeHours.quality.status).toBe("INSUFFICIENT");
+  wrapped(req, result);
+});
+it("does not require nullable quarantine and inbound for explicit sellable stock", () => {
+  const ext = extension();
+  const req = request({
+    input: input({
+      inventoryExtensions: [{ ...ext, data: { ...ext.data, quarantine: null, inbound: null } }],
+    }),
+  });
+  expect(run(req).available.metric.value).toBe(12);
+  expect(run(req).hoursRemaining.metric.value).toBe(4);
+  wrapped(req);
+});
+it("never substitutes on-hand when explicit sellable stock is missing", () => {
+  const row = sourceIssue("INVENTORY_UNKNOWN");
+  const req = request({
+    input: input({ inventoryFacts: [{ ...row, data: { ...row.data, available: null } }] }),
+  });
+  expect(run(req).available.metric.value).toBeNull();
+  wrapped(req);
+});
+it("does not let verified-empty policy fabricate missing stock", () => {
+  const req = request({
+    input: input({ inventoryFacts: [] }),
+    policy: ruled("INVENTORY_AVAILABLE", { minimumSampleSize: 0, allowVerifiedEmptyWindow: true }),
+  });
+  expect(run(req).available.metric.value).toBeNull();
+  expect(run(req).available.quality.status).toBe("UNAVAILABLE");
+});
+it("keeps fractional historical windows independent of current input window", () => {
+  const salesWindow = {
+    ...window,
+    periodStart: "2026-10-09T00:00:00Z",
+    periodEnd: "2026-10-09T01:30:00Z",
+  };
+  const result = run(request({ salesWindow, soldUnits: sales(7) }));
+  expect(result.salesWindowHours).toBe(1.5);
+  expect(result.salesUnitsPerHour).toBe(7 / 1.5);
+  expect(result.hoursRemaining.metric.value).toBe((12 / 7) * 1.5);
+  expect(result.soldUnits).toBe(7);
+});
+it("does not overflow a valid ratio-first duration", () => {
+  const row = stock(Number.MAX_SAFE_INTEGER);
+  const ext = extension();
+  const req = request({
+    input: input({
+      inventoryFacts: [
+        { ...row, data: { ...row.data, onHand: Number.MAX_SAFE_INTEGER, reserved: 0 } },
+      ],
+      inventoryExtensions: [{ ...ext, data: { ...ext.data, quarantine: 0 } }],
+    }),
+    soldUnits: sales(Number.MAX_SAFE_INTEGER),
+  });
+  expect(run(req).hoursRemaining.metric.value).toBe(4);
+});
+it("returns deep copied frozen results without freezing callers", () => {
+  const req = request();
+  const before = structuredClone(req);
+  const result = calculator.calculate(req);
+  expect(Object.isFrozen(result)).toBe(true);
+  const output = value(result);
+  expect(Object.isFrozen(output.available.quality.evidenceIds)).toBe(true);
+  expect(Object.isFrozen(output.available.metric)).toBe(true);
+  expect(req).toEqual(before);
+  expect(Object.isFrozen(req.input.binding)).toBe(false);
+  expect(output.available.quality.evidenceIds).not.toBe(req.input.evidenceIds);
+  expect(calculator.calculate(req)).toEqual(result);
+});
+it("copies and freezes dependency errors without freezing dependency evidence", () => {
+  const evidenceIds = ["math-proof"];
+  const math = {
+    ...exactMinorMath,
+    add: () => ({ ok: false as const, error: { code: "CONFLICT" as const, evidenceIds } }),
+  };
+  const calc = createInventoryCoverageCalculator({
+    math,
+    clock: { snapshot: () => ({ now, revision: 1 }) },
+  });
+  const result = calc.calculate(request());
+  expect(result).toEqual({ ok: false, error: { code: "CONFLICT", evidenceIds: ["math-proof"] } });
+  expect(Object.isFrozen(result)).toBe(true);
+  expect(Object.isFrozen(evidenceIds)).toBe(false);
+  evidenceIds.push("later");
+  expect(result).toEqual({ ok: false, error: { code: "CONFLICT", evidenceIds: ["math-proof"] } });
+});
+it("does not swallow dependency programmer exceptions", () => {
+  const math = {
+    ...exactMinorMath,
+    add: () => {
+      throw new Error("dependency bug");
+    },
+  };
+  const calc = createInventoryCoverageCalculator({
+    math,
+    clock: { snapshot: () => ({ now, revision: 1 }) },
+  });
+  expect(() => calc.calculate(request())).toThrow("dependency bug");
+});
+it("reads the injected clock exactly once per valid calculation", () => {
+  let calls = 0;
+  const clock = {
+    snapshot: () => {
+      calls++;
+      return { now, revision: calls };
+    },
+  };
+  const calc = createInventoryCoverageCalculator({ math: exactMinorMath, clock });
+  const first = calc.calculate(request());
+  expect(calls).toBe(1);
+  expect(calc.calculate(request())).toEqual(first);
+  expect(calls).toBe(2);
 });

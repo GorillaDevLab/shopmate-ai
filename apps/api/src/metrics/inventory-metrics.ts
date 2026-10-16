@@ -292,7 +292,7 @@ function fields(frame: Frame): Readonly<Record<string, number | string | null>> 
     reserved: stock?.reserved ?? null,
     quarantine: ext?.quarantine ?? null,
     asOf: ext?.asOf ?? null,
-    soldUnits: frame.request.soldUnits.metric.value,
+    soldUnits: observedSales(frame),
     salesWindowHours: frame.salesWindowHours,
     leadTimeHours: ext?.leadTimeHours ?? null,
     safetyBufferHours: ext?.safetyBufferHours ?? null,
@@ -408,6 +408,14 @@ function paymentIssues(frame: Frame): DataQualityIssueV1[] {
     return result;
   });
 }
+function observedSales(frame: Frame): number | null {
+  const { request } = frame;
+  const issues = [...paymentIssues(frame), ...request.soldUnits.quality.issues];
+  const unknown = issues.some((row) =>
+    ["PAYMENT_UNKNOWN", "SOURCE_INCONSISTENT", "NOT_SYNCHRONIZED"].includes(row.code),
+  );
+  return request.input.paymentFacts === null || unknown ? null : request.soldUnits.metric.value;
+}
 function freshness(frame: Frame, kind: Kind, rule: Rule): DataQualityIssueV1[] {
   const uses = dependencies(kind, rule),
     { selected, request } = frame;
@@ -450,6 +458,11 @@ function baseIssues(frame: Frame, kind: Kind, rule: Rule): DataQualityIssueV1[] 
   if (uses.extension) issues.push(...extensionIssues(frame, kind));
   if (uses.sales) issues.push(...frame.request.soldUnits.quality.issues, ...paymentIssues(frame));
   issues.push(...missingFields(frame, rule), ...freshness(frame, kind, rule));
+  if (
+    input.sourceWatermark !== null &&
+    Date.parse(input.sourceWatermark) < Date.parse(input.periodEnd)
+  )
+    issues.push(issue("PARTIAL_COVERAGE", "sourceWatermark", input.evidenceIds));
   if (kind === "INVENTORY_HOURS_REMAINING" && frame.request.soldUnits.metric.value === 0)
     issues.push(
       issue("ZERO_DENOMINATOR", "soldUnits", frame.request.soldUnits.quality.evidenceIds),
@@ -572,13 +585,13 @@ function compute(frame: Frame): InventoryCoverageMetrics {
     evaluate(frame, "INVENTORY_AVAILABLE"),
   );
   const ext = selected.extension?.data,
-    soldUnits = request.soldUnits.metric.value;
+    soldUnits = observedSales(frame);
   const salesUnitsPerHour =
     soldUnits === null || request.input.paymentFacts === null ? null : soldUnits / salesWindowHours;
   const rawHours =
-    available.metric.value === null || !soldUnits
+    selected.stock?.data.available == null || !soldUnits
       ? null
-      : (available.metric.value / soldUnits) * salesWindowHours;
+      : (selected.stock.data.available / soldUnits) * salesWindowHours;
   const hoursRemaining = measure(
     "INVENTORY_HOURS_REMAINING",
     rawHours,
@@ -602,6 +615,27 @@ function compute(frame: Frame): InventoryCoverageMetrics {
     ...durations(hoursRemaining.metric.value, leadTimeHours.metric.value, buffer),
   };
 }
+function validOutput(frame: Frame, result: InventoryCoverageMetrics): boolean {
+  const { input, externalSkuId } = frame.request;
+  return [result.available, result.hoursRemaining, result.leadTimeHours].every(
+    (row) =>
+      MetricComputationV1Schema.safeParse({
+        input,
+        snapshot: {
+          ...context(input),
+          ...row.quality,
+          metric: row.metric,
+          subject: { kind: "SKU", externalSkuId },
+          computedAt: input.visibleAt,
+        },
+      }).success,
+  );
+}
+function result(frame: Frame): InventoryCoverageMetrics {
+  const output = compute(frame);
+  if (!validOutput(frame, output)) reject("INVALID_INPUT", frame.request.input.evidenceIds);
+  return output;
+}
 function calculate(
   raw: InventoryCoverageRequest,
   deps: Dependencies,
@@ -617,7 +651,7 @@ function calculate(
     reconcile(selected, deps);
     return freeze({
       ok: true,
-      value: compute({
+      value: result({
         request,
         selected,
         sourceEvidence,
