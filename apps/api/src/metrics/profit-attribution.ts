@@ -171,7 +171,8 @@ function validation(input: unknown): MetricResult<ProfitDeltaRequest> {
     method.schemaVersion !== 1 ||
     method.version !== PROFIT_DELTA_METHOD_VERSION ||
     method.residualPolicy !== "EXPLICIT_RESIDUAL" ||
-    method.order.join(",") !== order.join(",")
+    method.order.length !== order.length ||
+    method.order.some((step, index) => step !== order[index])
   )
     return failure("VERSION_MISMATCH");
   if (
@@ -318,9 +319,15 @@ function revenueIssues(
   for (const period of periods(input))
     for (const row of period.skus) {
       result.push(...missing(row, ["units"]));
+      const zeroBaselineWeight =
+        kind === "PRICE_DISCOUNT" &&
+        period === input.current &&
+        input.baseline.skus.find((before) => before.externalSkuId === row.externalSkuId)?.units ===
+          0;
       if (
-        (period === input.baseline && kind !== "SKU_MIX") ||
-        (period === input.current && kind !== "VOLUME")
+        !zeroBaselineWeight &&
+        ((period === input.baseline && kind !== "SKU_MIX") ||
+          (period === input.current && kind !== "VOLUME"))
       )
         result.push(...missing(row, ["grossMinor", "discountMinor"]));
       if (row.units === 0 && ((row.grossMinor ?? 0) > 0 || (row.discountMinor ?? 0) > 0))
@@ -429,10 +436,30 @@ function freeze<T>(value: T): T {
   }
   return value;
 }
+function aggregateLimits(input: ProfitDeltaRequest, deps: Dependencies): MetricResult<null> {
+  const fields = [
+    "units",
+    "grossMinor",
+    "discountMinor",
+    "netRevenueMinor",
+    "cogsMinor",
+    "advertisingMinor",
+  ] as const;
+  for (const period of periods(input))
+    for (const field of fields) {
+      if (period.skus.some((row) => row[field] === null)) continue;
+      const sum = period.skus.reduce((amount, row) => amount + BigInt(row[field]!), 0n);
+      const result = checked(sum, deps);
+      if (!result.ok) return result;
+    }
+  return success(null);
+}
 function calculate(
   input: ProfitDeltaRequest,
   deps: Dependencies,
 ): MetricResult<ProfitDeltaMetrics> {
+  const limits = aggregateLimits(input, deps);
+  if (!limits.ok) return limits;
   const components: Component[] = [];
   for (const kind of order) {
     const result = component(input, kind, deps);

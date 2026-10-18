@@ -1,11 +1,13 @@
 import { expect, it } from "vitest";
 import type {
+  ExactMinorMath,
   MetricQuality,
   ProfitDeltaMetrics,
   ProfitDeltaRequest,
   ProfitPeriodAggregate,
   ProfitSkuAggregate,
 } from "@shopmate/contracts";
+import { MetricSnapshotV1Schema } from "@shopmate/contracts";
 import { exactMinorMath } from "./exact-math.js";
 import { createProfitDeltaAttribution } from "./profit-attribution.js";
 
@@ -345,4 +347,190 @@ it("returns deeply frozen independent copies without freezing caller data", () =
   expect(Object.isFrozen(result.delta.metric)).toBe(true);
   expect(Object.isFrozen(input.baseline.quality.issues[0]?.evidenceIds)).toBe(false);
   expect(input).toEqual(before);
+});
+
+it.each([
+  [{ units: 20, grossMinor: 2000 }, [1000, 0, 0, 0, 0]],
+  [{ discountMinor: 50 }, [0, -50, 0, 0, 0]],
+  [{ cogsMinor: -50 }, [0, 0, 0, 550, 0]],
+  [{ advertisingMinor: 250 }, [0, 0, 0, 0, -150]],
+] as const)("isolates literal independent factor %j", (patch, expected) => {
+  expect(amounts(request({}, { skus: [sku(patch)] }))).toEqual(expected);
+});
+it("isolates SKU mix and is invariant to either period's row ordering", () => {
+  const before = [sku(), sku({ externalSkuId: "b", grossMinor: 2000 })];
+  const after = [
+    sku({ units: 15, grossMinor: 1500 }),
+    sku({ externalSkuId: "b", units: 5, grossMinor: 1000 }),
+  ];
+  const input = request({ skus: before }, { skus: after });
+  expect(amounts(input)).toEqual([0, 0, -500, 0, 0]);
+  for (const baseline of [before, [...before].reverse()])
+    for (const current of [after, [...after].reverse()]) {
+      const result = calculate(request({ skus: baseline }, { skus: current }));
+      expect(result.components).toEqual(calculate(input).components);
+      expect(result.residualMinor).toBe(500);
+    }
+});
+it.each([-800, 800])("keeps signed economic residual %d without naming a cause", (adjustment) => {
+  const result = calculate(
+    request({}, { profitMinor: 400 + adjustment, skus: [sku({ netRevenueMinor: -100 })] }),
+  );
+  expect(result.components.map((part) => part.amountMinor)).toEqual([0, 0, 0, 0, 0]);
+  expect(result.delta.metric.value).toBe(adjustment);
+  expect(result.residualMinor).toBe(adjustment);
+});
+it.each([
+  ["HALF_AWAY_FROM_ZERO", [-1, -1, 0, 0, 0], 2],
+  ["TOWARD_ZERO", [0, 0, 0, 0, 0], 0],
+] as const)("rounds negative half ties once using %s", (rounding, expected, residual) => {
+  const input = request(
+    { skus: [sku({ units: 2, grossMinor: 1 })] },
+    { skus: [sku({ units: 1, grossMinor: 0 })] },
+  );
+  const result = calculate({ ...input, method: { ...input.method, rounding } });
+  expect(result.components.map((part) => part.amountMinor)).toEqual(expected);
+  expect(result.residualMinor).toBe(residual);
+});
+it("rounds positive half ties and retains a negative rounding residual", () => {
+  const input = request(
+    { skus: [sku({ units: 2, grossMinor: 1 })] },
+    { skus: [sku({ units: 3, grossMinor: 3 })] },
+  );
+  expect(amounts(input)).toEqual([1, 2, 0, 0, 0]);
+  expect(calculate(input).residualMinor).toBe(-3);
+});
+it("retains tiny rational unit prices without basis point intermediates", () => {
+  expect(
+    amounts(
+      request(
+        { skus: [sku({ units: 3, grossMinor: 1 })] },
+        { skus: [sku({ units: 9, grossMinor: 3 })] },
+      ),
+    ),
+  ).toEqual([2, 0, 0, 0, 0]);
+});
+it("sums exact SKU fractions before rounding", () => {
+  const before = [
+    sku({ units: 2, grossMinor: 1 }),
+    sku({ externalSkuId: "b", units: 2, grossMinor: 1 }),
+  ];
+  const after = [
+    sku({ units: 1, grossMinor: 1 }),
+    sku({ externalSkuId: "b", units: 1, grossMinor: 1 }),
+  ];
+  expect(amounts(request({ skus: before }, { skus: after }))).toEqual([-1, 1, 0, 0, 0]);
+});
+it("allows exact intermediates beyond safe integer range when final effects fit", () => {
+  const max = Number.MAX_SAFE_INTEGER;
+  expect(
+    amounts(
+      request(
+        { skus: [sku({ units: max, grossMinor: max })] },
+        { skus: [sku({ units: max, grossMinor: max })] },
+      ),
+    ),
+  ).toEqual([0, 0, 0, 0, 0]);
+  expect(
+    amounts(
+      request(
+        { skus: [sku({ units: max, grossMinor: max })] },
+        { skus: [sku({ units: 1, grossMinor: max })] },
+      ),
+    ),
+  ).toEqual([1 - max, max - 1, 0, 0, 0]);
+});
+it("identifies explicit new SKU entry without inventing a baseline price", () => {
+  const zero = sku({ externalSkuId: "b", units: 0, grossMinor: 0 });
+  const before = [sku({ units: 1, grossMinor: 100 }), zero];
+  const after = [
+    sku({ units: 1, grossMinor: 100 }),
+    sku({ externalSkuId: "b", units: 1, grossMinor: 200 }),
+  ];
+  expect(amounts(request({ skus: before }, { skus: after }))).toEqual([100, 0, 100, 0, 0]);
+  expect(
+    amounts(request({ skus: before }, { skus: [after[0]!, { ...after[1]!, grossMinor: null }] })),
+  ).toEqual([100, 0, null, 0, 0]);
+});
+it("rejects aggregate overflow even when period differences cancel", () => {
+  const rows = [sku({ units: Number.MAX_SAFE_INTEGER }), sku({ externalSkuId: "b", units: 1 })];
+  reject(request({ skus: rows }, { skus: rows }), "OVERFLOW");
+});
+it("rejects final component, profit delta and residual overflow", () => {
+  const max = Number.MAX_SAFE_INTEGER;
+  reject(
+    request(
+      { skus: [sku({ units: 1, grossMinor: max })] },
+      { skus: [sku({ units: 2, grossMinor: 0 })] },
+    ),
+    "OVERFLOW",
+  );
+  reject(request({ profitMinor: -max }, { profitMinor: max }), "OVERFLOW");
+  reject(
+    request(
+      { profitMinor: 0, skus: [sku({ grossMinor: 1 })] },
+      { profitMinor: max, skus: [sku({ grossMinor: 0 })] },
+    ),
+    "OVERFLOW",
+  );
+});
+it("retains dependency math failures and does not swallow programmer exceptions", () => {
+  const failed: ExactMinorMath = {
+    ...exactMinorMath,
+    subtract: () => ({
+      ok: false,
+      error: { code: "SOURCE_UNAVAILABLE", evidenceIds: ["math-proof"] },
+    }),
+  };
+  expect(createProfitDeltaAttribution({ math: failed }).calculate(request())).toEqual({
+    ok: false,
+    error: { code: "SOURCE_UNAVAILABLE", evidenceIds: ["math-proof"] },
+  });
+  const broken: ExactMinorMath = {
+    ...exactMinorMath,
+    add: () => {
+      throw new Error("dependency bug");
+    },
+  };
+  expect(() => createProfitDeltaAttribution({ math: broken }).calculate(request())).toThrow(
+    "dependency bug",
+  );
+});
+it("rejects a delimiter-based method order alias", () => {
+  const input = request();
+  reject(
+    {
+      ...input,
+      method: {
+        ...input.method,
+        order: ["VOLUME,PRICE_DISCOUNT", "SKU_MIX", "COGS", "ADVERTISING"],
+      },
+    },
+    "VERSION_MISMATCH",
+  );
+});
+it("matches public snapshot quality rules for known and unknown output", () => {
+  for (const input of [
+    request(),
+    request({}, { profitMinor: null }),
+    request({ quality: upstream("STALE") }),
+  ]) {
+    const result = calculate(input);
+    const source = input.current;
+    expect(
+      MetricSnapshotV1Schema.safeParse({
+        schemaVersion: 1,
+        definitionVersion: source.definitionVersion,
+        inputRevision: source.inputRevision,
+        binding: source.binding,
+        ...source.window,
+        visibleAt: source.visibleAt,
+        sourceWatermark: source.window.periodEnd,
+        computedAt: source.visibleAt,
+        subject: { kind: "STORE" },
+        metric: result.delta.metric,
+        ...result.delta.quality,
+      }).success,
+    ).toBe(true);
+  }
 });
