@@ -12,6 +12,8 @@ import {
   SignedMinorSchema,
   SourceVersionSchema,
   type MetricWindow,
+  type DataQualityIssueV1,
+  type MetricStatus,
   type ExactMinorMath,
   type MetricErrorCode,
   type MetricQuality,
@@ -228,8 +230,8 @@ function rounded(value: Fraction, mode: MinorRounding, deps: Dependencies): Metr
 function revenue(rows: readonly ProfitSkuAggregate[]): Revenue {
   return rows.reduce(
     (sum, row) => ({
-      quantity: sum.quantity + BigInt(row.units ?? 0),
-      revenue: sum.revenue + BigInt(row.grossMinor ?? 0) - BigInt(row.discountMinor ?? 0),
+      quantity: sum.quantity + BigInt(row.units!),
+      revenue: sum.revenue + BigInt(row.grossMinor!) - BigInt(row.discountMinor!),
     }),
     { quantity: 0n, revenue: 0n },
   );
@@ -239,72 +241,222 @@ function weightedCurrent(input: ProfitDeltaRequest): Fraction {
   return input.baseline.skus.reduce((sum, before) => {
     if (before.units === 0) return sum;
     const after = current.get(before.externalSkuId);
-    if (!after || !after.units) return sum;
+    if (!after || !after.units) throw new TypeError("Unvalidated current SKU price");
     return plus(
       sum,
       fraction(
-        BigInt(before.units ?? 0) *
-          (BigInt(after.grossMinor ?? 0) - BigInt(after.discountMinor ?? 0)),
+        BigInt(before.units!) * (BigInt(after.grossMinor!) - BigInt(after.discountMinor!)),
         BigInt(after.units),
       ),
     );
   }, fraction(0n));
 }
-function revenueEffects(input: ProfitDeltaRequest, deps: Dependencies): MetricResult<number[]> {
-  const before = revenue(input.baseline.skus),
-    after = revenue(input.current.skus);
-  if (before.quantity === 0n) return failure("INVALID_INPUT");
+function revenueEffect(input: ProfitDeltaRequest, kind: ProfitDeltaComponent): Fraction {
+  const quantity0 = input.baseline.skus.reduce((sum, row) => sum + BigInt(row.units!), 0n);
+  const quantity1 = input.current.skus.reduce((sum, row) => sum + BigInt(row.units!), 0n);
+  if (kind === "VOLUME")
+    return fraction((quantity1 - quantity0) * revenue(input.baseline.skus).revenue, quantity0);
   const weighted = weightedCurrent(input);
-  const counterfactual = fraction(after.quantity * weighted.n, before.quantity * weighted.d);
-  const volume = fraction((after.quantity - before.quantity) * before.revenue, before.quantity);
-  const price = plus(counterfactual, fraction(-after.quantity * before.revenue, before.quantity));
-  const mix = plus(fraction(after.revenue), fraction(-counterfactual.n, counterfactual.d));
-  const result: number[] = [];
-  for (const effect of [volume, price, mix]) {
-    const value = rounded(effect, input.method.rounding, deps);
-    if (!value.ok) return value;
-    result.push(value.value);
-  }
-  return success(result);
+  const counterfactual = fraction(quantity1 * weighted.n, quantity0 * weighted.d);
+  if (kind === "PRICE_DISCOUNT")
+    return plus(
+      counterfactual,
+      fraction(-quantity1 * revenue(input.baseline.skus).revenue, quantity0),
+    );
+  return plus(
+    fraction(revenue(input.current.skus).revenue),
+    fraction(-counterfactual.n, counterfactual.d),
+  );
 }
 function total(period: ProfitPeriodAggregate, field: "cogsMinor" | "advertisingMinor") {
-  return period.skus.reduce((sum, row) => sum + BigInt(row[field] ?? 0), 0n);
+  return period.skus.reduce((sum, row) => sum + BigInt(row[field]!), 0n);
+}
+function periods(input: ProfitDeltaRequest): readonly ProfitPeriodAggregate[] {
+  return [input.baseline, input.current];
+}
+function issue(
+  code: DataQualityIssueV1["code"],
+  field: string,
+  evidenceIds: readonly string[],
+): DataQualityIssueV1 {
+  return { code, field, evidenceIds: [...evidenceIds] };
+}
+function universeIssues(input: ProfitDeltaRequest): DataQualityIssueV1[] {
+  const before = new Set(input.baseline.skus.map((row) => row.externalSkuId));
+  const matched =
+    before.size === input.current.skus.length &&
+    input.current.skus.every((row) => before.has(row.externalSkuId));
+  return periods(input).flatMap((period) =>
+    !matched || period.quality.coverageBasisPoints < 10000
+      ? [issue("PARTIAL_COVERAGE", "skus", period.quality.evidenceIds)]
+      : [],
+  );
+}
+function missing(
+  row: ProfitSkuAggregate,
+  fields: readonly (keyof ProfitSkuAggregate)[],
+): DataQualityIssueV1[] {
+  return fields
+    .filter((field) => row[field] === null)
+    .map((field) =>
+      issue(
+        field === "cogsMinor"
+          ? "COST_MISSING"
+          : field === "advertisingMinor"
+            ? "FEE_MISSING"
+            : "PARTIAL_COVERAGE",
+        field,
+        row.evidenceIds,
+      ),
+    );
+}
+function revenueIssues(
+  input: ProfitDeltaRequest,
+  kind: ProfitDeltaComponent,
+): DataQualityIssueV1[] {
+  const result = universeIssues(input);
+  for (const period of periods(input))
+    for (const row of period.skus) {
+      result.push(...missing(row, ["units"]));
+      if (
+        (period === input.baseline && kind !== "SKU_MIX") ||
+        (period === input.current && kind !== "VOLUME")
+      )
+        result.push(...missing(row, ["grossMinor", "discountMinor"]));
+      if (row.units === 0 && ((row.grossMinor ?? 0) > 0 || (row.discountMinor ?? 0) > 0))
+        result.push(issue("SOURCE_INCONSISTENT", "units", row.evidenceIds));
+    }
+  if (
+    input.baseline.skus.every((row) => row.units !== null) &&
+    input.baseline.skus.reduce((sum, row) => sum + BigInt(row.units!), 0n) === 0n
+  )
+    result.push(issue("ZERO_DENOMINATOR", "baseline.units", input.baseline.quality.evidenceIds));
+  if (kind !== "VOLUME")
+    for (const row of input.baseline.skus) {
+      const after = input.current.skus.find(
+        (candidate) => candidate.externalSkuId === row.externalSkuId,
+      );
+      if (row.units !== null && row.units > 0 && after?.units === 0)
+        result.push(issue("ZERO_DENOMINATOR", "current.units", after.evidenceIds));
+    }
+  return result;
+}
+function componentIssues(
+  input: ProfitDeltaRequest,
+  kind: ProfitDeltaComponent,
+): DataQualityIssueV1[] {
+  if (kind !== "COGS" && kind !== "ADVERTISING") return revenueIssues(input, kind);
+  const field = kind === "COGS" ? "cogsMinor" : "advertisingMinor";
+  return periods(input).flatMap((period) =>
+    period.skus.flatMap((row) => {
+      const result = missing(row, [field]);
+      if (
+        field === "cogsMinor" &&
+        row.cogsMinor !== null &&
+        row.cogsMinor !== 0 &&
+        row.frozenCostVersions.length === 0
+      )
+        result.push(issue("COST_MISSING", field, row.evidenceIds));
+      return result;
+    }),
+  );
+}
+const precedence: readonly MetricStatus[] = [
+  "UNAVAILABLE",
+  "STALE",
+  "INSUFFICIENT",
+  "ESTIMATED",
+  "VERIFIED",
+];
+function qualityFor(
+  input: ProfitDeltaRequest,
+  extra: readonly DataQualityIssueV1[],
+): MetricQuality {
+  const sources = periods(input).map((period) => period.quality);
+  const status =
+    extra.length > 0
+      ? "UNAVAILABLE"
+      : precedence.find((candidate) => sources.some((source) => source.status === candidate))!;
+  const issues = [...sources.flatMap((source) => source.issues), ...extra];
+  const evidenceIds = [
+    ...new Set([
+      ...sources.flatMap((source) => source.evidenceIds),
+      ...periods(input).flatMap((period) => period.skus.flatMap((row) => row.evidenceIds)),
+    ]),
+  ].sort();
+  return {
+    status,
+    sampleSize: Math.min(...sources.map((source) => source.sampleSize)),
+    coverageBasisPoints: Math.min(...sources.map((source) => source.coverageBasisPoints)),
+    evidenceIds,
+    issues: structuredClone(issues),
+  };
+}
+type Component = ProfitDeltaMetrics["components"][number];
+function component(
+  input: ProfitDeltaRequest,
+  kind: ProfitDeltaComponent,
+  deps: Dependencies,
+): MetricResult<Component> {
+  const quality = qualityFor(input, componentIssues(input, kind));
+  if (quality.status === "UNAVAILABLE") return success({ kind, amountMinor: null, quality });
+  const field = kind === "COGS" ? "cogsMinor" : "advertisingMinor";
+  const amount =
+    kind === "COGS" || kind === "ADVERTISING"
+      ? checked(total(input.baseline, field) - total(input.current, field), deps)
+      : rounded(revenueEffect(input, kind), input.method.rounding, deps);
+  return amount.ok ? success({ kind, amountMinor: amount.value, quality }) : amount;
+}
+function profitDelta(
+  input: ProfitDeltaRequest,
+  deps: Dependencies,
+): MetricResult<ProfitDeltaMetrics["delta"]> {
+  const extra = periods(input)
+    .filter((period) => period.profitMinor === null)
+    .map((period) => issue("PARTIAL_COVERAGE", "profitMinor", period.quality.evidenceIds));
+  const quality = qualityFor(input, extra);
+  if (quality.status === "UNAVAILABLE")
+    return success({ metric: { kind: "PROFIT_DELTA", unit: "minorCNY", value: null }, quality });
+  const amount = deps.math.subtract(input.current.profitMinor!, input.baseline.profitMinor!);
+  return amount.ok
+    ? success({ metric: { kind: "PROFIT_DELTA", unit: "minorCNY", value: amount.value }, quality })
+    : amount;
+}
+function freeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 function calculate(
   input: ProfitDeltaRequest,
   deps: Dependencies,
 ): MetricResult<ProfitDeltaMetrics> {
-  const effects = revenueEffects(input, deps);
-  if (!effects.ok) return effects;
-  const values = [...effects.value];
-  for (const field of ["cogsMinor", "advertisingMinor"] as const) {
-    const value = checked(total(input.baseline, field) - total(input.current, field), deps);
-    if (!value.ok) return value;
-    values.push(value.value);
+  const components: Component[] = [];
+  for (const kind of order) {
+    const result = component(input, kind, deps);
+    if (!result.ok) return result;
+    components.push(result.value);
   }
-  const delta = deps.math.subtract(input.current.profitMinor ?? 0, input.baseline.profitMinor ?? 0);
+  const delta = profitDelta(input, deps);
   if (!delta.ok) return delta;
-  const residual = checked(
-    BigInt(delta.value) - values.reduce((sum, value) => sum + BigInt(value), 0n),
-    deps,
-  );
+  let residual: MetricResult<number | null> = success(null);
+  if (delta.value.metric.value !== null && components.every((part) => part.amountMinor !== null))
+    residual = checked(
+      BigInt(delta.value.metric.value) -
+        components.reduce((sum, part) => sum + BigInt(part.amountMinor!), 0n),
+      deps,
+    );
   if (!residual.ok) return residual;
-  return success({
-    methodVersion: input.method.version,
-    delta: {
-      metric: { kind: "PROFIT_DELTA", unit: "minorCNY", value: delta.value },
-      quality: copyQuality(input.current.quality),
-    },
-    components: order.map((kind: ProfitDeltaComponent, index) => ({
-      kind,
-      amountMinor: values[index]!,
-      quality: copyQuality(input.current.quality),
-    })),
-    residualMinor: residual.value,
-  });
-}
-function copyQuality(quality: MetricQuality): MetricQuality {
-  return structuredClone(quality);
+  return success(
+    freeze({
+      methodVersion: input.method.version,
+      delta: delta.value,
+      components,
+      residualMinor: residual.value,
+    }),
+  );
 }
 export function createProfitDeltaAttribution(deps: Dependencies): ProfitDeltaAttributionV1 {
   return Object.freeze({

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import type {
+  MetricQuality,
   ProfitDeltaMetrics,
   ProfitDeltaRequest,
   ProfitPeriodAggregate,
@@ -214,4 +215,134 @@ it("rejects submillisecond instants without interpreting evidence IDs as time", 
 });
 it("rejects duplicate SKU IDs", () => {
   reject(request({}, { skus: [sku(), sku()] }), "CONFLICT");
+});
+
+function quality(patch: Partial<MetricQuality> = {}): MetricQuality {
+  return { ...period(false).quality, ...patch };
+}
+function upstream(status: MetricQuality["status"]): MetricQuality {
+  return quality({
+    status,
+    issues: [{ code: "STALE_SOURCE", field: "source", evidenceIds: ["period-proof"] }],
+  });
+}
+it.each([
+  ["units", [null, null, null, 0, 0]],
+  ["grossMinor", [0, null, null, 0, 0]],
+  ["discountMinor", [0, null, null, 0, 0]],
+  ["cogsMinor", [0, 0, 0, null, 0]],
+  ["advertisingMinor", [0, 0, 0, 0, null]],
+] as const)("retains independent components when current %s is unknown", (field, expected) => {
+  const input = request({}, { skus: [sku({ [field]: null })] });
+  expect(amounts(input)).toEqual(expected);
+  expect(calculate(input).delta.metric.value).toBe(0);
+  expect(calculate(input).residualMinor).toBeNull();
+});
+it("does not need baseline revenue for current SKU mix", () => {
+  expect(amounts(request({ skus: [sku({ grossMinor: null })] }))).toEqual([null, null, 0, 0, 0]);
+});
+it("keeps known components when profit itself is unknown", () => {
+  const result = calculate(request({}, { profitMinor: null }));
+  expect(result.delta.metric.value).toBeNull();
+  expect(result.delta.quality.status).toBe("UNAVAILABLE");
+  expect(result.delta.quality.issues.length).toBeGreaterThan(0);
+  expect(result.components.map((component) => component.amountMinor)).toEqual([0, 0, 0, 0, 0]);
+  expect(result.residualMinor).toBeNull();
+});
+it("requires real frozen cost references for nonzero COGS", () => {
+  const result = calculate(request({}, { skus: [sku({ frozenCostVersions: [] })] }));
+  expect(result.components[3]?.amountMinor).toBeNull();
+  expect(result.components[3]?.quality.issues).toContainEqual({
+    code: "COST_MISSING",
+    field: "cogsMinor",
+    evidenceIds: ["sku-proof"],
+  });
+  expect(amounts(request({}, { skus: [sku({ cogsMinor: 0, frozenCostVersions: [] })] }))[3]).toBe(
+    500,
+  );
+});
+it("accepts distinct immutable cost source references under one policy", () => {
+  const result = calculate(
+    request(
+      {},
+      {
+        skus: [
+          sku({
+            cogsMinor: 600,
+            frozenCostVersions: ["source-revision-2"],
+            evidenceIds: ["cost-proof-2"],
+          }),
+        ],
+      },
+    ),
+  );
+  expect(result.components[3]?.amountMinor).toBe(-100);
+  expect(result.components[3]?.quality.evidenceIds).toContain("cost-proof-2");
+  expect(result.components[3]?.quality.evidenceIds).not.toContain("source-revision-2");
+});
+it.each(["UNAVAILABLE", "STALE", "INSUFFICIENT", "ESTIMATED"] as const)(
+  "preserves upstream %s quality and evidence",
+  (status) => {
+    const result = calculate(request({ quality: upstream(status) }));
+    for (const component of result.components) {
+      expect(component.quality.status).toBe(status);
+      expect(component.quality.issues).toContainEqual(upstream(status).issues[0]);
+      expect(component.amountMinor).toBe(status === "UNAVAILABLE" ? null : 0);
+    }
+    expect(result.delta.quality.status).toBe(status);
+  },
+);
+it("rejects orphan quality issues and invalid status/coverage metadata", () => {
+  const bad = upstream("STALE");
+  reject(request({}, { quality: { ...bad, evidenceIds: ["unrelated"] } }), "INVALID_INPUT");
+  reject(request({}, { quality: quality({ coverageBasisPoints: 9999 }) }), "INVALID_INPUT");
+  reject(request({}, { quality: quality({ status: "STALE" }) }), "INVALID_INPUT");
+});
+it("blocks full revenue decomposition for partial enumeration while retaining cost/ad", () => {
+  const partial = quality({
+    status: "INSUFFICIENT",
+    coverageBasisPoints: 5000,
+    issues: [{ code: "PARTIAL_COVERAGE", field: "skus", evidenceIds: ["period-proof"] }],
+  });
+  expect(amounts(request({}, { quality: partial }))).toEqual([null, null, null, 0, 0]);
+  expect(amounts(request({}, { skus: [sku({ externalSkuId: "other" })] }))).toEqual([
+    null,
+    null,
+    null,
+    0,
+    0,
+  ]);
+});
+it("handles absent baseline volume and explicit current exit without guessed prices", () => {
+  const empty = sku({
+    units: 0,
+    grossMinor: 0,
+    discountMinor: 0,
+    cogsMinor: 0,
+    advertisingMinor: 0,
+  });
+  expect(amounts(request({ skus: [empty] }))).toEqual([null, null, null, -500, -100]);
+  expect(amounts(request({}, { skus: [empty] }))).toEqual([-1000, null, null, 500, 100]);
+  expect(amounts(request({ skus: [] }, { skus: [] }))).toEqual([null, null, null, 0, 0]);
+});
+it("does not fabricate a price for inconsistent zero-unit revenue", () => {
+  const result = calculate(request({}, { skus: [sku({ units: 0 })] }));
+  expect(result.components.slice(0, 3).map((component) => component.amountMinor)).toEqual([
+    null,
+    null,
+    null,
+  ]);
+  expect(
+    result.components[0]?.quality.issues.some((issue) => issue.code === "SOURCE_INCONSISTENT"),
+  ).toBe(true);
+});
+it("returns deeply frozen independent copies without freezing caller data", () => {
+  const input = request({ quality: upstream("STALE") });
+  const before = structuredClone(input),
+    result = calculate(input);
+  expect(Object.isFrozen(result)).toBe(true);
+  expect(Object.isFrozen(result.components[0]?.quality.issues[0]?.evidenceIds)).toBe(true);
+  expect(Object.isFrozen(result.delta.metric)).toBe(true);
+  expect(Object.isFrozen(input.baseline.quality.issues[0]?.evidenceIds)).toBe(false);
+  expect(input).toEqual(before);
 });
