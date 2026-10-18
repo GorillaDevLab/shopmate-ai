@@ -545,3 +545,74 @@ it("freezes copied failure evidence without freezing dependency-owned objects", 
   expect(Object.isFrozen(error.evidenceIds)).toBe(false);
   expect(result.error).not.toBe(error);
 });
+it("retains known cost/ad deltas with conservative unmatched-universe quality", () => {
+  const before = quality({ evidenceIds: ["baseline-enumeration"] });
+  const after = quality({ evidenceIds: ["current-enumeration"] });
+  const result = calculate(
+    request(
+      { quality: before },
+      {
+        quality: after,
+        profitMinor: 500,
+        skus: [sku({ externalSkuId: "other", cogsMinor: 600, advertisingMinor: 120 })],
+      },
+    ),
+  );
+  expect(result.components.slice(3).map((part) => part.amountMinor)).toEqual([-100, -20]);
+  for (const part of result.components.slice(3)) {
+    expect(part.quality.status).toBe("ESTIMATED");
+    expect(part.quality.coverageBasisPoints).toBe(0);
+    for (const evidenceId of ["baseline-enumeration", "current-enumeration"]) {
+      expect(part.quality.issues).toContainEqual({
+        code: "PARTIAL_COVERAGE",
+        field: "skus",
+        evidenceIds: [evidenceId],
+      });
+      expect(part.quality.evidenceIds).toContain(evidenceId);
+    }
+  }
+  expect(result.delta.metric.value).toBe(100);
+  expect(result.delta.quality.status).toBe("VERIFIED");
+  expect(result.delta.quality.coverageBasisPoints).toBe(10000);
+  expect(result.residualMinor).toBeNull();
+});
+it.each([
+  ["cogsMinor", [null, -20]],
+  ["advertisingMinor", [-100, null]],
+] as const)("unmatched enumeration does not fill missing %s", (field, expected) => {
+  const result = calculate(
+    request(
+      {},
+      {
+        skus: [
+          sku({ externalSkuId: "other", cogsMinor: 600, advertisingMinor: 120, [field]: null }),
+        ],
+      },
+    ),
+  );
+  expect(result.components.slice(3).map((part) => part.amountMinor)).toEqual(expected);
+  const unavailable = result.components[field === "cogsMinor" ? 3 : 4]!;
+  expect(unavailable.quality.status).toBe("UNAVAILABLE");
+  expect(unavailable.quality.coverageBasisPoints).toBe(0);
+  expect(unavailable.quality.issues.some((item) => item.field === field)).toBe(true);
+});
+it.each(["UNAVAILABLE", "STALE", "INSUFFICIENT", "ESTIMATED"] as const)(
+  "unmatched enumeration preserves stronger upstream %s quality",
+  (status) => {
+    const result = calculate(
+      request(
+        { quality: upstream(status) },
+        { skus: [sku({ externalSkuId: "other", cogsMinor: 600, advertisingMinor: 120 })] },
+      ),
+    );
+    expect(result.components.slice(3).map((part) => part.amountMinor)).toEqual(
+      status === "UNAVAILABLE" ? [null, null] : [-100, -20],
+    );
+    for (const part of result.components.slice(3)) {
+      expect(part.quality.status).toBe(status);
+      expect(part.quality.coverageBasisPoints).toBe(0);
+      expect(part.quality.issues).toContainEqual(upstream(status).issues[0]);
+      expect(part.quality.issues.some((item) => item.code === "PARTIAL_COVERAGE")).toBe(true);
+    }
+  },
+);

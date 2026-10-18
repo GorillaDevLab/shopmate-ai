@@ -282,11 +282,15 @@ function issue(
 ): DataQualityIssueV1 {
   return { code, field, evidenceIds: [...evidenceIds] };
 }
-function universeIssues(input: ProfitDeltaRequest): DataQualityIssueV1[] {
+function matchedUniverse(input: ProfitDeltaRequest): boolean {
   const before = new Set(input.baseline.skus.map((row) => row.externalSkuId));
-  const matched =
+  return (
     before.size === input.current.skus.length &&
-    input.current.skus.every((row) => before.has(row.externalSkuId));
+    input.current.skus.every((row) => before.has(row.externalSkuId))
+  );
+}
+function universeIssues(input: ProfitDeltaRequest): DataQualityIssueV1[] {
+  const matched = matchedUniverse(input);
   return periods(input).flatMap((period) =>
     !matched || period.quality.coverageBasisPoints < 10000
       ? [issue("PARTIAL_COVERAGE", "skus", period.quality.evidenceIds)]
@@ -400,12 +404,23 @@ function qualityFor(
   };
 }
 type Component = ProfitDeltaMetrics["components"][number];
+function componentQuality(input: ProfitDeltaRequest, kind: ProfitDeltaComponent): MetricQuality {
+  const quality = qualityFor(input, componentIssues(input, kind));
+  if ((kind !== "COGS" && kind !== "ADVERTISING") || matchedUniverse(input)) return quality;
+  // Observed totals remain useful, but no lower bound proves the unmatched universe's coverage.
+  return {
+    ...quality,
+    status: quality.status === "VERIFIED" ? "ESTIMATED" : quality.status,
+    coverageBasisPoints: 0,
+    issues: [...quality.issues, ...universeIssues(input)],
+  };
+}
 function component(
   input: ProfitDeltaRequest,
   kind: ProfitDeltaComponent,
   deps: Dependencies,
 ): MetricResult<Component> {
-  const quality = qualityFor(input, componentIssues(input, kind));
+  const quality = componentQuality(input, kind);
   if (quality.status === "UNAVAILABLE") return success({ kind, amountMinor: null, quality });
   const field = kind === "COGS" ? "cogsMinor" : "advertisingMinor";
   const amount =

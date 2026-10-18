@@ -139,7 +139,13 @@ Every upstream issue and its evidence is preserved. Quality precedence is
 `UNAVAILABLE` is a hard null floor. Stale, insufficient and estimated source
 quality remain explicit on known effects. Partial source coverage prevents a
 complete revenue decomposition; known cost/ad totals retain the degraded source
-quality. Every null output measure/component has an explicit issue and real
+quality. When SKU sets are unmatched, their observed cost/ad deltas stay numeric
+if their own fields are known, but their quality is at least `ESTIMATED` with
+`PARTIAL_COVERAGE` and supplied period evidence. Their coverage is zero because
+the port provides no defensible lower bound for the unenumerated universe.
+Stronger upstream quality states and missing-field unavailability still apply;
+an independently supplied profit delta keeps its own source quality. Every null
+output measure/component has an explicit issue and real
 supplied evidence. Issue evidence must belong to its enclosing quality evidence.
 Returned values are deeply frozen copies, without mutating or freezing input.
 
