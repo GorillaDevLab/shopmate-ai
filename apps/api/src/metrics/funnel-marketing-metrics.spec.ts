@@ -6,6 +6,8 @@ import {
   type MetricInputV1,
   type MetricResult,
   type MetricSubject,
+  type MinorRounding,
+  type ExactMinorMath,
 } from "@shopmate/contracts";
 import { exactMinorMath } from "./exact-math.js";
 import { createFunnelMarketingCalculator } from "./funnel-marketing-metrics.js";
@@ -275,4 +277,307 @@ it("accepts equal timestamp instants while retaining source timestamp spellings"
   expect(result.conversion.measure.metric.value).toBe(1000);
   expect(result.conversion.numeratorCoverage?.periodStart).toBe(row.data.periodStart);
   expect(result.conversion.measure.quality.status).toBe("ESTIMATED");
+});
+
+function unknownCampaign(
+  field: "clicks" | "impressions" | "attributedOrders" | "spendMinor" | "attributedRevenueMinor",
+) {
+  const row = measuredCampaign();
+  return {
+    ...row,
+    data: {
+      ...row.data,
+      [field]: null,
+      source: {
+        ...row.data.source,
+        quality: { state: "PARTIAL" as const, issues: ["MARKETING_UNKNOWN" as const] },
+      },
+    },
+  };
+}
+it.each(["clicks", "impressions", "attributedOrders"] as const)(
+  "retains known ROAS with unknown %s",
+  (field) => {
+    const result = run(input({ campaignFacts: [unknownCampaign(field)] }));
+    expect(result.roas.measure.metric.value).toBe(30000);
+    expect(result.roas.measure.quality.status).toBe("ESTIMATED");
+    expect(result.roas.measure.quality.issues.length).toBeGreaterThan(0);
+  },
+);
+it.each(["spendMinor", "attributedRevenueMinor"] as const)(
+  "cannot treat missing %s as a known subtotal",
+  (field) => {
+    const result = run(input({ campaignFacts: [unknownCampaign(field)] }));
+    expect(result.roas.measure.metric.value).toBeNull();
+    expect(result.conversion.measure.metric.value).toBe(1000);
+  },
+);
+it.each(["paidOrders", "cart", "checkout"] as const)("isolates unknown traffic %s", (field) => {
+  const result = run(input({ traffic: [traffic({ [field]: null })] }));
+  const values = [result.conversion, result.cart, result.checkout].map(
+    (row) => row.measure.metric.value,
+  );
+  expect(values.filter((n) => n === null)).toHaveLength(1);
+});
+it("keeps all rates unavailable when visitor count is unknown", () => {
+  const result = run(input({ traffic: [traffic({ visitors: null })] }));
+  expect(result.conversion.numerator).toBe(100);
+  expect(result.conversion.denominator).toBeNull();
+  expect(result.cart.measure.metric.value).toBeNull();
+});
+it.each([{ cart: 1100 }, { checkout: 400 }, { paidOrders: 201 }, { cart: null, checkout: 1100 }])(
+  "does not clamp inconsistent funnel counts %#",
+  (patch) => {
+    const result = run(input({ traffic: [traffic(patch)] }));
+    for (const row of [result.conversion, result.cart, result.checkout]) {
+      expect(row.measure.metric.value).toBeNull();
+      expect(row.measure.quality.issues).toContainEqual(
+        expect.objectContaining({ code: "SOURCE_INCONSISTENT" }),
+      );
+    }
+  },
+);
+it("preserves actual numeric zero numerators", () => {
+  const row = measuredCampaign();
+  const result = run(
+    input({
+      traffic: [traffic({ paidOrders: 0 })],
+      campaignFacts: [{ ...row, data: { ...row.data, attributedRevenueMinor: 0 } }],
+    }),
+  );
+  expect(result.conversion.measure.metric.value).toBe(0);
+  expect(result.roas.measure.metric.value).toBe(0);
+});
+it("takes every matching completeness proof including one missing its required domain", () => {
+  const proof = input().metricCoverage[0]!;
+  const result = run(
+    input({
+      metricCoverage: [
+        ...input().metricCoverage,
+        { ...proof, collections: ["paymentFacts"], coverageBasisPoints: 10000 },
+      ],
+    }),
+  );
+  expect(result.conversion.coverageBasisPoints).toBe(0);
+  expect(result.conversion.measure.quality.status).toBe("ESTIMATED");
+  expect(result.cart.measure.quality.status).toBe("VERIFIED");
+});
+it("cannot manufacture measured provenance from completeness proofs on empty sources", () => {
+  const result = run(input({ traffic: [], campaignFacts: [] }));
+  for (const row of Object.values(result)) {
+    expect(row.measure.metric.value).toBeNull();
+    expect(row.numeratorCoverage).toBeNull();
+    expect(row.coverageBasisPoints).toBe(0);
+  }
+});
+it("limits completeness to measured traffic coverage", () => {
+  const result = run(input({ traffic: [traffic({ coverageBasisPoints: 6000 })] }));
+  expect(result.conversion.coverageBasisPoints).toBe(6000);
+  expect(result.conversion.measure.quality.status).toBe("ESTIMATED");
+});
+it("retains all proof evidence and the minimum proof coverage", () => {
+  const proof = input().metricCoverage[0]!;
+  const result = run(
+    input({
+      metricCoverage: [
+        ...input().metricCoverage,
+        { ...proof, evidenceIds: ["campaign"], coverageBasisPoints: 2000 },
+      ],
+    }),
+  );
+  expect(result.conversion.coverageBasisPoints).toBe(2000);
+  expect(result.conversion.measure.quality.evidenceIds).toContain("campaign");
+});
+it.each(["ESTIMATED", "INSUFFICIENT", "STALE"] as const)(
+  "retains upstream %s quality",
+  (status) => {
+    for (const row of Object.values(run(input({ status })))) {
+      expect(row.measure.quality.status).toBe(status);
+      expect(row.measure.quality.issues.length).toBeGreaterThan(0);
+    }
+  },
+);
+it("marks a watermark before the measured end stale", () => {
+  const sourceWatermark = "2026-10-10T03:00:00Z";
+  const raw = input({
+    sourceWatermark,
+    metricCoverage: input().metricCoverage.map((row) => ({ ...row, sourceWatermark })),
+  });
+  expect(run(raw).conversion.measure.quality.status).toBe("STALE");
+});
+it("retains public source issues without erasing independently known ROAS", () => {
+  const row = measuredCampaign(),
+    source = {
+      ...row.data.source,
+      updatedAt: null,
+      quality: { state: "PARTIAL" as const, issues: ["SOURCE_TIME_MISSING" as const] },
+    };
+  const result = run(input({ campaignFacts: [{ ...row, data: { ...row.data, source } }] }));
+  expect(result.roas.measure.metric.value).toBe(30000);
+  expect(result.roas.measure.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "SOURCE_TIME_MISSING" }),
+  );
+});
+it("degrades selected-campaign ROAS when the global public VERIFIED prerequisite fails", () => {
+  const row = measuredCampaign(),
+    other = {
+      ...unknownCampaign("spendMinor"),
+      data: { ...unknownCampaign("spendMinor").data, externalCampaignId: "other" },
+    };
+  const subject = { kind: "CAMPAIGN", externalCampaignId: "ad" } as const;
+  const result = run(
+    input({ campaignFacts: [row, other], metricCoverage: campaignProofs(subject) }),
+    subject,
+  );
+  expect(result.roas.measure.metric.value).toBe(30000);
+  expect(result.roas.measure.quality.status).toBe("ESTIMATED");
+});
+function rejected(raw: unknown, subject: unknown = store) {
+  const result = calculator.calculate(raw as MetricInputV1, subject as MetricSubject);
+  expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+}
+it.each([null, {}, { ...input(), extra: true }, { ...input(), visibleAt: "bad" }])(
+  "rejects malformed input %#",
+  (raw) => rejected(raw),
+);
+it.each([null, {}, { kind: "STORE", externalSkuId: "sku" }, { kind: "SKU", externalSkuId: " " }])(
+  "validates even unsupported subjects %#",
+  (subject) => rejected(input(), subject),
+);
+it.each([-1, 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+  "rejects unsafe traffic counts %s",
+  (visitors) => rejected(input({ traffic: [traffic({ visitors })] })),
+);
+it("rejects future and cross-binding facts", () => {
+  rejected(input({ traffic: [{ ...traffic(), observedAt: "2026-10-10T05:00:00Z" }] }));
+  rejected(input({ traffic: [{ ...traffic(), binding: { ...binding, storeId: "other" } }] }));
+});
+it.each(["periodStart", "periodEnd", "visibleAt", "sourceWatermark"] as const)(
+  "rejects submillisecond context %s",
+  (key) => {
+    const raw = input();
+    rejected({ ...raw, [key]: raw[key]!.replace("Z", ".0001Z"), metricCoverage: [] });
+  },
+);
+it("rejects submillisecond traffic, campaign source, and coverage timestamps", () => {
+  rejected(input({ traffic: [traffic({ periodStart: "2026-10-10T00:00:00.0001Z" })] }));
+  const row = measuredCampaign();
+  rejected(
+    input({
+      campaignFacts: [
+        {
+          ...row,
+          data: {
+            ...row.data,
+            source: { ...row.data.source, updatedAt: "2026-10-10T04:00:00.0001Z" },
+          },
+        },
+      ],
+    }),
+  );
+  rejected(
+    input({
+      campaignFacts: [
+        {
+          ...row,
+          measuredCoverage: { ...row.measuredCoverage!, periodStart: "2026-10-10T00:00:00.0001Z" },
+        },
+      ],
+    }),
+  );
+});
+it.each([
+  null,
+  {},
+  { math: exactMinorMath, rounding: "bad" },
+  { math: {}, rounding: "TOWARD_ZERO" },
+])("rejects invalid runtime dependencies %#", (dependencies) => {
+  const calc = createFunnelMarketingCalculator(
+    dependencies as { math: ExactMinorMath; rounding: MinorRounding },
+  );
+  expect(calc.calculate(input(), store)).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
+it("propagates checked arithmetic failures with source evidence", () => {
+  const math = {
+    ...exactMinorMath,
+    ratio: () => ({
+      ok: false as const,
+      error: { code: "OVERFLOW" as const, evidenceIds: ["dependency"] },
+    }),
+  };
+  const calc = createFunnelMarketingCalculator({ math, rounding: "TOWARD_ZERO" });
+  expect(calc.calculate(input(), store)).toMatchObject({
+    ok: false,
+    error: { code: "OVERFLOW", evidenceIds: expect.arrayContaining(["dependency"]) },
+  });
+});
+it("propagates unexpected dependency programmer errors", () => {
+  const calc = createFunnelMarketingCalculator({
+    math: {
+      ...exactMinorMath,
+      ratio: () => {
+        throw new Error("programmer");
+      },
+    },
+    rounding: "TOWARD_ZERO",
+  });
+  expect(() => calc.calculate(input(), store)).toThrow("programmer");
+});
+it("rejects a genuine checked count sum overflow", () => {
+  const half = "2026-10-10T02:00:00Z",
+    huge = { visitors: Number.MAX_SAFE_INTEGER, cart: 0, checkout: 0, paidOrders: 0 };
+  expect(
+    calculator.calculate(
+      input({
+        traffic: [traffic({ ...huge, periodEnd: half }), traffic({ ...huge, periodStart: half })],
+      }),
+      store,
+    ),
+  ).toMatchObject({ ok: false, error: { code: "OVERFLOW" } });
+});
+it.each([
+  ["HALF_AWAY_FROM_ZERO", 1],
+  ["TOWARD_ZERO", 0],
+] as const)("rounds once using %s", (rounding, expected) => {
+  const calc = createFunnelMarketingCalculator({ math: exactMinorMath, rounding });
+  const result = value(
+    calc.calculate(
+      input({ traffic: [traffic({ visitors: 20000, cart: 1, checkout: 1, paidOrders: 1 })] }),
+      store,
+    ),
+  );
+  expect(result.conversion.measure.metric.value).toBe(expected);
+});
+it("returns deeply frozen independent copies and deterministic replay", () => {
+  const raw = input(),
+    before = JSON.stringify(raw),
+    result = run(raw);
+  expect(run(raw)).toEqual(result);
+  expect(JSON.stringify(raw)).toBe(before);
+  expect(Object.isFrozen(raw)).toBe(false);
+  expect(Object.isFrozen(raw.binding)).toBe(false);
+  expect(Object.isFrozen(result.conversion.numeratorCoverage?.binding)).toBe(true);
+  expect(Object.isFrozen(result.conversion.measure.quality.issues)).toBe(true);
+  expect(result.conversion.numeratorCoverage?.binding).not.toBe(raw.binding);
+});
+it("passes both public output boundaries with exact original context", () => {
+  const raw = input();
+  for (const row of Object.values(run(raw))) {
+    expect(MetricRatioEvidenceSchema.safeParse(row).success).toBe(true);
+    expect(
+      MetricComputationV1Schema.safeParse({
+        input: raw,
+        snapshot: {
+          ...context(),
+          ...row.measure.quality,
+          metric: row.measure.metric,
+          subject: store,
+          computedAt: now,
+        },
+      }).success,
+    ).toBe(true);
+  }
 });

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   MetricComputationV1Schema,
   MetricInputV1Schema,
@@ -33,6 +34,24 @@ type Side = Readonly<{
 }>;
 type Frame = Readonly<{ input: MetricInputV1; subject: MetricSubject; deps: Dependencies }>;
 const precedence = ["UNAVAILABLE", "STALE", "INSUFFICIENT", "ESTIMATED", "VERIFIED"] as const;
+const dependencySchema = z.strictObject({
+  math: z.custom<ExactMinorMath>(
+    (value) =>
+      value !== null &&
+      typeof value === "object" &&
+      ["add", "subtract", "multiply", "ratio", "allocate"].every(
+        (key) => typeof Reflect.get(value, key) === "function",
+      ),
+  ),
+  rounding: z.enum(["HALF_AWAY_FROM_ZERO", "TOWARD_ZERO"]),
+});
+function precise(value: unknown): boolean {
+  if (typeof value === "string" && /^\d{4}-\d\d-\d\dT/.test(value)) {
+    const fraction = /\.(\d+)/.exec(value)?.[1] ?? "";
+    return !/[1-9]/.test(fraction.slice(3));
+  }
+  return value === null || typeof value !== "object" || Object.values(value).every(precise);
+}
 function ids(...groups: readonly (readonly string[])[]): string[] {
   return [...new Set(groups.flat())];
 }
@@ -112,10 +131,10 @@ function trafficRow(row: MetricTraffic, field: "paidOrders" | "cart" | "checkout
   const data = row.data!;
   const { binding, observedAt, sourceVersion, evidenceIds } = row;
   return {
-    numerator: data[field],
-    denominator: data.visitors,
+    numerator: inconsistent(data) ? null : data[field],
+    denominator: inconsistent(data) ? null : data.visitors,
     evidenceIds,
-    issues: [],
+    issues: inconsistent(data) ? [issue("SOURCE_INCONSISTENT", "traffic.funnel", evidenceIds)] : [],
     coverageBasisPoints: data.coverageBasisPoints,
     coverage: {
       binding,
@@ -126,6 +145,12 @@ function trafficRow(row: MetricTraffic, field: "paidOrders" | "cart" | "checkout
       coverageBasisPoints: data.coverageBasisPoints,
     },
   };
+}
+function inconsistent(data: NonNullable<MetricTraffic["data"]>): boolean {
+  const counts = [data.visitors, data.cart, data.checkout, data.paidOrders].filter(
+    (n): n is number => n !== null,
+  );
+  return counts.some((n, i) => i > 0 && n > counts[i - 1]!);
 }
 function overlaps(a: MetricWindow, b: MetricWindow): boolean {
   return (
@@ -243,8 +268,16 @@ function campaignSide(frame: Frame): Side {
     (row) =>
       subject.kind !== "CAMPAIGN" || row.data.externalCampaignId === subject.externalCampaignId,
   );
-  if (!rows?.length || rows.some((row) => row.measuredCoverage === null))
-    return missing(frame, "ATTRIBUTION_MISSING", "campaignFacts.measuredCoverage");
+  if (!rows?.length) return missing(frame, "ATTRIBUTION_MISSING", "campaignFacts.measuredCoverage");
+  if (rows.some((row) => row.measuredCoverage === null))
+    return {
+      ...missing(frame, "ATTRIBUTION_MISSING", "campaignFacts.measuredCoverage"),
+      evidenceIds: ids(...rows.map((row) => row.evidenceIds)),
+      issues: rows.flatMap((row) => [
+        issue("ATTRIBUTION_MISSING", "campaignFacts.measuredCoverage", row.evidenceIds),
+        ...campaignIssues(row),
+      ]),
+    };
   if (!matchingCohorts(rows))
     return windowMissing(
       frame,
@@ -254,14 +287,42 @@ function campaignSide(frame: Frame): Side {
   return combine(frame, rows.map(campaignRow));
 }
 function campaignRow(row: MetricCampaignFact): Side {
+  const bad = row.data.source.quality.issues.includes("SOURCE_INCONSISTENT");
   return {
-    numerator: row.data.attributedRevenueMinor,
-    denominator: row.data.spendMinor,
+    numerator: bad ? null : row.data.attributedRevenueMinor,
+    denominator: bad ? null : row.data.spendMinor,
     coverage: row.measuredCoverage,
     coverageBasisPoints: row.measuredCoverage!.coverageBasisPoints,
     evidenceIds: row.evidenceIds,
-    issues: [],
+    issues: campaignIssues(row),
   };
+}
+function campaignIssues(row: MetricCampaignFact): DataQualityIssueV1[] {
+  return row.data.source.quality.issues.map((code) =>
+    issue(
+      code === "SOURCE_INCONSISTENT" || code === "SOURCE_TIME_MISSING"
+        ? code
+        : "ATTRIBUTION_MISSING",
+      `campaignFacts.source.${code}`,
+      row.evidenceIds,
+    ),
+  );
+}
+function globalCampaignsKnown(frame: Frame): boolean {
+  return (frame.input.campaignFacts ?? []).every((row) => {
+    const dayStart = Date.parse(`${row.data.date}T00:00:00+08:00`),
+      measured = row.measuredCoverage;
+    return (
+      measured !== null &&
+      measured.coverageBasisPoints === 10000 &&
+      Date.parse(measured.periodStart) ===
+        Math.max(dayStart, Date.parse(frame.input.periodStart)) &&
+      Date.parse(measured.periodEnd) ===
+        Math.min(dayStart + 86400000, Date.parse(frame.input.periodEnd)) &&
+      row.data.spendMinor !== null &&
+      row.data.attributedRevenueMinor !== null
+    );
+  });
 }
 function matchingCohorts(rows: readonly MetricCampaignFact[]): boolean {
   const byDate = new Map<string, MetricMeasuredCoverage>();
@@ -313,6 +374,40 @@ function proofCoverage(frame: Frame, kind: Kind): number {
       : [0]),
   );
 }
+function qualityIssues(
+  frame: Frame,
+  kind: Kind,
+  side: Side,
+  extra: readonly DataQualityIssueV1[],
+): DataQualityIssueV1[] {
+  const result = [...side.issues, ...extra],
+    input = frame.input;
+  if (Math.min(side.coverageBasisPoints, proofCoverage(frame, kind)) < 10000)
+    result.push(issue("PARTIAL_COVERAGE", "metricCoverage", side.evidenceIds));
+  if (input.status !== "VERIFIED")
+    result.push(issue("PARTIAL_COVERAGE", "input.status", input.evidenceIds));
+  if (
+    input.sourceWatermark !== null &&
+    Date.parse(input.sourceWatermark) < Date.parse(input.periodEnd)
+  )
+    result.push(issue("STALE_SOURCE", "sourceWatermark", input.evidenceIds));
+  if (kind === "ROAS" && !globalCampaignsKnown(frame))
+    result.push(
+      issue(
+        "PARTIAL_COVERAGE",
+        "campaignFacts.global-verified-prerequisite",
+        ids(input.evidenceIds, ...(input.campaignFacts ?? []).map((row) => row.evidenceIds)),
+      ),
+    );
+  return result;
+}
+function proofEvidence(frame: Frame, kind: Kind): string[] {
+  return ids(
+    ...frame.input.metricCoverage
+      .filter((row) => row.kind === kind && sameSubject(row.subject, frame.subject))
+      .map((row) => row.evidenceIds),
+  );
+}
 function quality(
   frame: Frame,
   kind: Kind,
@@ -321,13 +416,10 @@ function quality(
   extra: DataQualityIssueV1[],
 ) {
   const coverageBasisPoints = Math.min(side.coverageBasisPoints, proofCoverage(frame, kind));
-  const issues = [...side.issues, ...extra];
-  if (coverageBasisPoints < 10000)
-    issues.push(issue("PARTIAL_COVERAGE", "metricCoverage", side.evidenceIds));
-  if (frame.input.status !== "VERIFIED")
-    issues.push(issue("PARTIAL_COVERAGE", "input.status", frame.input.evidenceIds));
+  const issues = qualityIssues(frame, kind, side, extra);
   const statuses: MetricStatus[] = [frame.input.status, issues.length ? "ESTIMATED" : "VERIFIED"];
   if (value === null) statuses.push("UNAVAILABLE");
+  if (issues.some((row) => row.code === "STALE_SOURCE")) statuses.push("STALE");
   return {
     status: precedence.find((status) => statuses.includes(status))!,
     sampleSize: side.denominator ?? 0,
@@ -335,6 +427,7 @@ function quality(
     evidenceIds: ids(
       frame.input.evidenceIds,
       side.evidenceIds,
+      proofEvidence(frame, kind),
       ...(kind === "ROAS" ? (frame.input.campaignFacts ?? []).map((row) => row.evidenceIds) : []),
       ...issues.map((row) => row.evidenceIds),
     ),
@@ -391,7 +484,12 @@ function calculate(
 ): MetricResult<FunnelMarketingMetrics> {
   const parsed = MetricInputV1Schema.safeParse(input),
     scope = MetricSubjectSchema.safeParse(subject);
-  if (!parsed.success || !scope.success)
+  if (
+    !parsed.success ||
+    !scope.success ||
+    !dependencySchema.safeParse(deps).success ||
+    !precise(input)
+  )
     return freeze({ ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] } });
   const frame = { input: parsed.data, subject: scope.data, deps };
   try {
