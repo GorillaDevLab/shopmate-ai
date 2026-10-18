@@ -161,3 +161,118 @@ it("does not infer attribution from a campaign date", () => {
   expect(result.roas.measure.quality.status).toBe("UNAVAILABLE");
   expect(result.conversion.measure.metric.value).toBe(1000);
 });
+
+function campaignProofs(subject: MetricSubject) {
+  return input().metricCoverage.map((row) => ({ ...row, subject }));
+}
+it("selects campaign ROAS without relabeling store traffic", () => {
+  const row = measuredCampaign(),
+    subject = { kind: "CAMPAIGN", externalCampaignId: "other" } as const;
+  const other = {
+    ...row,
+    evidenceIds: ["other"],
+    data: { ...row.data, externalCampaignId: "other", spendMinor: 5000 },
+    measuredCoverage: { ...row.measuredCoverage!, evidenceIds: ["other"] },
+  };
+  const result = run(
+    input({ campaignFacts: [row, other], metricCoverage: campaignProofs(subject) }),
+    subject,
+  );
+  expect(result.roas.measure.metric.value).toBe(60000);
+  expect(result.conversion.measure.metric.value).toBeNull();
+});
+it("treats an unmatched campaign as missing scope", () => {
+  expect(
+    run(input(), { kind: "CAMPAIGN", externalCampaignId: "absent" }).roas.measure.metric.value,
+  ).toBeNull();
+});
+it("returns explicit unavailable leaves for SKU scope", () => {
+  for (const leaf of Object.values(run(input(), { kind: "SKU", externalSkuId: "sku" }))) {
+    expect(leaf.measure.metric.value).toBeNull();
+    expect(leaf.measure.quality.issues.length).toBeGreaterThan(0);
+  }
+});
+it.each([null, [], [fact(null)]])("keeps missing and empty traffic unmeasured %#", (rows) => {
+  const result = run(input({ traffic: rows, metricCoverage: [] }));
+  expect(result.conversion.numerator).toBeNull();
+  expect(result.conversion.numeratorCoverage).toBeNull();
+  expect(result.roas.measure.metric.value).toBe(30000);
+});
+it("aggregates adjacent traffic segments using checked exact sums", () => {
+  const middle = "2026-10-10T02:00:00Z";
+  const result = run(
+    input({ traffic: [traffic({ periodEnd: middle }), traffic({ periodStart: middle })] }),
+  );
+  expect(result.conversion.numerator).toBe(200);
+  expect(result.conversion.denominator).toBe(2000);
+  expect(result.conversion.measure.metric.value).toBe(1000);
+  expect(result.conversion.measure.quality.status).toBe("VERIFIED");
+});
+it("retains a partial measured traffic ratio with restricted coverage", () => {
+  const result = run(input({ traffic: [traffic({ periodEnd: "2026-10-10T02:00:00Z" })] }));
+  expect(result.conversion.measure.metric.value).toBe(1000);
+  expect(result.conversion.measure.quality.status).toBe("ESTIMATED");
+  expect(result.conversion.coverageBasisPoints).toBe(5000);
+});
+it("does not prorate traffic that crosses the requested boundary", () => {
+  const result = run(input({ traffic: [traffic({ periodStart: "2026-10-09T23:00:00Z" })] }));
+  expect(result.conversion.measure.metric.value).toBeNull();
+  expect(result.conversion.measure.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "WINDOW_MISMATCH" }),
+  );
+});
+it("excludes wholly out-of-window traffic", () => {
+  const outside = traffic({ periodStart: "2026-10-09T20:00:00Z", periodEnd: window.periodStart });
+  expect(run(input({ traffic: [outside, traffic()] })).conversion.denominator).toBe(1000);
+});
+it.each(["duplicate", "overlap"])("rejects %s traffic intervals with both evidences", (mode) => {
+  const other = {
+    ...traffic({ periodStart: mode === "overlap" ? "2026-10-10T02:00:00Z" : window.periodStart }),
+    evidenceIds: ["other"],
+  };
+  const result = calculator.calculate(input({ traffic: [traffic(), other] }), store);
+  expect(result).toMatchObject({
+    ok: false,
+    error: { code: "CONFLICT", evidenceIds: expect.arrayContaining(["traffic", "other"]) },
+  });
+});
+it("rejects duplicate normalized campaign keys with both evidences", () => {
+  const row = measuredCampaign(),
+    other = { ...row, evidenceIds: ["other"], measuredCoverage: null };
+  expect(calculator.calculate(input({ campaignFacts: [row, other] }), store)).toMatchObject({
+    ok: false,
+    error: { code: "CONFLICT", evidenceIds: expect.arrayContaining(["campaign", "other"]) },
+  });
+});
+it("sums measured campaigns on the identical interval", () => {
+  const row = measuredCampaign(),
+    other = { ...row, data: { ...row.data, externalCampaignId: "other" } };
+  const result = run(input({ campaignFacts: [row, other] }));
+  expect(result.roas.numerator).toBe(60000);
+  expect(result.roas.denominator).toBe(20000);
+  expect(result.roas.measure.metric.value).toBe(30000);
+});
+it("refuses to mix campaign cohorts measured over different intervals", () => {
+  const row = measuredCampaign(),
+    other = {
+      ...row,
+      data: { ...row.data, externalCampaignId: "other" },
+      measuredCoverage: { ...row.measuredCoverage!, periodStart: "2026-10-10T02:00:00Z" },
+    };
+  expect(run(input({ campaignFacts: [row, other] })).roas.measure.metric.value).toBeNull();
+});
+it("does not forge a combined source version", () => {
+  const middle = "2026-10-10T02:00:00Z",
+    other = { ...traffic({ periodStart: middle }), sourceVersion: "v2" };
+  const result = run(input({ traffic: [traffic({ periodEnd: middle }), other] }));
+  expect(result.conversion.measure.metric.value).toBe(1000);
+  expect(result.conversion.numeratorCoverage).toBeNull();
+  expect(result.conversion.measure.quality.status).toBe("ESTIMATED");
+});
+it("accepts equal timestamp instants while retaining source timestamp spellings", () => {
+  const row = traffic({ periodStart: "2026-10-10T00:00:00.000Z" });
+  const result = run(input({ traffic: [row] }));
+  expect(result.conversion.measure.metric.value).toBe(1000);
+  expect(result.conversion.numeratorCoverage?.periodStart).toBe(row.data.periodStart);
+  expect(result.conversion.measure.quality.status).toBe("ESTIMATED");
+});

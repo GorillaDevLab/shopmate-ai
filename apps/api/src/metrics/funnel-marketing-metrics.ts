@@ -10,6 +10,8 @@ import {
   type MetricError,
   type MetricErrorCode,
   type MetricInputV1,
+  type MetricTraffic,
+  type MetricCampaignFact,
   type MetricMeasuredCoverage,
   type MetricResult,
   type MetricStatus,
@@ -95,8 +97,19 @@ function trafficSide(frame: Frame, field: "paidOrders" | "cart" | "checkout"): S
   const rows = frame.input.traffic;
   if (frame.subject.kind !== "STORE" || !rows?.length || rows.some((row) => row.data === null))
     return missing(frame, "TRAFFIC_MISSING", "traffic.subject-or-measurement");
-  const row = rows[0]!,
-    data = row.data!;
+  const selected = rows.filter((row) => overlaps(row.data!, frame.input));
+  if (!selected.length) return missing(frame, "TRAFFIC_MISSING", "traffic.window");
+  if (selected.some((row) => !inside(row.data!, frame.input)))
+    return windowMissing(
+      frame,
+      selected.flatMap((row) => row.evidenceIds),
+      "traffic.window",
+    );
+  const sides = selected.map((row) => trafficRow(row, field));
+  return combine(frame, sides);
+}
+function trafficRow(row: MetricTraffic, field: "paidOrders" | "cart" | "checkout"): Side {
+  const data = row.data!;
   const { binding, observedAt, sourceVersion, evidenceIds } = row;
   return {
     numerator: data[field],
@@ -114,13 +127,133 @@ function trafficSide(frame: Frame, field: "paidOrders" | "cart" | "checkout"): S
     },
   };
 }
+function overlaps(a: MetricWindow, b: MetricWindow): boolean {
+  return (
+    Date.parse(a.periodStart) < Date.parse(b.periodEnd) &&
+    Date.parse(b.periodStart) < Date.parse(a.periodEnd)
+  );
+}
+function inside(a: MetricWindow, b: MetricWindow): boolean {
+  return (
+    Date.parse(a.periodStart) >= Date.parse(b.periodStart) &&
+    Date.parse(a.periodEnd) <= Date.parse(b.periodEnd)
+  );
+}
+function windowMissing(frame: Frame, evidence: readonly string[], field: string): Side {
+  return {
+    ...missing(frame, "ATTRIBUTION_MISSING", field),
+    evidenceIds: evidence,
+    issues: [issue("WINDOW_MISMATCH", field, evidence)],
+  };
+}
+function sum(
+  frame: Frame,
+  values: readonly (number | null)[],
+  evidence: readonly string[],
+): number | null {
+  return values.some((n) => n === null)
+    ? null
+    : checked(frame.deps.math.add(values as number[]), evidence);
+}
+function intervalCoverage(frame: Frame, sides: readonly Side[]): number {
+  const intervals = sides
+    .map((row) => row.coverage!)
+    .sort((a, b) => Date.parse(a.periodStart) - Date.parse(b.periodStart));
+  const spans: { start: number; end: number }[] = [];
+  for (const row of intervals) {
+    const start = Date.parse(row.periodStart),
+      end = Date.parse(row.periodEnd),
+      last = spans.at(-1);
+    if (last && start <= last.end) last.end = Math.max(last.end, end);
+    else spans.push({ start, end });
+  }
+  const duration = checked(
+    frame.deps.math.add(spans.map((row) => row.end - row.start)),
+    sides.flatMap((row) => row.evidenceIds),
+  );
+  const total = Date.parse(frame.input.periodEnd) - Date.parse(frame.input.periodStart);
+  return checked(frame.deps.math.ratio(duration, total, "TOWARD_ZERO"), frame.input.evidenceIds)
+    .value!;
+}
+function combinedProvenance(
+  sides: readonly Side[],
+  measured: number,
+): MetricMeasuredCoverage | null {
+  const coverage = sides.map((row) => row.coverage!),
+    first = coverage[0]!;
+  const ordered = [...coverage].sort(
+    (a, b) => Date.parse(a.periodStart) - Date.parse(b.periodStart),
+  );
+  const contiguous = ordered.every(
+    (row, i) => i === 0 || Date.parse(row.periodStart) <= Date.parse(ordered[i - 1]!.periodEnd),
+  );
+  if (
+    !contiguous ||
+    coverage.some(
+      (row) => row.sourceVersion !== first.sourceVersion || row.observedAt !== first.observedAt,
+    )
+  )
+    return null;
+  if (coverage.length === 1) return first;
+  return {
+    ...first,
+    periodStart: ordered[0]!.periodStart,
+    periodEnd: ordered.reduce(
+      (end, row) => (Date.parse(row.periodEnd) > Date.parse(end) ? row.periodEnd : end),
+      first.periodEnd,
+    ),
+    evidenceIds: ids(...coverage.map((row) => row.evidenceIds)),
+    coverageBasisPoints: measured,
+  };
+}
+function combine(frame: Frame, sides: readonly Side[]): Side {
+  const evidenceIds = ids(...sides.map((row) => row.evidenceIds));
+  const measured = Math.min(...sides.map((row) => row.coverageBasisPoints));
+  const coverageBasisPoints = Math.min(measured, intervalCoverage(frame, sides));
+  const coverage = combinedProvenance(sides, measured);
+  const issues = sides.flatMap((row) => row.issues);
+  if (
+    !coverage ||
+    coverage.periodStart !== frame.input.periodStart ||
+    coverage.periodEnd !== frame.input.periodEnd
+  )
+    issues.push(issue("PARTIAL_COVERAGE", "measurement.provenance-or-window", evidenceIds));
+  return {
+    numerator: sum(
+      frame,
+      sides.map((row) => row.numerator),
+      evidenceIds,
+    ),
+    denominator: sum(
+      frame,
+      sides.map((row) => row.denominator),
+      evidenceIds,
+    ),
+    coverage,
+    coverageBasisPoints,
+    evidenceIds,
+    issues,
+  };
+}
 function campaignSide(frame: Frame): Side {
   if (frame.subject.kind === "SKU")
     return missing(frame, "ATTRIBUTION_MISSING", "campaignFacts.sku-allocation");
-  const rows = frame.input.campaignFacts;
+  const subject = frame.subject;
+  const rows = frame.input.campaignFacts?.filter(
+    (row) =>
+      subject.kind !== "CAMPAIGN" || row.data.externalCampaignId === subject.externalCampaignId,
+  );
   if (!rows?.length || rows.some((row) => row.measuredCoverage === null))
     return missing(frame, "ATTRIBUTION_MISSING", "campaignFacts.measuredCoverage");
-  const row = rows[0]!;
+  if (!matchingCohorts(rows))
+    return windowMissing(
+      frame,
+      rows.flatMap((row) => row.evidenceIds),
+      "campaignFacts.cohort",
+    );
+  return combine(frame, rows.map(campaignRow));
+}
+function campaignRow(row: MetricCampaignFact): Side {
   return {
     numerator: row.data.attributedRevenueMinor,
     denominator: row.data.spendMinor,
@@ -129,6 +262,38 @@ function campaignSide(frame: Frame): Side {
     evidenceIds: row.evidenceIds,
     issues: [],
   };
+}
+function matchingCohorts(rows: readonly MetricCampaignFact[]): boolean {
+  const byDate = new Map<string, MetricMeasuredCoverage>();
+  for (const row of rows) {
+    const coverage = row.measuredCoverage!,
+      previous = byDate.get(row.data.date);
+    if (
+      previous &&
+      (Date.parse(previous.periodStart) !== Date.parse(coverage.periodStart) ||
+        Date.parse(previous.periodEnd) !== Date.parse(coverage.periodEnd))
+    )
+      return false;
+    byDate.set(row.data.date, coverage);
+  }
+  return true;
+}
+function conflicts(frame: Frame): void {
+  const traffic = (frame.input.traffic ?? []).filter(
+    (row) => row.data !== null && overlaps(row.data, frame.input),
+  );
+  for (let i = 0; i < traffic.length; i++) {
+    for (const other of traffic.slice(i + 1))
+      if (overlaps(traffic[i]!.data!, other.data!))
+        reject("CONFLICT", ids(traffic[i]!.evidenceIds, other.evidenceIds));
+  }
+  const campaigns = new Map<string, MetricCampaignFact>();
+  for (const row of frame.input.campaignFacts ?? []) {
+    const key = JSON.stringify([row.data.externalCampaignId, row.data.date]),
+      previous = campaigns.get(key);
+    if (previous) reject("CONFLICT", ids(previous.evidenceIds, row.evidenceIds));
+    campaigns.set(key, row);
+  }
 }
 function sameSubject(a: MetricSubject, b: MetricSubject): boolean {
   if (a.kind !== b.kind) return false;
@@ -170,6 +335,7 @@ function quality(
     evidenceIds: ids(
       frame.input.evidenceIds,
       side.evidenceIds,
+      ...(kind === "ROAS" ? (frame.input.campaignFacts ?? []).map((row) => row.evidenceIds) : []),
       ...issues.map((row) => row.evidenceIds),
     ),
     issues,
@@ -229,6 +395,7 @@ function calculate(
     return freeze({ ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] } });
   const frame = { input: parsed.data, subject: scope.data, deps };
   try {
+    conflicts(frame);
     const result = {
       conversion: ratio(frame, "CONVERSION_RATE", trafficSide(frame, "paidOrders")),
       cart: ratio(frame, "CART_RATE", trafficSide(frame, "cart")),
