@@ -643,3 +643,11 @@ it("does not assert coverage when required source observation time is missing", 
   expect(result.issues).toContainEqual(issue("SOURCE_TIME_MISSING"));
   expect(result.issues).toContainEqual(issue("PARTIAL_COVERAGE"));
 });
+
+it("rejects empty required fields even in an irrelevant metric rule", () => {
+  const base = request(),
+    irrelevant = { ...base.policy.rules[0], kind: "COGS", requiredFields: [] };
+  expect(() =>
+    reduceRaw({ ...base, policy: { ...base.policy, rules: [...base.policy.rules, irrelevant] } }),
+  ).toThrow(TypeError);
+});

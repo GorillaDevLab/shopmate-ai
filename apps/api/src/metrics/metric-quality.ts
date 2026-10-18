@@ -32,6 +32,7 @@ const ruleSchema = z.strictObject({
   kind: kindSchema,
   requiredFields: z
     .array(ExternalIdSchema)
+    .min(1)
     .refine((fields) => new Set(fields).size === fields.length),
   minimumSampleSize: QuantitySchema,
   maximumAgeHours: z.number().finite().nonnegative(),
