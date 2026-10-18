@@ -114,8 +114,18 @@ function missing(
 }
 function trafficSide(frame: Frame, field: "paidOrders" | "cart" | "checkout"): Side {
   const rows = frame.input.traffic;
-  if (frame.subject.kind !== "STORE" || !rows?.length || rows.some((row) => row.data === null))
-    return missing(frame, "TRAFFIC_MISSING", "traffic.subject-or-measurement");
+  if (frame.subject.kind !== "STORE")
+    return missing(frame, "TRAFFIC_MISSING", "traffic.subject-allocation");
+  if (rows === null) return unsynchronized(frame, "traffic");
+  if (!rows.length) return missing(frame, "TRAFFIC_MISSING", "traffic.empty-measurements");
+  if (rows.some((row) => row.data === null))
+    return {
+      ...missing(frame, "TRAFFIC_MISSING", "traffic.data"),
+      evidenceIds: ids(...rows.map((row) => row.evidenceIds)),
+      issues: [
+        issue("TRAFFIC_MISSING", "traffic.data", ids(...rows.map((row) => row.evidenceIds))),
+      ],
+    };
   const selected = rows.filter((row) => overlaps(row.data!, frame.input));
   if (!selected.length) return missing(frame, "TRAFFIC_MISSING", "traffic.window");
   if (selected.some((row) => !inside(row.data!, frame.input)))
@@ -126,6 +136,17 @@ function trafficSide(frame: Frame, field: "paidOrders" | "cart" | "checkout"): S
     );
   const sides = selected.map((row) => trafficRow(row, field));
   return combine(frame, sides);
+}
+function unsynchronized(frame: Frame, field: "traffic" | "campaignFacts"): Side {
+  const side = missing(
+    frame,
+    field === "traffic" ? "TRAFFIC_MISSING" : "ATTRIBUTION_MISSING",
+    field,
+  );
+  return {
+    ...side,
+    issues: [...side.issues, issue("NOT_SYNCHRONIZED", field, frame.input.evidenceIds)],
+  };
 }
 function trafficRow(row: MetricTraffic, field: "paidOrders" | "cart" | "checkout"): Side {
   const data = row.data!;
@@ -264,6 +285,7 @@ function campaignSide(frame: Frame): Side {
   if (frame.subject.kind === "SKU")
     return missing(frame, "ATTRIBUTION_MISSING", "campaignFacts.sku-allocation");
   const subject = frame.subject;
+  if (frame.input.campaignFacts === null) return unsynchronized(frame, "campaignFacts");
   const rows = frame.input.campaignFacts?.filter(
     (row) =>
       subject.kind !== "CAMPAIGN" || row.data.externalCampaignId === subject.externalCampaignId,

@@ -581,3 +581,173 @@ it("passes both public output boundaries with exact original context", () => {
     ).toBe(true);
   }
 });
+
+it("keeps unsynchronized input unavailable with immutable error and value results", () => {
+  const raw = input({
+    status: "UNAVAILABLE",
+    sourceWatermark: null,
+    paymentFacts: null,
+    refundFacts: null,
+    inventoryFacts: null,
+    campaignFacts: null,
+    frozenCosts: null,
+    refundAllocations: null,
+    returnReceipts: null,
+    fees: null,
+    traffic: null,
+    inventoryExtensions: null,
+    metricCoverage: [],
+  });
+  for (const row of Object.values(run(raw))) {
+    expect(row.measure.quality.status).toBe("UNAVAILABLE");
+    expect(row.measure.metric.value).toBeNull();
+  }
+  const failure = calculator.calculate({} as MetricInputV1, store);
+  expect(Object.isFrozen(failure)).toBe(true);
+  if (!failure.ok) expect(Object.isFrozen(failure.error.evidenceIds)).toBe(true);
+});
+it("keeps ROAS unavailable for missing campaigns independently of the funnel", () => {
+  const result = run(input({ campaignFacts: null, metricCoverage: [] }));
+  expect(result.roas.measure.metric.value).toBeNull();
+  expect(result.roas.numeratorCoverage).toBeNull();
+  expect(result.conversion.measure.metric.value).toBe(1000);
+});
+it("rejects a real ROAS quotient overflow instead of clamping", () => {
+  const row = measuredCampaign();
+  expect(
+    calculator.calculate(
+      input({
+        campaignFacts: [
+          {
+            ...row,
+            data: { ...row.data, spendMinor: 1, attributedRevenueMinor: Number.MAX_SAFE_INTEGER },
+          },
+        ],
+      }),
+      store,
+    ),
+  ).toMatchObject({
+    ok: false,
+    error: { code: "OVERFLOW", evidenceIds: expect.arrayContaining(["campaign"]) },
+  });
+});
+it("keeps exact large intermediate ROAS math inside the safe output range", () => {
+  const row = measuredCampaign();
+  const result = run(
+    input({
+      campaignFacts: [
+        {
+          ...row,
+          data: {
+            ...row.data,
+            spendMinor: Number.MAX_SAFE_INTEGER,
+            attributedRevenueMinor: Number.MAX_SAFE_INTEGER,
+          },
+        },
+      ],
+    }),
+  );
+  expect(result.roas.measure.metric.value).toBe(10000);
+});
+function twoDayInput(): MetricInputV1 {
+  const periodStart = "2026-10-08T16:00:00Z",
+    middle = "2026-10-09T16:00:00Z";
+  const raw = input(),
+    row = measuredCampaign();
+  const make = (date: string, start: string, end: string) => ({
+    ...row,
+    data: { ...row.data, date },
+    measuredCoverage: { ...row.measuredCoverage!, periodStart: start, periodEnd: end },
+  });
+  return {
+    ...raw,
+    periodStart,
+    metricCoverage: raw.metricCoverage.map((proof) => ({ ...proof, periodStart })),
+    campaignFacts: [make("2026-10-09", periodStart, middle), make("2026-10-10", middle, now)],
+  };
+}
+it("aggregates matching measured applicable business-day cohorts", () => {
+  const result = run(twoDayInput());
+  expect(result.roas.numerator).toBe(60000);
+  expect(result.roas.denominator).toBe(20000);
+  expect(result.roas.measure.quality.status).toBe("VERIFIED");
+  expect(result.roas.numeratorCoverage?.periodStart).toBe(twoDayInput().periodStart);
+});
+it("does not fill an unmeasured day from query-completeness proofs", () => {
+  const raw = twoDayInput(),
+    rows = raw.campaignFacts!;
+  const result = run({ ...raw, campaignFacts: [rows[1]!] });
+  expect(result.roas.numerator).toBe(30000);
+  expect(result.roas.measure.quality.status).toBe("ESTIMATED");
+  expect(result.roas.coverageBasisPoints).toBeLessThan(10000);
+});
+it("keeps traffic gaps explicit without forging contiguous measured provenance", () => {
+  const result = run(
+    input({
+      traffic: [
+        traffic({ periodEnd: "2026-10-10T01:00:00Z" }),
+        traffic({ periodStart: "2026-10-10T03:00:00Z" }),
+      ],
+    }),
+  );
+  expect(result.conversion.measure.metric.value).toBe(1000);
+  expect(result.conversion.numeratorCoverage).toBeNull();
+  expect(result.conversion.coverageBasisPoints).toBe(5000);
+});
+it("does not sum unknown selected campaign spend into a confident subtotal", () => {
+  const row = measuredCampaign(),
+    other = unknownCampaign("spendMinor");
+  const result = run(
+    input({
+      campaignFacts: [row, { ...other, data: { ...other.data, externalCampaignId: "other" } }],
+    }),
+  );
+  expect(result.roas.numerator).toBe(60000);
+  expect(result.roas.denominator).toBeNull();
+  expect(result.roas.measure.metric.value).toBeNull();
+});
+it("rejects a submillisecond completeness proof observation time", () => {
+  const raw = input();
+  rejected({
+    ...raw,
+    metricCoverage: raw.metricCoverage.map((row) => ({
+      ...row,
+      observedAt: "2026-10-10T04:00:00.0001Z",
+    })),
+  });
+});
+it("accepts zero submillisecond tails as the same exact millisecond", () => {
+  const result = run(input({ traffic: [traffic({ periodStart: "2026-10-10T00:00:00.0000Z" })] }));
+  expect(result.conversion.measure.metric.value).toBe(1000);
+});
+it("carries source inconsistency evidence and retains independent store funnel", () => {
+  const row = measuredCampaign(),
+    source = {
+      ...row.data.source,
+      quality: { state: "PARTIAL" as const, issues: ["SOURCE_INCONSISTENT" as const] },
+    };
+  const result = run(input({ campaignFacts: [{ ...row, data: { ...row.data, source } }] }));
+  expect(result.roas.measure.metric.value).toBeNull();
+  expect(result.roas.measure.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "SOURCE_INCONSISTENT", evidenceIds: ["campaign"] }),
+  );
+  expect(result.conversion.measure.quality.status).toBe("VERIFIED");
+});
+it("distinguishes unsynchronized traffic from an observed empty collection", () => {
+  const absent = run(input({ traffic: null, metricCoverage: [] })).conversion;
+  const empty = run(input({ traffic: [] })).conversion;
+  expect(absent.measure.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "NOT_SYNCHRONIZED" }),
+  );
+  expect(empty.measure.quality.issues).not.toContainEqual(
+    expect.objectContaining({ code: "NOT_SYNCHRONIZED" }),
+  );
+  expect(absent.measure.quality.issues).not.toEqual(empty.measure.quality.issues);
+});
+it("retains provenance evidence of a nullable traffic measurement", () => {
+  const result = run(input({ traffic: [fact(null, "unknown-traffic")] }));
+  expect(result.conversion.measure.quality.evidenceIds).toContain("unknown-traffic");
+  expect(result.conversion.measure.quality.issues).toContainEqual(
+    expect.objectContaining({ field: "traffic.data" }),
+  );
+});
