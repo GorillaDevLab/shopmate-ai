@@ -762,3 +762,44 @@ it("does not interpret timestamp-shaped evidence IDs as timestamps", () => {
   const result = run(input({ evidenceIds: ["2026-10-10T04:00:00.0001Z"], metricCoverage: [] }));
   expect(result.conversion.measure.metric.value).toBe(1000);
 });
+it.each([null, 0])("retains zero visitor denominator with paidOrders=%s", (paidOrders) => {
+  const result = run(
+    input({ traffic: [traffic({ visitors: 0, cart: 0, checkout: 0, paidOrders })] }),
+  ).conversion;
+  expect(result.numerator).toBe(paidOrders);
+  expect(result.denominator).toBe(0);
+  expect(result.measure.metric.value).toBeNull();
+  expect(result.measure.quality.status).toBe("UNAVAILABLE");
+  expect(result.measure.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "ZERO_DENOMINATOR" }),
+  );
+  if (paidOrders === null)
+    expect(result.measure.quality.issues).toContainEqual(
+      expect.objectContaining({ code: "TRAFFIC_MISSING" }),
+    );
+});
+it.each([null, 0])(
+  "retains zero spend denominator with attributed revenue=%s",
+  (attributedRevenueMinor) => {
+    const row =
+      attributedRevenueMinor === null
+        ? unknownCampaign("attributedRevenueMinor")
+        : measuredCampaign();
+    const result = run(
+      input({
+        campaignFacts: [{ ...row, data: { ...row.data, spendMinor: 0, attributedRevenueMinor } }],
+      }),
+    ).roas;
+    expect(result.numerator).toBe(attributedRevenueMinor);
+    expect(result.denominator).toBe(0);
+    expect(result.measure.metric.value).toBeNull();
+    expect(result.measure.quality.status).toBe("UNAVAILABLE");
+    expect(result.measure.quality.issues).toContainEqual(
+      expect.objectContaining({ code: "ZERO_DENOMINATOR" }),
+    );
+    if (attributedRevenueMinor === null)
+      expect(result.measure.quality.issues).toContainEqual(
+        expect.objectContaining({ code: "ATTRIBUTION_MISSING" }),
+      );
+  },
+);

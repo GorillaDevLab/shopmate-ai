@@ -480,6 +480,8 @@ function quality(
 }
 function ratio<K extends Kind>(frame: Frame, kind: K, side: Side): RatioEvidence<K> {
   const extra: DataQualityIssueV1[] = [];
+  if (side.denominator === 0 && side.numerator === null)
+    extra.push(issue("ZERO_DENOMINATOR", kind, side.evidenceIds));
   let value: number | null = null;
   if (side.numerator !== null && side.denominator !== null) {
     const result = checked(
