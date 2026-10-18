@@ -751,3 +751,10 @@ it("retains provenance evidence of a nullable traffic measurement", () => {
     expect.objectContaining({ field: "traffic.data" }),
   );
 });
+it("counts selected measured campaign observations as ROAS samples", () => {
+  expect(run().roas.measure.quality.sampleSize).toBe(1);
+  expect(run().conversion.measure.quality.sampleSize).toBe(1000);
+  expect(run(input(), { kind: "SKU", externalSkuId: "sku" }).roas.measure.quality.sampleSize).toBe(
+    0,
+  );
+});

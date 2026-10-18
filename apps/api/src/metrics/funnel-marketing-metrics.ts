@@ -430,6 +430,16 @@ function proofEvidence(frame: Frame, kind: Kind): string[] {
       .map((row) => row.evidenceIds),
   );
 }
+function sampleSize(frame: Frame, kind: Kind, side: Side): number {
+  if (kind !== "ROAS") return side.denominator ?? 0;
+  const subject = frame.subject;
+  if (subject.kind === "SKU") return 0;
+  return (frame.input.campaignFacts ?? []).filter(
+    (row) =>
+      row.measuredCoverage !== null &&
+      (subject.kind !== "CAMPAIGN" || row.data.externalCampaignId === subject.externalCampaignId),
+  ).length;
+}
 function quality(
   frame: Frame,
   kind: Kind,
@@ -444,7 +454,7 @@ function quality(
   if (issues.some((row) => row.code === "STALE_SOURCE")) statuses.push("STALE");
   return {
     status: precedence.find((status) => statuses.includes(status))!,
-    sampleSize: side.denominator ?? 0,
+    sampleSize: sampleSize(frame, kind, side),
     coverageBasisPoints,
     evidenceIds: ids(
       frame.input.evidenceIds,
