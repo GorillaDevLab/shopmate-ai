@@ -636,3 +636,10 @@ it("keeps returned proof independent from later caller mutation and subsequent r
   });
   expect(reducer.reduce(request())).not.toBe(second);
 });
+
+it("does not assert coverage when required source observation time is missing", () => {
+  const result = reducer.reduce(request([dependency({ observedAt: null })]));
+  expect(result).toMatchObject({ status: "UNAVAILABLE", coverageBasisPoints: 0 });
+  expect(result.issues).toContainEqual(issue("SOURCE_TIME_MISSING"));
+  expect(result.issues).toContainEqual(issue("PARTIAL_COVERAGE"));
+});

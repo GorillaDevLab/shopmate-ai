@@ -225,7 +225,11 @@ function timingIssues(row: MetricQualityDependency, request: MetricQualityReques
   return codes.map((code) => ({ code, field: row.field, evidenceIds: [...row.evidenceIds] }));
 }
 function effectiveCoverage(row: MetricQualityDependency, empty: boolean): number {
-  if (row.sourceWatermark === null || row.issues.some(({ code }) => code === "SOURCE_INCONSISTENT"))
+  if (
+    row.sourceWatermark === null ||
+    row.observedAt === null ||
+    row.issues.some(({ code }) => code === "SOURCE_INCONSISTENT")
+  )
     return 0;
   const countCoverage =
     row.expectedCount === 0
