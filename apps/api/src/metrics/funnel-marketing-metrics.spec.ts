@@ -758,3 +758,7 @@ it("counts selected measured campaign observations as ROAS samples", () => {
     0,
   );
 });
+it("does not interpret timestamp-shaped evidence IDs as timestamps", () => {
+  const result = run(input({ evidenceIds: ["2026-10-10T04:00:00.0001Z"], metricCoverage: [] }));
+  expect(result.conversion.measure.metric.value).toBe(1000);
+});

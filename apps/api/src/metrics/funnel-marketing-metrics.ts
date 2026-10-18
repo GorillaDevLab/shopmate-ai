@@ -45,12 +45,24 @@ const dependencySchema = z.strictObject({
   ),
   rounding: z.enum(["HALF_AWAY_FROM_ZERO", "TOWARD_ZERO"]),
 });
-function precise(value: unknown): boolean {
-  if (typeof value === "string" && /^\d{4}-\d\d-\d\dT/.test(value)) {
+const timestampFields = [
+  "periodStart",
+  "periodEnd",
+  "visibleAt",
+  "sourceWatermark",
+  "observedAt",
+  "updatedAt",
+];
+function precise(value: unknown, key = ""): boolean {
+  if (typeof value === "string" && timestampFields.includes(key)) {
     const fraction = /\.(\d+)/.exec(value)?.[1] ?? "";
     return !/[1-9]/.test(fraction.slice(3));
   }
-  return value === null || typeof value !== "object" || Object.values(value).every(precise);
+  return (
+    value === null ||
+    typeof value !== "object" ||
+    Object.entries(value).every(([field, child]) => precise(child, field))
+  );
 }
 function ids(...groups: readonly (readonly string[])[]): string[] {
   return [...new Set(groups.flat())];
