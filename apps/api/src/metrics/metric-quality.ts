@@ -1,16 +1,103 @@
-import type {
-  DataQualityIssueV1,
-  MetricQuality,
-  MetricQualityDependency,
-  MetricQualityReducer,
-  MetricQualityRequest,
-  MetricStatus,
-  QualityPolicy,
+import { z } from "zod";
+import {
+  BasisPointsSchema,
+  DataQualityIssueV1Schema,
+  ExternalIdSchema,
+  MetricEvidenceIdsSchema,
+  MetricStatusSchema,
+  MetricTimestampSchema,
+  MetricValueSchema,
+  MetricWindowSchema,
+  QuantitySchema,
+  SourceVersionSchema,
+  type DataQualityIssueV1,
+  type MetricQuality,
+  type MetricQualityDependency,
+  type MetricQualityReducer,
+  type MetricQualityRequest,
+  type MetricStatus,
+  type QualityPolicy,
 } from "@shopmate/contracts";
 
 type Rule = QualityPolicy["rules"][number];
 type Evaluation = { status: MetricStatus; coverage: number; issues: DataQualityIssueV1[] };
 const precedence = ["UNAVAILABLE", "STALE", "INSUFFICIENT", "ESTIMATED", "VERIFIED"] as const;
+const kindSchema = z.union(MetricValueSchema.options.map((option) => option.unwrap().shape.kind));
+function exactTimestamp(value: string): boolean {
+  const tail = /\.(\d+)Z$/.exec(value)?.[1] ?? "";
+  return Number.isFinite(Date.parse(value)) && !/[1-9]/.test(tail.slice(3));
+}
+const timestampSchema = MetricTimestampSchema.refine(exactTimestamp);
+const ruleSchema = z.strictObject({
+  kind: kindSchema,
+  requiredFields: z
+    .array(ExternalIdSchema)
+    .refine((fields) => new Set(fields).size === fields.length),
+  minimumSampleSize: QuantitySchema,
+  maximumAgeHours: z.number().finite().nonnegative(),
+  minimumCoverageBasisPoints: BasisPointsSchema,
+  allowVerifiedEmptyWindow: z.boolean(),
+});
+const policySchema = z
+  .strictObject({
+    version: SourceVersionSchema,
+    precedence: z.tuple([
+      z.literal("UNAVAILABLE"),
+      z.literal("STALE"),
+      z.literal("INSUFFICIENT"),
+      z.literal("ESTIMATED"),
+      z.literal("VERIFIED"),
+    ]),
+    rules: z.array(ruleSchema),
+  })
+  .refine((policy) => new Set(policy.rules.map((rule) => rule.kind)).size === policy.rules.length);
+const dependencySchema = z
+  .strictObject({
+    field: ExternalIdSchema,
+    status: MetricStatusSchema,
+    sourceWatermark: timestampSchema.nullable(),
+    observedAt: timestampSchema.nullable(),
+    sampleSize: QuantitySchema,
+    knownCount: QuantitySchema,
+    expectedCount: QuantitySchema,
+    coverageBasisPoints: BasisPointsSchema,
+    evidenceIds: MetricEvidenceIdsSchema,
+    issues: z.array(DataQualityIssueV1Schema),
+  })
+  .refine(
+    (row) =>
+      row.knownCount <= row.expectedCount &&
+      row.issues.every((issue) => issue.evidenceIds.every((id) => row.evidenceIds.includes(id))),
+  );
+const requestSchema = z
+  .strictObject({
+    kind: kindSchema,
+    window: MetricWindowSchema.refine(
+      (window) => exactTimestamp(window.periodStart) && exactTimestamp(window.periodEnd),
+    ),
+    visibleAt: timestampSchema,
+    dependencies: z.array(dependencySchema),
+    policy: policySchema,
+  })
+  .refine(validRequest);
+function validRequest(request: MetricQualityRequest): boolean {
+  const rule = request.policy.rules.find((row) => row.kind === request.kind);
+  const cutoff = Date.parse(request.visibleAt);
+  return (
+    !!rule?.requiredFields.length &&
+    Date.parse(request.window.periodEnd) <= cutoff &&
+    request.dependencies.every((row) =>
+      [row.observedAt, row.sourceWatermark].every(
+        (time) => time === null || Date.parse(time) <= cutoff,
+      ),
+    )
+  );
+}
+function parse(raw: MetricQualityRequest): MetricQualityRequest {
+  const parsed = requestSchema.safeParse(raw);
+  if (!parsed.success) throw new TypeError("Invalid metric quality request or policy");
+  return parsed.data;
+}
 function strongest(statuses: readonly MetricStatus[]): MetricStatus {
   return precedence.find((status) => statuses.includes(status)) ?? "VERIFIED";
 }
@@ -73,9 +160,14 @@ function evaluate(
       : row.coverageBasisPoints;
   return { status: strongest(statuses), coverage, issues };
 }
-function reduce(request: MetricQualityRequest): MetricQuality {
+function reduce(raw: MetricQualityRequest): MetricQuality {
+  const request = parse(raw);
   const rule = request.policy.rules.find((row) => row.kind === request.kind)!;
   const selected = request.dependencies.filter((row) => rule.requiredFields.includes(row.field));
+  // The port has no request-level provenance: a caller must supply real relevant sync observations,
+  // even for empty business collections. Inventing an ID here would forge public issue evidence.
+  if (selected.length === 0)
+    throw new TypeError("Metric quality requires relevant source evidence");
   const results = selected.map((row) => evaluate(row, request, rule));
   return freeze({
     status: strongest(results.map((row) => row.status)),
