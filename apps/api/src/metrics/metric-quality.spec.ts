@@ -3,6 +3,7 @@ import type {
   DataQualityIssueV1,
   MetricQualityDependency,
   MetricQualityRequest,
+  MetricStatus,
   QualityPolicy,
 } from "@shopmate/contracts";
 import { createMetricQualityReducer } from "./metric-quality.js";
@@ -385,3 +386,153 @@ it("does not bypass a missing required field when the other source is observed e
   expect(result.issues).toContainEqual(issue("TRAFFIC_MISSING", "traffic"));
   expect(result.issues).toContainEqual(issue("LOW_SAMPLE"));
 });
+
+const issueFloors = [
+  ["NOT_SYNCHRONIZED", "UNAVAILABLE"],
+  ["SOURCE_INCONSISTENT", "UNAVAILABLE"],
+  ["PAYMENT_UNKNOWN", "UNAVAILABLE"],
+  ["REFUND_UNKNOWN", "UNAVAILABLE"],
+  ["COST_MISSING", "UNAVAILABLE"],
+  ["RETURN_UNKNOWN", "UNAVAILABLE"],
+  ["FEE_MISSING", "UNAVAILABLE"],
+  ["TRAFFIC_MISSING", "UNAVAILABLE"],
+  ["ATTRIBUTION_MISSING", "UNAVAILABLE"],
+  ["INVENTORY_UNKNOWN", "UNAVAILABLE"],
+  ["LEAD_TIME_MISSING", "UNAVAILABLE"],
+  ["ZERO_DENOMINATOR", "UNAVAILABLE"],
+  ["WINDOW_MISMATCH", "UNAVAILABLE"],
+  ["VERSION_MISMATCH", "UNAVAILABLE"],
+  ["STALE_SOURCE", "STALE"],
+  ["LOW_SAMPLE", "INSUFFICIENT"],
+  ["IMMATURE_COHORT", "INSUFFICIENT"],
+  ["COST_ESTIMATED", "ESTIMATED"],
+  ["FEE_ESTIMATED", "ESTIMATED"],
+  ["PARTIAL_COVERAGE", "ESTIMATED"],
+  ["SOURCE_TIME_MISSING", "ESTIMATED"],
+] as const;
+it.each(issueFloors)("applies %s floor %s even to a VERIFIED source", (code, status) => {
+  const result = reducer.reduce(request([dependency({ issues: [issue(code)] })]));
+  expect(result.status).toBe(status);
+  expect(result.issues).toContainEqual(issue(code));
+  expect(result.coverageBasisPoints).toBe(code === "SOURCE_INCONSISTENT" ? 0 : 10000);
+});
+
+const statuses: readonly MetricStatus[] = [
+  "UNAVAILABLE",
+  "STALE",
+  "INSUFFICIENT",
+  "ESTIMATED",
+  "VERIFIED",
+];
+function declared(status: MetricStatus): MetricQualityDependency {
+  const reasons = {
+    UNAVAILABLE: "COST_MISSING",
+    STALE: "STALE_SOURCE",
+    INSUFFICIENT: "LOW_SAMPLE",
+    ESTIMATED: "COST_ESTIMATED",
+  } as const;
+  return dependency({ status, issues: status === "VERIFIED" ? [] : [issue(reasons[status])] });
+}
+const precedenceCases = statuses.flatMap((left, leftIndex) =>
+  statuses.map((right, rightIndex) => ({
+    left,
+    right,
+    expected: statuses[Math.min(leftIndex, rightIndex)],
+  })),
+);
+it.each(precedenceCases)("takes highest defect for $left + $right", ({ left, right, expected }) => {
+  const rows = [declared(left), { ...declared(right), field: "traffic" }];
+  const result = reducer.reduce(request(rows, { requiredFields: ["paymentFacts", "traffic"] }));
+  expect(result.status).toBe(expected);
+  expect(result.issues).toEqual(expect.arrayContaining(rows.flatMap((row) => row.issues)));
+});
+
+it.each(statuses.filter((status) => status !== "VERIFIED"))(
+  "fails closed for unexplained %s status without inventing a cause",
+  (status) => {
+    expect(() => reducer.reduce(request([dependency({ status })]))).toThrow(TypeError);
+  },
+);
+
+it("preserves a source status stronger than its supplied reason floor", () => {
+  const result = reducer.reduce(
+    request([dependency({ status: "STALE", issues: [issue("LOW_SAMPLE")] })]),
+  );
+  expect(result.status).toBe("STALE");
+  expect(result.issues).toEqual([issue("LOW_SAMPLE")]);
+});
+
+it("keeps unsynchronized, stale, missing, partial and low sample defects simultaneously", () => {
+  const result = reducer.reduce(
+    request([
+      dependency({
+        sourceWatermark: null,
+        observedAt: "2026-10-01T15:00:00.000Z",
+        knownCount: 0,
+        sampleSize: 0,
+        issues: [issue("FEE_MISSING")],
+      }),
+    ]),
+  );
+  expect(result.status).toBe("UNAVAILABLE");
+  expect(result.issues).toEqual(
+    expect.arrayContaining([
+      issue("NOT_SYNCHRONIZED"),
+      issue("STALE_SOURCE"),
+      issue("PAYMENT_UNKNOWN"),
+      issue("PARTIAL_COVERAGE"),
+      issue("LOW_SAMPLE"),
+      issue("FEE_MISSING"),
+    ]),
+  );
+});
+
+it.each([
+  ["2026-10-01T15:59:59.999Z", "STALE"],
+  [end, "VERIFIED"],
+  ["2026-10-01T16:00:00.001Z", "VERIFIED"],
+] as const)("uses exact observedAt freshness boundary %s", (observedAt, status) => {
+  expect(reducer.reduce(request([dependency({ observedAt })])).status).toBe(status);
+});
+it.each([
+  ["2026-10-01T15:59:59.999Z", "STALE"],
+  [end, "VERIFIED"],
+  ["2026-10-01T16:00:00.001Z", "VERIFIED"],
+] as const)("uses exact watermark completeness boundary %s", (sourceWatermark, status) => {
+  expect(reducer.reduce(request([dependency({ sourceWatermark })])).status).toBe(status);
+});
+it.each([
+  [4, "INSUFFICIENT"],
+  [5, "VERIFIED"],
+  [6, "VERIFIED"],
+] as const)("uses inclusive minimum sample boundary %i", (sampleSize, status) => {
+  expect(reducer.reduce(request([dependency({ sampleSize })])).status).toBe(status);
+});
+it("allows a zero maximum age only at the exact supplied visibility cutoff", () => {
+  expect(
+    reducer.reduce(
+      request([dependency({ observedAt: visibleAt })], {
+        maximumAgeHours: 0,
+      }),
+    ).status,
+  ).toBe("VERIFIED");
+  expect(
+    reducer.reduce(
+      request([dependency({ observedAt: "2026-10-01T17:59:59.999Z" })], {
+        maximumAgeHours: 0,
+      }),
+    ).status,
+  ).toBe("STALE");
+});
+it.each(["__proto__", "constructor", "toString"])(
+  "treats arbitrary logical field %s literally",
+  (field) => {
+    const result = reducer.reduce(
+      request([dependency({ field, knownCount: 0 })], {
+        requiredFields: [field],
+      }),
+    );
+    expect(result.status).toBe("UNAVAILABLE");
+    expect(result.issues).toContainEqual(issue("NOT_SYNCHRONIZED", field));
+  },
+);

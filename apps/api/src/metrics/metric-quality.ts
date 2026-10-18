@@ -123,12 +123,35 @@ function missingCode(field: string): DataQualityIssueV1["code"] {
     leadTimeHours: "LEAD_TIME_MISSING",
     returnReceipts: "RETURN_UNKNOWN",
   };
-  return aliases[field] ?? "NOT_SYNCHRONIZED";
+  return Object.hasOwn(aliases, field) ? aliases[field]! : "NOT_SYNCHRONIZED";
 }
+// Missing/integrity/scope/denominator facts block use; stale outranks confidence defects.
+// A source-time issue can be inherited nonfatally when the wrapper independently supplies observedAt.
+const issueFloors: Readonly<Record<DataQualityIssueV1["code"], MetricStatus>> = {
+  NOT_SYNCHRONIZED: "UNAVAILABLE",
+  SOURCE_INCONSISTENT: "UNAVAILABLE",
+  PAYMENT_UNKNOWN: "UNAVAILABLE",
+  REFUND_UNKNOWN: "UNAVAILABLE",
+  COST_MISSING: "UNAVAILABLE",
+  RETURN_UNKNOWN: "UNAVAILABLE",
+  FEE_MISSING: "UNAVAILABLE",
+  TRAFFIC_MISSING: "UNAVAILABLE",
+  ATTRIBUTION_MISSING: "UNAVAILABLE",
+  INVENTORY_UNKNOWN: "UNAVAILABLE",
+  LEAD_TIME_MISSING: "UNAVAILABLE",
+  ZERO_DENOMINATOR: "UNAVAILABLE",
+  WINDOW_MISMATCH: "UNAVAILABLE",
+  VERSION_MISMATCH: "UNAVAILABLE",
+  STALE_SOURCE: "STALE",
+  LOW_SAMPLE: "INSUFFICIENT",
+  IMMATURE_COHORT: "INSUFFICIENT",
+  COST_ESTIMATED: "ESTIMATED",
+  FEE_ESTIMATED: "ESTIMATED",
+  PARTIAL_COVERAGE: "ESTIMATED",
+  SOURCE_TIME_MISSING: "ESTIMATED",
+};
 function issueStatus(code: DataQualityIssueV1["code"]): MetricStatus {
-  if (["COST_MISSING", "SOURCE_INCONSISTENT", "PAYMENT_UNKNOWN"].includes(code))
-    return "UNAVAILABLE";
-  return "ESTIMATED";
+  return issueFloors[code];
 }
 function observedEmpty(row: MetricQualityDependency, request: MetricQualityRequest, rule: Rule) {
   return (
@@ -151,21 +174,12 @@ function evaluate(
   rule: Rule,
   bypassEmpty: boolean,
 ): Evaluation {
-  const issues = row.issues.map(copyIssue),
-    statuses: MetricStatus[] = [row.status];
+  const issues = [...row.issues.map(copyIssue), ...timingIssues(row, request, rule)],
+    statuses: MetricStatus[] = [row.status, row.observedAt === null ? "UNAVAILABLE" : "VERIFIED"];
   const add = (code: DataQualityIssueV1["code"], status: MetricStatus) => {
     issues.push({ code, field: row.field, evidenceIds: [...row.evidenceIds] });
     statuses.push(status);
   };
-  if (row.sourceWatermark === null) add("NOT_SYNCHRONIZED", "UNAVAILABLE");
-  if (row.observedAt === null) add("SOURCE_TIME_MISSING", "UNAVAILABLE");
-  if (
-    (row.sourceWatermark !== null &&
-      Date.parse(row.sourceWatermark) < Date.parse(request.window.periodEnd)) ||
-    (row.observedAt !== null &&
-      Date.parse(request.visibleAt) - Date.parse(row.observedAt) > rule.maximumAgeHours * 3600000)
-  )
-    add("STALE_SOURCE", "STALE");
   const empty = observedEmpty(row, request, rule);
   if (
     !bypassEmpty &&
@@ -180,7 +194,24 @@ function evaluate(
     );
   if (row.knownCount === 0 && row.expectedCount > 0) add(missingCode(row.field), "UNAVAILABLE");
   statuses.push(...issues.map(({ code }) => issueStatus(code)));
+  // No public issue code means "unspecified source status". Require real reasons instead of
+  // inventing a low sample, partial observation or synchronization failure to explain that flag.
+  if (row.status !== "VERIFIED" && issues.length === 0)
+    throw new TypeError("Nonverified source status requires supplied or derived quality evidence");
   return { status: strongest(statuses), coverage, issues };
+}
+function timingIssues(row: MetricQualityDependency, request: MetricQualityRequest, rule: Rule) {
+  const codes: DataQualityIssueV1["code"][] = [];
+  if (row.sourceWatermark === null) codes.push("NOT_SYNCHRONIZED");
+  if (row.observedAt === null) codes.push("SOURCE_TIME_MISSING");
+  if (
+    (row.sourceWatermark !== null &&
+      Date.parse(row.sourceWatermark) < Date.parse(request.window.periodEnd)) ||
+    (row.observedAt !== null &&
+      Date.parse(request.visibleAt) - Date.parse(row.observedAt) > rule.maximumAgeHours * 3600000)
+  )
+    codes.push("STALE_SOURCE");
+  return codes.map((code) => ({ code, field: row.field, evidenceIds: [...row.evidenceIds] }));
 }
 function effectiveCoverage(row: MetricQualityDependency, empty: boolean): number {
   if (row.sourceWatermark === null || row.issues.some(({ code }) => code === "SOURCE_INCONSISTENT"))
