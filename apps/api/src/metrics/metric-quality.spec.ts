@@ -6,6 +6,7 @@ import type {
   MetricStatus,
   QualityPolicy,
 } from "@shopmate/contracts";
+import { DataQualityIssueV1Schema, MetricEvidenceIdsSchema } from "@shopmate/contracts";
 import { createMetricQualityReducer } from "./metric-quality.js";
 
 const end = "2026-10-01T16:00:00.000Z";
@@ -536,3 +537,102 @@ it.each(["__proto__", "constructor", "toString"])(
     expect(result.issues).toContainEqual(issue("NOT_SYNCHRONIZED", field));
   },
 );
+
+it("canonicalizes evidence and removes only equivalent issues", () => {
+  const repeated = { code: "FEE_ESTIMATED", field: "fees", evidenceIds: ["z", "a"] } as const;
+  const row = dependency({
+    evidenceIds: ["z", "a"],
+    issues: [
+      repeated,
+      { ...repeated, evidenceIds: ["a", "z"] },
+      { ...repeated, field: "advertising" },
+      { ...repeated, evidenceIds: ["a"] },
+    ],
+  });
+  const result = reducer.reduce(request([row, row]));
+  expect(result).toEqual({
+    status: "ESTIMATED",
+    sampleSize: 10,
+    coverageBasisPoints: 10000,
+    evidenceIds: ["a", "z"],
+    issues: [
+      { code: "FEE_ESTIMATED", field: "advertising", evidenceIds: ["a", "z"] },
+      { code: "FEE_ESTIMATED", field: "fees", evidenceIds: ["a", "z"] },
+      { code: "FEE_ESTIMATED", field: "fees", evidenceIds: ["a"] },
+    ],
+  });
+  expect(MetricEvidenceIdsSchema.safeParse(result.evidenceIds).success).toBe(true);
+  expect(result.issues.every((row) => DataQualityIssueV1Schema.safeParse(row).success)).toBe(true);
+});
+
+function permutations<T>(rows: readonly T[]): T[][] {
+  if (rows.length === 0) return [[]];
+  return rows.flatMap((row, index) =>
+    permutations(rows.filter((_, i) => i !== index)).map((rest) => [row, ...rest]),
+  );
+}
+it("returns the same quality for dependency, required-field, issue and evidence permutations", () => {
+  const rows = [
+    dependency({
+      evidenceIds: ["z", "a"],
+      issues: [issue("LOW_SAMPLE", "a", "a"), issue("COST_MISSING", "z", "z")],
+    }),
+    dependency({ field: "traffic", sampleSize: 2, evidenceIds: ["b"] }),
+    dependency({ field: "paymentFacts", knownCount: 8, evidenceIds: ["c"] }),
+  ];
+  const expected = reducer.reduce(
+    request(rows, { requiredFields: ["paymentFacts", "traffic", "absent"] }),
+  );
+  for (const order of permutations(rows)) {
+    const reversed = order.map((row) => ({
+      ...row,
+      evidenceIds: [...row.evidenceIds].reverse(),
+      issues: [...row.issues].reverse(),
+    }));
+    expect(
+      reducer.reduce(
+        request(reversed, {
+          requiredFields: ["absent", "traffic", "paymentFacts"],
+        }),
+      ),
+    ).toEqual(expected);
+  }
+});
+
+function assertFrozen(value: unknown): void {
+  if (value !== null && typeof value === "object") {
+    expect(Object.isFrozen(value)).toBe(true);
+    Object.values(value).forEach(assertFrozen);
+  }
+}
+it("returns deeply frozen copies without mutating or freezing caller objects", () => {
+  const original = structuredClone(request([dependency({ issues: [issue("COST_ESTIMATED")] })]));
+  const before = structuredClone(original),
+    result = reducer.reduce(original);
+  assertFrozen(result);
+  expect(original).toEqual(before);
+  expect(Object.isFrozen(original)).toBe(false);
+  expect(Object.isFrozen(original.dependencies[0]?.issues[0]?.evidenceIds)).toBe(false);
+  expect(result.issues[0]).not.toBe(original.dependencies[0]?.issues[0]);
+  expect(result.evidenceIds).not.toBe(original.dependencies[0]?.evidenceIds);
+});
+
+it("keeps returned proof independent from later caller mutation and subsequent requests", () => {
+  const evidenceIds = ["source-proof"],
+    supplied = { code: "COST_ESTIMATED" as const, field: "cost", evidenceIds };
+  const first = reducer.reduce(request([dependency({ evidenceIds, issues: [supplied] })]));
+  evidenceIds.push("later-proof");
+  supplied.field = "changed";
+  expect(first.issues).toEqual([
+    { code: "COST_ESTIMATED", field: "cost", evidenceIds: ["source-proof"] },
+  ]);
+  const second = reducer.reduce(request([dependency({ evidenceIds: ["other-proof"] })]));
+  expect(second).toEqual({
+    status: "VERIFIED",
+    sampleSize: 10,
+    coverageBasisPoints: 10000,
+    evidenceIds: ["other-proof"],
+    issues: [],
+  });
+  expect(reducer.reduce(request())).not.toBe(second);
+});

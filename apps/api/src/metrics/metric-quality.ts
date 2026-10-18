@@ -109,7 +109,18 @@ function freeze<T>(value: T): T {
   return value;
 }
 function copyIssue(row: DataQualityIssueV1): DataQualityIssueV1 {
-  return { ...row, evidenceIds: [...row.evidenceIds] };
+  return { ...row, evidenceIds: canonicalIds(row.evidenceIds) };
+}
+function canonicalIds(ids: readonly string[]): string[] {
+  return [...new Set(ids)].sort();
+}
+function canonicalIssues(issues: readonly DataQualityIssueV1[]): DataQualityIssueV1[] {
+  const keyed = new Map<string, DataQualityIssueV1>();
+  for (const row of issues) {
+    const copy = copyIssue(row);
+    keyed.set(JSON.stringify([copy.code, copy.field, copy.evidenceIds]), copy);
+  }
+  return [...keyed.keys()].sort().map((key) => keyed.get(key)!);
 }
 function missingCode(field: string): DataQualityIssueV1["code"] {
   const aliases: Readonly<Record<string, DataQualityIssueV1["code"]>> = {
@@ -240,7 +251,7 @@ function reduce(raw: MetricQualityRequest): MetricQuality {
     missing.length === 0 &&
     selected.every((row) => observedEmpty(row, request, rule));
   const results = selected.map((row) => evaluate(row, request, rule, bypassEmpty));
-  const evidenceIds = [...new Set(selected.flatMap((row) => row.evidenceIds))];
+  const evidenceIds = canonicalIds(selected.flatMap((row) => row.evidenceIds));
   const missingIssues = missing.map((field) => ({
     code: missingCode(field),
     field,
@@ -251,7 +262,7 @@ function reduce(raw: MetricQualityRequest): MetricQuality {
     sampleSize: missing.length ? 0 : Math.min(...selected.map((row) => row.sampleSize)),
     coverageBasisPoints: missing.length ? 0 : Math.min(...results.map((row) => row.coverage)),
     evidenceIds,
-    issues: [...results.flatMap((row) => row.issues), ...missingIssues],
+    issues: canonicalIssues([...results.flatMap((row) => row.issues), ...missingIssues]),
   });
 }
 
