@@ -312,12 +312,14 @@ function campaignSide(frame: Frame): Side {
         ...campaignIssues(row),
       ]),
     };
-  if (!matchingCohorts(rows))
-    return windowMissing(
+  if (!matchingCohorts(rows)) {
+    const result = windowMissing(
       frame,
       rows.flatMap((row) => row.evidenceIds),
       "campaignFacts.cohort",
     );
+    return { ...result, issues: [...result.issues, ...rows.flatMap(campaignIssues)] };
+  }
   return combine(frame, rows.map(campaignRow));
 }
 function campaignRow(row: MetricCampaignFact): Side {

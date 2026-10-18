@@ -762,6 +762,60 @@ it("does not interpret timestamp-shaped evidence IDs as timestamps", () => {
   const result = run(input({ evidenceIds: ["2026-10-10T04:00:00.0001Z"], metricCoverage: [] }));
   expect(result.conversion.measure.metric.value).toBe(1000);
 });
+function mismatchedCampaignInput() {
+  const row = measuredCampaign(),
+    source = {
+      ...row.data.source,
+      updatedAt: null,
+      quality: {
+        state: "PARTIAL" as const,
+        issues: ["SOURCE_INCONSISTENT", "SOURCE_TIME_MISSING"] as const,
+      },
+    };
+  const first = { ...row, data: { ...row.data, source } };
+  const second = {
+    ...row,
+    evidenceIds: ["second-campaign"],
+    data: { ...row.data, externalCampaignId: "other", source },
+    measuredCoverage: {
+      ...row.measuredCoverage!,
+      periodStart: "2026-10-10T02:00:00Z",
+      evidenceIds: ["second-campaign"],
+    },
+  };
+  return input({ campaignFacts: [first, second] });
+}
+it("retains every selected source issue when campaign cohorts mismatch", () => {
+  const raw = mismatchedCampaignInput();
+  expect(MetricInputV1Schema.safeParse(raw).success).toBe(true);
+  const result = run(raw).roas;
+  expect(result.measure.metric.value).toBeNull();
+  expect(result.measure.quality.status).toBe("UNAVAILABLE");
+  expect(result.measure.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "WINDOW_MISMATCH" }),
+  );
+  for (const evidenceId of ["campaign", "second-campaign"]) {
+    for (const code of ["SOURCE_INCONSISTENT", "SOURCE_TIME_MISSING"]) {
+      expect(result.measure.quality.issues).toContainEqual(
+        expect.objectContaining({ code, evidenceIds: [evidenceId] }),
+      );
+    }
+    expect(result.measure.quality.evidenceIds).toContain(evidenceId);
+  }
+  expect(MetricRatioEvidenceSchema.safeParse(result).success).toBe(true);
+  expect(
+    MetricComputationV1Schema.safeParse({
+      input: raw,
+      snapshot: {
+        ...context(),
+        ...result.measure.quality,
+        metric: result.measure.metric,
+        subject: store,
+        computedAt: now,
+      },
+    }).success,
+  ).toBe(true);
+});
 it.each([null, 0])("retains zero visitor denominator with paidOrders=%s", (paidOrders) => {
   const result = run(
     input({ traffic: [traffic({ visitors: 0, cart: 0, checkout: 0, paidOrders })] }),
