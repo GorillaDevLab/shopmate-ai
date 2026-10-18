@@ -489,7 +489,8 @@ export function createProfitDeltaAttribution(deps: Dependencies): ProfitDeltaAtt
   return Object.freeze({
     calculate: (input: ProfitDeltaRequest) => {
       const validated = validation(input);
-      return validated.ok ? calculate(validated.value, deps) : validated;
+      const result = validated.ok ? calculate(validated.value, deps) : validated;
+      return freeze(structuredClone(result));
     },
   });
 }

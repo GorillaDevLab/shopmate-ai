@@ -534,3 +534,14 @@ it("matches public snapshot quality rules for known and unknown output", () => {
     ).toBe(true);
   }
 });
+it("freezes copied failure evidence without freezing dependency-owned objects", () => {
+  const error = { code: "SOURCE_UNAVAILABLE" as const, evidenceIds: ["math-proof"] };
+  const math: ExactMinorMath = { ...exactMinorMath, subtract: () => ({ ok: false, error }) };
+  const result = createProfitDeltaAttribution({ math }).calculate(request());
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected dependency failure");
+  expect(Object.isFrozen(result)).toBe(true);
+  expect(Object.isFrozen(result.error.evidenceIds)).toBe(true);
+  expect(Object.isFrozen(error.evidenceIds)).toBe(false);
+  expect(result.error).not.toBe(error);
+});
