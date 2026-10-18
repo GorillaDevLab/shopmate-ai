@@ -111,6 +111,25 @@ function freeze<T>(value: T): T {
 function copyIssue(row: DataQualityIssueV1): DataQualityIssueV1 {
   return { ...row, evidenceIds: [...row.evidenceIds] };
 }
+function missingCode(field: string): DataQualityIssueV1["code"] {
+  const aliases: Readonly<Record<string, DataQualityIssueV1["code"]>> = {
+    frozenCosts: "COST_MISSING",
+    paymentFacts: "PAYMENT_UNKNOWN",
+    refundFacts: "REFUND_UNKNOWN",
+    fees: "FEE_MISSING",
+    traffic: "TRAFFIC_MISSING",
+    campaignFacts: "ATTRIBUTION_MISSING",
+    inventoryFacts: "INVENTORY_UNKNOWN",
+    leadTimeHours: "LEAD_TIME_MISSING",
+    returnReceipts: "RETURN_UNKNOWN",
+  };
+  return aliases[field] ?? "NOT_SYNCHRONIZED";
+}
+function issueStatus(code: DataQualityIssueV1["code"]): MetricStatus {
+  if (["COST_MISSING", "SOURCE_INCONSISTENT", "PAYMENT_UNKNOWN"].includes(code))
+    return "UNAVAILABLE";
+  return "ESTIMATED";
+}
 function observedEmpty(row: MetricQualityDependency, request: MetricQualityRequest, rule: Rule) {
   return (
     row.knownCount === 0 &&
@@ -130,6 +149,7 @@ function evaluate(
   row: MetricQualityDependency,
   request: MetricQualityRequest,
   rule: Rule,
+  bypassEmpty: boolean,
 ): Evaluation {
   const issues = row.issues.map(copyIssue),
     statuses: MetricStatus[] = [row.status];
@@ -148,17 +168,30 @@ function evaluate(
     add("STALE_SOURCE", "STALE");
   const empty = observedEmpty(row, request, rule);
   if (
-    !(empty && rule.allowVerifiedEmptyWindow) &&
+    !bypassEmpty &&
     (row.sampleSize < rule.minimumSampleSize || (empty && !rule.allowVerifiedEmptyWindow))
   )
     add("LOW_SAMPLE", "INSUFFICIENT");
-  if (issues.some(({ code }) => code === "COST_MISSING" || code === "SOURCE_INCONSISTENT"))
-    statuses.push("UNAVAILABLE");
-  const coverage =
-    row.sourceWatermark === null || issues.some(({ code }) => code === "SOURCE_INCONSISTENT")
-      ? 0
-      : row.coverageBasisPoints;
+  const coverage = effectiveCoverage(row, empty);
+  if (coverage < 10000)
+    add(
+      "PARTIAL_COVERAGE",
+      coverage < rule.minimumCoverageBasisPoints ? "INSUFFICIENT" : "ESTIMATED",
+    );
+  if (row.knownCount === 0 && row.expectedCount > 0) add(missingCode(row.field), "UNAVAILABLE");
+  statuses.push(...issues.map(({ code }) => issueStatus(code)));
   return { status: strongest(statuses), coverage, issues };
+}
+function effectiveCoverage(row: MetricQualityDependency, empty: boolean): number {
+  if (row.sourceWatermark === null || row.issues.some(({ code }) => code === "SOURCE_INCONSISTENT"))
+    return 0;
+  const countCoverage =
+    row.expectedCount === 0
+      ? empty
+        ? 10000
+        : 0
+      : Number((BigInt(row.knownCount) * 10000n) / BigInt(row.expectedCount));
+  return Math.min(row.coverageBasisPoints, countCoverage);
 }
 function reduce(raw: MetricQualityRequest): MetricQuality {
   const request = parse(raw);
@@ -168,13 +201,26 @@ function reduce(raw: MetricQualityRequest): MetricQuality {
   // even for empty business collections. Inventing an ID here would forge public issue evidence.
   if (selected.length === 0)
     throw new TypeError("Metric quality requires relevant source evidence");
-  const results = selected.map((row) => evaluate(row, request, rule));
+  const missing = rule.requiredFields.filter(
+    (field) => !selected.some((row) => row.field === field),
+  );
+  const bypassEmpty =
+    rule.allowVerifiedEmptyWindow &&
+    missing.length === 0 &&
+    selected.every((row) => observedEmpty(row, request, rule));
+  const results = selected.map((row) => evaluate(row, request, rule, bypassEmpty));
+  const evidenceIds = [...new Set(selected.flatMap((row) => row.evidenceIds))];
+  const missingIssues = missing.map((field) => ({
+    code: missingCode(field),
+    field,
+    evidenceIds: [...evidenceIds],
+  }));
   return freeze({
-    status: strongest(results.map((row) => row.status)),
-    sampleSize: Math.min(...selected.map((row) => row.sampleSize)),
-    coverageBasisPoints: Math.min(...results.map((row) => row.coverage)),
-    evidenceIds: [...new Set(selected.flatMap((row) => row.evidenceIds))],
-    issues: results.flatMap((row) => row.issues),
+    status: missing.length ? "UNAVAILABLE" : strongest(results.map((row) => row.status)),
+    sampleSize: missing.length ? 0 : Math.min(...selected.map((row) => row.sampleSize)),
+    coverageBasisPoints: missing.length ? 0 : Math.min(...results.map((row) => row.coverage)),
+    evidenceIds,
+    issues: [...results.flatMap((row) => row.issues), ...missingIssues],
   });
 }
 

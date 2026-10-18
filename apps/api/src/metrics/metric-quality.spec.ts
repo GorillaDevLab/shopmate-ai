@@ -244,3 +244,144 @@ it("accepts exact trailing-zero precision and independent sync-through/observati
   expect(result.status).toBe("VERIFIED");
   expect(result.evidenceIds).toEqual(["2026-10-01T16:00:00.0001Z"]);
 });
+
+it.each([
+  [9, 10, 10000, 9000, "ESTIMATED", 9000],
+  [8999, 10000, 10000, 9000, "INSUFFICIENT", 8999],
+  [10, 10, 8999, 9000, "INSUFFICIENT", 8999],
+  [10, 10, 9500, 9000, "ESTIMATED", 9500],
+  [1, 3, 10000, 0, "ESTIMATED", 3333],
+  [0, 10, 10000, 0, "UNAVAILABLE", 0],
+  [Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER, 10000, 0, "ESTIMATED", 9999],
+  [Number.MAX_SAFE_INTEGER - 2, Number.MAX_SAFE_INTEGER - 1, 10000, 0, "ESTIMATED", 9999],
+] as const)(
+  "conservatively combines counts %i/%i and declared coverage %i",
+  (
+    knownCount,
+    expectedCount,
+    coverageBasisPoints,
+    minimumCoverageBasisPoints,
+    status,
+    coverage,
+  ) => {
+    const result = reducer.reduce(
+      request([dependency({ knownCount, expectedCount, coverageBasisPoints })], {
+        minimumCoverageBasisPoints,
+      }),
+    );
+    expect(result).toMatchObject({ status, coverageBasisPoints: coverage });
+    expect(result.issues).toContainEqual(issue("PARTIAL_COVERAGE"));
+  },
+);
+
+it("does not infer sample count from the number of field records", () => {
+  const result = reducer.reduce(
+    request([dependency({ knownCount: 1, expectedCount: 1, sampleSize: 1000 })], {
+      minimumSampleSize: 1000,
+    }),
+  );
+  expect(result).toMatchObject({ status: "VERIFIED", sampleSize: 1000 });
+});
+
+it("conserves every required field and every duplicate-field source", () => {
+  const result = reducer.reduce(
+    request(
+      [
+        dependency(),
+        dependency({
+          sampleSize: 2,
+          knownCount: 1,
+          expectedCount: 2,
+          evidenceIds: ["second-proof"],
+        }),
+        dependency({ field: "traffic", sampleSize: 8, evidenceIds: ["traffic-proof"] }),
+      ],
+      { requiredFields: ["paymentFacts", "traffic"] },
+    ),
+  );
+  expect(result).toMatchObject({
+    status: "INSUFFICIENT",
+    sampleSize: 2,
+    coverageBasisPoints: 5000,
+  });
+  expect(result.evidenceIds).toEqual(["payment-proof", "second-proof", "traffic-proof"]);
+  expect(result.issues).toContainEqual(issue("LOW_SAMPLE", "paymentFacts", "second-proof"));
+});
+
+it.each([
+  ["frozenCosts", "COST_MISSING"],
+  ["paymentFacts", "PAYMENT_UNKNOWN"],
+  ["refundFacts", "REFUND_UNKNOWN"],
+  ["fees", "FEE_MISSING"],
+  ["traffic", "TRAFFIC_MISSING"],
+  ["campaignFacts", "ATTRIBUTION_MISSING"],
+  ["inventoryFacts", "INVENTORY_UNKNOWN"],
+  ["leadTimeHours", "LEAD_TIME_MISSING"],
+  ["returnReceipts", "RETURN_UNKNOWN"],
+  ["custom-cost-count", "NOT_SYNCHRONIZED"],
+] as const)("fails missing field %s closed with honest %s evidence", (field, code) => {
+  const result = reducer.reduce(
+    request([dependency({ field: "context" })], {
+      requiredFields: ["context", field],
+    }),
+  );
+  expect(result).toMatchObject({ status: "UNAVAILABLE", sampleSize: 0, coverageBasisPoints: 0 });
+  expect(result.issues).toContainEqual(issue(code, field));
+  expect(result.evidenceIds).toEqual(["payment-proof"]);
+});
+
+it("keeps known partial missing-field coverage as a disclosed lower bound", () => {
+  const result = reducer.reduce(
+    request([dependency({ knownCount: 8, expectedCount: 10, issues: [issue("PAYMENT_UNKNOWN")] })]),
+  );
+  expect(result).toMatchObject({ status: "UNAVAILABLE", coverageBasisPoints: 8000 });
+  expect(result.issues).toContainEqual(issue("PAYMENT_UNKNOWN"));
+  expect(result.issues).toContainEqual(issue("PARTIAL_COVERAGE"));
+});
+
+it.each([
+  { observedAt: "2026-10-01T15:59:59.999Z" },
+  { sourceWatermark: null },
+  { observedAt: null },
+  { sourceWatermark: "2026-10-01T15:59:59.999Z" },
+  { coverageBasisPoints: 9999 },
+  { issues: [issue("COST_ESTIMATED")] },
+] satisfies Partial<MetricQualityDependency>[])(
+  "does not verify incomplete empty proof %j",
+  (defect) => {
+    const row = dependency({ knownCount: 0, expectedCount: 0, sampleSize: 0, ...defect });
+    const result = reducer.reduce(
+      request([row], { minimumSampleSize: 0, minimumCoverageBasisPoints: 0, maximumAgeHours: 3 }),
+    );
+    expect(result.status).not.toBe("VERIFIED");
+    expect(result.coverageBasisPoints).toBe(0);
+    expect(result.issues.length).toBeGreaterThan(0);
+  },
+);
+
+it("bypasses zero sample only when all required dependencies prove an empty window", () => {
+  const result = reducer.reduce(
+    request(
+      [
+        dependency(),
+        dependency({ field: "traffic", knownCount: 0, expectedCount: 0, sampleSize: 0 }),
+      ],
+      {
+        requiredFields: ["paymentFacts", "traffic"],
+      },
+    ),
+  );
+  expect(result).toMatchObject({ status: "INSUFFICIENT", sampleSize: 0 });
+  expect(result.issues).toContainEqual(issue("LOW_SAMPLE", "traffic"));
+});
+
+it("does not bypass a missing required field when the other source is observed empty", () => {
+  const result = reducer.reduce(
+    request([dependency({ knownCount: 0, expectedCount: 0, sampleSize: 0 })], {
+      requiredFields: ["paymentFacts", "traffic"],
+    }),
+  );
+  expect(result.status).toBe("UNAVAILABLE");
+  expect(result.issues).toContainEqual(issue("TRAFFIC_MISSING", "traffic"));
+  expect(result.issues).toContainEqual(issue("LOW_SAMPLE"));
+});
