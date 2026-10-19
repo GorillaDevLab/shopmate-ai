@@ -1,6 +1,57 @@
 import { expect, it } from "vitest";
-import type { MetricCalculator, MetricResult } from "@shopmate/contracts";
+import {
+  MetricInputV1Schema,
+  type MetricCalculator,
+  type MetricInputV1,
+  type MetricResult,
+} from "@shopmate/contracts";
 import { createMetricDefinitionRegistry } from "./metric-definition-registry.js";
+import { createMetricEvidenceHasher } from "./metric-evidence-hash.js";
+
+const binding = {
+  organizationId: "org-1",
+  workspaceId: "workspace-1",
+  storeId: "store-1",
+  connectionId: "connection-1",
+  externalStoreId: "external-1",
+};
+const hasher = createMetricEvidenceHasher(
+  createMetricDefinitionRegistry([
+    { definitionVersion: "v1", calculator: calculator("NOT_FOUND") },
+    { definitionVersion: "v2", calculator: calculator("SOURCE_UNAVAILABLE") },
+  ]),
+);
+function input(patch: Partial<MetricInputV1> = {}): MetricInputV1 {
+  return {
+    schemaVersion: 1,
+    definitionVersion: "v1",
+    inputRevision: "revision-1",
+    binding,
+    periodStart: "2026-10-01T00:00:00Z",
+    periodEnd: "2026-10-02T00:00:00Z",
+    timezone: "Asia/Shanghai",
+    currency: "CNY",
+    visibleAt: "2026-10-03T00:00:00Z",
+    sourceWatermark: "2026-10-02T00:00:00Z",
+    evidenceIds: ["source-a", "source-b"],
+    status: "VERIFIED",
+    paymentFacts: [],
+    refundFacts: [],
+    inventoryFacts: [],
+    campaignFacts: [],
+    frozenCosts: [],
+    refundAllocations: [],
+    returnReceipts: [],
+    fees: [],
+    traffic: [],
+    inventoryExtensions: [],
+    metricCoverage: [],
+    ...patch,
+  };
+}
+function create(data: MetricInputV1 = input()) {
+  return hasher.create({ input: data, kind: "GMV", subject: { kind: "STORE" } });
+}
 
 function value<T>(result: MetricResult<T>): T {
   expect(result.ok).toBe(true);
@@ -69,4 +120,57 @@ it.each([
   })),
 ])("rejects invalid server construction configuration %#", (definitions) => {
   expect(() => createMetricDefinitionRegistry(definitions as never)).toThrow(TypeError);
+});
+
+it("creates stable scoped evidence from strict synthetic normalized input", () => {
+  expect(MetricInputV1Schema.safeParse(input()).success).toBe(true);
+  const descriptor = value(create());
+  expect(descriptor.inputHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+  expect(descriptor.evidenceIds).toHaveLength(2);
+  expect(descriptor.evidenceIds.every((id) => /^metric-evidence-v1:[a-f0-9]{64}$/.test(id))).toBe(
+    true,
+  );
+  expect(descriptor).toMatchObject({
+    schemaVersion: 1,
+    hashVersion: "metric-input-sha256-v1",
+    definitionVersion: "v1",
+    inputRevision: "revision-1",
+    binding,
+    kind: "GMV",
+    subject: { kind: "STORE" },
+  });
+  expect(JSON.stringify(descriptor)).not.toContain("source-a");
+  expect(descriptor.window.periodStart).toBe("2026-10-01T00:00:00.000Z");
+});
+
+it("canonicalizes object keys and unordered evidence without changing multiplicity", () => {
+  const reordered = Object.fromEntries(
+    Object.entries(input()).reverse(),
+  ) as unknown as MetricInputV1;
+  expect(value(create({ ...reordered, evidenceIds: ["source-b", "source-a"] }))).toEqual(
+    value(create()),
+  );
+  expect(value(create(input({ inputRevision: "revision-2" }))).inputHash).not.toBe(
+    value(create()).inputHash,
+  );
+});
+
+it.each(Object.keys(binding) as (keyof typeof binding)[])(
+  "binds proof identity to scope component %s",
+  (key) => {
+    const first = value(create());
+    const changed = value(create(input({ binding: { ...binding, [key]: "other" } })));
+    expect(changed.inputHash).not.toBe(first.inputHash);
+    expect(changed.evidenceIds.some((id) => first.evidenceIds.includes(id))).toBe(false);
+  },
+);
+
+it("rejects unknown definition versions without an implicit upgrade", () => {
+  expect(create(input({ definitionVersion: "v3" }))).toEqual({
+    ok: false,
+    error: { code: "VERSION_MISMATCH", evidenceIds: [] },
+  });
+  expect(value(create(input({ definitionVersion: "v1" })))).toMatchObject({
+    definitionVersion: "v1",
+  });
 });
