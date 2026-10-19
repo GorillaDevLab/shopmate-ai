@@ -375,3 +375,138 @@ it("rejects unknown definition versions without an implicit upgrade", () => {
     definitionVersion: "v1",
   });
 });
+
+it("replays the registered historical definition with set-order independent proof IDs", () => {
+  const descriptor = value(create());
+  expect(value(hasher.verify({ descriptor, input: input() }))).toEqual(descriptor);
+  const reordered = { ...descriptor, evidenceIds: [...descriptor.evidenceIds].reverse() };
+  expect(value(hasher.verify({ descriptor: reordered, input: input() }))).toEqual(descriptor);
+  expect(value(hasher.verify({ descriptor, input: input() })).definitionVersion).toBe("v1");
+});
+
+it.each(Object.keys(binding) as (keyof typeof binding)[])(
+  "rejects foreign %s before returning foreign evidence",
+  (key) => {
+    const foreign = value(create(input({ binding: { ...binding, [key]: "foreign" } })));
+    const result = hasher.verify({ descriptor: foreign, input: input() });
+    expect(result).toEqual({ ok: false, error: { code: "SCOPE_MISMATCH", evidenceIds: [] } });
+    expect(JSON.stringify(result)).not.toContain(foreign.evidenceIds[0]);
+  },
+);
+
+it.each(["v2", "unknown"])(
+  "rejects changed definition %s without upgrading replay",
+  (definitionVersion) => {
+    const descriptor = { ...value(create()), definitionVersion };
+    expect(hasher.verify({ descriptor, input: input() })).toEqual({
+      ok: false,
+      error: { code: "VERSION_MISMATCH", evidenceIds: [] },
+    });
+  },
+);
+
+it.each(["periodStart", "periodEnd"] as const)("rejects changed descriptor window %s", (key) => {
+  const original = value(create());
+  const descriptor = {
+    ...original,
+    window: { ...original.window, [key]: original.window[key].replace("00:00:00", "01:00:00") },
+  };
+  expect(hasher.verify({ descriptor, input: input() })).toEqual({
+    ok: false,
+    error: { code: "WINDOW_MISMATCH", evidenceIds: [] },
+  });
+});
+
+it.each([
+  { inputRevision: "changed" },
+  { visibleAt: "2026-10-04T00:00:00Z" },
+  { sourceWatermark: null },
+  { inputHash: `sha256:${"0".repeat(64)}` },
+  { kind: "PAID_REVENUE" },
+  { subject: { kind: "SKU", externalSkuId: "sku-other" } },
+  { evidenceIds: [`metric-evidence-v1:${"0".repeat(64)}`] },
+])("rejects tampered complete descriptor context %#", (patch) => {
+  const descriptor = { ...value(create()), ...patch };
+  expect(hasher.verify({ descriptor, input: input() } as never)).toEqual({
+    ok: false,
+    error: { code: "CONFLICT", evidenceIds: [] },
+  });
+});
+
+it.each(["missing", "extra", "foreign"])(
+  "rejects %s evidence membership despite the same inputHash",
+  (mode) => {
+    const original = value(create());
+    const foreign = value(create(input({ inputRevision: "foreign" }))).evidenceIds[0]!;
+    const evidenceIds =
+      mode === "missing"
+        ? original.evidenceIds.slice(1)
+        : mode === "extra"
+          ? [...original.evidenceIds, foreign]
+          : [foreign, original.evidenceIds[1]!];
+    expect(hasher.verify({ descriptor: { ...original, evidenceIds }, input: input() })).toEqual({
+      ok: false,
+      error: { code: "CONFLICT", evidenceIds: [] },
+    });
+  },
+);
+
+it.each([
+  null,
+  { schemaVersion: 2 },
+  { hashVersion: "metric-input-sha256-v2" },
+  { inputHash: `sha256:${"A".repeat(64)}` },
+  { evidenceIds: ["source-a"] },
+  { evidenceIds: [] },
+  { evidenceIds: [`metric-evidence-v1:${"0".repeat(64)}`, `metric-evidence-v1:${"0".repeat(64)}`] },
+  { rawFacts: "private@example.invalid" },
+  { visibleAt: "2026-10-03T00:00:00.0001Z" },
+])("strictly rejects malformed descriptors %#", (patch) => {
+  const descriptor = patch === null ? null : { ...value(create()), ...patch };
+  expect(hasher.verify({ descriptor, input: input() } as never)).toEqual({
+    ok: false,
+    error: { code: "INVALID_INPUT", evidenceIds: [] },
+  });
+});
+
+it.each([
+  null,
+  {},
+  { descriptor: value(create()), input: input(), extra: true },
+  { descriptor: value(create()), input: { ...input(), email: "private" } },
+])("strictly validates complete verification request %#", (request) => {
+  expect(hasher.verify(request as never)).toEqual({
+    ok: false,
+    error: { code: "INVALID_INPUT", evidenceIds: [] },
+  });
+});
+
+it("detects changed facts even with an unchanged revision and source evidence", () => {
+  const data = proofInput();
+  const descriptor = value(create(data));
+  const stock = inventory();
+  const changed = {
+    ...data,
+    inventoryFacts: [{ ...stock, data: { ...stock.data, available: 3 } }],
+  };
+  expect(hasher.verify({ descriptor, input: changed })).toEqual({
+    ok: false,
+    error: { code: "CONFLICT", evidenceIds: [] },
+  });
+});
+
+it("returns independent deep frozen copies without freezing or retaining caller input", () => {
+  const data = input({ binding: { ...binding } });
+  const descriptor = value(create(data));
+  expect(Object.isFrozen(data)).toBe(false);
+  expect(Object.isFrozen(data.binding)).toBe(false);
+  expect(descriptor.binding).not.toBe(data.binding);
+  expect(Object.isFrozen(descriptor.binding)).toBe(true);
+  expect(Object.isFrozen(descriptor.window)).toBe(true);
+  expect(Object.isFrozen(descriptor.subject)).toBe(true);
+  expect(Object.isFrozen(descriptor.evidenceIds)).toBe(true);
+  Object.assign(data.binding, { storeId: "changed" });
+  expect(descriptor.binding.storeId).toBe(binding.storeId);
+  expect(value(create()).inputHash).toBe(descriptor.inputHash);
+  expect(value(create())).not.toBe(descriptor);
+});

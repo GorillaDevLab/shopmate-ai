@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
 import {
+  ConnectorBindingSchema,
   MetricInputV1Schema,
   MetricSubjectSchema,
   MetricValueSchema,
+  MetricWindowSchema,
+  MetricTimestampSchema,
+  SourceVersionSchema,
   type ConnectorBinding,
   type MetricErrorCode,
   type MetricInputV1,
@@ -33,6 +37,12 @@ export interface MetricReplayDescriptor {
   readonly inputHash: string;
   readonly evidenceIds: readonly string[];
 }
+export interface MetricEvidenceHasher {
+  readonly create: (request: MetricEvidenceRequest) => MetricResult<MetricReplayDescriptor>;
+  readonly verify: (
+    request: Readonly<{ descriptor: MetricReplayDescriptor; input: MetricInputV1 }>,
+  ) => MetricResult<MetricReplayDescriptor>;
+}
 
 const hashVersion = "metric-input-sha256-v1";
 const kindSchema = z.union(MetricValueSchema.options.map((option) => option.unwrap().shape.kind));
@@ -41,6 +51,24 @@ const requestSchema = z.strictObject({
   kind: kindSchema,
   subject: MetricSubjectSchema,
 });
+const descriptorSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  hashVersion: z.literal(hashVersion),
+  definitionVersion: SourceVersionSchema,
+  inputRevision: SourceVersionSchema,
+  binding: ConnectorBindingSchema,
+  window: MetricWindowSchema,
+  visibleAt: MetricTimestampSchema,
+  sourceWatermark: MetricTimestampSchema.nullable(),
+  kind: kindSchema,
+  subject: MetricSubjectSchema,
+  inputHash: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  evidenceIds: z
+    .array(z.string().regex(/^metric-evidence-v1:[a-f0-9]{64}$/u))
+    .min(1)
+    .refine((ids) => new Set(ids).size === ids.length),
+});
+const verifySchema = z.strictObject({ descriptor: descriptorSchema, input: MetricInputV1Schema });
 const timestampKeys = new Set([
   "periodStart",
   "periodEnd",
@@ -162,7 +190,31 @@ function create(
   if (!definition.ok) return failure(definition.error.code);
   return freeze({ ok: true, value: descriptor(parsed.data) });
 }
-export function createMetricEvidenceHasher(registry: MetricDefinitionRegistry) {
+function verify(
+  registry: MetricDefinitionRegistry,
+  request: Parameters<MetricEvidenceHasher["verify"]>[0],
+): MetricResult<MetricReplayDescriptor> {
+  const parsed = verifySchema.safeParse(request);
+  if (!parsed.success || !exactTimestamps(parsed.data)) return failure("INVALID_INPUT");
+  const { descriptor: proof, input } = parsed.data;
+  if (canonical(proof.binding) !== canonical(input.binding)) return failure("SCOPE_MISMATCH");
+  if (proof.definitionVersion !== input.definitionVersion) return failure("VERSION_MISMATCH");
+  const window = {
+    periodStart: input.periodStart,
+    periodEnd: input.periodEnd,
+    timezone: input.timezone,
+    currency: input.currency,
+  };
+  if (canonical(proof.window) !== canonical(window)) return failure("WINDOW_MISMATCH");
+  const recomputed = create(registry, { input, kind: proof.kind, subject: proof.subject });
+  if (!recomputed.ok) return recomputed;
+  return canonical(proof) === canonical(recomputed.value) ? recomputed : failure("CONFLICT");
+}
+
+/** Digests identify integrity and scope; callers still enforce repository authorization. */
+export function createMetricEvidenceHasher(
+  registry: MetricDefinitionRegistry,
+): MetricEvidenceHasher {
   const parsed = z
     .object({
       resolve: z.custom<MetricDefinitionRegistry["resolve"]>(
@@ -172,5 +224,8 @@ export function createMetricEvidenceHasher(registry: MetricDefinitionRegistry) {
     .safeParse(registry);
   if (!parsed.success) throw new TypeError("Invalid metric definition registry");
   const snapshot = Object.freeze({ resolve: parsed.data.resolve });
-  return Object.freeze({ create: (request: MetricEvidenceRequest) => create(snapshot, request) });
+  return Object.freeze({
+    create: (request: MetricEvidenceRequest) => create(snapshot, request),
+    verify: (request: Parameters<MetricEvidenceHasher["verify"]>[0]) => verify(snapshot, request),
+  });
 }
