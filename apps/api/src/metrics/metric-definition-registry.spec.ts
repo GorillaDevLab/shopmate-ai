@@ -52,6 +52,207 @@ function input(patch: Partial<MetricInputV1> = {}): MetricInputV1 {
 function create(data: MetricInputV1 = input()) {
   return hasher.create({ input: data, kind: "GMV", subject: { kind: "STORE" } });
 }
+function inventory() {
+  return {
+    binding,
+    observedAt: "2026-10-02T00:00:00Z",
+    sourceVersion: "source-v1",
+    evidenceIds: ["inventory-a"],
+    data: {
+      externalStoreId: binding.externalStoreId,
+      externalSkuId: "sku-a",
+      externalLocationId: "location-a",
+      available: 4,
+      reserved: 1,
+      onHand: 5,
+      safetyStock: 0,
+      leadTimeDays: 1,
+      source: {
+        version: "provider-v1",
+        updatedAt: "2026-10-01T08:00:00+08:00",
+        quality: { state: "COMPLETE" as const, issues: [] },
+      },
+    },
+  };
+}
+function extension() {
+  return {
+    binding,
+    observedAt: "2026-10-02T00:00:00Z",
+    sourceVersion: "extension-v1",
+    evidenceIds: ["extension-a"],
+    data: {
+      externalSkuId: "sku-a",
+      externalLocationId: "location-a",
+      asOf: "2026-10-01T00:00:00Z",
+      quarantine: 0,
+      inbound: 2,
+      leadTimeHours: 24.5,
+      safetyBufferHours: 1.25,
+      eta: "2026-10-03T00:00:00Z",
+    },
+  };
+}
+function proofInput(): MetricInputV1 {
+  const base = input();
+  return {
+    ...base,
+    inventoryFacts: [inventory()],
+    inventoryExtensions: [extension()],
+    metricCoverage: [
+      {
+        schemaVersion: 1,
+        definitionVersion: base.definitionVersion,
+        inputRevision: base.inputRevision,
+        binding,
+        periodStart: base.periodStart,
+        periodEnd: base.periodEnd,
+        timezone: base.timezone,
+        currency: base.currency,
+        visibleAt: base.visibleAt,
+        sourceWatermark: base.sourceWatermark,
+        evidenceIds: ["source-a"],
+        observedAt: base.visibleAt,
+        sourceVersion: "coverage-v1",
+        kind: "GMV",
+        subject: { kind: "STORE" },
+        collections: ["inventoryFacts", "inventoryExtensions"],
+        coverageBasisPoints: 10000,
+      },
+    ],
+  };
+}
+
+it.each([null, {}, { resolve: 1 }])("rejects malformed registry construction %#", (registry) => {
+  expect(() => createMetricEvidenceHasher(registry as never)).toThrow(TypeError);
+});
+
+it.each([
+  null,
+  {},
+  { input: input(), kind: "UNKNOWN", subject: { kind: "STORE" } },
+  { input: input(), kind: "GMV", subject: { kind: "STORE", email: "private@example.invalid" } },
+  { input: input(), kind: "GMV", subject: { kind: "STORE" }, metadata: true },
+])("strictly rejects malformed evidence request %#", (request) => {
+  expect(hasher.create(request as never)).toEqual({
+    ok: false,
+    error: { code: "INVALID_INPUT", evidenceIds: [] },
+  });
+});
+
+it.each([
+  { ...input(), buyer: "private@example.invalid" },
+  { ...input(), inputRevision: " revision" },
+  {
+    ...input(),
+    inventoryFacts: [{ ...inventory(), data: { ...inventory().data, phone: "private" } }],
+  },
+  {
+    ...input(),
+    inventoryFacts: [
+      { ...inventory(), data: { ...inventory().data, available: Number.MAX_SAFE_INTEGER + 1 } },
+    ],
+  },
+  {
+    ...input(),
+    inventoryExtensions: [
+      { ...extension(), data: { ...extension().data, leadTimeHours: Infinity } },
+    ],
+  },
+  {
+    ...input(),
+    inventoryExtensions: [{ ...extension(), data: { ...extension().data, leadTimeHours: NaN } }],
+  },
+  { ...input(), traffic: undefined },
+  { ...input(), fees: [undefined] },
+  { ...input(), sourceWatermark: null },
+  { ...input(), evidenceIds: ["source-a", "source-a"] },
+])("rejects complete malformed input including irrelevant collections %#", (data) => {
+  const result = create(data as never);
+  expect(result).toEqual({ ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] } });
+  expect(JSON.stringify(result)).not.toContain("private");
+});
+
+it.each(["visibleAt", "periodStart", "periodEnd", "sourceWatermark"] as const)(
+  "rejects lost submillisecond input precision in %s",
+  (key) => {
+    const data = input({ [key]: input()[key]!.replace("Z", ".0001Z") });
+    expect(create(data)).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT", evidenceIds: [] },
+    });
+  },
+);
+
+it.each(["observedAt", "updatedAt", "asOf", "eta"])(
+  "rejects lost nested timestamp precision in %s",
+  (key) => {
+    const fact = extension();
+    const stock = inventory();
+    const data =
+      key === "observedAt"
+        ? input({ inventoryFacts: [{ ...stock, observedAt: "2026-10-02T00:00:00.0001Z" }] })
+        : key === "updatedAt"
+          ? input({
+              inventoryFacts: [
+                {
+                  ...stock,
+                  data: {
+                    ...stock.data,
+                    source: { ...stock.data.source, updatedAt: "2026-10-01T08:00:00.0001+08:00" },
+                  },
+                },
+              ],
+            })
+          : input({
+              inventoryExtensions: [
+                { ...fact, data: { ...fact.data, [key]: "2026-10-01T00:00:00.0001Z" } },
+              ],
+            });
+    expect(create(data)).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+  },
+);
+
+it("normalizes known timestamp instants while preserving timestamp-shaped IDs", () => {
+  const stock = inventory();
+  const original = value(create(input({ inventoryFacts: [stock] })));
+  const same = {
+    ...stock,
+    observedAt: "2026-10-02T00:00:00.000000Z",
+    data: {
+      ...stock.data,
+      source: { ...stock.data.source, updatedAt: "2026-10-01T00:00:00.000Z" },
+    },
+  };
+  expect(value(create(input({ inventoryFacts: [same] })))).toEqual(original);
+  const first = value(create(input({ inputRevision: "2026-10-01T00:00:00Z" })));
+  const second = value(create(input({ inputRevision: "2026-10-01T00:00:00.000Z" })));
+  expect(first.inputHash).not.toBe(second.inputHash);
+});
+
+it("hashes distinct evidence union and fact multiplicity without deduping facts", () => {
+  const data = proofInput();
+  expect(MetricInputV1Schema.safeParse(data).success).toBe(true);
+  const single = value(create(data));
+  expect(single.evidenceIds).toHaveLength(4);
+  const duplicate = value(create({ ...data, inventoryFacts: [inventory(), inventory()] }));
+  expect(duplicate.inputHash).not.toBe(single.inputHash);
+  expect(duplicate.evidenceIds).toHaveLength(4);
+});
+
+it("preserves null collections and real fractional numeric facts", () => {
+  expect(value(create(input({ inventoryFacts: null }))).inputHash).not.toBe(
+    value(create()).inputHash,
+  );
+  const fact = extension();
+  const first = value(create(input({ inventoryExtensions: [fact] })));
+  const second = value(
+    create(
+      input({ inventoryExtensions: [{ ...fact, data: { ...fact.data, leadTimeHours: 24.75 } }] }),
+    ),
+  );
+  expect(first.inputHash).not.toBe(second.inputHash);
+});
 
 function value<T>(result: MetricResult<T>): T {
   expect(result.ok).toBe(true);

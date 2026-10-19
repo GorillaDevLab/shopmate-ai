@@ -163,5 +163,14 @@ function create(
   return freeze({ ok: true, value: descriptor(parsed.data) });
 }
 export function createMetricEvidenceHasher(registry: MetricDefinitionRegistry) {
-  return Object.freeze({ create: (request: MetricEvidenceRequest) => create(registry, request) });
+  const parsed = z
+    .object({
+      resolve: z.custom<MetricDefinitionRegistry["resolve"]>(
+        (value) => typeof value === "function",
+      ),
+    })
+    .safeParse(registry);
+  if (!parsed.success) throw new TypeError("Invalid metric definition registry");
+  const snapshot = Object.freeze({ resolve: parsed.data.resolve });
+  return Object.freeze({ create: (request: MetricEvidenceRequest) => create(snapshot, request) });
 }
