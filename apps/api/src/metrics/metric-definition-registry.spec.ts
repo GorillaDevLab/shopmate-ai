@@ -122,6 +122,67 @@ function proofInput(): MetricInputV1 {
     ],
   };
 }
+function payment() {
+  const item = (id: string) => ({
+    externalLineId: id,
+    externalProductId: "product-a",
+    externalSkuId: "sku-a",
+    quantity: 1,
+    unitPriceMinor: 10,
+    grossMinor: 10,
+    discountMinor: 0,
+    netMinor: 10,
+  });
+  return {
+    ...inventory(),
+    evidenceIds: ["payment-a"],
+    data: {
+      externalStoreId: binding.externalStoreId,
+      externalOrderId: "order-a",
+      source: inventory().data.source,
+      status: "PAID" as const,
+      orderedAt: "2026-10-01T00:00:00Z",
+      paidAt: "2026-10-01T01:00:00Z",
+      currency: "CNY" as const,
+      items: [item("line-a"), item("line-b")],
+      grossMinor: 20,
+      discountMinor: 0,
+      shippingMinor: 0,
+      payableMinor: 20,
+      paidMinor: 20,
+      refundedMinor: 0,
+    },
+  };
+}
+function campaign() {
+  const provenance = { ...inventory(), evidenceIds: ["campaign-a", "campaign-b"] };
+  return {
+    ...provenance,
+    data: {
+      externalStoreId: binding.externalStoreId,
+      source: inventory().data.source,
+      externalCampaignId: "campaign-1",
+      date: "2026-10-01",
+      impressions: 10,
+      clicks: 3,
+      attributedOrders: 1,
+      spendMinor: 5,
+      attributedRevenueMinor: 20,
+      currency: "CNY" as const,
+    },
+    measuredCoverage: {
+      binding,
+      observedAt: provenance.observedAt,
+      sourceVersion: "measured-v1",
+      evidenceIds: ["campaign-a"],
+      periodStart: "2026-10-01T00:00:00Z",
+      periodEnd: "2026-10-01T12:00:00Z",
+      timezone: "Asia/Shanghai" as const,
+      currency: "CNY" as const,
+      coverageBasisPoints: 5000,
+    },
+  };
+}
 
 it.each([null, {}, { resolve: 1 }])("rejects malformed registry construction %#", (registry) => {
   expect(() => createMetricEvidenceHasher(registry as never)).toThrow(TypeError);
@@ -262,6 +323,9 @@ function value<T>(result: MetricResult<T>): T {
 function calculator(code: "NOT_FOUND" | "SOURCE_UNAVAILABLE"): MetricCalculator {
   return { calculate: () => ({ ok: false, error: { code, evidenceIds: [] } }) };
 }
+function calculationRequest(): Parameters<MetricCalculator["calculate"]>[0] {
+  return { input: input(), kind: "GMV", subject: { kind: "STORE" }, computedAt: input().visibleAt };
+}
 
 it("resolves only the requested immutable definition after newer versions exist", () => {
   const old = calculator("NOT_FOUND"),
@@ -272,6 +336,14 @@ it("resolves only the requested immutable definition after newer versions exist"
   ]);
   expect(value(registry.resolve("v1")).calculator.calculate).toBeTypeOf("function");
   expect(value(registry.resolve("v1")).definitionVersion).toBe("v1");
+  expect(value(registry.resolve("v1")).calculator.calculate(calculationRequest())).toMatchObject({
+    ok: false,
+    error: { code: "NOT_FOUND" },
+  });
+  expect(value(registry.resolve("v2")).calculator.calculate(calculationRequest())).toMatchObject({
+    ok: false,
+    error: { code: "SOURCE_UNAVAILABLE" },
+  });
   expect(registry.resolve("latest")).toEqual({
     ok: false,
     error: { code: "VERSION_MISMATCH", evidenceIds: [] },
@@ -289,7 +361,7 @@ it("snapshots caller configuration without freezing it", () => {
   entry.calculator = calculator("SOURCE_UNAVAILABLE");
   original.calculate = calculator("SOURCE_UNAVAILABLE").calculate;
   definitions.length = 0;
-  expect(value(registry.resolve("v1")).calculator.calculate({} as never)).toEqual({
+  expect(value(registry.resolve("v1")).calculator.calculate(calculationRequest())).toEqual({
     ok: false,
     error: { code: "NOT_FOUND", evidenceIds: [] },
   });
@@ -509,4 +581,168 @@ it("returns independent deep frozen copies without freezing or retaining caller 
   expect(descriptor.binding.storeId).toBe(binding.storeId);
   expect(value(create()).inputHash).toBe(descriptor.inputHash);
   expect(value(create())).not.toBe(descriptor);
+});
+
+it("matches the literal SHA256 golden for the explicitly versioned canonical input", () => {
+  expect(value(create()).inputHash).toBe(
+    "sha256:a6b1b71b1bc60d6f392e21bc7f4b46f763e7e801596df834a20e0118f41de8ca",
+  );
+});
+
+it.each([
+  { definitionVersion: "v2" },
+  { inputRevision: "revision-2" },
+  { status: "ESTIMATED" },
+  { visibleAt: "2026-10-04T00:00:00Z" },
+  { sourceWatermark: "2026-10-01T00:00:00Z" },
+  { evidenceIds: ["source-c", "source-b"] },
+  { periodStart: "2026-10-01T01:00:00Z" },
+])("hashes every logical input context change %#", (patch) => {
+  expect(value(create(input(patch as Partial<MetricInputV1>))).inputHash).not.toBe(
+    value(create()).inputHash,
+  );
+});
+
+it.each([
+  { kind: "PAID_REVENUE", subject: { kind: "STORE" } },
+  { kind: "GMV", subject: { kind: "SKU", externalSkuId: "sku-a" } },
+  { kind: "GMV", subject: { kind: "CAMPAIGN", externalCampaignId: "campaign-a" } },
+] as const)("hashes metric kind and subject %#", (context) => {
+  const changed = value(hasher.create({ input: input(), ...context }));
+  expect(changed.inputHash).not.toBe(value(create()).inputHash);
+  expect(changed.evidenceIds.some((id) => value(create()).evidenceIds.includes(id))).toBe(false);
+});
+
+it("ignores fact, item, issue, coverage and collection ordering", () => {
+  const fact = payment();
+  const stock = inventory();
+  const issues = ["INVENTORY_STALE", "SOURCE_TIME_MISSING"] as const;
+  const source = { ...stock.data.source, quality: { state: "PARTIAL" as const, issues } };
+  const stocks = [
+    { ...stock, data: { ...stock.data, source } },
+    { ...stock, sourceVersion: "v2" },
+  ];
+  const coverage = proofInput().metricCoverage[0]!;
+  const data = input({
+    paymentFacts: [fact],
+    inventoryFacts: stocks,
+    metricCoverage: [coverage, { ...coverage, coverageBasisPoints: 5000 }],
+  });
+  const reordered = {
+    ...data,
+    paymentFacts: [{ ...fact, data: { ...fact.data, items: [...fact.data.items].reverse() } }],
+    inventoryFacts: [
+      { ...stock, sourceVersion: "v2" },
+      {
+        ...stock,
+        data: {
+          ...stock.data,
+          source: { ...source, quality: { ...source.quality, issues: [...issues].reverse() } },
+        },
+      },
+    ],
+    metricCoverage: data.metricCoverage
+      .map((proof) => ({ ...proof, collections: [...proof.collections].reverse() }))
+      .reverse(),
+  };
+  expect(value(create(reordered))).toEqual(value(create(data)));
+  expect(value(hasher.verify({ descriptor: value(create(data)), input: reordered }))).toEqual(
+    value(create(data)),
+  );
+});
+
+it.each([
+  "sourceVersion",
+  "providerVersion",
+  "coverage",
+  "status",
+  "amount",
+  "sourceEvidence",
+  "quality",
+])("hashes factual %s changes", (field) => {
+  const stock = inventory();
+  const data = proofInput();
+  const changed =
+    field === "sourceVersion"
+      ? { ...stock, sourceVersion: "new" }
+      : field === "sourceEvidence"
+        ? { ...stock, evidenceIds: ["inventory-new"] }
+        : field === "providerVersion"
+          ? {
+              ...stock,
+              data: { ...stock.data, source: { ...stock.data.source, version: "provider-v2" } },
+            }
+          : field === "quality"
+            ? {
+                ...stock,
+                data: {
+                  ...stock.data,
+                  source: {
+                    ...stock.data.source,
+                    quality: { state: "PARTIAL" as const, issues: ["INVENTORY_STALE" as const] },
+                  },
+                },
+              }
+            : { ...stock, data: { ...stock.data, available: 3 } };
+  const modified =
+    field === "coverage"
+      ? {
+          ...data,
+          metricCoverage: data.metricCoverage.map((proof) => ({
+            ...proof,
+            coverageBasisPoints: 5000,
+          })),
+        }
+      : field === "status"
+        ? { ...data, status: "ESTIMATED" as const }
+        : { ...data, inventoryFacts: [changed] };
+  expect(value(create(modified)).inputHash).not.toBe(value(create(data)).inputHash);
+});
+
+it("includes measured coverage and source evidence in the whole logical identity", () => {
+  const fact = campaign();
+  const first = value(create(input({ campaignFacts: [fact] })));
+  expect(first.evidenceIds).toHaveLength(4);
+  const changed = {
+    ...fact,
+    measuredCoverage: { ...fact.measuredCoverage, coverageBasisPoints: 10000 },
+  };
+  expect(value(create(input({ campaignFacts: [changed] }))).inputHash).not.toBe(first.inputHash);
+  const reordered = { ...fact, evidenceIds: [...fact.evidenceIds].reverse() };
+  expect(value(create(input({ campaignFacts: [reordered] })))).toEqual(first);
+});
+
+it("distinguishes null and zero while normalizing negative zero", () => {
+  const fact = extension();
+  const withValue = (quarantine: number | null) =>
+    input({ inventoryExtensions: [{ ...fact, data: { ...fact.data, quarantine } }] });
+  expect(value(create(withValue(null))).inputHash).not.toBe(value(create(withValue(0))).inputHash);
+  expect(value(create(withValue(-0)))).toEqual(value(create(withValue(0))));
+});
+
+it.each(["inputRevision", "evidenceIds", "externalSkuId", "sourceVersion"])(
+  "preserves timestamp-shaped %s as identifiers",
+  (key) => {
+    const data = (id: string) =>
+      key === "inputRevision"
+        ? input({ inputRevision: id })
+        : key === "evidenceIds"
+          ? input({ evidenceIds: [id] })
+          : key === "sourceVersion"
+            ? input({ inventoryFacts: [{ ...inventory(), sourceVersion: id }] })
+            : input({
+                inventoryFacts: [
+                  { ...inventory(), data: { ...inventory().data, externalSkuId: id } },
+                ],
+              });
+    expect(value(create(data("2026-10-01T00:00:00Z"))).inputHash).not.toBe(
+      value(create(data("2026-10-01T00:00:00.000Z"))).inputHash,
+    );
+  },
+);
+
+it("uses JSON escaping to keep delimiter-like and Unicode identifiers distinct", () => {
+  const first = value(create(input({ inputRevision: 'a:"b\\c', evidenceIds: ["雪:d"] })));
+  const second = value(create(input({ inputRevision: 'a:"b', evidenceIds: ["c\\雪:d"] })));
+  expect(first.inputHash).not.toBe(second.inputHash);
 });
