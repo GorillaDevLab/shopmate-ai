@@ -14,6 +14,7 @@ if (!process.env.TEST_DATABASE_URL)
   throw new Error("Metric storage requires runner TEST_DATABASE_URL");
 const serverUrl = requireIsolatedDatabaseUrl(process.env.TEST_DATABASE_URL);
 const migrationRoot = new URL("../../prisma/migrations/", import.meta.url);
+const metricMigration = "20261004090000_metric_snapshots";
 
 async function withDatabase(action) {
   const operator = new pg.Client({ connectionString: serverUrl });
@@ -429,7 +430,7 @@ test("metric history is immutable even for operator DML and binds all ownership 
 async function loginClients(client, url, action) {
   const logins = [];
   try {
-    for (const capability of ["reader", "writer", "definition_writer"]) {
+    for (const capability of ["reader", "writer", "definition_writer", "ungranted"]) {
       const name = `metric_${capability}_${randomBytes(6).toString("hex")}`;
       const password = randomBytes(20).toString("hex");
       // PostgreSQL identifiers/password DDL cannot bind; generated hex-only fragments prevent injection.
@@ -439,7 +440,8 @@ async function loginClients(client, url, action) {
       );
       const login = new pg.Client({ connectionString: roleUrl(url, name, password) });
       logins.push({ name, login, capability });
-      await client.query(`GRANT shopmate_metric_${capability} TO ${name}`);
+      if (capability !== "ungranted")
+        await client.query(`GRANT shopmate_metric_${capability} TO ${name}`);
       await login.connect();
     }
     await action(Object.fromEntries(logins.map(({ capability, login }) => [capability, login])));
@@ -482,6 +484,12 @@ async function withContext(client, user, overrides, action, isolation = "READ CO
 }
 async function allowedRoles(t, client, roles) {
   await insert(client, "metric_snapshots", snapshot());
+  const foreign = Object.fromEntries(
+    Object.entries(binding).map(([key, value]) => [key, value.replace(/a$/u, "b")]),
+  );
+  await definition(client, foreign);
+  await insert(client, "metric_snapshots", snapshot(foreign));
+
   await t.test("actual restricted logins enforce separate capabilities", async () => {
     assert.deepEqual(
       (
@@ -637,6 +645,8 @@ test("metric capabilities use fresh complete tenant context with actual restrict
       await revokedContexts(t, client, roles);
       await securityBoundary(t, client, roles);
       await hardenedDefiner(t, client, roles);
+      await capabilityFlags(t, client, roles);
+      await unassignedWorkspace(t, client, roles);
     });
   });
 });
@@ -968,3 +978,104 @@ async function nodeReporterProof(t, source, runner) {
     },
   );
 }
+
+async function capabilityFlags(t, client, roles) {
+  await t.test("capability groups cannot login or bypass tenant security", async () => {
+    const rows = await client.query(
+      "SELECT rolcanlogin,rolsuper,rolbypassrls,rolcreatedb,rolcreaterole,rolreplication FROM pg_roles WHERE rolname IN ('shopmate_metric_reader','shopmate_metric_writer','shopmate_metric_definition_writer')",
+    );
+    assert.equal(rows.rowCount, 3);
+    assert.ok(rows.rows.every((row) => Object.values(row).every((flag) => flag === false)));
+  });
+  await t.test("ungranted login receives neither public data nor helper execution", async () => {
+    await assert.rejects(roles.ungranted.query("SELECT * FROM metric_snapshots"), {
+      code: "42501",
+    });
+    await assert.rejects(
+      roles.ungranted.query(
+        "SELECT public.metric_scope_access($1,$2,$3,$4,$5,false)",
+        Object.values(binding),
+      ),
+      { code: "42501" },
+    );
+  });
+}
+async function createUnassignedWorkspace(client) {
+  const foreign = {
+    ...binding,
+    workspaceId: "metric-unassigned",
+    storeId: "metric-unassigned-store",
+    connectionId: "metric-unassigned-connection",
+    externalStoreId: "metric/unassigned",
+  };
+  await client.query(
+    'INSERT INTO "Workspace" (id,"organizationId",name,slug,"updatedAt") VALUES ($1,$2,$1,$1,now())',
+    [foreign.workspaceId, foreign.organizationId],
+  );
+  await client.query(
+    'INSERT INTO "Store" (id,"merchantId",name,city,platform,"organizationId","workspaceId") VALUES ($1,$2,$1,$3,$4,$5,$6)',
+    [foreign.storeId, "metric-a", "Shanghai", "MOCK", foreign.organizationId, foreign.workspaceId],
+  );
+  await client.query(
+    'INSERT INTO "PlatformConnection" (id,"organizationId","workspaceId","storeId","externalStoreId") VALUES ($1,$2,$3,$4,$5)',
+    [
+      foreign.connectionId,
+      foreign.organizationId,
+      foreign.workspaceId,
+      foreign.storeId,
+      foreign.externalStoreId,
+    ],
+  );
+  await definition(client, foreign);
+  await insert(client, "metric_snapshots", snapshot(foreign));
+  return foreign;
+}
+async function unassignedWorkspace(t, client, roles) {
+  const foreign = await createUnassignedWorkspace(client);
+  const context = {
+    workspace_id: foreign.workspaceId,
+    store_id: foreign.storeId,
+    connection_id: foreign.connectionId,
+    external_store_id: foreign.externalStoreId,
+  };
+  await t.test("matching unassigned workspace still hides rows from an active member", async () => {
+    await withContext(roles.reader, "metric-viewer", context, async () =>
+      assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 0),
+    );
+    await withContext(roles.writer, "metric-viewer", context, () =>
+      assert.rejects(insert(roles.writer, "metric_snapshots", snapshot(foreign)), {
+        code: "42501",
+      }),
+    );
+  });
+  await t.test("owner can read an active workspace without assignment", async () => {
+    await withContext(roles.reader, "metric-owner", context, async () =>
+      assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 1),
+    );
+  });
+}
+test("unsafe existing capability role fails and rolls back metric installation", async () => {
+  await withDatabase(async (client) => {
+    for (const name of (await readdir(migrationRoot))
+      .filter((v) => /^\d{14}_/u.test(v) && v < metricMigration)
+      .sort())
+      await client.query(await readFile(new URL(`${name}/migration.sql`, migrationRoot), "utf8"));
+    await client.query("ALTER ROLE shopmate_metric_reader LOGIN");
+    try {
+      await assert.rejects(
+        client.query(
+          await readFile(new URL(`${metricMigration}/migration.sql`, migrationRoot), "utf8"),
+        ),
+        { code: "42501" },
+      );
+    } finally {
+      await client.query("ROLLBACK");
+      await client.query("ALTER ROLE shopmate_metric_reader NOLOGIN");
+    }
+    assert.equal(
+      (await client.query("SELECT to_regclass('metric_snapshots') AS table")).rows[0].table,
+      null,
+    );
+    assert.equal((await client.query('SELECT * FROM "Store"')).rowCount, 0);
+  });
+});
