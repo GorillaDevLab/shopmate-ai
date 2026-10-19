@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
-import { URL } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 import pg from "pg";
 import { requireIsolatedDatabaseUrl } from "../helpers/isolated-postgres.mjs";
 
@@ -14,7 +14,6 @@ if (!process.env.TEST_DATABASE_URL)
   throw new Error("Metric storage requires runner TEST_DATABASE_URL");
 const serverUrl = requireIsolatedDatabaseUrl(process.env.TEST_DATABASE_URL);
 const migrationRoot = new URL("../../prisma/migrations/", import.meta.url);
-const metricMigration = "20261004090000_metric_snapshots";
 
 async function withDatabase(action) {
   const operator = new pg.Client({ connectionString: serverUrl });
@@ -143,7 +142,7 @@ function definition(client, overrides = {}) {
     ...overrides,
   });
 }
-async function fixture(client) {
+async function tenantFixture(client) {
   for (const key of ["a", "b"]) {
     await client.query(
       'INSERT INTO "Merchant" (id,name,slug,"updatedAt") VALUES ($1,$1,$1,now())',
@@ -178,6 +177,9 @@ async function fixture(client) {
     'INSERT INTO "WorkspaceMember" (id,"organizationId","workspaceId","userId") VALUES ($1,$2,$3,$4)',
     ["metric-assignment", binding.organizationId, binding.workspaceId, "metric-viewer"],
   );
+}
+async function fixture(client) {
+  await tenantFixture(client);
   for (const [unit, keys] of Object.entries(kinds))
     for (const key of keys) await definition(client, { key, unit });
 }
@@ -489,7 +491,6 @@ async function allowedRoles(t, client, roles) {
   );
   await definition(client, foreign);
   await insert(client, "metric_snapshots", snapshot(foreign));
-
   await t.test("actual restricted logins enforce separate capabilities", async () => {
     assert.deepEqual(
       (
@@ -643,7 +644,7 @@ test("metric capabilities use fresh complete tenant context with actual restrict
       await missingContexts(t, roles);
       await foreignContexts(t, roles);
       await revokedContexts(t, client, roles);
-      await securityBoundary(t, client, roles);
+      await securityBoundary(t, roles);
       await hardenedDefiner(t, client, roles);
       await capabilityFlags(t, client, roles);
       await unassignedWorkspace(t, client, roles);
@@ -666,7 +667,7 @@ test("literal identifiers share the public UTF-16 length budget", async () => {
   });
 });
 
-async function securityBoundary(t, _client, roles) {
+async function securityBoundary(t, roles) {
   for (const isolation of ["REPEATABLE READ", "SERIALIZABLE"])
     await t.test(`${isolation} cannot retain stale authorization`, async () => {
       await withContext(
@@ -935,7 +936,41 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
   }
   assert.match(ordinary, /exclude:/u);
 });
-
+const metricMigration = "20261004090000_metric_snapshots";
+const databaseRoot = fileURLToPath(new URL("../../", import.meta.url));
+async function prisma(url, args) {
+  const { tenantEnvironment } = await import("../../../../scripts/test-tenant-database.mjs");
+  return execFileSync(
+    process.execPath,
+    [path.join(databaseRoot, "node_modules/prisma/build/index.js"), ...args],
+    {
+      cwd: databaseRoot,
+      env: tenantEnvironment(process.env, url),
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 120_000,
+    },
+  );
+}
+async function migrationHistory(action) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "shopmate-metric-migrations-"));
+  try {
+    const migrations = path.join(directory, "migrations");
+    await mkdir(migrations);
+    for (const name of await readdir(migrationRoot)) {
+      if (name === metricMigration) continue;
+      await cp(new URL(name, migrationRoot), path.join(migrations, name), { recursive: true });
+    }
+    const config = path.join(directory, "prisma.config.mjs");
+    await writeFile(
+      config,
+      `export default { schema: ${JSON.stringify(path.join(databaseRoot, "prisma/schema.prisma"))}, migrations: { path: ${JSON.stringify(migrations)} }, datasource: { url: process.env.DATABASE_URL } };\n`,
+    );
+    await action(config, migrations);
+  } finally {
+    await removeMigrationHistory(directory);
+  }
+}
 async function removeMigrationHistory(directory) {
   const absolute = path.resolve(directory);
   if (
@@ -945,7 +980,82 @@ async function removeMigrationHistory(directory) {
     throw new Error("Refusing to remove an unowned metric migration fixture");
   await rm(absolute, { recursive: true, force: true });
 }
+async function emptyDiff(url) {
+  assert.match(
+    await prisma(url, [
+      "migrate",
+      "diff",
+      "--from-config-datasource",
+      "--to-schema",
+      "prisma/schema.prisma",
+      "--exit-code",
+      "--script",
+    ]),
+    /empty migration/u,
+  );
+}
+test("Prisma deploy installs metric history freshly with an empty schema diff", async () => {
+  await withDatabase(async (client, url) => {
+    assert.match(await prisma(url, ["migrate", "deploy"]), /20261004090000_metric_snapshots/u);
+    assert.equal((await client.query("SELECT * FROM metric_snapshots")).rowCount, 0);
+    assert.equal((await client.query("SELECT * FROM metric_definitions")).rowCount, 0);
+    await emptyDiff(url);
+  });
+});
+async function assertLaterHistory(client) {
+  const later = (await readdir(migrationRoot))
+    .filter((name) => /^\d{14}_/u.test(name) && name > metricMigration)
+    .sort();
+  const installed = await client.query(
+    'SELECT migration_name FROM "_prisma_migrations" WHERE migration_name>$1 ORDER BY migration_name',
+    [metricMigration],
+  );
+  assert.deepEqual(
+    installed.rows.map((row) => row.migration_name),
+    later,
+  );
+  assert.ok(later.length > 0);
+}
+async function populatedUpgrade(client, url, config, migrations) {
+  await prisma(url, ["migrate", "deploy", "--config", config]);
+  await tenantFixture(client);
+  await client.query(
+    'INSERT INTO "Product" (id,"merchantId",name,price,"updatedAt") VALUES ($1,$2,$3,$4,now())',
+    ["metric-legacy-product", "metric-a", "Synthetic legacy product", 99],
+  );
+  assert.equal(
+    (await client.query("SELECT to_regclass('metric_snapshots') AS table")).rows[0].table,
+    null,
+  );
+  await assertLaterHistory(client);
 
+  await cp(new URL(`${metricMigration}/`, migrationRoot), path.join(migrations, metricMigration), {
+    recursive: true,
+  });
+  assert.match(
+    await prisma(url, ["migrate", "deploy", "--config", config]),
+    /20261004090000_metric_snapshots/u,
+  );
+  assert.equal(
+    (await client.query('SELECT name FROM "Product" WHERE id=$1', ["metric-legacy-product"]))
+      .rows[0].name,
+    "Synthetic legacy product",
+  );
+  assert.equal(
+    (await client.query('SELECT 1 FROM "Store" WHERE id=$1', [binding.storeId])).rowCount,
+    1,
+  );
+  assert.equal((await client.query("SELECT * FROM metric_snapshots")).rowCount, 0);
+  assert.equal((await client.query("SELECT * FROM metric_definitions")).rowCount, 0);
+  await emptyDiff(url);
+}
+test("Prisma deploy applies newly pending earlier metric migration after populated later history", async () => {
+  await withDatabase(async (client, url) => {
+    await migrationHistory((config, migrations) =>
+      populatedUpgrade(client, url, config, migrations),
+    );
+  });
+});
 async function nodeReporterProof(t, source, runner) {
   await t.test(
     "direct TAP execution rejects an empty file but accepts real assertions",
@@ -978,7 +1088,6 @@ async function nodeReporterProof(t, source, runner) {
     },
   );
 }
-
 async function capabilityFlags(t, client, roles) {
   await t.test("capability groups cannot login or bypass tenant security", async () => {
     const rows = await client.query(
