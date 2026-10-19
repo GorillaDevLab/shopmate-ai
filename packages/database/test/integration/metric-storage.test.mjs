@@ -707,3 +707,216 @@ async function hardenedDefiner(t, client, roles) {
     );
   });
 }
+const apiTargets = ["test/tenant-database.e2e-spec.ts", "test/demo-commerce-database.e2e-spec.ts"];
+function apiReport() {
+  return {
+    success: true,
+    numTotalTestSuites: 2,
+    numPassedTestSuites: 2,
+    numFailedTestSuites: 0,
+    numPendingTestSuites: 0,
+    numTotalTests: 2,
+    numPassedTests: 2,
+    numFailedTests: 0,
+    numPendingTests: 0,
+    numTodoTests: 0,
+    testResults: apiTargets.map((name) => ({
+      name: `/fixture/apps/api/${name}`,
+      status: "passed",
+      assertionResults: [{ status: "passed", failureMessages: [] }],
+    })),
+  };
+}
+const passingTap =
+  "TAP version 13\n1..2\n# tests 2\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n";
+const invalidApiReports = [
+  [
+    "zero tests",
+    (r) => {
+      r.numTotalTests = 0;
+      r.numPassedTests = 0;
+    },
+  ],
+  [
+    "missing expected file",
+    (r) => {
+      r.testResults.pop();
+    },
+  ],
+  [
+    "zero file assertions",
+    (r) => {
+      r.testResults[0].assertionResults = [];
+    },
+  ],
+  [
+    "pending",
+    (r) => {
+      r.numPendingTests = 1;
+    },
+  ],
+  [
+    "todo",
+    (r) => {
+      r.numTodoTests = 1;
+    },
+  ],
+  [
+    "failed",
+    (r) => {
+      r.numFailedTests = 1;
+    },
+  ],
+  [
+    "failed suite",
+    (r) => {
+      r.numFailedTestSuites = 1;
+    },
+  ],
+  [
+    "pending suite",
+    (r) => {
+      r.numPendingTestSuites = 1;
+    },
+  ],
+  [
+    "false success",
+    (r) => {
+      r.success = false;
+    },
+  ],
+  [
+    "skipped assertion",
+    (r) => {
+      r.testResults[0].assertionResults[0].status = "skipped";
+    },
+  ],
+  [
+    "failed assertion",
+    (r) => {
+      r.testResults[0].assertionResults[0].status = "failed";
+    },
+  ],
+  [
+    "missing counts",
+    (r) => {
+      delete r.numTodoTests;
+    },
+  ],
+  [
+    "empty report",
+    (r) => {
+      r.testResults = [];
+    },
+  ],
+];
+async function runnerReports(t, runner) {
+  await t.test("TAP requires actual positive passing counts", () =>
+    assert.deepEqual(runner.assertTapReport(passingTap), {
+      tests: 2,
+      pass: 2,
+      fail: 0,
+      cancelled: 0,
+      skipped: 0,
+      todo: 0,
+    }),
+  );
+  for (const [name, report] of [
+    ["missing", ""],
+    ["zero", passingTap.replaceAll("2", "0")],
+    ["skip", passingTap.replace("# skipped 0", "# skipped 1")],
+    ["todo", passingTap.replace("# todo 0", "# todo 1")],
+    ["cancelled", passingTap.replace("# cancelled 0", "# cancelled 1")],
+    ["failed", passingTap.replace("# fail 0", "# fail 1")],
+    ["count mismatch", passingTap.replace("# pass 2", "# pass 1")],
+  ])
+    await t.test(`TAP rejects ${name}`, () => assert.throws(() => runner.assertTapReport(report)));
+  await t.test("JSON proves each expected API file and every assertion", () =>
+    assert.deepEqual(
+      runner.assertApiReport(apiReport(), apiTargets),
+      apiTargets.map((file) => ({ file, tests: 1 })),
+    ),
+  );
+  for (const [name, mutate] of invalidApiReports)
+    await t.test(`JSON rejects ${name}`, () => {
+      const report = apiReport();
+      mutate(report);
+      assert.throws(() => runner.assertApiReport(report, apiTargets));
+    });
+}
+const poisonedEnvironment = {
+  DATABASE_URL: "postgresql://invalid.invalid/production",
+  SHADOW_DATABASE_URL: "unsafe",
+  DIRECT_URL: "unsafe",
+  TENANT_TEST_OPERATOR_URL: "unsafe",
+  MOCK_PLATFORM_WORKER_DATABASE_URL: "unsafe",
+  MIGRATION_DATABASE_URL: "unsafe",
+  DOTENV_CONFIG_OVERRIDE: "true",
+  DOTENV_CONFIG_PATH: "unsafe",
+  PGHOST: "unsafe",
+  KEEP_ME: "yes",
+};
+async function runnerEnvironment(t, runner) {
+  await t.test(
+    "children receive only runner-owned database URLs and cannot dotenv override",
+    () => {
+      const env = runner.tenantEnvironment(poisonedEnvironment, serverUrl);
+      assert.equal(env.DATABASE_URL, serverUrl);
+      assert.equal(env.TEST_DATABASE_URL, serverUrl);
+      assert.equal(env.DOTENV_CONFIG_OVERRIDE, "false");
+      assert.equal(env.KEEP_ME, "yes");
+      for (const key of Object.keys(poisonedEnvironment).filter(
+        (k) => !["DATABASE_URL", "KEEP_ME", "DOTENV_CONFIG_OVERRIDE"].includes(k),
+      ))
+        assert.equal(env[key], undefined, key);
+    },
+  );
+  await t.test(
+    "API runtime URL is restricted to prepared login on same disposable instance",
+    () => {
+      const runtime = new URL(serverUrl);
+      runtime.username = "shopmate_tenant_api";
+      runtime.password = "";
+      const env = runner.tenantEnvironment(poisonedEnvironment, serverUrl, runtime.toString());
+      assert.equal(env.DATABASE_URL, runtime.toString());
+      assert.equal(env.TENANT_TEST_OPERATOR_URL, serverUrl);
+      assert.throws(() =>
+        runner.tenantEnvironment(
+          poisonedEnvironment,
+          "postgresql://example.com/shopmate_tenant_test",
+        ),
+      );
+      runtime.pathname = "/shopmate_tenant_test_other";
+      assert.throws(() =>
+        runner.tenantEnvironment(poisonedEnvironment, serverUrl, runtime.toString()),
+      );
+    },
+  );
+}
+test("mandatory tenant runner rejects empty/skipped reports and poisoned inherited URLs", async (t) => {
+  const source = await readFile(
+    new URL("../../../../scripts/test-tenant-database.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /export function assertTapReport/u);
+  const runner = await import("../../../../scripts/test-tenant-database.mjs");
+  await runnerReports(t, runner);
+  await runnerEnvironment(t, runner);
+  assert.match(
+    source,
+    /await run\("packages\/database", "test\/integration\/metric-storage.test.mjs"/u,
+  );
+  const tenant = await readFile(
+    new URL("../../../../apps/api/vitest.tenant.config.ts", import.meta.url),
+    "utf8",
+  );
+  const ordinary = await readFile(
+    new URL("../../../../apps/api/vitest.config.ts", import.meta.url),
+    "utf8",
+  );
+  for (const file of apiTargets) {
+    assert.ok(tenant.includes(file));
+    assert.ok(ordinary.includes(file));
+  }
+  assert.match(ordinary, /exclude:/u);
+});
