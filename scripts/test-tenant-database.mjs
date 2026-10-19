@@ -13,7 +13,7 @@ import { prepareTenantApiRuntime } from "../packages/database/test/helpers/tenan
 const root = fileURLToPath(new URL("../", import.meta.url));
 const apiTargets = ["test/tenant-database.e2e-spec.ts", "test/demo-commerce-database.e2e-spec.ts"];
 const forbiddenEnvironment =
-  /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_/iu;
+  /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_|^NODE_TEST_CONTEXT$/iu;
 export function tenantEnvironment(inherited, isolatedUrl, runtimeUrl) {
   requireIsolatedDatabaseUrl(isolatedUrl);
   if (runtimeUrl) {

@@ -857,6 +857,7 @@ const poisonedEnvironment = {
   DOTENV_CONFIG_OVERRIDE: "true",
   DOTENV_CONFIG_PATH: "unsafe",
   PGHOST: "unsafe",
+  NODE_TEST_CONTEXT: "child-v8",
   KEEP_ME: "yes",
 };
 async function runnerEnvironment(t, runner) {
@@ -942,10 +943,12 @@ async function nodeReporterProof(t, source, runner) {
       const directory = await mkdtemp(path.join(os.tmpdir(), "shopmate-metric-migrations-"));
       try {
         const file = path.join(directory, "probe.mjs");
+        const env = runner.tenantEnvironment(process.env, serverUrl);
         await writeFile(file, "");
         const empty = execFileSync(process.execPath, ["--test-reporter=tap", file], {
           encoding: "utf8",
           windowsHide: true,
+          env,
         });
         assert.throws(() => runner.assertTapReport(empty));
         await writeFile(
@@ -955,6 +958,7 @@ async function nodeReporterProof(t, source, runner) {
         const positive = execFileSync(process.execPath, ["--test-reporter=tap", file], {
           encoding: "utf8",
           windowsHide: true,
+          env,
         });
         assert.equal(runner.assertTapReport(positive).tests, 1);
         assert.doesNotMatch(source, /\["--test", "--test-reporter=tap"\]/u);
