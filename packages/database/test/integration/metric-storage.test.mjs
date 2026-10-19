@@ -150,7 +150,7 @@ async function fixture(client) {
       [`metric-store-${key}`, `metric-${key}`, "Shanghai", "MOCK"],
     );
     await client.query(
-      'INSERT INTO "PlatformConnection" (id,"organizationId","workspaceId","storeId","externalStoreId") VALUES ($1,$2,$3,$4,$5)',
+      'INSERT INTO "PlatformConnection" (id,"organizationId","workspaceId","storeId","externalStoreId",status) VALUES ($1,$2,$3,$4,$5,\'DISCONNECTED\')',
       [
         `metric-connection-${key}`,
         `legacy-org-metric-${key}`,
@@ -337,3 +337,373 @@ test("metric storage rejects malformed values and preserves exact public units",
     );
   });
 });
+async function immutableHistory(t, client) {
+  const row = snapshot({ inputRevision: "history-original" });
+  const original = (await insert(client, "metric_snapshots", row)).rows[0];
+  await t.test("same immutable snapshot identity is a unique violation", () =>
+    assert.rejects(insert(client, "metric_snapshots", row), { code: "23505" }),
+  );
+  await t.test("revision and definition version append without replacing history", async () => {
+    await insert(client, "metric_snapshots", {
+      ...row,
+      inputRevision: "history-next",
+      valueMinor: 5,
+    });
+    await definition(client, { definitionVersion: "v2" });
+    await insert(client, "metric_snapshots", { ...row, definitionVersion: "v2", valueMinor: 8 });
+    const rows = await client.query(
+      'SELECT "definitionVersion","inputRevision","valueMinor" FROM metric_snapshots ORDER BY "createdAt",id',
+    );
+    assert.equal(rows.rowCount, 3);
+    assert.equal(
+      (await client.query('SELECT "valueMinor" FROM metric_snapshots WHERE id=$1', [original.id]))
+        .rows[0].valueMinor,
+      "0",
+    );
+    assert.equal(
+      (await client.query("SELECT count(*) FROM metric_definitions WHERE key=$1", ["GMV"])).rows[0]
+        .count,
+      "2",
+    );
+  });
+}
+async function immutableDml(t, client) {
+  for (const table of ["metric_definitions", "metric_snapshots"])
+    for (const statement of [
+      `UPDATE ${table} SET id=id`,
+      `DELETE FROM ${table}`,
+      `TRUNCATE ${table} CASCADE`,
+    ])
+      await t.test(`operator cannot ${statement}`, () =>
+        assert.rejects(client.query(statement), { code: "23514" }),
+      );
+  await t.test("rolled back insertion leaves no history", async () => {
+    await client.query("BEGIN");
+    await insert(client, "metric_snapshots", snapshot({ inputRevision: "rolled-back" }));
+    await client.query("ROLLBACK");
+    assert.equal(
+      (
+        await client.query('SELECT 1 FROM metric_snapshots WHERE "inputRevision"=$1', [
+          "rolled-back",
+        ])
+      ).rowCount,
+      0,
+    );
+  });
+}
+async function ownershipCases(t, client) {
+  for (const field of Object.keys(binding)) {
+    const foreign =
+      field === "externalStoreId" ? "metric/external.b" : binding[field].replace(/a$/u, "b");
+    await t.test(`definition ${field} cannot mix ownership`, () =>
+      assert.rejects(definition(client, { [field]: foreign }), { code: "23503" }),
+    );
+    await t.test(`snapshot ${field} cannot mix ownership`, () =>
+      assert.rejects(insert(client, "metric_snapshots", snapshot({ [field]: foreign })), {
+        code: "23503",
+      }),
+    );
+  }
+  await t.test("snapshot references exact definition version", () =>
+    assert.rejects(insert(client, "metric_snapshots", snapshot({ definitionVersion: "missing" })), {
+      code: "23503",
+    }),
+  );
+  await t.test("metadata cannot duplicate a full scope and version", () =>
+    assert.rejects(definition(client), { code: "23505" }),
+  );
+}
+test("metric history is immutable even for operator DML and binds all ownership fields", async (t) => {
+  await withDatabase(async (client) => {
+    await migrate(client);
+    await fixture(client);
+    await ownershipCases(t, client);
+    await immutableHistory(t, client);
+    await immutableDml(t, client);
+  });
+});
+
+async function loginClients(client, url, action) {
+  const logins = [];
+  try {
+    for (const capability of ["reader", "writer", "definition_writer"]) {
+      const name = `metric_${capability}_${randomBytes(6).toString("hex")}`;
+      const password = randomBytes(20).toString("hex");
+      // PostgreSQL identifiers/password DDL cannot bind; generated hex-only fragments prevent injection.
+      assert.match(name, /^[a-z0-9_]+$/u);
+      await client.query(
+        `CREATE ROLE ${name} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '${password}'`,
+      );
+      const login = new pg.Client({ connectionString: roleUrl(url, name, password) });
+      logins.push({ name, login, capability });
+      await client.query(`GRANT shopmate_metric_${capability} TO ${name}`);
+      await login.connect();
+    }
+    await action(Object.fromEntries(logins.map(({ capability, login }) => [capability, login])));
+  } finally {
+    for (const { name, login } of logins) {
+      try {
+        await login.end();
+      } finally {
+        await client.query(`DROP ROLE ${name}`);
+      }
+    }
+  }
+}
+function roleUrl(url, name, password) {
+  const target = new URL(url);
+  target.username = name;
+  target.password = password;
+  return target.toString();
+}
+async function withContext(client, user, overrides, action, isolation = "READ COMMITTED") {
+  assert.ok(["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"].includes(isolation));
+  await client.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+  try {
+    const context = {
+      user_id: user,
+      ...Object.fromEntries(
+        Object.entries(binding).map(([key, value]) => [
+          key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`),
+          value,
+        ]),
+      ),
+      ...overrides,
+    };
+    for (const [key, value] of Object.entries(context))
+      await client.query("SELECT set_config($1,$2,true)", [`app.${key}`, value]);
+    return await action();
+  } finally {
+    await client.query("ROLLBACK");
+  }
+}
+async function allowedRoles(t, client, roles) {
+  await insert(client, "metric_snapshots", snapshot());
+  await t.test("actual restricted logins enforce separate capabilities", async () => {
+    assert.deepEqual(
+      (
+        await roles.reader.query(
+          "SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user",
+        )
+      ).rows[0],
+      { rolsuper: false, rolbypassrls: false },
+    );
+    await withContext(roles.reader, "metric-viewer", {}, async () => {
+      assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 1);
+      assert.equal((await roles.reader.query("SELECT * FROM metric_definitions")).rowCount, 23);
+    });
+    await withContext(roles.writer, "metric-owner", {}, () =>
+      insert(roles.writer, "metric_snapshots", snapshot()),
+    );
+    await withContext(roles.definition_writer, "metric-admin", {}, () =>
+      definition(roles.definition_writer, { definitionVersion: "role-v2" }),
+    );
+  });
+}
+async function deniedRoles(t, roles) {
+  await t.test("runtime roles cannot read raw tenants or stores", async () => {
+    for (const login of Object.values(roles))
+      for (const table of [
+        '"Store"',
+        '"Organization"',
+        '"OrganizationMember"',
+        '"Workspace"',
+        '"WorkspaceMember"',
+      ])
+        await assert.rejects(login.query(`SELECT * FROM ${table}`), { code: "42501" });
+  });
+  await t.test("snapshot writer cannot provision definitions", () =>
+    withContext(roles.writer, "metric-owner", {}, () =>
+      assert.rejects(definition(roles.writer, { definitionVersion: "forbidden" }), {
+        code: "42501",
+      }),
+    ),
+  );
+  await t.test("definition writer cannot insert snapshots", () =>
+    withContext(roles.definition_writer, "metric-owner", {}, () =>
+      assert.rejects(insert(roles.definition_writer, "metric_snapshots", snapshot()), {
+        code: "42501",
+      }),
+    ),
+  );
+  for (const login of Object.values(roles))
+    for (const table of ["metric_definitions", "metric_snapshots"])
+      for (const command of [
+        `UPDATE ${table} SET id=id`,
+        `DELETE FROM ${table}`,
+        `TRUNCATE ${table}`,
+      ])
+        await t.test(
+          `restricted ${Object.keys(roles).find((k) => roles[k] === login)} cannot ${command}`,
+          () => assert.rejects(login.query(command), { code: "42501" }),
+        );
+}
+async function missingContexts(t, roles) {
+  for (const key of [
+    "user_id",
+    "organization_id",
+    "workspace_id",
+    "store_id",
+    "connection_id",
+    "external_store_id",
+  ])
+    await t.test(`missing ${key} hides reads and denies insertion`, async () => {
+      await withContext(roles.reader, "metric-viewer", { [key]: "" }, async () =>
+        assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 0),
+      );
+      await withContext(roles.writer, "metric-owner", { [key]: "" }, () =>
+        assert.rejects(insert(roles.writer, "metric_snapshots", snapshot()), { code: "42501" }),
+      );
+    });
+}
+async function foreignContexts(t, roles) {
+  for (const key of [
+    "organization_id",
+    "workspace_id",
+    "store_id",
+    "connection_id",
+    "external_store_id",
+  ])
+    await t.test(`foreign ${key} hides reads and denies insertion`, async () => {
+      await withContext(roles.reader, "metric-viewer", { [key]: "foreign" }, async () =>
+        assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 0),
+      );
+      await withContext(roles.writer, "metric-owner", { [key]: "foreign" }, () =>
+        assert.rejects(insert(roles.writer, "metric_snapshots", snapshot()), { code: "42501" }),
+      );
+    });
+  await t.test("context is transaction-local and unavailable to the next request", async () =>
+    assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 0),
+  );
+  await t.test("ordinary member cannot write with writer capability", () =>
+    withContext(roles.writer, "metric-viewer", {}, () =>
+      assert.rejects(insert(roles.writer, "metric_snapshots", snapshot()), { code: "42501" }),
+    ),
+  );
+}
+async function revokedContexts(t, client, roles) {
+  const changes = [
+    ['UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2', "metric-viewer"],
+    ['UPDATE "WorkspaceMember" SET status=$1 WHERE "userId"=$2', "metric-viewer"],
+    ['UPDATE "Organization" SET status=$1 WHERE id=$2', binding.organizationId],
+    ['UPDATE "Workspace" SET status=$1 WHERE id=$2', binding.workspaceId],
+  ];
+  for (const [index, [query, key]] of changes.entries())
+    await t.test(`revoked authority ${index} is rechecked on the next transaction`, async () => {
+      await client.query(query, [index < 2 ? "INACTIVE" : "SUSPENDED", key]);
+      try {
+        await withContext(roles.reader, "metric-viewer", {}, async () =>
+          assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 0),
+        );
+      } finally {
+        await client.query(query, ["ACTIVE", key]);
+      }
+    });
+  await t.test("historical reads do not require active connection or DEMO tenant", async () => {
+    assert.equal(
+      (
+        await client.query('SELECT status FROM "PlatformConnection" WHERE id=$1', [
+          binding.connectionId,
+        ])
+      ).rows[0].status,
+      "DISCONNECTED",
+    );
+    await withContext(roles.reader, "metric-viewer", {}, async () =>
+      assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 1),
+    );
+    assert.equal((await client.query('SELECT * FROM "DemoTenant"')).rowCount, 0);
+  });
+}
+test("metric capabilities use fresh complete tenant context with actual restricted LOGINs", async (t) => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    assert.equal(
+      (
+        await client.query(
+          "SELECT 1 FROM pg_roles WHERE rolname IN ('shopmate_metric_reader','shopmate_metric_writer','shopmate_metric_definition_writer')",
+        )
+      ).rowCount,
+      3,
+    );
+    await fixture(client);
+    await loginClients(client, url, async (roles) => {
+      await allowedRoles(t, client, roles);
+      await deniedRoles(t, roles);
+      await missingContexts(t, roles);
+      await foreignContexts(t, roles);
+      await revokedContexts(t, client, roles);
+      await securityBoundary(t, client, roles);
+      await hardenedDefiner(t, client, roles);
+    });
+  });
+});
+
+test("literal identifiers share the public UTF-16 length budget", async () => {
+  await withDatabase(async (client) => {
+    await migrate(client);
+    await fixture(client);
+    const supplementary = String.fromCodePoint(0x1f600);
+    assert.equal(
+      (await definition(client, { definitionVersion: supplementary.repeat(128) })).rowCount,
+      1,
+    );
+    await assert.rejects(definition(client, { definitionVersion: supplementary.repeat(129) }), {
+      code: "23514",
+    });
+  });
+});
+
+async function securityBoundary(t, _client, roles) {
+  for (const isolation of ["REPEATABLE READ", "SERIALIZABLE"])
+    await t.test(`${isolation} cannot retain stale authorization`, async () => {
+      await withContext(
+        roles.reader,
+        "metric-viewer",
+        {},
+        async () =>
+          assert.equal((await roles.reader.query("SELECT * FROM metric_snapshots")).rowCount, 0),
+        isolation,
+      );
+      await withContext(
+        roles.writer,
+        "metric-owner",
+        {},
+        () =>
+          assert.rejects(insert(roles.writer, "metric_snapshots", snapshot()), { code: "42501" }),
+        isolation,
+      );
+    });
+}
+async function hardenedDefiner(t, client, roles) {
+  await t.test("reader cannot execute unneeded validators or assume definer owner", async () => {
+    await assert.rejects(roles.reader.query("SELECT public.metric_literal($1)", ["x"]), {
+      code: "42501",
+    });
+    const owner = (await client.query("SELECT current_user AS name")).rows[0].name;
+    assert.match(owner, /^[a-z0-9_]+$/u);
+    await assert.rejects(roles.reader.query(`SET ROLE ${owner}`), { code: "42501" });
+    const functions = await client.query(
+      "SELECT prosecdef,proconfig,pg_get_userbyid(proowner) AS owner FROM pg_proc WHERE oid='public.metric_scope_access(text,text,text,text,text,boolean)'::regprocedure",
+    );
+    assert.deepEqual(functions.rows[0], {
+      prosecdef: true,
+      proconfig: ["search_path=pg_catalog"],
+      owner,
+    });
+  });
+  await t.test("both metric tables force RLS without mutation policies", async () => {
+    const rows = await client.query(
+      "SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid IN ('metric_definitions'::regclass,'metric_snapshots'::regclass)",
+    );
+    assert.equal(rows.rowCount, 2);
+    assert.ok(rows.rows.every((row) => row.relrowsecurity && row.relforcerowsecurity));
+    assert.equal(
+      (
+        await client.query(
+          "SELECT * FROM pg_policies WHERE tablename IN ('metric_definitions','metric_snapshots') AND cmd NOT IN ('SELECT','INSERT')",
+        )
+      ).rowCount,
+      0,
+    );
+  });
+}

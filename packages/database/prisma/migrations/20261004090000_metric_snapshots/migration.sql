@@ -81,7 +81,7 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
 $$;
 CREATE FUNCTION public.metric_literal(value TEXT) RETURNS BOOLEAN
 LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
-  SELECT length(value) BETWEEN 1 AND 256
+  SELECT length(value)+length(regexp_replace(value,U&'[\0001-\FFFF]','','g')) BETWEEN 1 AND 256
     AND value=btrim(value,U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF')
     AND value !~ U&'[\0001-\001F\007F-\009F\200B-\200F\202A-\202E\2066-\2069]'
 $$;
@@ -175,4 +175,93 @@ ALTER TABLE public.metric_snapshots ADD CONSTRAINT metric_snapshots_scope_check 
     AND "storeId" ~ '^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$'
     AND "connectionId" ~ '^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$'
     AND public.metric_literal("externalStoreId") IS TRUE);
+
+-- Capability groups are provisioned without credentials or membership grants to application logins.
+DO $$
+DECLARE name_ TEXT;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=current_user AND (rolsuper OR rolbypassrls)) THEN
+    RAISE EXCEPTION 'Metric policy owner must bypass forced tenant RLS' USING ERRCODE='42501';
+  END IF;
+  FOREACH name_ IN ARRAY ARRAY['shopmate_metric_reader','shopmate_metric_writer','shopmate_metric_definition_writer'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=name_) THEN
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=name_ AND
+        (rolsuper OR rolbypassrls OR rolcanlogin OR rolcreatedb OR rolcreaterole OR rolreplication)) THEN
+        RAISE EXCEPTION 'Unsafe existing metric capability role' USING ERRCODE='42501';
+      END IF;
+    ELSE
+      -- The identifier comes only from the fixed local allowlist above.
+      EXECUTE format('CREATE ROLE %I NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION',name_);
+    END IF;
+  END LOOP;
+END
+$$;
+-- Narrow boolean authority check: no tenant rows or credentials are returned to callers.
+CREATE FUNCTION public.metric_scope_access(org_ TEXT, workspace_ TEXT, store_ TEXT, connection_ TEXT, external_ TEXT, writable_ BOOLEAN)
+RETURNS BOOLEAN LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+  SELECT (current_setting('transaction_isolation')='read committed'
+    AND org_=current_setting('app.organization_id',true)
+    AND workspace_=current_setting('app.workspace_id',true)
+    AND store_=current_setting('app.store_id',true)
+    AND connection_=current_setting('app.connection_id',true)
+    AND external_=current_setting('app.external_store_id',true)
+    AND nullif(current_setting('app.user_id',true),'') IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM public."Store" s
+      JOIN public."Organization" o ON o.id=s."organizationId" AND o."legacyMerchantId"=s."merchantId"
+      JOIN public."Workspace" w ON w.id=s."workspaceId" AND w."organizationId"=o.id
+      JOIN public."OrganizationMember" m ON m."organizationId"=o.id
+      WHERE s.id=store_ AND o.id=org_ AND w.id=workspace_
+        AND m."userId"=current_setting('app.user_id',true)
+        AND m.status='ACTIVE' AND o.status='ACTIVE' AND w.status='ACTIVE'
+        AND (NOT writable_ OR m.role IN ('OWNER','ADMIN'))
+        AND (m.role IN ('OWNER','ADMIN') OR EXISTS (
+          SELECT 1 FROM public."WorkspaceMember" wm WHERE wm."organizationId"=o.id
+            AND wm."workspaceId"=w.id AND wm."userId"=m."userId" AND wm.status='ACTIVE'))
+    )) IS TRUE
+$$;
+CREATE FUNCTION public.metric_history_immutable() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
+BEGIN
+  RAISE EXCEPTION 'Metric history is immutable; append a new revision or definition version' USING ERRCODE='23514';
+END
+$$;
+CREATE TRIGGER metric_definitions_immutable BEFORE UPDATE OR DELETE ON public.metric_definitions
+  FOR EACH ROW EXECUTE FUNCTION public.metric_history_immutable();
+CREATE TRIGGER metric_snapshots_immutable BEFORE UPDATE OR DELETE ON public.metric_snapshots
+  FOR EACH ROW EXECUTE FUNCTION public.metric_history_immutable();
+CREATE TRIGGER metric_definitions_no_truncate BEFORE TRUNCATE ON public.metric_definitions
+  FOR EACH STATEMENT EXECUTE FUNCTION public.metric_history_immutable();
+CREATE TRIGGER metric_snapshots_no_truncate BEFORE TRUNCATE ON public.metric_snapshots
+  FOR EACH STATEMENT EXECUTE FUNCTION public.metric_history_immutable();
+ALTER TABLE public.metric_definitions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.metric_definitions FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.metric_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.metric_snapshots FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON public.metric_definitions,public.metric_snapshots FROM PUBLIC,shopmate_metric_reader,shopmate_metric_writer,shopmate_metric_definition_writer;
+GRANT USAGE ON SCHEMA public TO shopmate_metric_reader,shopmate_metric_writer,shopmate_metric_definition_writer;
+GRANT SELECT ON public.metric_definitions TO shopmate_metric_reader,shopmate_metric_writer,shopmate_metric_definition_writer;
+GRANT SELECT ON public.metric_snapshots TO shopmate_metric_reader,shopmate_metric_writer;
+GRANT INSERT ON public.metric_snapshots TO shopmate_metric_writer;
+GRANT INSERT ON public.metric_definitions TO shopmate_metric_definition_writer;
+REVOKE ALL ON FUNCTION public.metric_unit(TEXT),public.metric_literal(TEXT),public.metric_evidence_valid(TEXT[]),
+  public.metric_issue_evidence(JSONB,TEXT[]),public.metric_issue_valid(JSONB,TEXT[]),public.metric_issues_valid(JSONB,TEXT[]),
+  public.metric_time_valid(TIMESTAMPTZ),public.metric_value_valid(TEXT,TEXT,BIGINT,BIGINT,BIGINT,DOUBLE PRECISION),
+  public.metric_scope_access(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN),public.metric_history_immutable() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.metric_scope_access(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN)
+  TO shopmate_metric_reader,shopmate_metric_writer,shopmate_metric_definition_writer;
+GRANT EXECUTE ON FUNCTION public.metric_unit(TEXT),public.metric_literal(TEXT),public.metric_time_valid(TIMESTAMPTZ)
+  TO shopmate_metric_writer,shopmate_metric_definition_writer;
+GRANT EXECUTE ON FUNCTION public.metric_evidence_valid(TEXT[]),public.metric_issue_evidence(JSONB,TEXT[]),
+  public.metric_issue_valid(JSONB,TEXT[]),public.metric_issues_valid(JSONB,TEXT[]),
+  public.metric_value_valid(TEXT,TEXT,BIGINT,BIGINT,BIGINT,DOUBLE PRECISION) TO shopmate_metric_writer;
+CREATE POLICY metric_definitions_read ON public.metric_definitions FOR SELECT
+  TO shopmate_metric_reader,shopmate_metric_writer,shopmate_metric_definition_writer
+  USING (public.metric_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId",false));
+CREATE POLICY metric_definitions_append ON public.metric_definitions FOR INSERT TO shopmate_metric_definition_writer
+  WITH CHECK (public.metric_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId",true));
+CREATE POLICY metric_snapshots_read ON public.metric_snapshots FOR SELECT TO shopmate_metric_reader,shopmate_metric_writer
+  USING (public.metric_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId",false));
+CREATE POLICY metric_snapshots_append ON public.metric_snapshots FOR INSERT TO shopmate_metric_writer
+  WITH CHECK (public.metric_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId",true));
 COMMIT;
