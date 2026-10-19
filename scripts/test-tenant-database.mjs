@@ -130,7 +130,7 @@ async function run(directory, script, args, environment, apiReportPath) {
   const capture = { output: "" };
   const child = spawn(
     process.execPath,
-    [...(apiReportPath ? [] : ["--test", "--test-reporter=tap"]), script, ...args],
+    [...(apiReportPath ? [] : ["--test-reporter=tap"]), script, ...args],
     {
       cwd: path.join(root, directory),
       env: tenantEnvironment(

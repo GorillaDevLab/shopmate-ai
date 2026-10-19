@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { URL } from "node:url";
@@ -901,6 +904,7 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
   assert.match(source, /export function assertTapReport/u);
   const runner = await import("../../../../scripts/test-tenant-database.mjs");
   await runnerReports(t, runner);
+  await nodeReporterProof(t, source, runner);
   await runnerEnvironment(t, runner);
   assert.match(
     source,
@@ -920,3 +924,43 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
   }
   assert.match(ordinary, /exclude:/u);
 });
+
+async function removeMigrationHistory(directory) {
+  const absolute = path.resolve(directory);
+  if (
+    path.dirname(absolute) !== path.resolve(os.tmpdir()) ||
+    !path.basename(absolute).startsWith("shopmate-metric-migrations-")
+  )
+    throw new Error("Refusing to remove an unowned metric migration fixture");
+  await rm(absolute, { recursive: true, force: true });
+}
+
+async function nodeReporterProof(t, source, runner) {
+  await t.test(
+    "direct TAP execution rejects an empty file but accepts real assertions",
+    async () => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), "shopmate-metric-migrations-"));
+      try {
+        const file = path.join(directory, "probe.mjs");
+        await writeFile(file, "");
+        const empty = execFileSync(process.execPath, ["--test-reporter=tap", file], {
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        assert.throws(() => runner.assertTapReport(empty));
+        await writeFile(
+          file,
+          'import test from "node:test"; import assert from "node:assert/strict"; test("real assertion", () => assert.equal(2 + 2, 4));',
+        );
+        const positive = execFileSync(process.execPath, ["--test-reporter=tap", file], {
+          encoding: "utf8",
+          windowsHide: true,
+        });
+        assert.equal(runner.assertTapReport(positive).tests, 1);
+        assert.doesNotMatch(source, /\["--test", "--test-reporter=tap"\]/u);
+      } finally {
+        await removeMigrationHistory(directory);
+      }
+    },
+  );
+}
