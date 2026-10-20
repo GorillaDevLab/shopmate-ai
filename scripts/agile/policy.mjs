@@ -65,6 +65,8 @@ function issueDependencies(body, heading, nextHeading) {
 
 function validateIssue(card, issue) {
   if (issue.id !== card.id) throw new Error(`Issue map mismatch for ${card.id}`);
+  if (issue.labels.some((label) => label.startsWith("agile:") && !STATES.has(label)))
+    throw new Error(`unknown lifecycle label for ${card.id}`);
   const labels = issue.labels.filter((label) => STATES.has(label));
   const retired =
     labels.length === 0 && issue.state === "CLOSED" && issue.stateReason === "COMPLETED";

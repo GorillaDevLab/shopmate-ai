@@ -241,6 +241,16 @@ test("multiple lifecycle labels and dependency section mismatches fail validatio
   );
 });
 
+test("unknown agile lifecycle label fails even beside a valid one", () => {
+  const item = issue("P03-001", "agile:ready", {
+    labels: ["agile:ready", "agile:typo", "agile-priority:P0"],
+  });
+  assert.throws(
+    () => planReconciliation(snapshot([card("P03-001")], [item]), config),
+    /unknown.*label/i,
+  );
+});
+
 test("verified completed card retires a stale Done lifecycle label", () => {
   const result = planReconciliation(
     snapshot([card("P03-001")], [done("P03-001")], [pr("P03-001")], [project("P03-001", "Done")]),
