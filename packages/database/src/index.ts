@@ -1,6 +1,15 @@
 export { disconnectPrismaClient, getPrismaClient } from "./client.js";
 export { resolveTenantMembership, type TenantMembershipRecord } from "./tenant-membership.js";
 export { verifyPassword } from "./password-hash.js";
+export { createMetricSnapshotRepository } from "./metric-snapshot.repository.js";
+export type {
+  MetricHashDescriptor,
+  MetricInputHasher,
+  StoredMetricSnapshot,
+  MetricHistoryPage,
+  MetricSnapshotStore,
+  MetricSnapshotStoreOptions,
+} from "./metric-snapshot.repository.js";
 export type * from "./demo-commerce.types.js";
 export { findDemoSession, findDemoStore } from "./demo-commerce.repository.js";
 export {

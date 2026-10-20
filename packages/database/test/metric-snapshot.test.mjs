@@ -344,3 +344,8 @@ test("history cursors can replay valid long query identifiers", async () => {
   assert.equal(page.ok, true);
   assert.equal((await repo.history({ query: longQuery, limit: 1, cursor: page.value.nextCursor })).ok, true);
 });
+
+test("database package exports the repository factory without runtime wiring", async () => {
+  const publicApi = await import("../src/index.ts");
+  assert.equal(publicApi.createMetricSnapshotRepository, createMetricSnapshotRepository);
+});
