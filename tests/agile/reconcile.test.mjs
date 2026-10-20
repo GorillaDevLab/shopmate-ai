@@ -233,7 +233,11 @@ function gateGraph(query) {
       data: {
         repository: {
           issue: {
-            closedByPullRequestsReferences: { nodes: [{ number: 481 }], totalCount: 1, pageInfo },
+            closedByPullRequestsReferences: {
+              nodes: [{ number: 481, repository: { nameWithOwner: fullName } }],
+              totalCount: 1,
+              pageInfo,
+            },
           },
         },
       },

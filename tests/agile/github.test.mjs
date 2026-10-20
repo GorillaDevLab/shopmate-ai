@@ -57,7 +57,7 @@ function prResponse(query, after) {
         repository: {
           issue: {
             closedByPullRequestsReferences: {
-              nodes: after ? [{ number: 481 }] : [],
+              nodes: after ? [{ number: 481, repository: { nameWithOwner: fullName } }] : [],
               totalCount: 1,
               pageInfo: pageInfo(after),
             },
@@ -219,6 +219,53 @@ test("closed Issue references and PR closure references paginate fully", async (
   const prs = await api(fetch).readIssuePrs(211);
   assert.deepEqual(prs[0].closingIssueNumbers, [211]);
   assert.equal(prs[0].number, 481);
+});
+
+function crossRepositoryPrResponse(query, variables, mixed, calls) {
+  if (query.includes("closedByPullRequestsReferences")) {
+    const number = variables.after ? (mixed ? 481 : 998) : 999;
+    const nameWithOwner = number === 481 ? fullName : "Other/repo";
+    return json({
+      data: {
+        repository: {
+          issue: {
+            closedByPullRequestsReferences: {
+              nodes: [{ number, repository: { nameWithOwner } }],
+              totalCount: 2,
+              pageInfo: pageInfo(variables.after),
+            },
+          },
+        },
+      },
+    });
+  }
+  calls.push(variables.number);
+  if (variables.number !== 481) return json({ data: { repository: { pullRequest: null } } });
+  return prResponse(query, variables.after);
+}
+
+test("mixed paginated closing references fetch only local PRs", async () => {
+  const calls = [];
+  const fetch = async (_url, init) => {
+    const { query, variables } = JSON.parse(init.body);
+    return crossRepositoryPrResponse(query, variables, true, calls);
+  };
+  const prs = await api(fetch).readIssuePrs(211);
+  assert.deepEqual(
+    prs.map((pr) => pr.number),
+    [481],
+  );
+  assert.ok(calls.every((number) => number === 481));
+});
+
+test("foreign-only paginated closing references neither fetch local PRs nor abort", async () => {
+  const calls = [];
+  const fetch = async (_url, init) => {
+    const { query, variables } = JSON.parse(init.body);
+    return crossRepositoryPrResponse(query, variables, false, calls);
+  };
+  assert.deepEqual(await api(fetch).readIssuePrs(211), []);
+  assert.deepEqual(calls, []);
 });
 
 test("checks require trusted Actions run, suite, app and exact head", async () => {

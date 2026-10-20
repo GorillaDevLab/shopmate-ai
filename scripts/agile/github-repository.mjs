@@ -1,7 +1,7 @@
 import { graphPages, restPages } from "./http.mjs";
 
 const PAGE = "totalCount pageInfo { hasNextPage endCursor }";
-const ISSUE_PRS = `query($owner:String!,$repo:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repo){issue(number:$number){closedByPullRequestsReferences(first:100,after:$after,includeClosedPrs:true){nodes{number} ${PAGE}}}}}`;
+const ISSUE_PRS = `query($owner:String!,$repo:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repo){issue(number:$number){closedByPullRequestsReferences(first:100,after:$after,includeClosedPrs:true){nodes{number repository{nameWithOwner}} ${PAGE}}}}}`;
 const CLOSURES = `query($owner:String!,$repo:String!,$number:Int!,$after:String){repository(owner:$owner,name:$repo){pullRequest(number:$number){number mergedAt baseRefName baseRepository{nameWithOwner} headRefOid closingIssuesReferences(first:100,after:$after){nodes{number repository{nameWithOwner}} ${PAGE}}}}}`;
 
 function normalizeIssue(row) {
@@ -49,7 +49,11 @@ async function readIssuePrs(ctx, number) {
     return data.repository?.issue?.closedByPullRequestsReferences;
   });
   const prs = [];
-  for (const node of nodes) prs.push(await readPullRequest(ctx, node.number));
+  for (const node of nodes) {
+    if (!node.repository?.nameWithOwner) throw new Error("PR reference repository missing");
+    if (node.repository.nameWithOwner === ctx.fullName)
+      prs.push(await readPullRequest(ctx, node.number));
+  }
   return prs.filter((pr) => pr.baseRepository === ctx.fullName);
 }
 
