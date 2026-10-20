@@ -174,7 +174,29 @@ test("active work and assignees stay untouched; shared locks block inactive Read
   assert.equal(result.entries[0].after, "In progress");
   assert.equal(result.entries[1].after, "Backlog");
   assert.deepEqual(issues[1].assignees, ["bob"]);
-  assert.match(result.entries[1].blockers.join(" "), /lock|owner/i);
+  assert.match(result.entries[1].blockers.join(" "), /lock/i);
+});
+
+test("one existing assignee preserves Ready and does not block Backlog unlocking", () => {
+  const cards = [card("P03-001"), card("P03-002", ["P03-001"])];
+  const dependentBody = "## 硬依赖（合并后才可领取）\n- `P03-001`\n## 实际接线依赖\n- 无";
+  for (const label of ["agile:ready", "agile:backlog"]) {
+    const assigned = issue("P03-002", label, { assignees: ["hannnnnnnny"], body: dependentBody });
+    const plan = planReconciliation(
+      snapshot(cards, [done("P03-001"), assigned], [pr("P03-001")]),
+      config,
+    );
+    assert.equal(plan.entries[1].after, "Ready");
+    assert.deepEqual(assigned.assignees, ["hannnnnnnny"]);
+    assert.deepEqual(plan.entries[1].blockers, []);
+  }
+});
+
+test("multiple owners remain a reported readiness conflict", () => {
+  const assigned = issue("P03-001", "agile:ready", { assignees: ["alice", "bob"] });
+  const plan = planReconciliation(snapshot([card("P03-001")], [assigned]), config);
+  assert.equal(plan.entries[0].after, "Backlog");
+  assert.match(plan.entries[0].blockers.join(" "), /multiple owners/i);
 });
 
 test("active work with newly incomplete dependency stays active and reports it", () => {

@@ -155,8 +155,6 @@ function planEntry(card, issue, projectItem, before, complete, active, snapshot)
   const blockers = dependencyBlockers(card, complete, snapshot.externalGates);
   blockers.push(...lockBlockers(card, active));
   if (issue.assignees.length > 1) blockers.push("multiple owners");
-  if (issue.assignees.length === 1 && !["In progress", "In review"].includes(before))
-    blockers.push("existing owner");
   const integrationBlockers = dependencyBlockers(
     { dependsOn: card.integrationDependsOn },
     complete,
