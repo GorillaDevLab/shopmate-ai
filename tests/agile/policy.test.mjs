@@ -177,6 +177,36 @@ test("active work and assignees stay untouched; shared locks block inactive Read
   assert.match(result.entries[1].blockers.join(" "), /lock/i);
 });
 
+test("native Project active stages preserve work and reserve shared files", () => {
+  for (const stage of ["In progress", "In review"]) {
+    const cards = [
+      card("P03-001", [], { sharedFiles: ["shared.ts"] }),
+      card("P03-002", [], { sharedFiles: ["shared.ts"] }),
+    ];
+    const issues = [
+      issue("P03-001", "agile:ready", { assignees: ["alice"] }),
+      issue("P03-002", "agile:ready"),
+    ];
+    const projects = [project("P03-001", stage), project("P03-002", "Ready")];
+    const plan = planReconciliation(snapshot(cards, issues, [], projects), config);
+    assert.equal(plan.entries[0].after, stage);
+    assert.equal(plan.entries[1].after, "Backlog");
+    assert.match(plan.entries[1].blockers.join(" "), /file lock conflict with P03-001/);
+  }
+});
+
+test("conflicting active phases fail closed before any state plan", () => {
+  const item = issue("P03-001", "agile:in-progress");
+  assert.throws(
+    () =>
+      planReconciliation(
+        snapshot([card("P03-001")], [item], [], [project("P03-001", "In review")]),
+        config,
+      ),
+    /ambiguous.*active/i,
+  );
+});
+
 test("one existing assignee preserves Ready and does not block Backlog unlocking", () => {
   const cards = [card("P03-001"), card("P03-002", ["P03-001"])];
   const dependentBody = "## 硬依赖（合并后才可领取）\n- `P03-001`\n## 实际接线依赖\n- 无";

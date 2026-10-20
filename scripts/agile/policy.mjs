@@ -7,6 +7,7 @@ const STATES = new Map([
   ["agile:done", "Done"],
 ]);
 const LABELS = new Map([...STATES].map(([label, state]) => [state, label]));
+const ACTIVE = new Set(["In progress", "In review"]);
 
 function distinct(values, context) {
   if (new Set(values).size !== values.length) throw new Error(`duplicate ${context}`);
@@ -153,7 +154,15 @@ function dependencyBlockers(card, complete, gates) {
     .map((id) => `dependency ${id} incomplete`);
 }
 
-function planEntry(card, issue, projectItem, before, complete, active, snapshot) {
+function activeStage(issueStatus, projectStatus, id) {
+  const issueActive = ACTIVE.has(issueStatus);
+  const projectActive = ACTIVE.has(projectStatus);
+  if (issueActive && projectActive && issueStatus !== projectStatus)
+    throw new Error(`ambiguous active stages for ${id}`);
+  return projectActive ? projectStatus : issueActive ? issueStatus : null;
+}
+
+function planEntry(card, issue, projectItem, before, stage, complete, active, snapshot) {
   const blockers = dependencyBlockers(card, complete, snapshot.externalGates);
   blockers.push(...lockBlockers(card, active));
   if (issue.assignees.length > 1) blockers.push("multiple owners");
@@ -163,12 +172,13 @@ function planEntry(card, issue, projectItem, before, complete, active, snapshot)
     snapshot.externalGates,
   );
   const verified = complete.get(card.id) === true;
-  let after = before;
+  let after = stage ?? before;
   if (verified) after = "Done";
   else if (issue.state === "CLOSED") {
     blockers.push("completion evidence pending");
-    if (!["In progress", "In review"].includes(before)) after = "In review";
-  } else if (["Backlog", "Ready"].includes(before)) after = blockers.length ? "Backlog" : "Ready";
+    if (!stage) after = "In review";
+  } else if (!stage && ["Backlog", "Ready"].includes(before))
+    after = blockers.length ? "Backlog" : "Ready";
   return {
     id: card.id,
     issueNumber: issue.number,
@@ -212,11 +222,12 @@ export function planReconciliation(snapshot, config) {
   const { cards, issues, projects } = validateSnapshot(snapshot, config);
   const complete = hardCompletion(cards, snapshot, config);
   const before = new Map([...cards].map(([id, card]) => [id, validateIssue(card, issues.get(id))]));
+  const stages = new Map(
+    [...cards.keys()].map((id) => [id, activeStage(before.get(id), projects.get(id).status, id)]),
+  );
   const active = [...cards.values()].filter(
     (card) =>
-      !complete.get(card.id) &&
-      (["In progress", "In review"].includes(before.get(card.id)) ||
-        issues.get(card.id).state === "CLOSED"),
+      !complete.get(card.id) && (stages.get(card.id) || issues.get(card.id).state === "CLOSED"),
   );
   const entries = [...cards.values()].map((card) =>
     planEntry(
@@ -224,6 +235,7 @@ export function planReconciliation(snapshot, config) {
       issues.get(card.id),
       projects.get(card.id),
       before.get(card.id),
+      stages.get(card.id),
       complete,
       active,
       snapshot,

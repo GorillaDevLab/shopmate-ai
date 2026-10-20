@@ -84,7 +84,7 @@ function issueResponse(state, path, init) {
     state: "open",
     state_reason: null,
     labels: state.labels.map((name) => ({ name })),
-    assignees: [],
+    assignees: (state.assignees ?? []).map((login) => ({ login })),
   };
   return json(path.endsWith("/issues") ? [row] : row);
 }
@@ -138,6 +138,40 @@ test("dry run saves a nonsecret plan and performs no writes", async () => {
   );
   assert.deepEqual(fake.state.writes, []);
   assert.equal(JSON.stringify(reports).includes("repo-secret"), false);
+});
+
+test("apply preserves native Project active work and aligns its lagging Issue label", async () => {
+  const fake = scenario({
+    labels: ["agile:ready", "phase:p03"],
+    status: "In progress",
+    assignees: ["alice"],
+  });
+  const result = await reconcile({
+    api: client(fake.fetch),
+    cards: [card],
+    config,
+    apply: true,
+    persist: async () => {},
+  });
+  assert.equal(result.status, "applied");
+  assert.equal(fake.state.status, "In progress");
+  assert.deepEqual(fake.state.writes, ["issue"]);
+  assert.deepEqual(fake.state.labels, ["phase:p03", "agile:in-progress"]);
+});
+
+test("conflicting active Issue and Project phases abort before writes", async () => {
+  const fake = scenario({ labels: ["agile:in-progress"], status: "In review" });
+  await assert.rejects(
+    reconcile({
+      api: client(fake.fetch),
+      cards: [card],
+      config,
+      apply: true,
+      persist: async () => {},
+    }),
+    /ambiguous.*active/i,
+  );
+  assert.deepEqual(fake.state.writes, []);
 });
 
 test("unrelated Project items in the same repository do not enter the pool", async () => {
