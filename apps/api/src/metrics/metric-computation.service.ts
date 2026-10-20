@@ -307,17 +307,18 @@ export function createMetricComputationService(
   options: MetricComputationServiceOptions,
 ): MetricComputationService {
   const actor = freeze(TenantContextSchema.parse(options.actor));
-  const { read } = options.source,
-    { append, read: readSnapshot } = options.repository;
-  const { resolve } = options.registry,
-    { authorizeBinding } = options;
-  const registry = Object.freeze({ resolve });
+  const source = Object.freeze({ read: options.source.read.bind(options.source) });
+  const repository = Object.freeze({
+    append: options.repository.append.bind(options.repository),
+    read: options.repository.read.bind(options.repository),
+  });
+  const registry = Object.freeze({ resolve: options.registry.resolve.bind(options.registry) });
   const captured: Captured = Object.freeze({
     actor,
-    source: Object.freeze({ read }),
-    repository: Object.freeze({ append, read: readSnapshot }),
+    source,
+    repository,
     registry,
-    authorizeBinding,
+    authorizeBinding: options.authorizeBinding.bind(options),
     hasher: createMetricEvidenceHasher(registry),
   });
   return Object.freeze({ compute: (request: MetricComputeRequest) => compute(captured, request) });

@@ -9,10 +9,17 @@ import {
   type MetricSnapshotRepository,
   type MetricSnapshotV1,
   type MetricSourceQuery,
+  type MetricSourceReader,
   type TenantContext,
 } from "@shopmate/contracts";
-import { createMetricDefinitionRegistry } from "./metric-definition-registry.js";
-import { createMetricComputationService } from "./metric-computation.service.js";
+import {
+  createMetricDefinitionRegistry,
+  type MetricDefinitionRegistry,
+} from "./metric-definition-registry.js";
+import {
+  createMetricComputationService,
+  type MetricComputationServiceOptions,
+} from "./metric-computation.service.js";
 
 const binding: ConnectorBinding = {
   organizationId: "org-1",
@@ -599,3 +606,63 @@ it("accepts the same source cutoff represented with normalized UTC timestamps", 
   expect(result[0]!.visibleAt).toBe(timestamps.visibleAt);
   expect(f.read).toHaveBeenCalledTimes(1);
 });
+
+class ReceiverSource implements MetricSourceReader {
+  #input = input();
+  async read(): Promise<MetricResult<MetricInputV1>> {
+    return success(this.#input);
+  }
+}
+class ReceiverRepository implements MetricSnapshotRepository {
+  #snapshots: MetricSnapshotV1[] = [];
+  async append(computation: MetricComputationV1): Promise<MetricResult<MetricSnapshotV1>> {
+    this.#snapshots.push(computation.snapshot);
+    return success(this.#snapshots.at(-1)!);
+  }
+  async read(): Promise<MetricResult<readonly MetricSnapshotV1[]>> {
+    return success(this.#snapshots);
+  }
+}
+class ReceiverRegistry implements MetricDefinitionRegistry {
+  #registry = createMetricDefinitionRegistry([
+    {
+      definitionVersion: "v1",
+      calculator: { calculate: (request) => success(calculation(request)) },
+    },
+  ]);
+  resolve(version: string) {
+    return this.#registry.resolve(version);
+  }
+}
+class ReceiverOptions implements MetricComputationServiceOptions {
+  #binding = binding;
+  readonly actor = actor;
+  readonly source = new ReceiverSource();
+  readonly repository = new ReceiverRepository();
+  readonly registry = new ReceiverRegistry();
+  async authorizeBinding(): Promise<MetricResult<ConnectorBinding>> {
+    return success(this.#binding);
+  }
+}
+
+it.each(["source", "repository", "registry", "authorization"])(
+  "preserves the original class %s method receiver without freezing the adapter",
+  async (boundary) => {
+    const f = fixture();
+    const options =
+      boundary === "authorization"
+        ? new ReceiverOptions()
+        : {
+            actor,
+            source: boundary === "source" ? new ReceiverSource() : { read: f.read },
+            repository: boundary === "repository" ? new ReceiverRepository() : f.repository,
+            registry: boundary === "registry" ? new ReceiverRegistry() : f.registry,
+            authorizeBinding: f.authorizeBinding,
+          };
+    const adapters = [options, options.source, options.repository, options.registry];
+    const frozen = adapters.map(Object.isFrozen);
+    const service = createMetricComputationService(options);
+    expect(value(await service.compute({ query: query(), computedAt }))).toHaveLength(2);
+    expect(adapters.map(Object.isFrozen)).toEqual(frozen);
+  },
+);
