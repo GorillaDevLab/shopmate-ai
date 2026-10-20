@@ -3,6 +3,7 @@ import {
   MetricComputationV1Schema,
   type ConnectorBinding,
   type MetricCalculationRequest,
+  type MetricCalculator,
   type MetricComputationV1,
   type MetricInputV1,
   type MetricResult,
@@ -701,3 +702,46 @@ it("revalidates normalized calculator output against the original frozen input b
   }
   expect(result.every((snapshot) => snapshot.visibleAt === query().visibleAt)).toBe(true);
 });
+
+class PrivateCalculator implements MetricCalculator {
+  #error = "OVERFLOW" as const;
+  #shouldFail: boolean;
+  constructor(shouldFail: boolean) {
+    this.#shouldFail = shouldFail;
+  }
+  calculate(request: MetricCalculationRequest): MetricResult<MetricComputationV1> {
+    return this.#shouldFail
+      ? { ok: false, error: { code: this.#error, evidenceIds: [] } }
+      : success(calculation(request));
+  }
+}
+
+it.each([false, true])(
+  "retains a custom registry's private-field calculator receiver (failure=%s)",
+  async (shouldFail) => {
+    const f = fixture();
+    const calculator = new PrivateCalculator(shouldFail);
+    const method = calculator.calculate;
+    const registry: MetricDefinitionRegistry = {
+      resolve: (version) => success({ definitionVersion: version, calculator }),
+    };
+    const service = createMetricComputationService({
+      actor,
+      source: { read: f.read },
+      registry,
+      repository: f.repository,
+      authorizeBinding: f.authorizeBinding,
+    });
+    const result = await service.compute({ query: query(), computedAt });
+    if (shouldFail) {
+      expect(result).toEqual({ ok: false, error: { code: "OVERFLOW", evidenceIds: [] } });
+      expect(f.append).not.toHaveBeenCalled();
+    } else {
+      expect(value(result)).toHaveLength(2);
+      expect(f.append).toHaveBeenCalledTimes(2);
+    }
+    expect(f.read).toHaveBeenCalledTimes(1);
+    expect(calculator.calculate).toBe(method);
+    expect(Object.isFrozen(calculator)).toBe(false);
+  },
+);

@@ -194,9 +194,13 @@ function resolveDefinition(options: Captured, version: string): MetricResult<Met
     if (!resolved.ok) return resolved;
     const parsed = definitionSchema.safeParse(resolved.value);
     if (!parsed.success) return failure("INVALID_INPUT");
-    return parsed.data.definitionVersion === version
-      ? { ok: true, value: parsed.data }
-      : failure("VERSION_MISMATCH");
+    if (parsed.data.definitionVersion !== version) return failure("VERSION_MISMATCH");
+    const owner = (resolved.value as MetricDefinition).calculator;
+    const calculate = parsed.data.calculator.calculate.bind(owner);
+    return freeze({
+      ok: true,
+      value: { definitionVersion: parsed.data.definitionVersion, calculator: { calculate } },
+    });
   } catch {
     return failure("SOURCE_UNAVAILABLE");
   }
