@@ -4,62 +4,127 @@ import { Buffer } from "node:buffer";
 import { createMetricSnapshotRepository } from "../src/metric-snapshot.repository.ts";
 
 const binding = {
-  organizationId: "org-a", workspaceId: "workspace-a", storeId: "store-a",
-  connectionId: "connection-a", externalStoreId: "external-a",
+  organizationId: "org-a",
+  workspaceId: "workspace-a",
+  storeId: "store-a",
+  connectionId: "connection-a",
+  externalStoreId: "external-a",
 };
 const actor = {
-  userId: "user-a", merchantId: "merchant-a", organizationId: "org-a",
-  workspaceId: "workspace-a", role: "ANALYST", permissions: [],
+  userId: "user-a",
+  merchantId: "merchant-a",
+  organizationId: "org-a",
+  workspaceId: "workspace-a",
+  role: "ANALYST",
+  permissions: [],
 };
 const start = "2026-10-01T16:00:00Z";
 const end = "2026-10-02T06:00:00Z";
 const window = { periodStart: start, periodEnd: end, timezone: "Asia/Shanghai", currency: "CNY" };
 const common = {
-  schemaVersion: 1, definitionVersion: "g4-v1", inputRevision: "revision-a",
-  binding, ...window, visibleAt: end, sourceWatermark: end, evidenceIds: ["sync-a"],
+  schemaVersion: 1,
+  definitionVersion: "g4-v1",
+  inputRevision: "revision-a",
+  binding,
+  ...window,
+  visibleAt: end,
+  sourceWatermark: end,
+  evidenceIds: ["sync-a"],
 };
 const input = {
-  ...common, status: "VERIFIED", paymentFacts: [], refundFacts: [], inventoryFacts: [],
-  campaignFacts: [], frozenCosts: null, refundAllocations: null, returnReceipts: null,
-  fees: null, traffic: null, inventoryExtensions: null,
-  metricCoverage: [{
-    ...common, observedAt: end, sourceVersion: "source-v1", kind: "PAID_REVENUE",
-    subject: { kind: "STORE" }, collections: ["paymentFacts"], coverageBasisPoints: 10000,
-  }],
+  ...common,
+  status: "VERIFIED",
+  paymentFacts: [],
+  refundFacts: [],
+  inventoryFacts: [],
+  campaignFacts: [],
+  frozenCosts: null,
+  refundAllocations: null,
+  returnReceipts: null,
+  fees: null,
+  traffic: null,
+  inventoryExtensions: null,
+  metricCoverage: [
+    {
+      ...common,
+      observedAt: end,
+      sourceVersion: "source-v1",
+      kind: "PAID_REVENUE",
+      subject: { kind: "STORE" },
+      collections: ["paymentFacts"],
+      coverageBasisPoints: 10000,
+    },
+  ],
 };
 const snapshot = {
-  ...common, computedAt: end, sampleSize: 0, coverageBasisPoints: 10000,
-  status: "VERIFIED", issues: [], subject: { kind: "STORE" },
+  ...common,
+  computedAt: end,
+  sampleSize: 0,
+  coverageBasisPoints: 10000,
+  status: "VERIFIED",
+  issues: [],
+  subject: { kind: "STORE" },
   metric: { kind: "PAID_REVENUE", unit: "minorCNY", value: 0 },
 };
 const computation = { input, snapshot };
 const hash = `sha256:${"a".repeat(64)}`;
 const descriptor = {
-  schemaVersion: 1, hashVersion: "metric-input-sha256-v1", definitionVersion: "g4-v1",
-  inputRevision: "revision-a", binding, window, visibleAt: end, sourceWatermark: end,
-  kind: "PAID_REVENUE", subject: { kind: "STORE" }, inputHash: hash,
+  schemaVersion: 1,
+  hashVersion: "metric-input-sha256-v1",
+  definitionVersion: "g4-v1",
+  inputRevision: "revision-a",
+  binding,
+  window,
+  visibleAt: end,
+  sourceWatermark: end,
+  kind: "PAID_REVENUE",
+  subject: { kind: "STORE" },
+  inputHash: hash,
   evidenceIds: [`metric-evidence-v1:${"b".repeat(64)}`],
 };
 const query = {
-  binding, window, kinds: ["PAID_REVENUE"], subject: { kind: "STORE" },
-  definitionVersion: "g4-v1", inputRevision: null, visibleAt: end,
+  binding,
+  window,
+  kinds: ["PAID_REVENUE"],
+  subject: { kind: "STORE" },
+  definitionVersion: "g4-v1",
+  inputRevision: null,
+  visibleAt: end,
 };
 
 function row(value = snapshot, id = "00000000-0000-4000-8000-000000000001") {
   return {
-    id, organizationId: binding.organizationId, workspaceId: binding.workspaceId,
-    storeId: binding.storeId, connectionId: binding.connectionId,
-    externalStoreId: binding.externalStoreId, key: value.metric.kind,
-    definitionVersion: value.definitionVersion, schemaVersion: 1,
-    hashVersion: "metric-input-sha256-v1", inputRevision: value.inputRevision,
-    inputHash: hash, subjectKind: "STORE", subjectId: "",
-    periodStart: new Date(value.periodStart), periodEnd: new Date(value.periodEnd),
-    timezone: value.timezone, currency: value.currency, visibleAt: new Date(value.visibleAt),
-    sourceWatermark: new Date(value.sourceWatermark), computedAt: new Date(value.computedAt),
-    sampleSize: BigInt(value.sampleSize), coverageBasisPoints: value.coverageBasisPoints,
-    status: value.status, evidenceIds: value.evidenceIds, issues: value.issues,
-    valueMinor: BigInt(value.metric.value), valueUnits: null, valueBasisPoints: null,
-    valueHours: null, createdAt: new Date(end),
+    id,
+    organizationId: binding.organizationId,
+    workspaceId: binding.workspaceId,
+    storeId: binding.storeId,
+    connectionId: binding.connectionId,
+    externalStoreId: binding.externalStoreId,
+    key: value.metric.kind,
+    definitionVersion: value.definitionVersion,
+    schemaVersion: 1,
+    hashVersion: "metric-input-sha256-v1",
+    inputRevision: value.inputRevision,
+    inputHash: hash,
+    subjectKind: "STORE",
+    subjectId: "",
+    periodStart: new Date(value.periodStart),
+    periodEnd: new Date(value.periodEnd),
+    timezone: value.timezone,
+    currency: value.currency,
+    visibleAt: new Date(value.visibleAt),
+    sourceWatermark: new Date(value.sourceWatermark),
+    computedAt: new Date(value.computedAt),
+    sampleSize: BigInt(value.sampleSize),
+    coverageBasisPoints: value.coverageBasisPoints,
+    status: value.status,
+    evidenceIds: value.evidenceIds,
+    issues: value.issues,
+    valueMinor: BigInt(value.metric.value),
+    valueUnits: null,
+    valueBasisPoints: null,
+    valueHours: null,
+    createdAt: new Date(end),
   };
 }
 
@@ -84,9 +149,20 @@ function database({ allowed = true, existing = [], fail = null, respond = null }
       if (sql.includes("FROM public.metric_snapshots")) return { rows };
       return { rows: [] };
     },
-    release() { state.released++; },
+    release() {
+      state.released++;
+    },
   };
-  return { pool: { async connect() { return client; } }, calls, rows, state };
+  return {
+    pool: {
+      async connect() {
+        return client;
+      },
+    },
+    calls,
+    rows,
+    state,
+  };
 }
 function repository(db, proof = descriptor, principal = actor) {
   const hasher = { create: () => ({ ok: true, value: proof }) };
@@ -111,14 +187,18 @@ test("duplicate semantic payload reuses original computedAt, evidence and id", a
   const result = await repository(db).append({ input, snapshot: next });
   assert.deepEqual(result, { ok: true, value: snapshot });
   assert.equal(db.rows[0], original);
-  assert.equal(db.calls.some((call) => call.sql.includes("INSERT INTO")), false);
+  assert.equal(
+    db.calls.some((call) => call.sql.includes("INSERT INTO")),
+    false,
+  );
 });
 
 test("same immutable revision with changed value returns typed conflict", async () => {
   const db = database({ existing: [row()] });
   const changed = { ...snapshot, metric: { ...snapshot.metric, value: 1 } };
   assert.deepEqual(await repository(db).append({ input, snapshot: changed }), {
-    ok: false, error: { code: "CONFLICT", evidenceIds: [] },
+    ok: false,
+    error: { code: "CONFLICT", evidenceIds: [] },
   });
 });
 
@@ -128,12 +208,18 @@ test("foreign actor or denied live membership cannot learn row existence", async
   assert.equal((await repository(db).read(query)).error.code, "NOT_FOUND");
   const foreign = { ...actor, organizationId: "org-b" };
   assert.equal((await repository(db, descriptor, foreign).read(query)).error.code, "NOT_FOUND");
-  assert.equal(db.calls.filter((call) => call.sql.includes("FROM public.metric_snapshots")).length, 0);
+  assert.equal(
+    db.calls.filter((call) => call.sql.includes("FROM public.metric_snapshots")).length,
+    0,
+  );
 });
 
 test("malformed input and detached hash descriptor fail before writes", async () => {
   const db = database();
-  assert.equal((await repository(db).append({ input, snapshot: { ...snapshot, extra: 1 } })).error.code, "INVALID_INPUT");
+  assert.equal(
+    (await repository(db).append({ input, snapshot: { ...snapshot, extra: 1 } })).error.code,
+    "INVALID_INPUT",
+  );
   const detached = { ...descriptor, binding: { ...binding, storeId: "foreign" } };
   assert.equal((await repository(db, detached).append(computation)).error.code, "INVALID_INPUT");
   assert.equal(db.calls.length, 0);
@@ -142,7 +228,8 @@ test("malformed input and detached hash descriptor fail before writes", async ()
 test("database errors become SOURCE_UNAVAILABLE without leaking details", async () => {
   const db = database({ fail: "metric_scope_access" });
   assert.deepEqual(await repository(db).read(query), {
-    ok: false, error: { code: "SOURCE_UNAVAILABLE", evidenceIds: [] },
+    ok: false,
+    error: { code: "SOURCE_UNAVAILABLE", evidenceIds: [] },
   });
   assert.match(db.calls.at(-1).sql, /ROLLBACK/);
 });
@@ -164,15 +251,27 @@ test("pg default bigint strings decode without precision loss", async () => {
 
 test("P13 normalized descriptor timestamps and unordered evidence remain idempotent", async () => {
   const normalized = {
-    ...descriptor, window: { ...window, periodStart: new Date(start).toISOString(), periodEnd: new Date(end).toISOString() },
-    visibleAt: new Date(end).toISOString(), sourceWatermark: new Date(end).toISOString(),
+    ...descriptor,
+    window: {
+      ...window,
+      periodStart: new Date(start).toISOString(),
+      periodEnd: new Date(end).toISOString(),
+    },
+    visibleAt: new Date(end).toISOString(),
+    sourceWatermark: new Date(end).toISOString(),
   };
   const sources = ["sync-a", "sync-b"];
   const original = { ...snapshot, evidenceIds: sources };
   const db = database({ existing: [row(original)] });
-  const next = JSON.parse(JSON.stringify({ input: { ...input, evidenceIds: sources },
-    snapshot: { ...original, evidenceIds: [...sources].reverse() } }, (_key, value) =>
-    value === start || value === end ? new Date(value).toISOString() : value));
+  const next = JSON.parse(
+    JSON.stringify(
+      {
+        input: { ...input, evidenceIds: sources },
+        snapshot: { ...original, evidenceIds: [...sources].reverse() },
+      },
+      (_key, value) => (value === start || value === end ? new Date(value).toISOString() : value),
+    ),
+  );
   const result = await repository(db, normalized).append(next);
   assert.deepEqual(result, { ok: true, value: original });
 });
@@ -186,11 +285,16 @@ test("insert targets the P14 unique index with inference, rather than a nonexist
 });
 
 test("malformed hasher descriptors return INVALID_INPUT before connecting", async () => {
-  for (const proof of [null, { ...descriptor, evidenceIds: [] },
-    { ...descriptor, visibleAt: "invalid" }, { ...descriptor, inputHash: "wrong" }]) {
+  for (const proof of [
+    null,
+    { ...descriptor, evidenceIds: [] },
+    { ...descriptor, visibleAt: "invalid" },
+    { ...descriptor, inputHash: "wrong" },
+  ]) {
     const db = database();
     assert.deepEqual(await repository(db, proof).append(computation), {
-      ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] },
+      ok: false,
+      error: { code: "INVALID_INPUT", evidenceIds: [] },
     });
     assert.equal(db.calls.length, 0);
   }
@@ -199,8 +303,14 @@ test("malformed hasher descriptors return INVALID_INPUT before connecting", asyn
 test("auxiliary requests reject unknown fields before connecting", async () => {
   const db = database();
   const repo = repository(db);
-  assert.equal((await repo.byId({ binding, id: row().id, extra: true })).error.code, "INVALID_INPUT");
-  assert.equal((await repo.history({ query, limit: 2, cursor: null, extra: true })).error.code, "INVALID_INPUT");
+  assert.equal(
+    (await repo.byId({ binding, id: row().id, extra: true })).error.code,
+    "INVALID_INPUT",
+  );
+  assert.equal(
+    (await repo.history({ query, limit: 2, cursor: null, extra: true })).error.code,
+    "INVALID_INPUT",
+  );
   assert.equal(db.calls.length, 0);
 });
 
@@ -214,9 +324,16 @@ test("bound authenticated actor is captured rather than retaining mutable caller
 });
 
 test("stored malformed numbers and contradictory typed columns fail closed", async () => {
-  for (const mutation of [{ sampleSize: "9007199254740992" }, { valueMinor: "1.5" },
-    { valueMinor: " 1" }, { valueMinor: "1e3" }, { valueMinor: "9007199254740992" },
-    { valueUnits: "1" }, { subjectId: "unexpected" }, { periodStart: 0 }]) {
+  for (const mutation of [
+    { sampleSize: "9007199254740992" },
+    { valueMinor: "1.5" },
+    { valueMinor: " 1" },
+    { valueMinor: "1e3" },
+    { valueMinor: "9007199254740992" },
+    { valueUnits: "1" },
+    { subjectId: "unexpected" },
+    { periodStart: 0 },
+  ]) {
     const db = database({ existing: [{ ...row(), ...mutation }] });
     assert.equal((await repository(db).read(query)).error.code, "SOURCE_UNAVAILABLE");
   }
@@ -239,7 +356,10 @@ test("history keyset cursor retains scope and timestamp/id tie breaking", async 
   const db = database({ existing: [second, first] });
   const repo = repository(db);
   const page = await repo.history({ query, limit: 1, cursor: null });
-  assert.deepEqual(page.value.items.map((item) => item.id), [second.id]);
+  assert.deepEqual(
+    page.value.items.map((item) => item.id),
+    [second.id],
+  );
   assert.equal(typeof page.value.nextCursor, "string");
   db.rows.splice(0, db.rows.length, second);
   const next = await repo.history({ query, limit: 1, cursor: page.value.nextCursor });
@@ -248,7 +368,10 @@ test("history keyset cursor retains scope and timestamp/id tie breaking", async 
   assert.match(select.sql, /ORDER BY "createdAt" DESC,"id" DESC LIMIT \$18/);
   assert.deepEqual(select.params.slice(15), [second.createdAt, second.id, 2]);
   const foreign = { ...query, binding: { ...binding, storeId: "foreign" } };
-  assert.equal((await repo.history({ query: foreign, limit: 1, cursor: page.value.nextCursor })).error.code, "INVALID_INPUT");
+  assert.equal(
+    (await repo.history({ query: foreign, limit: 1, cursor: page.value.nextCursor })).error.code,
+    "INVALID_INPUT",
+  );
 });
 
 test("unknown well formed cursor anchor returns the same NOT_FOUND without disclosing a foreign row", async () => {
@@ -261,9 +384,13 @@ test("unknown well formed cursor anchor returns the same NOT_FOUND without discl
 });
 
 test("history rejects invalid filters limits and cursors", async () => {
-  for (const request of [{ query, limit: 0, cursor: null }, { query, limit: 101, cursor: null },
-    { query, limit: 1.5, cursor: null }, { query, limit: 1, cursor: "???" },
-    { query: { ...query, kinds: [] }, limit: 1, cursor: null }]) {
+  for (const request of [
+    { query, limit: 0, cursor: null },
+    { query, limit: 101, cursor: null },
+    { query, limit: 1.5, cursor: null },
+    { query, limit: 1, cursor: "???" },
+    { query: { ...query, kinds: [] }, limit: 1, cursor: null },
+  ]) {
     assert.equal((await repository(database()).history(request)).error.code, "INVALID_INPUT");
   }
 });
@@ -282,12 +409,18 @@ test("scope authorization is freshly checked and never trusts the caller role", 
 test("concurrent identical insert re-reads and preserves the winning original snapshot", async () => {
   let selects = 0;
   const original = row();
-  const db = database({ respond(sql) {
-    if (sql.includes("FROM public.metric_snapshots")) return { rows: ++selects === 1 ? [] : [original] };
-    if (sql.includes("INSERT INTO")) return { rows: [] };
-    return null;
-  } });
-  const result = await repository(db).append({ input, snapshot: { ...snapshot, computedAt: "2026-10-02T07:00:00Z" } });
+  const db = database({
+    respond(sql) {
+      if (sql.includes("FROM public.metric_snapshots"))
+        return { rows: ++selects === 1 ? [] : [original] };
+      if (sql.includes("INSERT INTO")) return { rows: [] };
+      return null;
+    },
+  });
+  const result = await repository(db).append({
+    input,
+    snapshot: { ...snapshot, computedAt: "2026-10-02T07:00:00Z" },
+  });
   assert.deepEqual(result, { ok: true, value: snapshot });
   assert.equal(selects, 2);
 });
@@ -297,27 +430,45 @@ test("changed hash evidence quality or cutoff cannot overwrite an immutable revi
     { stored: { ...row(), inputHash: `sha256:${"c".repeat(64)}` } },
     { stored: row({ ...snapshot, evidenceIds: ["sync-b"] }) },
     { stored: row({ ...snapshot, sampleSize: 1 }) },
-    { stored: row({ ...snapshot, visibleAt: "2026-10-02T06:00:01Z", computedAt: "2026-10-02T06:00:01Z" }) },
+    {
+      stored: row({
+        ...snapshot,
+        visibleAt: "2026-10-02T06:00:01Z",
+        computedAt: "2026-10-02T06:00:01Z",
+      }),
+    },
   ];
   for (const { stored } of variants) {
     const db = database({ existing: [stored] });
     assert.equal((await repository(db).append(computation)).error.code, "CONFLICT");
-    assert.equal(db.calls.some((call) => call.sql.includes("INSERT INTO")), false);
+    assert.equal(
+      db.calls.some((call) => call.sql.includes("INSERT INTO")),
+      false,
+    );
   }
 });
 
 test("missing or mismatched approved definition produces VERSION_MISMATCH", async () => {
-  const db = database({ respond: (sql) => sql.includes("metric_definitions") ? { rows: [] } : null });
+  const db = database({
+    respond: (sql) => (sql.includes("metric_definitions") ? { rows: [] } : null),
+  });
   assert.equal((await repository(db).append(computation)).error.code, "VERSION_MISMATCH");
   assert.match(db.calls.at(-1).sql, /ROLLBACK/);
 });
 
 test("connection and insert failures return only typed SOURCE_UNAVAILABLE and release clients", async () => {
-  const unavailable = { pool: { connect() { throw new Error("secret"); } } };
+  const unavailable = {
+    pool: {
+      connect() {
+        throw new Error("secret");
+      },
+    },
+  };
   assert.equal((await repository(unavailable).read(query)).error.code, "SOURCE_UNAVAILABLE");
   const db = database({ fail: "INSERT INTO" });
   assert.deepEqual(await repository(db).append(computation), {
-    ok: false, error: { code: "SOURCE_UNAVAILABLE", evidenceIds: [] },
+    ok: false,
+    error: { code: "SOURCE_UNAVAILABLE", evidenceIds: [] },
   });
   assert.match(db.calls.at(-1).sql, /ROLLBACK/);
   assert.equal(db.state.released, 1);
@@ -325,7 +476,10 @@ test("connection and insert failures return only typed SOURCE_UNAVAILABLE and re
 
 test("by-id returns persisted metadata and parameterizes literal external identifiers", async () => {
   const db = database({ existing: [row()] });
-  const request = { binding: { ...binding, externalStoreId: "literal'); SELECT secret; --" }, id: row().id };
+  const request = {
+    binding: { ...binding, externalStoreId: "literal'); SELECT secret; --" },
+    id: row().id,
+  };
   const result = await repository(db).byId(request);
   assert.deepEqual(result, { ok: true, value: { id: row().id, inputHash: hash, snapshot } });
   const select = db.calls.find((call) => call.sql.includes("FROM public.metric_snapshots"));
@@ -335,14 +489,21 @@ test("by-id returns persisted metadata and parameterizes literal external identi
 });
 
 test("history cursors can replay valid long query identifiers", async () => {
-  const longQuery = { ...query, definitionVersion: "定义".repeat(128), inputRevision: "修订".repeat(128),
+  const longQuery = {
+    ...query,
+    definitionVersion: "定义".repeat(128),
+    inputRevision: "修订".repeat(128),
     subject: { kind: "SKU", externalSkuId: "库存".repeat(128) },
-    binding: { ...binding, externalStoreId: "商店".repeat(128) } };
+    binding: { ...binding, externalStoreId: "商店".repeat(128) },
+  };
   const db = database({ existing: [row(), row()] });
   const repo = repository(db);
   const page = await repo.history({ query: longQuery, limit: 1, cursor: null });
   assert.equal(page.ok, true);
-  assert.equal((await repo.history({ query: longQuery, limit: 1, cursor: page.value.nextCursor })).ok, true);
+  assert.equal(
+    (await repo.history({ query: longQuery, limit: 1, cursor: page.value.nextCursor })).ok,
+    true,
+  );
 });
 
 test("database package exports the repository factory without runtime wiring", async () => {
