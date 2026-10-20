@@ -1,0 +1,101 @@
+name: Agile task state sync
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  issues:
+    types: [opened, reopened, closed, labeled, unlabeled, assigned, unassigned, edited]
+  push:
+    branches: [main]
+    paths:
+      - docs/superpowers/plans/p3-p13-agile/backlog.json
+      - scripts/agile/**
+      - .github/workflows/agile-state-sync.yml
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the full reconciliation plan
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  checks: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: agile-task-state-sync
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.merged == true) &&
+      (github.event_name != 'issues' ||
+       contains(github.event.issue.labels.*.name, 'agile-p3-p13') ||
+       github.event.label.name == 'agile-p3-p13' ||
+       contains(github.event.issue.labels.*.name, 'agile-external-gate') ||
+       github.event.label.name == 'agile-external-gate')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check Project App setup
+        env:
+          APP_ID: ${{ secrets.AGILE_PROJECT_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.AGILE_PROJECT_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$APP_ID" || -z "$APP_PRIVATE_KEY" ]]; then
+            echo '### Agile task state: setup-required' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Configure AGILE_PROJECT_APP_ID and AGILE_PROJECT_APP_PRIVATE_KEY for full Project Status synchronization.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Checkout trusted policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Create selected-repository Project token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          app-id: ${{ secrets.AGILE_PROJECT_APP_ID }}
+          private-key: ${{ secrets.AGILE_PROJECT_APP_PRIVATE_KEY }}
+          owner: GorillaDevLab
+          repositories: shopmate-ai
+          permission-issues: read
+          permission-organization-projects: write
+
+      - name: Preview task state
+        if: github.event_name == 'workflow_dispatch' && inputs.apply != true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: node scripts/agile/sync.mjs --report "$RUNNER_TEMP/agile-state-plan.json"
+
+      - name: Reconcile task state
+        if: github.event_name != 'workflow_dispatch' || inputs.apply == true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: node scripts/agile/sync.mjs --apply --report "$RUNNER_TEMP/agile-state-plan.json"
+
+      - name: Save reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agile-state-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agile-state-plan.json
+          if-no-files-found: ignore
+          retention-days: 7
