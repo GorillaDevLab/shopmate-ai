@@ -59,7 +59,7 @@
 
 ## Ready 与完成门槛
 
-`dependsOn` 表示开始和独立验收前必须合并的任务；`integrationDependsOn` 表示实际连接生产路径前必须合并的任务。`P2-GATE` 由 P2 完成验收关闭。真实接线卡的硬依赖闭包必须包含已消费叶子的全部 integrationDependsOn，以及明确的实际 metric/Agent/auth/upload/parser/strategy/source 实现门槛；缺少任一实现不能 Ready。组件用 fixture Done 只代表接口交付。初始仅无硬依赖的卡标 Ready；依赖合并后由协调人检查文件锁，再将后继卡放 Ready。此版本不声称自动解析依赖或自动原子领取。
+`dependsOn` 表示开始和独立验收前必须合并的任务；`integrationDependsOn` 表示实际连接生产路径前必须合并的任务。`P2-GATE` 未配置独立核验映射前保持阻塞。真实接线卡的硬依赖闭包必须包含已消费叶子的全部 integrationDependsOn，以及明确的实际 metric/Agent/auth/upload/parser/strategy/source 实现门槛；缺少任一实现不能 Ready。组件用 fixture Done 只代表接口交付。启用[任务状态同步](../../engineering/agile-state-sync.md)后，协调器按版本化依赖、合并 PR 的最新 head 六项 CI 和当前文件锁更新未领取卡的 Ready/Backlog，并对完成卡清理旧生命周期标签、同步 Project Status。In progress/In review、负责人及人工领取/锁定流程仍由协调人维护；冲突只报告。工作流合并、Project App 授权和实际 dry-run/apply 验证之前，仍按人工流程检查状态。
 
 每卡的统一交付步骤：
 
@@ -68,7 +68,7 @@
 - [ ] 只实现卡内交付；每个独立改动写清晰 commit message 并单独提交。
 - [ ] 运行卡内定向测试与改动对应的 lint/typecheck/build；UI 卡提供 375px 与桌面截图/键盘验证。
 - [ ] PR 使用 `Closes #Issue编号`，列出结果、测试证据和范围限制，经过独立 review。
-- [ ] 确认最新 PR head CI 全绿，合并 main，关闭 Issue，状态设 Done；未合并不能算 Done。
+- [ ] 确认最新 PR head 六项 CI 全绿、PR 合并 main、Issue 以 completed 关闭；启用状态同步后核对 Project Done 与生命周期标签，未启用时由协调人手动更新。未合并或 CI 未通过不能算 Done。
 
 ## 优先拉通的两个轨道
 
