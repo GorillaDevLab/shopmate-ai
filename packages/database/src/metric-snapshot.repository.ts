@@ -69,7 +69,7 @@ export interface MetricSnapshotStoreOptions {
 }
 
 type Row = Record<string, unknown>;
-type SqlClient = Pick<PoolClient, "query" | "release">;
+type SqlClient = Pick<PoolClient, "query" | "release" | "on" | "off">;
 const hashPattern = /^sha256:[a-f0-9]{64}$/u;
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/iu;
 const bindingKeys = [
@@ -427,6 +427,15 @@ async function authorize(
   );
   return result.rows[0]?.allowed === true;
 }
+async function rollbackFailed(client: SqlClient | undefined, begun: boolean): Promise<boolean> {
+  if (!client || !begun) return false;
+  try {
+    await client.query("ROLLBACK");
+    return false;
+  } catch {
+    return true;
+  }
+}
 async function transaction<T>(
   options: MetricSnapshotStoreOptions,
   binding: ConnectorBinding,
@@ -435,27 +444,33 @@ async function transaction<T>(
 ): Promise<MetricResult<T>> {
   if (!scoped(options.actor, binding)) return failure(write ? "FORBIDDEN" : "NOT_FOUND");
   let client: SqlClient | undefined;
+  let begun = false;
+  let rollingBack = false;
+  let discard = false;
+  const onError = () => {
+    discard = true;
+  };
   try {
     client = await options.pool.connect();
+    // pg-pool removes its idle error listener while a client is checked out.
+    client.on("error", onError);
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
-    if (!(await authorize(client, options.actor, binding, write))) {
-      await client.query("ROLLBACK");
-      return failure(write ? "FORBIDDEN" : "NOT_FOUND");
-    }
-    const result = await work(client);
+    begun = true;
+    const result = (await authorize(client, options.actor, binding, write))
+      ? await work(client)
+      : failure<T>(write ? "FORBIDDEN" : "NOT_FOUND");
+    if (discard) throw new Error("Metric connection unavailable");
+    rollingBack = !result.ok;
     await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    begun = false;
+    if (discard) throw new Error("Metric connection unavailable");
     return result;
   } catch {
-    if (client) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        return failure("SOURCE_UNAVAILABLE");
-      }
-    }
+    discard = rollingBack || (await rollbackFailed(client, begun)) || discard;
     return failure("SOURCE_UNAVAILABLE");
   } finally {
-    client?.release();
+    client?.off("error", onError);
+    client?.release(discard);
   }
 }
 function equivalent(

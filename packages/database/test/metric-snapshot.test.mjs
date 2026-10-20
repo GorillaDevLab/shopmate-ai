@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Buffer } from "node:buffer";
+import { EventEmitter } from "node:events";
+import { spawnSync } from "node:child_process";
+import process from "node:process";
+import { URL } from "node:url";
 import { createMetricSnapshotRepository } from "../src/metric-snapshot.repository.ts";
 
 const binding = {
@@ -131,8 +135,8 @@ function row(value = snapshot, id = "00000000-0000-4000-8000-000000000001") {
 function database({ allowed = true, existing = [], fail = null, respond = null } = {}) {
   const calls = [];
   const rows = [...existing];
-  const state = { allowed, released: 0 };
-  const client = {
+  const state = { allowed, released: 0, discarded: [] };
+  const client = Object.assign(new EventEmitter(), {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (fail && sql.includes(fail)) throw new Error("secret connection detail");
@@ -149,10 +153,11 @@ function database({ allowed = true, existing = [], fail = null, respond = null }
       if (sql.includes("FROM public.metric_snapshots")) return { rows };
       return { rows: [] };
     },
-    release() {
+    release(discard) {
       state.released++;
+      state.discarded.push(discard);
     },
-  };
+  });
   return {
     pool: {
       async connect() {
@@ -162,6 +167,7 @@ function database({ allowed = true, existing = [], fail = null, respond = null }
     calls,
     rows,
     state,
+    client,
   };
 }
 function repository(db, proof = descriptor, principal = actor) {
@@ -509,4 +515,109 @@ test("history cursors can replay valid long query identifiers", async () => {
 test("database package exports the repository factory without runtime wiring", async () => {
   const publicApi = await import("../src/index.ts");
   assert.equal(publicApi.createMetricSnapshotRepository, createMetricSnapshotRepository);
+});
+
+function checkedOutErrorScript() {
+  return `
+    import { EventEmitter } from 'node:events';
+    import { createMetricSnapshotRepository } from ${JSON.stringify(new URL("../src/metric-snapshot.repository.ts", import.meta.url).href)};
+    const actor = ${JSON.stringify(actor)};
+    const query = ${JSON.stringify(query)};
+    let discarded;
+    const client = Object.assign(new EventEmitter(), {
+      query(sql) {
+        if (sql.includes('set_config')) return new Promise((resolve, reject) => {
+          setImmediate(() => {
+            const error = new Error('socket terminated');
+            reject(error);
+            client.emit('error', error);
+          });
+        });
+        return Promise.resolve({ rows: [] });
+      },
+      release(discard) { discarded = discard; }
+    });
+    const pool = { async connect() { return client; } };
+    const hasher = { create() { throw new Error('read must not hash'); } };
+    const result = await createMetricSnapshotRepository({ pool, actor, hasher }).read(query);
+    process.stdout.write(JSON.stringify({ result, discarded, listeners: client.listenerCount('error') }));
+  `;
+}
+
+test("checked-out socket error emits are contained and discard the client without crashing Node", () => {
+  const child = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", checkedOutErrorScript()],
+    {
+      encoding: "utf8",
+      timeout: 10000,
+    },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), {
+    result: { ok: false, error: { code: "SOURCE_UNAVAILABLE", evidenceIds: [] } },
+    discarded: true,
+    listeners: 0,
+  });
+});
+
+test("ordinary query failure rolls back and removes the checked-out client listener", async () => {
+  const db = database({ fail: "FROM public.metric_snapshots" });
+  assert.equal((await repository(db).read(query)).error.code, "SOURCE_UNAVAILABLE");
+  assert.match(db.calls.at(-1).sql, /ROLLBACK/);
+  assert.deepEqual(db.state.discarded, [false]);
+  assert.equal(db.client.listenerCount("error"), 0);
+});
+
+test("failed rollback discards a client whose transaction state is uncertain", async () => {
+  const db = database({
+    respond(sql) {
+      if (sql === "ROLLBACK" || sql.includes("FROM public.metric_snapshots"))
+        throw new Error("query failed");
+      return null;
+    },
+  });
+  assert.equal((await repository(db).read(query)).error.code, "SOURCE_UNAVAILABLE");
+  assert.deepEqual(db.state.discarded, [true]);
+  assert.equal(db.client.listenerCount("error"), 0);
+});
+
+test("emitted socket errors cannot turn a fulfilled query into success", async () => {
+  for (const stage of ["FROM public.metric_snapshots", "COMMIT"]) {
+    const db = database({
+      respond(sql) {
+        if (sql.includes(stage)) db.client.emit("error", new Error("socket terminated"));
+        return null;
+      },
+    });
+    assert.equal((await repository(db).read(query)).error.code, "SOURCE_UNAVAILABLE");
+    assert.deepEqual(db.state.discarded, [true]);
+    assert.equal(db.client.listenerCount("error"), 0);
+  }
+});
+
+test("success and denied authorization release clients and remove only the repository listener", async () => {
+  for (const allowed of [true, false]) {
+    const db = database({ allowed });
+    const existingListener = () => {};
+    db.client.on("error", existingListener);
+    await repository(db).read(query);
+    assert.deepEqual(db.state.discarded, [false]);
+    assert.deepEqual(db.client.listeners("error"), [existingListener]);
+  }
+});
+
+test("a failed explicit rollback is discarded even if retrying rollback could succeed", async () => {
+  let rollbacks = 0;
+  const db = database({
+    allowed: false,
+    respond(sql) {
+      if (sql === "ROLLBACK" && ++rollbacks === 1) throw new Error("rollback lost connection");
+      return null;
+    },
+  });
+  assert.equal((await repository(db).read(query)).error.code, "SOURCE_UNAVAILABLE");
+  assert.deepEqual(db.state.discarded, [true]);
+  assert.equal(rollbacks, 1);
+  assert.equal(db.client.listenerCount("error"), 0);
 });
