@@ -90,8 +90,8 @@ function ciResponse(url, runs, checks) {
   const path = new URL(url).pathname;
   if (path.endsWith("/actions/workflows/ci.yml"))
     return json({ id: 42, path: ".github/workflows/ci.yml" });
-  if (path.endsWith("/runs")) return json({ workflow_runs: runs });
-  return json({ check_runs: checks });
+  if (path.endsWith("/runs")) return json({ total_count: runs.length, workflow_runs: runs });
+  return json({ total_count: checks.length, check_runs: checks });
 }
 
 const run = (conclusion, time, suite = 77) => ({
@@ -238,6 +238,15 @@ test("newer failed CI run defeats older success at the same head", async () => {
   const runs = [run("failure", "2026-10-20T02:00:00Z", 80), run("success", "2026-10-20T01:00:00Z")];
   const fetch = async (url) => ciResponse(url, runs, [check("quality")]);
   assert.deepEqual(await api(fetch).readChecks(sha), []);
+});
+
+test("wrapped REST runs reject missing next page when total_count is larger", async () => {
+  const fetch = async (url) => {
+    if (new URL(url).pathname.endsWith("/runs"))
+      return json({ total_count: 2, workflow_runs: [run("success", "2026-10-20T01:00:00Z")] });
+    return ciResponse(url, [], [check("quality")]);
+  };
+  await assert.rejects(api(fetch).readChecks(sha), /count/i);
 });
 
 test("external gate Issue read retains exact title for identity verification", async () => {

@@ -267,6 +267,7 @@ function gateRest(path) {
     return json({ id: 42, path: ".github/workflows/ci.yml" });
   if (path.endsWith("/runs"))
     return json({
+      total_count: 1,
       workflow_runs: [
         {
           workflow_id: 42,
@@ -279,6 +280,7 @@ function gateRest(path) {
       ],
     });
   return json({
+    total_count: 1,
     check_runs: [
       {
         name: "quality",

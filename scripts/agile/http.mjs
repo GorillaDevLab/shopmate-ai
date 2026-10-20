@@ -59,10 +59,20 @@ export function createHttp(fetch, token) {
   return { request, graphql };
 }
 
+function validateRestCount(data, key, prior, length) {
+  if (!key) return null;
+  const count = data.total_count;
+  if (!Number.isSafeInteger(count) || count < 0 || (prior !== null && prior !== count))
+    throw new Error("REST pagination count missing or changed");
+  if (length > count) throw new Error("REST pagination count exceeded");
+  return count;
+}
+
 export async function restPages(http, path, key) {
   const result = [];
   const seen = new Set();
   let current = new URL(path, ORIGIN);
+  let totalCount = null;
   for (let page = 0; page < 100; page += 1) {
     if (seen.has(current.href)) throw new Error("REST pagination repeated cursor");
     seen.add(current.href);
@@ -70,6 +80,7 @@ export async function restPages(http, path, key) {
     const rows = key ? data?.[key] : data;
     if (!Array.isArray(rows)) throw new Error("REST pagination invalid response");
     result.push(...rows);
+    totalCount = validateRestCount(data, key, totalCount, result.length);
     const link = headers
       .get("link")
       ?.split(",")
@@ -80,7 +91,11 @@ export async function restPages(http, path, key) {
       current = new URL(next, ORIGIN);
       continue;
     }
-    if (rows.length < 100) return result;
+    if (rows.length < 100) {
+      if (totalCount !== null && result.length !== totalCount)
+        throw new Error("REST pagination count mismatch");
+      return result;
+    }
     current.searchParams.set("page", String(Number(current.searchParams.get("page") ?? 1) + 1));
   }
   throw new Error("REST pagination limit exceeded");
