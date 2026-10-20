@@ -45,3 +45,8 @@ test("root test command registers focused Agile suite without removing existing 
   assert.match(packageJson.scripts.test, /tests\/agile\/\*\.test\.mjs/);
   assert.match(packageJson.scripts.test, /tests\/ci-workflow\.test\.mjs/);
 });
+
+test("rerun evidence artifacts use a unique run attempt name", async () => {
+  const yaml = await read(".github/workflows/agile-state-sync.yml");
+  assert.ok(yaml.includes("name: agile-state-plan-${{ github.run_id }}-${{ github.run_attempt }}"));
+});
