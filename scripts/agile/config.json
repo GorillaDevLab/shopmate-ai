@@ -1,0 +1,17 @@
+{
+  "owner": "GorillaDevLab",
+  "repo": "shopmate-ai",
+  "org": "GorillaDevLab",
+  "projectNumber": 1,
+  "defaultBranch": "main",
+  "requiredChecks": [
+    "质量门禁",
+    "历史源与同步验收 (growing)",
+    "历史源与同步验收 (problematic)",
+    "历史源与同步验收 (mature)",
+    "历史源与同步验收 (new)",
+    "15 场景源与同步验收"
+  ],
+  "externalGateIds": ["P2-GATE"],
+  "externalGateSources": {}
+}
