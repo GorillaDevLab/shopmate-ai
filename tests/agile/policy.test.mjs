@@ -149,6 +149,15 @@ test("reopened prerequisite demotes inactive successor and transitive completion
   assert.equal(blocked.entries[2].after, "Backlog");
 });
 
+test("closed intermediate card cannot bypass a reopened ancestor", () => {
+  const cards = [card("P03-001"), card("P03-002", ["P03-001"]), card("P03-003", ["P03-002"])];
+  const issues = [issue("P03-001"), done("P03-002"), issue("P03-003", "agile:ready")];
+  issues[1].body = "## 硬依赖（合并后才可领取）\n- `P03-001`\n## 实际接线依赖\n- 无";
+  issues[2].body = "## 硬依赖（合并后才可领取）\n- `P03-002`\n## 实际接线依赖\n- 无";
+  const result = planReconciliation(snapshot(cards, issues, [pr("P03-002")]), config);
+  assert.equal(result.entries[2].after, "Backlog");
+});
+
 test("active work and assignees stay untouched; shared locks block inactive Ready", () => {
   const cards = [
     card("P03-001", [], { sharedFiles: ["packages/contracts/src/index.ts"] }),
@@ -208,4 +217,26 @@ test("multiple lifecycle labels and dependency section mismatches fail validatio
       ),
     /mismatch/i,
   );
+});
+
+test("verified completed card retires a stale Done lifecycle label", () => {
+  const result = planReconciliation(
+    snapshot([card("P03-001")], [done("P03-001")], [pr("P03-001")], [project("P03-001", "Done")]),
+    config,
+  );
+  assert.deepEqual(
+    result.changed.map((entry) => entry.id),
+    ["P03-001"],
+  );
+  assert.equal(result.entries[0].labelAfter, null);
+});
+
+test("native Project Done cannot hide a closed Issue with pending CI", () => {
+  const result = planReconciliation(
+    snapshot([card("P03-001")], [done("P03-001")], [], [project("P03-001", "Done")]),
+    config,
+  );
+  assert.equal(result.entries[0].after, "In review");
+  assert.match(result.entries[0].blockers.join(" "), /completion evidence/i);
+  assert.equal(result.entries[0].labelAfter, "agile:in-review");
 });

@@ -69,6 +69,8 @@ function validateIssue(card, issue) {
   const retired =
     labels.length === 0 && issue.state === "CLOSED" && issue.stateReason === "COMPLETED";
   if (labels.length !== 1 && !retired) throw new Error(`ambiguous lifecycle labels for ${card.id}`);
+  if (issue.state === "OPEN" && labels[0] === "agile:done")
+    throw new Error(`open Issue has Done lifecycle for ${card.id}`);
   const hard = issueDependencies(issue.body, "## 硬依赖（合并后才可领取）", "## 实际接线依赖");
   const wiring = issueDependencies(issue.body, "## 实际接线依赖", "## 验收");
   if (hard.join("|") !== [...card.dependsOn].sort().join("|"))
@@ -163,7 +165,10 @@ function planEntry(card, issue, projectItem, before, complete, active, snapshot)
   const verified = complete.get(card.id) === true;
   let after = before;
   if (verified) after = "Done";
-  else if (["Backlog", "Ready"].includes(before)) after = blockers.length ? "Backlog" : "Ready";
+  else if (issue.state === "CLOSED") {
+    blockers.push("completion evidence pending");
+    if (!["In progress", "In review"].includes(before)) after = "In review";
+  } else if (["Backlog", "Ready"].includes(before)) after = blockers.length ? "Backlog" : "Ready";
   return {
     id: card.id,
     issueNumber: issue.number,
@@ -180,17 +185,38 @@ function planEntry(card, issue, projectItem, before, complete, active, snapshot)
   };
 }
 
-export function planReconciliation(snapshot, config) {
-  const { cards, issues, projects } = validateSnapshot(snapshot, config);
-  const complete = new Map(
+function hardCompletion(cards, snapshot, config) {
+  const ownComplete = new Map(
     snapshot.issues.map((issue) => [
       issue.id,
       completionEvidence(issue, snapshot.prs, config).complete,
     ]),
   );
+  const complete = new Map();
+  function hardClosure(id) {
+    if (complete.has(id)) return complete.get(id);
+    const card = cards.get(id);
+    const verified =
+      ownComplete.get(id) &&
+      card.dependsOn.every((dep) =>
+        cards.has(dep) ? hardClosure(dep) : snapshot.externalGates[dep]?.verified === true,
+      );
+    complete.set(id, verified);
+    return verified;
+  }
+  for (const id of cards.keys()) hardClosure(id);
+  return complete;
+}
+
+export function planReconciliation(snapshot, config) {
+  const { cards, issues, projects } = validateSnapshot(snapshot, config);
+  const complete = hardCompletion(cards, snapshot, config);
   const before = new Map([...cards].map(([id, card]) => [id, validateIssue(card, issues.get(id))]));
   const active = [...cards.values()].filter(
-    (card) => ["In progress", "In review"].includes(before.get(card.id)) && !complete.get(card.id),
+    (card) =>
+      !complete.get(card.id) &&
+      (["In progress", "In review"].includes(before.get(card.id)) ||
+        issues.get(card.id).state === "CLOSED"),
   );
   const entries = [...cards.values()].map((card) =>
     planEntry(
@@ -206,7 +232,10 @@ export function planReconciliation(snapshot, config) {
   return {
     entries,
     changed: entries.filter(
-      (entry) => entry.before !== entry.after || entry.projectBefore !== entry.after,
+      (entry) =>
+        entry.before !== entry.after ||
+        entry.projectBefore !== entry.after ||
+        entry.labelsBefore.some((label) => STATES.has(label) && label !== entry.labelAfter),
     ),
   };
 }
