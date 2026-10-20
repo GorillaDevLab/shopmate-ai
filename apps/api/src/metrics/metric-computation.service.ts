@@ -201,6 +201,25 @@ function resolveDefinition(options: Captured, version: string): MetricResult<Met
     return failure("SOURCE_UNAVAILABLE");
   }
 }
+function retainInput(
+  input: MetricInputV1,
+  snapshot: MetricSnapshotV1,
+): MetricResult<MetricComputationV1> {
+  // Hash equality established equivalent instants; the computation contract requires exact strings.
+  const computation = {
+    input,
+    snapshot: {
+      ...snapshot,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      visibleAt: input.visibleAt,
+      sourceWatermark: input.sourceWatermark,
+    },
+  };
+  return MetricComputationV1Schema.safeParse(computation).success
+    ? { ok: true, value: freeze(computation) }
+    : failure("INVALID_INPUT");
+}
 function validateCalculation(
   options: Captured,
   request: MetricCalculationRequest,
@@ -223,7 +242,7 @@ function validateCalculation(
   if (!original.ok) return original;
   if (!returned.ok) return returned;
   if (original.value.inputHash !== returned.value.inputHash) return failure("CONFLICT");
-  return { ok: true, value: freeze({ input: request.input, snapshot }) };
+  return retainInput(request.input, snapshot);
 }
 function calculateAll(
   options: Captured,

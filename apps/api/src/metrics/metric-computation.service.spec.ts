@@ -666,3 +666,38 @@ it.each(["source", "repository", "registry", "authorization"])(
     expect(adapters.map(Object.isFrozen)).toEqual(frozen);
   },
 );
+
+function normalizedCalculation(request: MetricCalculationRequest): MetricComputationV1 {
+  const computed = calculation(request);
+  const timestamps = {
+    periodStart: new Date(request.input.periodStart).toISOString(),
+    periodEnd: new Date(request.input.periodEnd).toISOString(),
+    visibleAt: new Date(request.input.visibleAt).toISOString(),
+    sourceWatermark: new Date(request.input.sourceWatermark!).toISOString(),
+  };
+  return MetricComputationV1Schema.parse({
+    input: {
+      ...computed.input,
+      ...timestamps,
+      metricCoverage: computed.input.metricCoverage.map((coverage) => ({
+        ...coverage,
+        ...timestamps,
+      })),
+    },
+    snapshot: { ...computed.snapshot, ...timestamps },
+  });
+}
+
+it("revalidates normalized calculator output against the original frozen input before append", async () => {
+  const f = fixture();
+  f.calculate.mockImplementation((request) => success(normalizedCalculation(request)));
+  const result = value(await f.service.compute({ query: query(), computedAt }));
+  expect(f.append).toHaveBeenCalledTimes(2);
+  for (const [computation] of f.append.mock.calls) {
+    expect(MetricComputationV1Schema.safeParse(computation).success).toBe(true);
+    expect(computation.input).toBe(f.calculate.mock.calls[0]![0].input);
+    expect(computation.snapshot.visibleAt).toBe(computation.input.visibleAt);
+    expect(computation.snapshot.metric.value).toBe(0);
+  }
+  expect(result.every((snapshot) => snapshot.visibleAt === query().visibleAt)).toBe(true);
+});
