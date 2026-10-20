@@ -281,6 +281,19 @@ test("unknown agile lifecycle label fails even beside a valid one", () => {
   );
 });
 
+test("duplicate or reordered canonical dependency headings fail global validation", () => {
+  const clean = issue("P03-001").body;
+  const repeated = `${clean}\n## 验收\n## 硬依赖（合并后才可领取）\n- P2-GATE\n## 实际接线依赖\n- 无`;
+  const reversed = "## 实际接线依赖\n- 无\n## 硬依赖（合并后才可领取）\n- 无\n## 验收";
+  for (const body of [repeated, reversed]) {
+    const item = issue("P03-001", "agile:backlog", { body });
+    assert.throws(
+      () => planReconciliation(snapshot([card("P03-001")], [item]), config),
+      /dependency headings/i,
+    );
+  }
+});
+
 test("verified completed card retires a stale Done lifecycle label", () => {
   const result = planReconciliation(
     snapshot([card("P03-001")], [done("P03-001")], [pr("P03-001")], [project("P03-001", "Done")]),

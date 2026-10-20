@@ -47,19 +47,27 @@ export function validateGraph(cards, config) {
   return byId;
 }
 
-function section(body, heading, nextHeading) {
-  const start = body.indexOf(heading);
-  if (start < 0) throw new Error(`missing Issue ${heading} section`);
-  const rest = body.slice(start + heading.length);
-  const end = rest.indexOf(nextHeading);
-  return (end < 0 ? rest : rest.slice(0, end))
-    .split("\n")
-    .filter((line) => /^\s*-\s/.test(line))
-    .join("\n");
+function headingIndex(lines, heading) {
+  const positions = lines.flatMap((line, index) => (line.trim() === heading ? [index] : []));
+  if (positions.length !== 1) throw new Error(`dependency headings ambiguous: ${heading}`);
+  return positions[0];
 }
 
-function issueDependencies(body, heading, nextHeading) {
-  const source = section(body, heading, nextHeading);
+function dependencySections(body) {
+  const lines = body.split(/\r?\n/);
+  const hard = headingIndex(lines, "## 硬依赖（合并后才可领取）");
+  const wiring = headingIndex(lines, "## 实际接线依赖");
+  const acceptance = lines.findIndex((line) => line.trim() === "## 验收");
+  if (hard >= wiring || (acceptance >= 0 && wiring >= acceptance))
+    throw new Error("dependency headings out of order");
+  return {
+    hard: lines.slice(hard + 1, wiring),
+    wiring: lines.slice(wiring + 1, acceptance < 0 ? lines.length : acceptance),
+  };
+}
+
+function issueDependencies(lines, heading) {
+  const source = lines.filter((line) => /^\s*-\s/.test(line)).join("\n");
   const ids = [...source.matchAll(/\b(?:P\d{2}-\d{3}|P2-GATE)\b/g)].map((match) => match[0]);
   return distinct(ids, `${heading} Issue section`).sort();
 }
@@ -74,8 +82,9 @@ function validateIssue(card, issue) {
   if (labels.length !== 1 && !retired) throw new Error(`ambiguous lifecycle labels for ${card.id}`);
   if (issue.state === "OPEN" && labels[0] === "agile:done")
     throw new Error(`open Issue has Done lifecycle for ${card.id}`);
-  const hard = issueDependencies(issue.body, "## 硬依赖（合并后才可领取）", "## 实际接线依赖");
-  const wiring = issueDependencies(issue.body, "## 实际接线依赖", "## 验收");
+  const sections = dependencySections(issue.body);
+  const hard = issueDependencies(sections.hard, "hard dependency");
+  const wiring = issueDependencies(sections.wiring, "integration dependency");
   if (hard.join("|") !== [...card.dependsOn].sort().join("|"))
     throw new Error(`hard dependency mismatch for ${card.id}`);
   if (wiring.join("|") !== [...card.integrationDependsOn].sort().join("|"))
