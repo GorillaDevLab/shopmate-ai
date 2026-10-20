@@ -11,18 +11,20 @@ model DemoTenant {
 }
 
 model PlatformConnection {
-  id              String                @id
-  organizationId  String
-  workspaceId     String
-  storeId         String
-  externalStoreId String
-  provider        String                @default("MOCK")
-  status          String                @default("ACTIVE")
-  generation      Int                   @default(0)
-  store           Store                 @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
-  sessions        DemoCommerceSession[]
-  syncGrants      SyncWorkerGrant[]
-  commerceScopes  CommerceSourceScope[]
+  id                String                @id
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  externalStoreId   String
+  provider          String                @default("MOCK")
+  status            String                @default("ACTIVE")
+  generation        Int                   @default(0)
+  store             Store                 @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
+  sessions          DemoCommerceSession[]
+  syncGrants        SyncWorkerGrant[]
+  commerceScopes    CommerceSourceScope[]
+  metricDefinitions MetricDefinitionRow[]
+  metricSnapshots   MetricSnapshotRow[]
 
   @@unique([storeId, provider])
   @@unique([id, organizationId, workspaceId, storeId, externalStoreId])
@@ -858,18 +860,20 @@ model Sku {
 }
 
 model Store {
-  id             String               @id
-  merchantId     String
-  name           String
-  city           String
-  platform       String
-  organizationId String               @default("")
-  workspaceId    String               @default("")
-  organization   Organization         @relation(fields: [merchantId, organizationId], references: [legacyMerchantId, id], onDelete: Restrict, onUpdate: NoAction)
-  workspace      Workspace            @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  merchant       Merchant             @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  orders         Order[]
-  connections    PlatformConnection[]
+  id                String                @id
+  merchantId        String
+  name              String
+  city              String
+  platform          String
+  organizationId    String                @default("")
+  workspaceId       String                @default("")
+  organization      Organization          @relation(fields: [merchantId, organizationId], references: [legacyMerchantId, id], onDelete: Restrict, onUpdate: NoAction)
+  workspace         Workspace             @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  merchant          Merchant              @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  orders            Order[]
+  connections       PlatformConnection[]
+  metricDefinitions MetricDefinitionRow[]
+  metricSnapshots   MetricSnapshotRow[]
 
   @@unique([merchantId, id])
   @@unique([organizationId, workspaceId, id])
@@ -1218,4 +1222,67 @@ model DemoScenarioRunAudit {
   run            DemoScenarioRun @relation(fields: [runId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@schema("demo")
+}
+
+model MetricDefinitionRow {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  connectionId      String
+  externalStoreId   String
+  key               String
+  definitionVersion String
+  unit              String
+  definitionHash    String
+  createdAt         DateTime            @default(now()) @db.Timestamptz(3)
+  store             Store               @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "metric_definitions_store_fkey")
+  connection        PlatformConnection  @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "metric_definitions_connection_fkey")
+  snapshots         MetricSnapshotRow[]
+
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, key, definitionVersion], map: "metric_definitions_scope_version_key")
+  @@map("metric_definitions")
+  @@schema("public")
+}
+
+model MetricSnapshotRow {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId      String
+  workspaceId         String
+  storeId             String
+  connectionId        String
+  externalStoreId     String
+  key                 String
+  definitionVersion   String
+  schemaVersion       Int                 @default(1)
+  hashVersion         String              @default("metric-input-sha256-v1")
+  inputRevision       String
+  inputHash           String
+  subjectKind         String
+  subjectId           String
+  periodStart         DateTime            @db.Timestamptz(3)
+  periodEnd           DateTime            @db.Timestamptz(3)
+  timezone            String
+  currency            String
+  visibleAt           DateTime            @db.Timestamptz(3)
+  sourceWatermark     DateTime?           @db.Timestamptz(3)
+  computedAt          DateTime            @db.Timestamptz(3)
+  sampleSize          BigInt
+  coverageBasisPoints Int
+  status              String
+  evidenceIds         String[]
+  issues              Json
+  valueMinor          BigInt?
+  valueUnits          BigInt?
+  valueBasisPoints    BigInt?
+  valueHours          Float?              @db.DoublePrecision
+  createdAt           DateTime            @default(now()) @db.Timestamptz(3)
+  store               Store               @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "metric_snapshots_store_fkey")
+  connection          PlatformConnection  @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "metric_snapshots_connection_fkey")
+  definition          MetricDefinitionRow @relation(fields: [organizationId, workspaceId, storeId, connectionId, externalStoreId, key, definitionVersion], references: [organizationId, workspaceId, storeId, connectionId, externalStoreId, key, definitionVersion], onDelete: Restrict, onUpdate: NoAction, map: "metric_snapshots_definition_fkey")
+
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, key, subjectKind, subjectId, definitionVersion, periodStart, periodEnd, inputRevision], map: "metric_snapshots_identity_revision_key")
+  @@index([organizationId, workspaceId, storeId, key, periodStart, periodEnd, computedAt], map: "metric_snapshots_scope_period_history_idx")
+  @@map("metric_snapshots")
+  @@schema("public")
 }
