@@ -62,7 +62,7 @@ export async function createMetricFixture(profile = "mature") {
     throw error;
   }
 }
-async function provisionSourceLogin(admin) {
+export async function provisionSourceLogin(admin) {
   // The mandatory gate shares a cluster, so reuse only an unprivileged fixture login.
   const existing = await admin.query(`
     SELECT login.rolcanlogin AND NOT EXISTS (
