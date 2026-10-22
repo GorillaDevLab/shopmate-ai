@@ -3,13 +3,16 @@ DO $$ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='shopmate_metric_source') THEN
   CREATE ROLE shopmate_metric_source NOLOGIN NOSUPERUSER NOBYPASSRLS;
  END IF;
+ IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='shopmate_metric_source' AND (rolcanlogin OR rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication)) THEN
+  RAISE EXCEPTION 'Unsafe metric source capability role' USING ERRCODE='42501';
+ END IF;
 END $$;
 CREATE FUNCTION public.metric_source_safe_login() RETURNS BOOLEAN
 LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
  SELECT current_setting('role') IN ('none',session_user)
  AND current_setting('transaction_isolation')='read committed'
  AND pg_has_role(session_user,'shopmate_metric_source','MEMBER')
- AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname=session_user AND rolcanlogin)
+ AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname=session_user AND rolcanlogin) AND NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='shopmate_metric_source' AND rolcanlogin)
  AND NOT EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(session_user,r.oid,'MEMBER') AND
  (r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication
  OR r.rolname IN ('pg_read_all_data','pg_write_all_data','pg_read_server_files','pg_write_server_files','pg_execute_server_program','shopmate_sync_worker')
@@ -129,9 +132,9 @@ LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
 $$;
 CREATE FUNCTION public.metric_source_projection(binding JSONB, requested_window JSONB, cutoff TIMESTAMPTZ) RETURNS JSONB
 LANGUAGE SQL STABLE SET search_path=pg_catalog AS $$
- WITH scope AS MATERIALIZED (SELECT s AS source_scope,s.*,d."clockNow" AT TIME ZONE 'UTC' business_now,d."clockRevision",(d.config->>'historyStart')::timestamptz opening
+ WITH scope AS MATERIALIZED (SELECT s AS source_scope,s.*,d."clockNow" AT TIME ZONE 'UTC' business_now,d."clockRevision",r."openingAt" AT TIME ZONE 'UTC' opening
  FROM commerce."SourceScope" s JOIN demo."DemoCommerceSession" d ON (d."connectionId",d."organizationId",d."workspaceId",d."storeId",d."externalStoreId")=(s."connectionId",s."organizationId",s."workspaceId",s."storeId",s."externalStoreId")
- WHERE requested_window-ARRAY['periodStart','periodEnd','timezone','currency']='{}'::jsonb AND requested_window->>'timezone'='Asia/Shanghai' AND requested_window->>'currency'='CNY' AND (requested_window->>'periodStart')::timestamptz<(requested_window->>'periodEnd')::timestamptz AND (requested_window->>'periodEnd')::timestamptz<=cutoff AND cutoff=date_trunc('milliseconds',cutoff) AND public.metric_source_binding(s)=binding AND public.metric_source_authorized(s) AND cutoff<=d."clockNow" AT TIME ZONE 'UTC'),
+ JOIN mock_platform."Runtime" r ON (r."sessionId",r.generation,r."organizationId",r."workspaceId",r."storeId",r."connectionId",r."externalStoreId")=(d.id,s.generation,s."organizationId",s."workspaceId",s."storeId",s."connectionId",s."externalStoreId") AND r."sourceConfig"=d.config AND r."configHash"=d."configHash" AND r."generatorVersion"=d."generatorVersion" WHERE requested_window-ARRAY['periodStart','periodEnd','timezone','currency']='{}'::jsonb AND requested_window->>'timezone'='Asia/Shanghai' AND requested_window->>'currency'='CNY' AND requested_window->>'periodStart' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$' AND requested_window->>'periodEnd' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,3})?Z$' AND (requested_window->>'periodStart')::timestamptz<(requested_window->>'periodEnd')::timestamptz AND (requested_window->>'periodEnd')::timestamptz<=cutoff AND cutoff=date_trunc('milliseconds',cutoff) AND public.metric_source_binding(s)=binding AND public.metric_source_authorized(s) AND cutoff<=d."clockNow" AT TIME ZONE 'UTC'),
  evidence AS MATERIALIZED (SELECT s.*,public.metric_source_prefix(s.source_scope,cutoff,(requested_window->>'periodEnd')::timestamptz,s.opening) prefix FROM scope s),
  facts AS MATERIALIZED (SELECT e.*,v.stream,public.metric_source_facts(s,v.stream,(SELECT max(j."observedAt") FROM public.metric_source_jobs(s) j WHERE j.stream=v.stream)) items
  FROM evidence e JOIN commerce."SourceScope" s ON s.id=e.id CROSS JOIN (VALUES ('ORDERS'),('REFUNDS'),('INVENTORY'),('MARKETING')) v(stream) WHERE e.prefix IS NOT NULL)
