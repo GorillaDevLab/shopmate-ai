@@ -1,5 +1,7 @@
 import type {
   ContributionRequest,
+  MetricCalculationRequest,
+  MetricCoverageV1,
   MetricError,
   MetricErrorCode,
   MetricInputV1,
@@ -27,6 +29,26 @@ export function checkedRuntime<T>(result: MetricResult<T>): T {
 export function runtimeWindow(input: MetricInputV1): MetricWindow {
   const { periodStart, periodEnd, timezone, currency } = input;
   return { periodStart, periodEnd, timezone, currency };
+}
+/** Private leaf view only: strict request validation has already fenced every proof's context. */
+export function runtimeDependencyInput(
+  { input, kind, subject }: MetricCalculationRequest,
+  dependencies: readonly Pick<MetricCoverageV1, "kind" | "collections">[],
+): MetricInputV1 {
+  const proofs = input.metricCoverage.filter(
+    (proof) => proof.kind === kind && JSON.stringify(proof.subject) === JSON.stringify(subject),
+  );
+  const projected = dependencies.flatMap((dependency) =>
+    proofs
+      .filter((proof) => dependency.collections.every((key) => proof.collections.includes(key)))
+      .map((proof) => ({
+        ...proof,
+        ...dependency,
+        // Payment leaves use STORE internally; only the requested SKU's line sum is consumed.
+        subject: { kind: "STORE" as const },
+      })),
+  );
+  return { ...input, metricCoverage: [...input.metricCoverage, ...projected] };
 }
 export function paidRuntimeFacts(input: MetricInputV1) {
   return (input.paymentFacts ?? []).filter(

@@ -39,6 +39,7 @@ import {
   runtimeWindow,
   runtimeBuyerShipping,
   runtimeSkuSales,
+  runtimeDependencyInput,
   unavailableRuntime,
 } from "./metric-runtime-facts.js";
 
@@ -105,7 +106,13 @@ function inventory(request: MetricCalculationRequest, ports: Ports): Measure {
       .map((data) => data!.externalLocationId),
   );
   if (locations.size !== 1) return unavailableRuntime(kind, input, "inventoryFacts.location");
-  const payments = checkedRuntime(ports.payments.calculate(input));
+  const salesInput = runtimeDependencyInput(
+    request,
+    kind === "INVENTORY_HOURS_REMAINING"
+      ? [{ kind: "PAID_UNITS", collections: ["paymentFacts"] }]
+      : [],
+  );
+  const payments = checkedRuntime(ports.payments.calculate(salesInput));
   const result = checkedRuntime(
     ports.inventory.calculate({
       input,
@@ -135,7 +142,10 @@ function finance(request: MetricCalculationRequest, ports: Ports): Measure {
       result.cohortAmountRate,
     ]);
   }
-  const costs = checkedRuntime(ports.frozenCosts.calculate(input, ACCEPTED_RESELLABLE_FROZEN_V1));
+  const costInput = route === "contribution" ? contributionDependencyInput(request) : input;
+  const costs = checkedRuntime(
+    ports.frozenCosts.calculate(costInput, ACCEPTED_RESELLABLE_FROZEN_V1),
+  );
   if (route === "costs")
     return pick(kind, [costs.netMerchandiseRevenue, costs.cogs, costs.grossProfit]);
   const result = checkedRuntime(
@@ -146,6 +156,15 @@ function finance(request: MetricCalculationRequest, ports: Ports): Measure {
     }),
   );
   return pick(kind, [result.contribution, result.estimatedNetProfit]);
+}
+function contributionDependencyInput(request: MetricCalculationRequest) {
+  const net = ["paymentFacts", "refundFacts", "refundAllocations"] as const;
+  const cost = [...net, "frozenCosts", "returnReceipts"] as const;
+  return runtimeDependencyInput(request, [
+    { kind: "NET_MERCHANDISE_REVENUE", collections: net },
+    { kind: "COGS", collections: cost },
+    { kind: "GROSS_PROFIT", collections: cost },
+  ]);
 }
 function dispatch(request: MetricCalculationRequest, ports: Ports): Measure {
   const { input, kind, subject } = request;

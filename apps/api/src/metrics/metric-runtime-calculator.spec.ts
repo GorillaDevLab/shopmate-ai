@@ -18,11 +18,18 @@ import {
   METRIC_RUNTIME_DEFINITION_HASH,
   METRIC_RUNTIME_DEFINITION_MANIFEST,
 } from "./metric-runtime-calculator.js";
+import { createMetricEvidenceHasher } from "./metric-evidence-hash.js";
+import { createMetricDefinitionRegistry } from "./metric-definition-registry.js";
 
 const now = "2026-10-10T00:00:00Z";
 const calculator = createMetricRuntimeCalculator({
   clock: { snapshot: () => ({ now, revision: 1 }) },
 });
+const hasher = createMetricEvidenceHasher(
+  createMetricDefinitionRegistry([
+    { definitionVersion: METRIC_RUNTIME_DEFINITION_VERSION, calculator },
+  ]),
+);
 function input(source: MetricInputV1 = financeBaseGolden.input): MetricInputV1 {
   return {
     ...source,
@@ -40,6 +47,9 @@ function value<T>(result: MetricResult<T>): T {
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error(result.error.code);
   return result.value;
+}
+function inputHash({ input, kind, subject }: MetricCalculationRequest): string {
+  return value(hasher.create({ input, kind, subject })).inputHash;
 }
 it.each(financeBaseGolden.expected.measures)(
   "dispatches the literal G4 $metric.kind oracle",
@@ -239,6 +249,136 @@ function inventorySource(): MetricInputV1 {
 function skuRequest(kind: MetricKind, source = inventorySource()): MetricCalculationRequest {
   return { ...request(kind, source), subject: { kind: "SKU", externalSkuId: "sku-a" } };
 }
+function onlyRequestedCoverage(source: MetricInputV1, kind: MetricKind): MetricInputV1 {
+  return {
+    ...source,
+    metricCoverage: source.metricCoverage.filter((proof) => proof.kind === kind),
+  };
+}
+it("uses only the requested SKU proof for inventory sales without changing input integrity", () => {
+  const source = onlyRequestedCoverage(inventorySource(), "INVENTORY_HOURS_REMAINING");
+  const req = skuRequest("INVENTORY_HOURS_REMAINING", source);
+  const before = inputHash(req);
+  const result = value(calculator.calculate(req));
+  expect(result.snapshot).toMatchObject({
+    metric: { value: 288 },
+    status: "VERIFIED",
+    coverageBasisPoints: 10000,
+  });
+  expect(result.input).toEqual(source);
+  expect(result.input.metricCoverage).toHaveLength(1);
+  expect(Object.isFrozen(result.input.metricCoverage)).toBe(true);
+  expect(inputHash({ ...req, input: result.input })).toBe(before);
+  expect(inputHash(req)).toBe(before);
+});
+it.each([
+  ["CONTRIBUTION", 600],
+  ["ESTIMATED_NET_PROFIT", 400],
+] as const)("uses only the requested %s proof for frozen-cost dependencies", (kind, expected) => {
+  const source = onlyRequestedCoverage(input(), kind),
+    req = request(kind, source);
+  const before = inputHash(req);
+  const result = value(calculator.calculate(req));
+  expect(result.snapshot).toMatchObject({
+    metric: { value: expected },
+    status: "VERIFIED",
+    coverageBasisPoints: 10000,
+  });
+  expect(result.input).toEqual(source);
+  expect(result.input.metricCoverage).toHaveLength(1);
+  expect(Object.isFrozen(result.input.metricCoverage)).toBe(true);
+  expect(inputHash({ ...req, input: result.input })).toBe(before);
+  expect(inputHash(req)).toBe(before);
+});
+it("retains partial requested coverage through internal frozen-cost dependencies", () => {
+  const base = onlyRequestedCoverage(input(), "CONTRIBUTION");
+  const source = {
+    ...base,
+    metricCoverage: base.metricCoverage.map((proof) => ({ ...proof, coverageBasisPoints: 7000 })),
+  };
+  expect(value(calculator.calculate(request("CONTRIBUTION", source))).snapshot).toMatchObject({
+    metric: { value: 600 },
+    status: "ESTIMATED",
+    coverageBasisPoints: 7000,
+  });
+});
+it.each(["unrequested kind", "different SKU", "missing payment collection"] as const)(
+  "does not project inventory completeness from %s",
+  (scenario) => {
+    const base = onlyRequestedCoverage(inventorySource(), "INVENTORY_HOURS_REMAINING");
+    const proof = base.metricCoverage[0]!;
+    const changed =
+      scenario === "unrequested kind"
+        ? { ...proof, kind: "INVENTORY_AVAILABLE" as const }
+        : scenario === "different SKU"
+          ? { ...proof, subject: { kind: "SKU" as const, externalSkuId: "sku-b" } }
+          : { ...proof, collections: ["inventoryFacts", "inventoryExtensions"] as const };
+    const source = { ...base, metricCoverage: [changed] };
+    expect(
+      value(calculator.calculate(skuRequest("INVENTORY_HOURS_REMAINING", source))).snapshot,
+    ).toMatchObject({
+      metric: { value: null },
+      status: scenario === "missing payment collection" ? "INSUFFICIENT" : "UNAVAILABLE",
+      coverageBasisPoints: 0,
+    });
+  },
+);
+it.each(["CONTRIBUTION", "ESTIMATED_NET_PROFIT"] as const)(
+  "preserves missing-cost uncertainty with only requested %s coverage",
+  (kind) => {
+    const source = onlyRequestedCoverage(input(financeMissingCostGolden.input), kind);
+    const result = value(calculator.calculate(request(kind, source))).snapshot;
+    expect(result).toMatchObject({ metric: { value: null }, status: "UNAVAILABLE" });
+    expect(result.coverageBasisPoints).toBeLessThan(10000);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "COST_MISSING" }));
+  },
+);
+it("retains payment uncertainty despite complete requested SKU coverage", () => {
+  const base = onlyRequestedCoverage(inventorySource(), "INVENTORY_HOURS_REMAINING");
+  const payment = base.paymentFacts![0]!;
+  const source = {
+    ...base,
+    paymentFacts: [
+      {
+        ...payment,
+        data: {
+          ...payment.data,
+          paidMinor: null,
+          source: {
+            ...payment.data.source,
+            quality: { state: "PARTIAL" as const, issues: ["PAYMENT_UNKNOWN" as const] },
+          },
+        },
+      },
+    ],
+  };
+  const result = value(
+    calculator.calculate(skuRequest("INVENTORY_HOURS_REMAINING", source)),
+  ).snapshot;
+  expect(result).toMatchObject({
+    metric: { value: null },
+    status: "UNAVAILABLE",
+    coverageBasisPoints: 0,
+  });
+  expect(result.issues).toContainEqual(expect.objectContaining({ code: "PAYMENT_UNKNOWN" }));
+});
+it.each([
+  { inputRevision: "other-revision" },
+  { definitionVersion: "other-version" },
+  { visibleAt: now },
+  { periodStart: "2026-10-01T15:00:00Z" },
+  { sourceWatermark: "2026-10-02T15:59:00Z" },
+])("rejects requested coverage with mismatched context %j before projection", (change) => {
+  const base = onlyRequestedCoverage(input(), "CONTRIBUTION");
+  const source = {
+    ...base,
+    metricCoverage: base.metricCoverage.map((proof) => ({ ...proof, ...change })),
+  };
+  expect(calculator.calculate(request("CONTRIBUTION", source))).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
 it("uses the exact SKU's one paid unit instead of three storewide units", () => {
   const before = inventorySource();
   const result = value(
