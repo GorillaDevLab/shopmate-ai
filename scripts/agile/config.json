@@ -13,5 +13,11 @@
     "15 场景源与同步验收"
   ],
   "externalGateIds": ["P2-GATE"],
-  "externalGateSources": {}
+  "externalGateSources": {
+    "P2-GATE": {
+      "repository": "GorillaDevLab/shopmate-ai",
+      "issueNumber": 499,
+      "expectedTitle": "[P2-GATE] 持久源与五流同步交付验收"
+    }
+  }
 }
