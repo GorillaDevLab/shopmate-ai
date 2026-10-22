@@ -165,6 +165,7 @@ test("unsafe login attributes and SET ROLE escalation cannot capture source byte
   const repository = createMetricSourceBundleRepository({ pool: database.pool, actor });
   await database.admin.query("ALTER ROLE metric_source_login CREATEDB");
   try {
+    await assert.rejects(createMetricFixture(), /Unsafe metric source fixture login/u);
     assert.equal(
       (await repository.capture({ binding, window, visibleAt: cutoff })).error.code,
       "SOURCE_UNAVAILABLE",

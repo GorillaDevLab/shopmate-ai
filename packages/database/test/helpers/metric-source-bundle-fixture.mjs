@@ -33,8 +33,7 @@ export const binding = Object.fromEntries(
 export async function createMetricFixture(profile = "mature") {
   const db = await createSyncDatabase("worker");
   try {
-    await db.admin.query("CREATE ROLE metric_source_login LOGIN NOSUPERUSER NOBYPASSRLS");
-    await db.admin.query("GRANT shopmate_metric_source TO metric_source_login");
+    await provisionSourceLogin(db.admin);
     if (profile === "new") await configureNewProfile(db);
     const source = createMockSourceWorker(sourceEnv(db.url));
     try {
@@ -62,6 +61,29 @@ export async function createMetricFixture(profile = "mature") {
     await closeSyncDatabase(db);
     throw error;
   }
+}
+async function provisionSourceLogin(admin) {
+  // The mandatory gate shares a cluster, so reuse only an unprivileged fixture login.
+  const existing = await admin.query(`
+    SELECT login.rolcanlogin AND NOT EXISTS (
+      SELECT 1 FROM pg_roles role WHERE pg_has_role(login.oid,role.oid,'MEMBER') AND (
+        role.rolsuper OR role.rolbypassrls OR role.rolcreaterole OR role.rolcreatedb OR role.rolreplication
+        OR role.rolname IN ('pg_read_all_data','pg_write_all_data','pg_read_server_files','pg_write_server_files','pg_execute_server_program','shopmate_sync_worker')
+        OR EXISTS (SELECT 1 FROM pg_database WHERE datdba=role.oid)
+        OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=role.oid)
+        OR EXISTS (SELECT 1 FROM pg_class WHERE relowner=role.oid)
+        OR EXISTS (SELECT 1 FROM pg_proc WHERE proowner=role.oid)
+        OR has_database_privilege(role.oid,current_database(),'CREATE')
+      )
+    ) AS safe FROM pg_roles login WHERE login.rolname='metric_source_login'
+  `);
+  if (existing.rowCount && !existing.rows[0].safe)
+    throw new Error("Unsafe metric source fixture login");
+  if (!existing.rowCount)
+    await admin.query(
+      "CREATE ROLE metric_source_login LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION",
+    );
+  await admin.query("GRANT shopmate_metric_source TO metric_source_login");
 }
 async function configureNewProfile(db) {
   const config = configFor(scopeFor(), "new", 30);
