@@ -1,6 +1,6 @@
 # P2 持久源与五流同步验收门禁
 
-本记录把 `P2-GATE` 映射到真实 [Issue #499：持久源与五流同步交付验收](https://github.com/GorillaDevLab/shopmate-ai/issues/499)。实现证据为已合并的 [PR #480](https://github.com/GorillaDevLab/shopmate-ai/pull/480)，其 head 为 `93ca6585103204ef68747d0b842dc6f2ff0df96c`；核验时 main 为 `1ed26e8110766e0948ab8faa3231ade35358b1ed`。[CI run 38226619903](https://github.com/GorillaDevLab/shopmate-ai/actions/runs/38226619903) 在该实现 head 的六项必需检查全部 SUCCESS。此历史证据不替代本映射 PR 自身的审查与 CI。
+本记录把 `P2-GATE` 映射到真实 [Issue #499：持久源与五流同步交付验收](https://github.com/GorillaDevLab/shopmate-ai/issues/499)。实现证据为已合并的 [PR #480](https://github.com/GorillaDevLab/shopmate-ai/pull/480)，其 head 为 `93ca6585103204ef68747d0b842dc6f2ff0df96c`，合入 main 的 merge commit 为 `1ed26e8110766e0948ab8faa3231ade35358b1ed`。[CI run 38226619903](https://github.com/GorillaDevLab/shopmate-ai/actions/runs/38226619903) 在该实现 head 的六项必需检查全部 SUCCESS。此历史证据不替代本映射 PR 自身的审查与 CI。
 
 ## 已交付边界
 
