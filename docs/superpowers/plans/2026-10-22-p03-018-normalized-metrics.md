@@ -31,7 +31,7 @@
 - [ ] Write real restricted-PostgreSQL failing tests for missing archive/capture functions; run only isolatedPostgres-created owned DB and stop it in finally.
 - [ ] Implement additive constrained table, narrow authorized binding/proof/capture/read operations and strict SDK decoding. One INSERT...SELECT snapshot captures all normalized DTOs plus real receipt proof. Reject unsafe logins and unavailable/incomplete/future/quarantined source rather than returning a clean zero. Historical archive reads still require current membership/binding/generation.
 - [ ] Cover duplicate capture idempotency; actual late page data => new revision; old bundle immutable; scope/revocation/disconnect/reset/future/changed cutoff denial; watermark null/insufficient prefix/partial newer pages; numeric bounds and source failure. Use actual P2 worker page commits in fixtures, not direct fabricated Job completion.
-- [ ] Run database build/typecheck/lint, focused suite, format/diff and AST checks. Commit schema, SDK and necessary focused tests in independently verifiable units. Write report and freeze for task review before Task2 consumes the interface.
+- [ ] Run database build/typecheck/lint, focused suite, format/diff and AST checks. Commit schema, SDK and necessary focused tests in independently verifiable units. Freeze the port shape so independent fixture-based adapter work can proceed; actual integration waits for Task1 review approval.
 
 ## Task 2: Read-only adapter and production calculator dispatch
 
