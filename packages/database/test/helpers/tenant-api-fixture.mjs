@@ -6,7 +6,10 @@ export async function prepareTenantApiRuntime(url) {
   const client = new pg.Client({ connectionString: requireIsolatedDatabaseUrl(url) });
   await client.connect();
   try {
-    await client.query("CREATE ROLE shopmate_tenant_api LOGIN NOSUPERUSER NOBYPASSRLS");
+    if (
+      !(await client.query("SELECT 1 FROM pg_roles WHERE rolname='shopmate_tenant_api'")).rowCount
+    )
+      await client.query("CREATE ROLE shopmate_tenant_api LOGIN NOSUPERUSER NOBYPASSRLS");
     await client.query("GRANT USAGE ON SCHEMA public,demo TO shopmate_tenant_api");
     await client.query(
       'GRANT SELECT ON "Organization","OrganizationMember","Workspace","WorkspaceMember","Store","DemoTenant","TenantBootstrapEnvironment" TO shopmate_tenant_api',
@@ -32,6 +35,35 @@ export async function prepareTenantApiRuntime(url) {
     runtime.username = "shopmate_tenant_api";
     runtime.password = "";
     return runtime.toString();
+  } finally {
+    await client.end();
+  }
+}
+
+export async function prepareMetricApiRuntime(url) {
+  const client = new pg.Client({ connectionString: requireIsolatedDatabaseUrl(url) });
+  await client.connect();
+  try {
+    const definitions = [
+      ["shopmate_metric_api", "shopmate_metric_source,shopmate_metric_writer"],
+      ["shopmate_metric_definition_api", "shopmate_metric_definition_writer"],
+    ];
+    for (const [login, capabilities] of definitions) {
+      if (!(await client.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [login])).rowCount)
+        await client.query(
+          `CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`,
+        );
+      await client.query(`GRANT ${capabilities} TO ${login}`);
+    }
+    const runtime = new URL(url),
+      writer = new URL(url);
+    runtime.username = "shopmate_metric_api";
+    writer.username = "shopmate_metric_definition_api";
+    runtime.password = writer.password = "";
+    return {
+      METRIC_DATABASE_URL: runtime.toString(),
+      METRIC_DEFINITION_DATABASE_URL: writer.toString(),
+    };
   } finally {
     await client.end();
   }
