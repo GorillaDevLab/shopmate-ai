@@ -19,20 +19,6 @@ jobs:
     name: 质量门禁
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    services:
-      tenant-postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: tenant_test_admin
-          POSTGRES_DB: shopmate_tenant_test
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U tenant_test_admin -d shopmate_tenant_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,9 +62,15 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # The tenant runner ignores inherited database URLs and starts its own throwaway
+      # cluster, so it needs PostgreSQL 16 binaries (the runner image only ships 18).
+      - name: Install PostgreSQL 16 binaries
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-16
+          echo "PG_BIN=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+
       - name: Required tenant database and API isolation
-        env:
-          TEST_DATABASE_URL: postgresql://tenant_test_admin@127.0.0.1:5432/shopmate_tenant_test
         run: pnpm test:tenant
 
       - name: Build
