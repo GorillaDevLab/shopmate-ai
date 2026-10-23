@@ -684,6 +684,72 @@ it("rejects fractional source timestamps and cross-store provenance", () => {
   };
   expect(calculator.calculate(request("PAID_REVENUE", crossed))).toMatchObject({ ok: false });
 });
+it("keeps G4 paid10500 when only opaque version and evidence strings look like timestamps", () => {
+  const base = input(),
+    opaque = "2026-10-01T00:00:00.0001Z";
+  const paymentFacts = base.paymentFacts!.map((payment) => ({
+    ...payment,
+    sourceVersion: opaque,
+    data: { ...payment.data, source: { ...payment.data.source, version: opaque } },
+  }));
+  const source = { ...base, paymentFacts, evidenceIds: [...base.evidenceIds, opaque] };
+  expect(value(calculator.calculate(request("PAID_REVENUE", source))).snapshot.metric.value).toBe(
+    10500,
+  );
+});
+function fractionalTime(time: string): string {
+  return `${time.replace(/Z$/u, "").split(".")[0]}.0001Z`;
+}
+it.each(["orderedAt", "paidAt"] as const)("rejects submillisecond business %s", (field) => {
+  const base = input(),
+    payment = base.paymentFacts![0]!;
+  const source = {
+    ...base,
+    paymentFacts: [
+      { ...payment, data: { ...payment.data, [field]: fractionalTime(payment.data[field]!) } },
+    ],
+  };
+  expect(calculator.calculate(request("PAID_REVENUE", source))).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
+it.each(["periodStart", "periodEnd", "visibleAt", "sourceWatermark"] as const)(
+  "rejects submillisecond input %s",
+  (field) => {
+    const base = input();
+    const source = { ...base, [field]: fractionalTime(base[field]!) };
+    expect(calculator.calculate(request("PAID_REVENUE", source))).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+  },
+);
+it.each(["periodStart", "periodEnd", "visibleAt", "sourceWatermark", "observedAt"] as const)(
+  "rejects submillisecond coverage %s",
+  (field) => {
+    const base = input();
+    const metricCoverage = base.metricCoverage.map((proof) => ({
+      ...proof,
+      [field]: fractionalTime(proof[field]!),
+    }));
+    expect(
+      calculator.calculate(request("PAID_REVENUE", { ...base, metricCoverage })),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+  },
+);
+it("rejects submillisecond business clock timestamps", () => {
+  const clock = createMetricRuntimeCalculator({
+    clock: { snapshot: () => ({ now: fractionalTime(now), revision: 1 }) },
+  });
+  expect(clock.calculate(request("PAID_REVENUE"))).toMatchObject({
+    ok: false,
+    error: { code: "INVALID_INPUT" },
+  });
+});
 it("exports an immutable versioned semantic definition for explicit provisioning", () => {
   expect(METRIC_RUNTIME_DEFINITION_VERSION).toBe("metrics-g4-v1");
   expect(METRIC_RUNTIME_DEFINITION_HASH).toMatch(/^sha256:[0-9a-f]{64}$/);

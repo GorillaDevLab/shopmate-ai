@@ -14,6 +14,10 @@ import type {
   NormalizedMetricSourceBundle,
 } from "@shopmate/database";
 import { createNormalizedMetricSourceAdapter } from "./normalized-metric-source.adapter.js";
+import {
+  createMetricRuntimeCalculator,
+  METRIC_RUNTIME_DEFINITION_VERSION,
+} from "./metric-runtime-calculator.js";
 
 const opening = "2026-10-01T00:00:00.000Z";
 const end = "2026-10-03T00:00:00.000Z";
@@ -458,6 +462,29 @@ it("preserves provider version text without treating it as a business timestamp"
   const input = await mapped(bundle({ orders: [{ ...bundle().orders[0]!, data }] }));
   expect(input.paymentFacts?.[0]?.sourceVersion).toBe(version);
   expect(input.paymentFacts?.[0]?.data.source.version).toBe(version);
+});
+it("computes paid10500 through the real adapter with an opaque date-looking version", async () => {
+  const calculator = createMetricRuntimeCalculator({
+    clock: { snapshot: () => ({ now: visible, revision: 1 }) },
+  });
+  for (const version of [null, "2026-10-01T00:00:00.0001Z"]) {
+    const data = {
+      ...order(),
+      paidAt: window.periodStart,
+      source: { ...order().source, version },
+    };
+    const input = await mapped(
+      bundle({ orders: [{ ...bundle().orders[0]!, data }] }),
+      query({ definitionVersion: METRIC_RUNTIME_DEFINITION_VERSION }),
+    );
+    const result = calculator.calculate({
+      input,
+      kind: "PAID_REVENUE",
+      subject: { kind: "STORE" },
+      computedAt: visible,
+    });
+    expect(result).toMatchObject({ ok: true, value: { snapshot: { metric: { value: 10500 } } } });
+  }
 });
 it.each([
   { source: { ...order().source, updatedAt: "2026-10-01T00:00:00.00001Z" } },

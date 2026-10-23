@@ -56,10 +56,36 @@ const requestSchema = z.strictObject({
   subject: MetricSubjectSchema,
   computedAt: MetricTimestampSchema,
 });
-function precise(value: unknown): boolean {
-  if (typeof value === "string" && /^\d{4}-\d\d-\d\dT/.test(value))
-    return !/[1-9]/.test((/\.(\d+)/.exec(value)?.[1] ?? "").slice(3));
-  return value === null || typeof value !== "object" || Object.values(value).every(precise);
+const timestampFields = new Set([
+  "now",
+  "computedAt",
+  "periodStart",
+  "periodEnd",
+  "visibleAt",
+  "sourceWatermark",
+  "observedAt",
+  "orderedAt",
+  "paidAt",
+  "requestedAt",
+  "succeededAt",
+  "updatedAt",
+  "frozenAt",
+  "acceptedAt",
+  "asOf",
+  "eta",
+]);
+function precise(value: unknown, field = ""): boolean {
+  // Strict request schemas establish field meaning; opaque source strings have no time semantics.
+  if (typeof value === "string")
+    return (
+      !timestampFields.has(field) || !/[1-9]/.test((/\.(\d+)/.exec(value)?.[1] ?? "").slice(3))
+    );
+  if (Array.isArray(value)) return value.every((item: unknown) => precise(item));
+  return (
+    value === null ||
+    typeof value !== "object" ||
+    Object.entries(value).every(([key, item]) => precise(item, key))
+  );
 }
 function supported(kind: MetricKind, subject: MetricSubject): boolean {
   const route = METRIC_RUNTIME_ROUTES[kind];
