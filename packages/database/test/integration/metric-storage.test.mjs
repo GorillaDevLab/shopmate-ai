@@ -951,11 +951,21 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
   }
   assert.match(ordinary, /exclude:/u);
   assert.match(source, /delete process\.env\.TEST_DATABASE_URL/u);
-  assert.ok(
-    source.indexOf('"test/integration/metric-source-bundle.test.mjs", []') <
-      source.indexOf("const runtimeUrl = await prepareTenantApiRuntime"),
+  assertSourceTargetPrecedesApi(source);
+  assert.throws(() =>
+    assertSourceTargetPrecedesApi("const runtimeUrl = await prepareTenantApiRuntime"),
+  );
+  assert.throws(() =>
+    assertSourceTargetPrecedesApi('"test/integration/metric-source-bundle.test.mjs", []'),
   );
 });
+function assertSourceTargetPrecedesApi(source) {
+  const sourceOffset = source.indexOf('"test/integration/metric-source-bundle.test.mjs", []');
+  const apiOffset = source.indexOf("const runtimeUrl = await prepareTenantApiRuntime");
+  assert.ok(sourceOffset >= 0, "Required source-bundle target missing");
+  assert.ok(apiOffset >= 0, "Required API marker missing");
+  assert.ok(sourceOffset < apiOffset, "Source-bundle target must precede API execution");
+}
 async function metricRunnerEnvironment(t, runner) {
   await t.test(
     "metric URLs use only prepared restricted logins on the owned database and replace inherited key",
