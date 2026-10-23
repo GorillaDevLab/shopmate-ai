@@ -72,14 +72,8 @@ function entityIdentity(entity: EventEntity, binding: ConnectorBinding): string 
       return entity.connectionId;
   }
 }
-/** Canonical deduplication identity only; this is neither a signature nor an authorization token. */
-export function createEventFingerprint(value: EventIdentity): string {
-  const identity = EventIdentitySchema.parse({
-    binding: value.binding,
-    eventType: value.eventType,
-    entity: value.entity,
-    baselineVersion: value.baselineVersion,
-  });
+// Parent refinements can run after child custom errors, so serialization must not re-parse.
+function serializeEventFingerprint(identity: EventIdentity): string {
   return JSON.stringify([
     "event-fingerprint-v1",
     identity.binding.organizationId,
@@ -90,6 +84,16 @@ export function createEventFingerprint(value: EventIdentity): string {
     entityIdentity(identity.entity, identity.binding),
     identity.baselineVersion,
   ]);
+}
+/** Canonical deduplication identity only; this is neither a signature nor an authorization token. */
+export function createEventFingerprint(value: EventIdentity): string {
+  const identity = EventIdentitySchema.parse({
+    binding: value.binding,
+    eventType: value.eventType,
+    entity: value.entity,
+    baselineVersion: value.baselineVersion,
+  });
+  return serializeEventFingerprint(identity);
 }
 function sameEntity(left: EventEntity, right: EventEntity, binding: ConnectorBinding): boolean {
   return (
@@ -124,7 +128,7 @@ export const EventCandidateSchema = z
   })
   .refine(
     (value) =>
-      value.fingerprint === createEventFingerprint(value.evidence) &&
+      value.fingerprint === serializeEventFingerprint(value.evidence) &&
       allowedSeverity({ eventType: value.evidence.eventType, severityFloor: value.severityFloor }),
     "Candidate fingerprint or deterministic severity floor disagrees with evidence",
   )
@@ -175,7 +179,7 @@ export const EventRecordSchema = z
       value.eventType === value.currentEvidence.eventType &&
       sameEntity(value.entity, value.currentEvidence.entity, value.binding) &&
       allowedSeverity(value) &&
-      value.fingerprint === createEventFingerprint(value.currentEvidence) &&
+      value.fingerprint === serializeEventFingerprint(value.currentEvidence) &&
       Date.parse(value.firstSeenAt) <= Date.parse(value.lastSeenAt),
     "Event record scope, identity, severity or timestamps disagree",
   )

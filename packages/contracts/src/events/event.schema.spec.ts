@@ -498,6 +498,7 @@ import type {
   EventDetectionRequest,
   EventStateTransition,
   BaselineRequest,
+  EventIdentity,
 } from "../index.js";
 import type { TenantContext } from "../tenant/tenant.schema.js";
 const actor = {
@@ -555,6 +556,83 @@ function record() {
     currentEvidence: evidenceReference(),
   };
 }
+const invalidIdentityCases = [
+  {
+    label: "cross-connection sync identity",
+    index: 10,
+    patch: { entity: { ...connection, connectionId: "foreign" } },
+  },
+  {
+    label: "hidden character in SKU identity",
+    index: 0,
+    patch: { entity: { ...sku, externalSkuId: "sku-\u200ba" } },
+  },
+  {
+    label: "untrimmed external store binding",
+    index: 0,
+    patch: { binding: { ...binding, externalStoreId: " external-a" } },
+  },
+] as const;
+function invalidIdentityCandidate(index: number, patch: Partial<EventIdentity>) {
+  const value = candidate(index);
+  return { ...value, evidence: { ...value.evidence, ...patch } };
+}
+function eventRecord(index: number, patch: Partial<EventIdentity> = {}) {
+  const reference = { ...evidenceReference(index), ...patch };
+  return {
+    ...record(),
+    binding: reference.binding,
+    eventType: reference.eventType,
+    entity: reference.entity,
+    fingerprint: candidate(index).fingerprint,
+    currentEvidence: reference,
+  };
+}
+it.each(invalidIdentityCases)("returns candidate failure for $label", ({ index, patch }) => {
+  expect(EventCandidateSchema.safeParse(invalidIdentityCandidate(index, patch)).success).toBe(
+    false,
+  );
+});
+it.each(invalidIdentityCases)("returns record failure for $label", ({ index, patch }) => {
+  expect(EventRecordSchema.safeParse(eventRecord(index, patch)).success).toBe(false);
+});
+it.each(invalidIdentityCases)("returns append request failure for $label", ({ index, patch }) => {
+  expect(
+    EventAppendEvidenceRequestSchema.safeParse({
+      actor,
+      binding,
+      candidate: invalidIdentityCandidate(index, patch),
+      reference: { ...evidenceReference(index), ...patch },
+      expectedRevision: null,
+    }).success,
+  ).toBe(false);
+});
+it.each(invalidIdentityCases)(
+  "returns detection outcome failure for $label",
+  ({ index, patch }) => {
+    expect(
+      EventDetectionOutcomeSchema.safeParse({
+        disposition: "CANDIDATE",
+        candidate: invalidIdentityCandidate(index, patch),
+        quality,
+        blockedResources: [],
+      }).success,
+    ).toBe(false);
+  },
+);
+it.each(invalidIdentityCases)(
+  "keeps public fingerprint rejection for $label",
+  ({ index, patch }) => {
+    expect(() => createEventFingerprint({ ...candidate(index).evidence, ...patch })).toThrow();
+  },
+);
+it.each(fixtures)("preserves record and reference fingerprint for $eventType", (fixture) => {
+  const index = fixtures.indexOf(fixture);
+  const value = eventRecord(index);
+  expect(EventRecordSchema.safeParse(value).success).toBe(true);
+  const reference = EventEvidenceReferenceSchema.parse(value.currentEvidence);
+  expect(createEventFingerprint(reference)).toBe(candidate(index).fingerprint);
+});
 const qualityRule = {
   minimumSampleSize: 20,
   minimumCoverageBasisPoints: 9000,
