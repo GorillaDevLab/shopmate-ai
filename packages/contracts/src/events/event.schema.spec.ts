@@ -33,6 +33,7 @@ const campaign = { kind: "CAMPAIGN", externalCampaignId: "campaign-a" } as const
 const connection = { kind: "CONNECTION", connectionId: binding.connectionId } as const;
 const sourceRef = {
   kind: "METRIC_SNAPSHOT",
+  measure: { kind: "PAID_REVENUE", unit: "minorCNY" },
   id: "metric-a",
   version: "revision-a",
   hash: "hash-a",
@@ -54,6 +55,9 @@ const common = {
   baselineAlignment: "ALIGNED",
   baseline: {
     status: "AVAILABLE",
+    alignment: "ALIGNED",
+    measure: { kind: "PAID_REVENUE", unit: "minorCNY" },
+    aggregation: "EXACT_MEDIAN",
     version: "baseline-v1",
     period: baselinePeriod,
     median: 100,
@@ -404,3 +408,552 @@ it.each([{ lastSuccessAt: future }, { lagSeconds: 1 }, { typedErrorCode: "raw ex
     expect(accepts({ ...evidence(10), facts: { ...fixtures[10]?.facts, ...facts } })).toBe(false);
   },
 );
+it("publishes candidate, policy and authenticated consumer contracts", async () => {
+  const path = "./event.schema.js";
+  const module = await import(path).catch((error: unknown) => ({ missingBoundary: error }));
+  expect(module).toHaveProperty("EventCandidateSchema");
+});
+it("retains typed measures and fractional observed baseline medians", () => {
+  const measure = { kind: "LEAD_TIME_HOURS", unit: "hours" };
+  const baseline = {
+    ...common.baseline,
+    measure,
+    aggregation: "EXACT_MEDIAN",
+    median: 1.5,
+    mad: 0.5,
+    sourceReferences: [{ ...sourceRef, period: baselinePeriod, measure }],
+  };
+  expect(accepts({ ...evidence(), baseline })).toBe(true);
+});
+
+import {
+  createEventFingerprint,
+  EventCandidateSchema,
+  EventEvidenceReferenceSchema,
+  EventEvidenceRecordSchema,
+  EventRecordSchema,
+  EventStateTransitionSchema,
+  EventListQuerySchema,
+  EventDetailQuerySchema,
+  EventEvidenceQuerySchema,
+  EventHistoryQuerySchema,
+  EventAppendEvidenceRequestSchema,
+  EventCurrentQuerySchema,
+  EventRulePolicyV1Schema,
+  BaselineRequestSchema,
+  EventDetectionRequestSchema,
+  EventDetectionOutcomeSchema,
+} from "./event.schema.js";
+import type {
+  BaselinePort,
+  EventDetector,
+  EventRepository,
+  EventQueryPort,
+} from "./event-ports.js";
+import type {
+  EventCandidate,
+  EventDetectionRequest,
+  EventStateTransition,
+  BaselineRequest,
+} from "./event.schema.js";
+import type { TenantContext } from "../tenant/tenant.schema.js";
+const actor = {
+  userId: "user-a",
+  merchantId: "merchant-a",
+  organizationId: binding.organizationId,
+  workspaceId: binding.workspaceId,
+  role: "OPERATOR",
+  permissions: ["tenant:read"],
+} as const;
+const identity = {
+  binding,
+  eventType: "STOCKOUT_RISK",
+  entity: sku,
+  baselineVersion: "baseline-v1",
+} as const;
+function candidate(index = 0) {
+  const value = EventEvidenceV1Schema.parse(evidence(index));
+  return {
+    schemaVersion: 1,
+    fingerprint: createEventFingerprint(value),
+    severityFloor: "LOW",
+    rulePolicyVersion: "policy-v1",
+    evidence: value,
+  };
+}
+function evidenceReference(index = 0) {
+  const value = evidence(index);
+  return {
+    schemaVersion: 1,
+    id: "evidence-a",
+    version: "evidence-v1",
+    hash: "sha256-host-a",
+    binding,
+    eventType: value.eventType,
+    entity: value.entity,
+    definitionVersion: value.definitionVersion,
+    baselineVersion: value.baselineVersion,
+  };
+}
+function record() {
+  return {
+    schemaVersion: 1,
+    id: "event-a",
+    binding,
+    eventType: identity.eventType,
+    entity: sku,
+    fingerprint: createEventFingerprint(identity),
+    severityFloor: "LOW",
+    rulePolicyVersion: "policy-v1",
+    state: "OPEN",
+    revision: 1,
+    firstSeenAt: end,
+    lastSeenAt: end,
+    currentEvidence: evidenceReference(),
+  };
+}
+const qualityRule = {
+  minimumSampleSize: 20,
+  minimumCoverageBasisPoints: 9000,
+  maximumAgeSeconds: 3600,
+  minimumBaselineSamples: 4,
+  requireAlignedBaseline: true,
+  toleranceBasisPoints: 100,
+};
+const thresholdFixtures = [
+  { eventType: "STOCKOUT_RISK", thresholds: { criticalHoursRemaining: 6, leadTimeBufferHours: 4 } },
+  {
+    eventType: "INVENTORY_STAGNATION",
+    thresholds: {
+      minimumHoldingDays: 90,
+      minimumDemandCoverageDays: 90,
+      minimumListingAgeHours: 720,
+    },
+  },
+  {
+    eventType: "REFUND_SPIKE",
+    thresholds: {
+      relativeIncreaseBasisPoints: 20000,
+      minimumRefundedOrders: 10,
+      maturityHours: 48,
+    },
+  },
+  {
+    eventType: "CANCELLED_ORDER_SPIKE",
+    thresholds: { relativeIncreaseBasisPoints: 20000, minimumCancelledOrders: 10 },
+  },
+  {
+    eventType: "PROFIT_MARGIN_DROP",
+    thresholds: { relativeDropBasisPoints: 1000, minimumDropMinor: 1000 },
+  },
+  {
+    eventType: "UNUSUAL_DISCOUNT",
+    thresholds: { discountBasisPoints: 3000, minimumDiscountMinor: 1000 },
+  },
+  {
+    eventType: "ROAS_DROP",
+    thresholds: {
+      relativeDropBasisPoints: 3000,
+      minimumSpendMinor: 1000,
+      minimumAttributionCoverageBasisPoints: 9000,
+    },
+  },
+  {
+    eventType: "AD_SPEND_SPIKE",
+    thresholds: { relativeIncreaseBasisPoints: 20000, minimumSpendMinor: 1000 },
+  },
+  {
+    eventType: "CONVERSION_DROP",
+    thresholds: { relativeDropBasisPoints: 3500, minimumVisitors: 100 },
+  },
+  {
+    eventType: "PRODUCT_BREAKOUT",
+    thresholds: {
+      relativeGrowthBasisPoints: 20000,
+      minimumSalesUnits: 20,
+      minimumConversionBasisPoints: 1000,
+    },
+  },
+  { eventType: "SYNC_FAILURE", thresholds: { maximumLagSeconds: 3600 } },
+  {
+    eventType: "REVENUE_DROP",
+    thresholds: { relativeDropBasisPoints: 2000, minimumDropMinor: 1000 },
+  },
+];
+const policy = {
+  schemaVersion: 1,
+  version: "policy-v1",
+  baselineVersion: "baseline-v1",
+  rules: thresholdFixtures.map((fixture) => ({ ...qualityRule, ...fixture })),
+};
+const snapshot = {
+  schemaVersion: 1,
+  definitionVersion: "metrics-v1",
+  inputRevision: "revision-a",
+  binding,
+  ...period,
+  visibleAt: end,
+  sourceWatermark: end,
+  computedAt: end,
+  sampleSize: 100,
+  coverageBasisPoints: 10000,
+  status: "VERIFIED",
+  issues: [],
+  evidenceIds: ["metric-a"],
+  subject: sku,
+  metric: { kind: "PAID_REVENUE", unit: "minorCNY", value: 10000 },
+};
+const baselineRequest = {
+  binding,
+  eventType: "STOCKOUT_RISK",
+  entity: sku,
+  period,
+  observedAt: end,
+  definitionVersion: "metrics-v1",
+  baselineVersion: "baseline-v1",
+  measure: { kind: "PAID_REVENUE", unit: "minorCNY" },
+  sourceReferences: [{ ...sourceRef, period: baselinePeriod }],
+  candidates: [
+    {
+      ...snapshot,
+      ...baselinePeriod,
+      visibleAt: baselinePeriod.periodEnd,
+      sourceWatermark: baselinePeriod.periodEnd,
+      computedAt: baselinePeriod.periodEnd,
+    },
+  ],
+};
+function detectionRequest() {
+  return { evidence: evidence(), snapshots: [snapshot], baseline: common.baseline, policy };
+}
+it("uses an ordered canonical JSON tuple for opaque deduplication", () => {
+  expect(createEventFingerprint(identity)).toBe(
+    JSON.stringify([
+      "event-fingerprint-v1",
+      "org-a",
+      "workspace-a",
+      "store-a",
+      "STOCKOUT_RISK",
+      "SKU",
+      "sku-a",
+      "baseline-v1",
+    ]),
+  );
+  expect(
+    createEventFingerprint({
+      ...identity,
+      entity: { kind: "SKU", externalSkuId: "a|b" },
+      baselineVersion: "c",
+    }),
+  ).not.toBe(
+    createEventFingerprint({
+      ...identity,
+      entity: { kind: "SKU", externalSkuId: "a" },
+      baselineVersion: "b|c",
+    }),
+  );
+});
+it.each(["organizationId", "workspaceId", "storeId"])("changes fingerprint with %s", (key) => {
+  expect(
+    createEventFingerprint({ ...identity, binding: { ...binding, [key]: "foreign" } }),
+  ).not.toBe(createEventFingerprint(identity));
+});
+it("changes fingerprint with type, entity and baseline version", () => {
+  const base = createEventFingerprint(identity);
+  expect(createEventFingerprint({ ...identity, eventType: "INVENTORY_STAGNATION" })).not.toBe(base);
+  expect(
+    createEventFingerprint({ ...identity, entity: { ...sku, externalSkuId: "sku-b" } }),
+  ).not.toBe(base);
+  expect(createEventFingerprint({ ...identity, baselineVersion: "baseline-v2" })).not.toBe(base);
+});
+it.each(fixtures)("accepts strict candidate and immutable reference for $eventType", (fixture) => {
+  const index = fixtures.indexOf(fixture);
+  expect(EventCandidateSchema.safeParse(candidate(index)).success).toBe(true);
+  expect(EventEvidenceReferenceSchema.safeParse(evidenceReference(index)).success).toBe(true);
+  expect(
+    EventEvidenceRecordSchema.safeParse({
+      reference: evidenceReference(index),
+      evidence: evidence(index),
+    }).success,
+  ).toBe(true);
+});
+it.each(["INFO", "LOW"])("allows %s opportunity severity", (severityFloor) => {
+  expect(EventCandidateSchema.safeParse({ ...candidate(9), severityFloor }).success).toBe(true);
+});
+it.each(["MEDIUM", "HIGH", "CRITICAL"])("rejects %s opportunity severity", (severityFloor) => {
+  expect(EventCandidateSchema.safeParse({ ...candidate(9), severityFloor }).success).toBe(false);
+});
+it.each([
+  { fingerprint: "forged" },
+  { severityFloor: "APPROVE" },
+  { rulePolicyVersion: "" },
+  { execute: true },
+  { provider: "jev" },
+])("rejects invalid candidate %j", (patch) => {
+  expect(EventCandidateSchema.safeParse({ ...candidate(), ...patch }).success).toBe(false);
+});
+it.each([
+  { binding: { ...binding, externalStoreId: "foreign" } },
+  { definitionVersion: "foreign" },
+  { baselineVersion: "foreign" },
+  { eventType: "REFUND_SPIKE" },
+  { entity: { ...sku, externalSkuId: "foreign" } },
+  { version: "" },
+])("rejects evidence reference mismatch %j", (patch) => {
+  expect(
+    EventEvidenceRecordSchema.safeParse({
+      reference: { ...evidenceReference(), ...patch },
+      evidence: evidence(),
+    }).success,
+  ).toBe(false);
+});
+it("requires immutable current evidence and monotone event times", () => {
+  expect(EventRecordSchema.safeParse(record()).success).toBe(true);
+  expect(EventRecordSchema.safeParse({ ...record(), revision: 0 }).success).toBe(false);
+  expect(EventRecordSchema.safeParse({ ...record(), firstSeenAt: future }).success).toBe(false);
+  expect(
+    EventRecordSchema.safeParse({ ...record(), currentEvidence: evidenceReference(2) }).success,
+  ).toBe(false);
+});
+const transition = {
+  actor,
+  binding,
+  eventId: "event-a",
+  expectedRevision: 1,
+  fromState: "OPEN",
+  toState: "ACKNOWLEDGED",
+  reason: "ACKNOWLEDGED_BY_OPERATOR",
+  changedAt: end,
+};
+it.each([
+  { toState: "ACKNOWLEDGED", reason: "ACKNOWLEDGED_BY_OPERATOR" },
+  { toState: "RESOLVED", reason: "CONDITION_CLEARED" },
+  { toState: "SUPPRESSED", reason: "FALSE_POSITIVE" },
+])("accepts scoped CAS transition %j", (patch) => {
+  expect(EventStateTransitionSchema.safeParse({ ...transition, ...patch }).success).toBe(true);
+});
+it.each([
+  { actor: undefined },
+  { expectedRevision: 0 },
+  { actor: { ...actor, workspaceId: "foreign" } },
+  { toState: "RESOLVED", reason: "ACKNOWLEDGED_BY_OPERATOR" },
+  { fromState: "RESOLVED", toState: "OPEN" },
+  { reason: "free text" },
+  { approval: true },
+])("rejects invalid or unauthenticated state transition %j", (patch) => {
+  expect(EventStateTransitionSchema.safeParse({ ...transition, ...patch }).success).toBe(false);
+});
+const detailQuery = { actor, binding, eventId: "event-a" };
+const listQuery = {
+  actor,
+  binding,
+  eventTypes: ["STOCKOUT_RISK"],
+  states: ["OPEN"],
+  entity: null,
+  cursor: null,
+  limit: 50,
+};
+it("accepts explicit scoped list/detail/evidence/history/current queries", () => {
+  expect(EventListQuerySchema.safeParse(listQuery).success).toBe(true);
+  expect(EventDetailQuerySchema.safeParse(detailQuery).success).toBe(true);
+  expect(
+    EventEvidenceQuerySchema.safeParse({ ...detailQuery, reference: evidenceReference() }).success,
+  ).toBe(true);
+  expect(
+    EventHistoryQuerySchema.safeParse({ ...detailQuery, cursor: null, limit: 50 }).success,
+  ).toBe(true);
+  expect(EventCurrentQuerySchema.safeParse({ actor, binding, identity }).success).toBe(true);
+});
+it.each([
+  { actor: undefined },
+  { actor: { ...actor, organizationId: "foreign" } },
+  { limit: 201 },
+  { cursor: "x".repeat(1025) },
+  { eventTypes: ["SQL"] },
+  { states: ["OPEN", "OPEN"] },
+  { entity: { kind: "STORE", name: "PII" } },
+  { sql: "SELECT" },
+])("rejects unbounded or unauthenticated list query %j", (patch) => {
+  expect(EventListQuerySchema.safeParse({ ...listQuery, ...patch }).success).toBe(false);
+});
+it("requires full authenticated scope and expected revision for append", () => {
+  const request = {
+    actor,
+    binding,
+    candidate: candidate(),
+    reference: evidenceReference(),
+    expectedRevision: null,
+  };
+  expect(EventAppendEvidenceRequestSchema.safeParse(request).success).toBe(true);
+  expect(
+    EventAppendEvidenceRequestSchema.safeParse({ ...request, expectedRevision: undefined }).success,
+  ).toBe(false);
+  expect(
+    EventAppendEvidenceRequestSchema.safeParse({
+      ...request,
+      binding: { ...binding, connectionId: "foreign" },
+    }).success,
+  ).toBe(false);
+});
+it("validates a versioned readonly policy across all 12 threshold families", () => {
+  const parsed = EventRulePolicyV1Schema.parse(policy);
+  expect(parsed.rules).toHaveLength(12);
+  expect(Object.isFrozen(parsed.rules[0]?.thresholds)).toBe(true);
+});
+it.each([
+  { schemaVersion: 2 },
+  { version: "" },
+  { rules: [policy.rules[0], policy.rules[0]] },
+  { rules: [{ ...policy.rules[0], thresholds: { arbitrary: 10 } }] },
+  { rules: [{ ...policy.rules[0], maximumAgeSeconds: -1 }] },
+  { rules: [{ ...policy.rules[0], minimumCoverageBasisPoints: 10001 }] },
+  { credentials: "x" },
+])("rejects unsafe policy input %j", (patch) => {
+  expect(EventRulePolicyV1Schema.safeParse({ ...policy, ...patch }).success).toBe(false);
+});
+it("validates baseline observation inputs without selecting candidates", () => {
+  expect(BaselineRequestSchema.safeParse(baselineRequest).success).toBe(true);
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...baselineRequest,
+      sourceReferences: [{ ...sourceRef, period: baselinePeriod }],
+      candidates: [{ ...baselineRequest.candidates[0], computedAt: future }],
+    }).success,
+  ).toBe(false);
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...baselineRequest,
+      sourceReferences: [{ ...sourceRef, period: baselinePeriod }],
+      candidates: [
+        { ...baselineRequest.candidates[0], binding: { ...binding, storeId: "foreign" } },
+      ],
+    }).success,
+  ).toBe(false);
+});
+it.each([
+  { policy: { ...policy, baselineVersion: "foreign" } },
+  { snapshots: [{ ...snapshot, definitionVersion: "foreign" }] },
+  { snapshots: [{ ...snapshot, binding: { ...binding, workspaceId: "foreign" } }] },
+  { baseline: { ...common.baseline, version: "foreign" } },
+])("rejects inconsistent detector context %j", (patch) => {
+  expect(EventDetectionRequestSchema.safeParse({ ...detectionRequest(), ...patch }).success).toBe(
+    false,
+  );
+});
+it("accepts pure detection input and explicit no-candidate quality", () => {
+  expect(EventDetectionRequestSchema.safeParse(detectionRequest()).success).toBe(true);
+  expect(
+    EventDetectionOutcomeSchema.safeParse({
+      disposition: "NO_CANDIDATE",
+      reason: "INSUFFICIENT_EVIDENCE",
+      quality,
+      blockedResources: ["ORDERS"],
+    }).success,
+  ).toBe(true);
+  expect(
+    EventDetectionOutcomeSchema.safeParse({
+      disposition: "CANDIDATE",
+      candidate: candidate(),
+      quality,
+      blockedResources: [],
+    }).success,
+  ).toBe(true);
+});
+it("exposes readonly authenticated ports with typed request/result contracts", () => {
+  expectTypeOf<Parameters<EventDetector["detect"]>[0]>().toEqualTypeOf<EventDetectionRequest>();
+  expectTypeOf<Parameters<BaselinePort["evaluate"]>[0]>().toEqualTypeOf<BaselineRequest>();
+  expectTypeOf<
+    Parameters<EventRepository["stateTransition"]>[0]
+  >().toEqualTypeOf<EventStateTransition>();
+  expectTypeOf<Parameters<EventQueryPort["list"]>[0]["actor"]>().toMatchTypeOf<TenantContext>();
+  expectTypeOf<EventCandidate["evidence"]["sourceReferences"]>().toMatchTypeOf<
+    readonly unknown[]
+  >();
+});
+it("accepts sync diagnostics from immutable non-metric aggregate references", () => {
+  const sourceReferences = [{ ...sourceRef, kind: "NORMALIZED_AGGREGATE", measure: null }];
+  expect(accepts({ ...evidence(10), sourceReferences })).toBe(true);
+});
+it("rejects fabricated metric references without typed measure", () => {
+  expect(accepts({ ...evidence(), sourceReferences: [{ ...sourceRef, measure: null }] })).toBe(
+    false,
+  );
+});
+it.each([
+  { median: -1, measure: { kind: "LEAD_TIME_HOURS", unit: "hours" } },
+  { median: 10001, measure: { kind: "CONVERSION_RATE", unit: "basisPoints" } },
+  { median: 100, measure: { kind: "ROAS", unit: "minorCNY" } },
+])("rejects baseline unit/domain mismatch %j", (patch) => {
+  const baseline = {
+    ...common.baseline,
+    ...patch,
+    sourceReferences: [{ ...sourceRef, period: baselinePeriod, measure: patch.measure }],
+  };
+  expect(accepts({ ...evidence(), baseline })).toBe(false);
+});
+it("rejects extra foreign immutable baseline references", () => {
+  const foreign = {
+    ...sourceRef,
+    period: baselinePeriod,
+    id: "foreign-ref",
+    binding: { ...binding, organizationId: "foreign" },
+  };
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...baselineRequest,
+      sourceReferences: [...baselineRequest.sourceReferences, foreign],
+    }).success,
+  ).toBe(false);
+});
+it("distinguishes zero and missing baseline states without fabricated values", () => {
+  expect(
+    accepts({ ...evidence(), baseline: { ...common.baseline, status: "ZERO", median: 0 } }),
+  ).toBe(true);
+  expect(accepts({ ...evidence(), baseline: { ...common.baseline, median: 0 } })).toBe(false);
+  const missing = {
+    status: "MISSING",
+    alignment: "MISSING",
+    version: "baseline-v1",
+    measure: common.baseline.measure,
+    aggregation: "EXACT_MEDIAN",
+    period: null,
+    median: null,
+    mad: null,
+    sampleSize: 0,
+    coverageBasisPoints: 0,
+    sourceReferences: [],
+  };
+  expect(accepts({ ...evidence(), baseline: missing, baselineAlignment: "MISSING" })).toBe(true);
+});
+it("allows signed profit baselines and ROAS above 10000", () => {
+  for (const measure of [
+    { kind: "GROSS_PROFIT", unit: "minorCNY" },
+    { kind: "ROAS", unit: "basisPoints" },
+  ]) {
+    const median = measure.kind === "GROSS_PROFIT" ? -100.5 : 30000;
+    const baseline = {
+      ...common.baseline,
+      measure,
+      median,
+      sourceReferences: [{ ...sourceRef, period: baselinePeriod, measure }],
+    };
+    expect(accepts({ ...evidence(), baseline })).toBe(true);
+  }
+});
+it("retains aligned low-sample baseline without fabricating its median", () => {
+  const baseline = {
+    ...common.baseline,
+    status: "INSUFFICIENT",
+    alignment: "ALIGNED",
+    median: null,
+    mad: null,
+    sampleSize: 1,
+    coverageBasisPoints: 9000,
+  };
+  expect(accepts({ ...evidence(), baseline })).toBe(true);
+});
+it("rejects inconsistent explicit baseline alignment", () => {
+  expect(accepts({ ...evidence(), baseline: { ...common.baseline, alignment: "UNALIGNED" } })).toBe(
+    false,
+  );
+});

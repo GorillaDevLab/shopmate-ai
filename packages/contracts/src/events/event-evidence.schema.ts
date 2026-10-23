@@ -11,6 +11,7 @@ import {
   BasisPointsSchema,
   DataQualityIssueV1Schema,
   MetricStatusSchema,
+  MetricValueSchema,
   SignedMinorSchema,
 } from "../metrics/metric.schema.js";
 
@@ -80,6 +81,9 @@ export function sameEventPeriod(left: EventPeriod, right: EventPeriod): boolean 
     left.currency === right.currency
   );
 }
+export const EventMeasureSchema = z.union(
+  MetricValueSchema.options.map((option) => option.unwrap().omit({ value: true }).readonly()),
+);
 export const EventSourceReferenceSchema = z
   .strictObject({
     kind: z.enum(["METRIC_SNAPSHOT", "NORMALIZED_AGGREGATE"]),
@@ -90,10 +94,15 @@ export const EventSourceReferenceSchema = z
     definitionVersion: SourceVersionSchema,
     period: EventPeriodSchema,
     observedAt: EventTimestampSchema,
+    measure: EventMeasureSchema.nullable(),
   })
   .refine(
     (value) => Date.parse(value.period.periodEnd) <= Date.parse(value.observedAt),
     "Reference is not observed",
+  )
+  .refine(
+    (value) => value.kind !== "METRIC_SNAPSHOT" || value.measure !== null,
+    "Metric reference requires typed measure",
   )
   .readonly();
 export const EventSourceReferencesSchema = z
@@ -156,15 +165,18 @@ export const EventQualitySchema = z
   .readonly();
 const finiteHours = z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER);
 const baselineFields = {
+  alignment: z.literal("ALIGNED"),
+  measure: EventMeasureSchema,
+  aggregation: z.literal("EXACT_MEDIAN"),
   version: SourceVersionSchema,
   period: EventPeriodSchema,
-  median: SignedMinorSchema,
-  mad: QuantitySchema,
+  median: z.number().finite().min(-Number.MAX_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
+  mad: finiteHours,
   sampleSize: QuantitySchema.min(1),
   coverageBasisPoints: BasisPointsSchema,
   sourceReferences: EventSourceReferencesSchema,
 };
-export const RobustBaselineV1Schema = z.discriminatedUnion("status", [
+const baselineUnion = z.discriminatedUnion("status", [
   z
     .strictObject({ ...baselineFields, status: z.literal("AVAILABLE") })
     .refine((value) => value.median !== 0, "Zero baseline has an explicit state")
@@ -173,6 +185,9 @@ export const RobustBaselineV1Schema = z.discriminatedUnion("status", [
   z
     .strictObject({
       status: z.enum(["MISSING", "UNALIGNED", "INSUFFICIENT", "STALE"]),
+      alignment: z.enum(["ALIGNED", "MISSING", "UNALIGNED"]),
+      measure: EventMeasureSchema,
+      aggregation: z.literal("EXACT_MEDIAN"),
       version: SourceVersionSchema,
       period: EventPeriodSchema.nullable(),
       median: z.null(),
@@ -183,6 +198,31 @@ export const RobustBaselineV1Schema = z.discriminatedUnion("status", [
     })
     .readonly(),
 ]);
+const signedBaselineKinds = new Set([
+  "NET_REVENUE_SETTLEMENT",
+  "NET_MERCHANDISE_REVENUE",
+  "GROSS_PROFIT",
+  "CONTRIBUTION",
+  "ESTIMATED_NET_PROFIT",
+  "PROFIT_DELTA",
+]);
+function validBaselineDomain(value: z.infer<typeof baselineUnion>): boolean {
+  if (value.alignment === "ALIGNED" && value.period === null) return false;
+  if (value.status === "MISSING" && (value.alignment !== "MISSING" || value.period !== null))
+    return false;
+  if (value.status === "UNALIGNED" && value.alignment !== "UNALIGNED") return false;
+  if (value.median === null) return true;
+  if (!signedBaselineKinds.has(value.measure.kind) && value.median < 0) return false;
+  return (
+    value.measure.unit !== "basisPoints" ||
+    value.measure.kind === "ROAS" ||
+    (value.median <= 10000 && value.mad <= 10000)
+  );
+}
+export const RobustBaselineV1Schema = baselineUnion.refine(
+  validBaselineDomain,
+  "Baseline measure domain mismatch",
+);
 const stockoutFacts = z
   .strictObject({
     availableUnits: QuantitySchema.nullable(),
@@ -438,23 +478,25 @@ function validBaseline(value: Evidence): boolean {
   const baseline = value.baseline;
   if (baseline === null)
     return value.baselineVersion === null && value.baselineAlignment === "MISSING";
-  if (value.baselineVersion !== baseline.version) return false;
-  if (baseline.status === "AVAILABLE" || baseline.status === "ZERO")
+  if (value.baselineVersion !== baseline.version || value.baselineAlignment !== baseline.alignment)
+    return false;
+  if (baseline.alignment === "ALIGNED")
     return (
-      value.baselineAlignment === "ALIGNED" &&
+      baseline.period !== null &&
       alignedPeriod(value, baseline.period) &&
       baseline.sourceReferences.every(
-        (ref) => referenceMatches(ref, value, ref.period) && alignedPeriod(value, ref.period),
+        (ref) =>
+          referenceMatches(ref, value, ref.period) &&
+          alignedPeriod(value, ref.period) &&
+          ref.measure?.kind === baseline.measure.kind &&
+          ref.measure?.unit === baseline.measure.unit,
       )
     );
-  return (
-    value.baselineAlignment === (baseline.status === "UNALIGNED" ? "UNALIGNED" : "MISSING") &&
-    baseline.sourceReferences.every(
-      (ref) =>
-        sameEventBinding(ref.binding, value.binding) &&
-        ref.definitionVersion === value.definitionVersion &&
-        Date.parse(ref.observedAt) <= Date.parse(value.observedAt),
-    )
+  return baseline.sourceReferences.every(
+    (ref) =>
+      sameEventBinding(ref.binding, value.binding) &&
+      ref.definitionVersion === value.definitionVersion &&
+      Date.parse(ref.observedAt) <= Date.parse(value.observedAt),
   );
 }
 function validCommon(value: Evidence): boolean {
