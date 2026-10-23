@@ -182,7 +182,10 @@ test("append binds all scope fields locally and returns the persisted snapshot",
   assert.equal(db.rows.length, 1);
   assert.match(db.calls[0].sql, /BEGIN ISOLATION LEVEL READ COMMITTED/);
   const settings = db.calls.find((call) => call.sql.includes("set_config"));
-  assert.deepEqual(settings.params, [actor.userId, ...Object.values(binding)]);
+  assert.match(settings.sql, /set_config\('app.merchant_id',\$7,true\)/u);
+  assert.deepEqual(settings.params, [actor.userId, ...Object.values(binding), actor.merchantId]);
+  const access = db.calls.find((call) => call.sql.includes("metric_scope_access"));
+  assert.deepEqual(access.params, [...Object.values(binding), true]);
   assert.match(db.calls.at(-1).sql, /COMMIT/);
 });
 

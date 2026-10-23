@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -721,16 +722,20 @@ async function hardenedDefiner(t, client, roles) {
     );
   });
 }
-const apiTargets = ["test/tenant-database.e2e-spec.ts", "test/demo-commerce-database.e2e-spec.ts"];
+const apiTargets = [
+  "test/tenant-database.e2e-spec.ts",
+  "test/demo-commerce-database.e2e-spec.ts",
+  "test/metrics-database.e2e-spec.ts",
+];
 function apiReport() {
   return {
     success: true,
-    numTotalTestSuites: 2,
-    numPassedTestSuites: 2,
+    numTotalTestSuites: apiTargets.length,
+    numPassedTestSuites: apiTargets.length,
     numFailedTestSuites: 0,
     numPendingTestSuites: 0,
-    numTotalTests: 2,
-    numPassedTests: 2,
+    numTotalTests: apiTargets.length,
+    numPassedTests: apiTargets.length,
     numFailedTests: 0,
     numPendingTests: 0,
     numTodoTests: 0,
@@ -761,6 +766,12 @@ const invalidApiReports = [
     "zero file assertions",
     (r) => {
       r.testResults[0].assertionResults = [];
+    },
+  ],
+  [
+    "zero mandatory metrics assertions",
+    (r) => {
+      r.testResults[2].assertionResults = [];
     },
   ],
   [
@@ -865,6 +876,9 @@ const poisonedEnvironment = {
   TENANT_TEST_OPERATOR_URL: "unsafe",
   MOCK_PLATFORM_WORKER_DATABASE_URL: "unsafe",
   MIGRATION_DATABASE_URL: "unsafe",
+  METRIC_DATABASE_URL: "unsafe",
+  METRIC_DEFINITION_DATABASE_URL: "unsafe",
+  METRIC_CURSOR_SECRET: "inherited-production-key-never-use",
   DOTENV_CONFIG_OVERRIDE: "true",
   DOTENV_CONFIG_PATH: "unsafe",
   PGHOST: "unsafe",
@@ -918,6 +932,7 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
   await runnerReports(t, runner);
   await nodeReporterProof(t, source, runner);
   await runnerEnvironment(t, runner);
+  await metricRunnerEnvironment(t, runner);
   assert.match(
     source,
     /await run\("packages\/database", "test\/integration\/metric-storage.test.mjs"/u,
@@ -935,8 +950,71 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
     assert.ok(ordinary.includes(file));
   }
   assert.match(ordinary, /exclude:/u);
+  assert.match(source, /delete process\.env\.TEST_DATABASE_URL/u);
+  assertSourceTargetPrecedesApi(source);
+  assert.throws(() =>
+    assertSourceTargetPrecedesApi("const runtimeUrl = await prepareTenantApiRuntime"),
+  );
+  assert.throws(() =>
+    assertSourceTargetPrecedesApi('"test/integration/metric-source-bundle.test.mjs", []'),
+  );
 });
+function assertSourceTargetPrecedesApi(source) {
+  const sourceOffset = source.indexOf('"test/integration/metric-source-bundle.test.mjs", []');
+  const apiOffset = source.indexOf("const runtimeUrl = await prepareTenantApiRuntime");
+  assert.ok(sourceOffset >= 0, "Required source-bundle target missing");
+  assert.ok(apiOffset >= 0, "Required API marker missing");
+  assert.ok(sourceOffset < apiOffset, "Source-bundle target must precede API execution");
+}
+async function metricRunnerEnvironment(t, runner) {
+  await t.test(
+    "metric URLs use only prepared restricted logins on the owned database and replace inherited key",
+    () => {
+      const runtime = new URL(serverUrl),
+        definition = new URL(serverUrl),
+        member = new URL(serverUrl);
+      runtime.username = "shopmate_metric_api";
+      definition.username = "shopmate_metric_definition_api";
+      member.username = "shopmate_tenant_api";
+      const metrics = {
+        METRIC_DATABASE_URL: runtime.toString(),
+        METRIC_DEFINITION_DATABASE_URL: definition.toString(),
+      };
+      const env = runner.tenantEnvironment(
+        poisonedEnvironment,
+        serverUrl,
+        member.toString(),
+        metrics,
+      );
+      assert.equal(env.METRIC_DATABASE_URL, metrics.METRIC_DATABASE_URL);
+      assert.equal(env.METRIC_DEFINITION_DATABASE_URL, metrics.METRIC_DEFINITION_DATABASE_URL);
+      assert.notEqual(env.METRIC_CURSOR_SECRET, poisonedEnvironment.METRIC_CURSOR_SECRET);
+      assert.equal(Buffer.byteLength(env.METRIC_CURSOR_SECRET), 96);
+      rejectMetricRuntimeTargets(runner, runtime, member, metrics);
+    },
+  );
+}
+function rejectMetricRuntimeTargets(runner, runtime, member, metrics) {
+  for (const bad of [
+    serverUrl,
+    "postgresql://shopmate_metric_api@example.com/shopmate_tenant_test",
+    runtime.toString().replace("shopmate_tenant_test", "shopmate_tenant_test_other"),
+  ])
+    assert.throws(() =>
+      runner.tenantEnvironment(poisonedEnvironment, serverUrl, member.toString(), {
+        ...metrics,
+        METRIC_DATABASE_URL: bad,
+      }),
+    );
+  assert.throws(() =>
+    runner.tenantEnvironment(poisonedEnvironment, serverUrl, member.toString(), {
+      ...metrics,
+      METRIC_DEFINITION_DATABASE_URL: metrics.METRIC_DATABASE_URL,
+    }),
+  );
+}
 const metricMigration = "20261004090000_metric_snapshots";
+const deferredMetricMigrations = [metricMigration, "20261023090000_metric_snapshot_current_source"];
 const databaseRoot = fileURLToPath(new URL("../../", import.meta.url));
 async function prisma(url, args) {
   const { tenantEnvironment } = await import("../../../../scripts/test-tenant-database.mjs");
@@ -958,7 +1036,7 @@ async function migrationHistory(action) {
     const migrations = path.join(directory, "migrations");
     await mkdir(migrations);
     for (const name of await readdir(migrationRoot)) {
-      if (name === metricMigration) continue;
+      if (deferredMetricMigrations.includes(name)) continue;
       await cp(new URL(name, migrationRoot), path.join(migrations, name), { recursive: true });
     }
     const config = path.join(directory, "prisma.config.mjs");
@@ -1004,17 +1082,44 @@ test("Prisma deploy installs metric history freshly with an empty schema diff", 
 });
 async function assertLaterHistory(client) {
   const later = (await readdir(migrationRoot))
-    .filter((name) => /^\d{14}_/u.test(name) && name > metricMigration)
+    .filter(
+      (name) =>
+        /^\d{14}_/u.test(name) &&
+        name > metricMigration &&
+        !deferredMetricMigrations.includes(name),
+    )
     .sort();
   const installed = await client.query(
-    'SELECT migration_name FROM "_prisma_migrations" WHERE migration_name>$1 ORDER BY migration_name',
-    [metricMigration],
+    'SELECT migration_name FROM "_prisma_migrations" WHERE migration_name>$1 AND NOT migration_name=ANY($2::text[]) ORDER BY migration_name',
+    [metricMigration, deferredMetricMigrations],
   );
   assert.deepEqual(
     installed.rows.map((row) => row.migration_name),
     later,
   );
   assert.ok(later.length > 0);
+}
+async function restoreMetricMigrations(client, url, config, migrations) {
+  assert.deepEqual(
+    (
+      await client.query(
+        "SELECT to_regprocedure('public.metric_source_revision_current(text,text,text,text,text,text)') AS predicate,EXISTS (SELECT 1 FROM pg_policy WHERE polname='metric_snapshots_current_source') AS policy",
+      )
+    ).rows[0],
+    { predicate: null, policy: false },
+  );
+  for (const name of deferredMetricMigrations)
+    await cp(new URL(`${name}/`, migrationRoot), path.join(migrations, name), { recursive: true });
+  const deployed = await prisma(url, ["migrate", "deploy", "--config", config]);
+  for (const name of deferredMetricMigrations) assert.ok(deployed.includes(name));
+  assert.equal(
+    (
+      await client.query(
+        "SELECT count(*)::int AS policies FROM pg_policy WHERE polname='metric_snapshots_current_source' AND polrelid='metric_snapshots'::regclass AND NOT polpermissive",
+      )
+    ).rows[0].policies,
+    1,
+  );
 }
 async function populatedUpgrade(client, url, config, migrations) {
   await prisma(url, ["migrate", "deploy", "--config", config]);
@@ -1029,13 +1134,7 @@ async function populatedUpgrade(client, url, config, migrations) {
   );
   await assertLaterHistory(client);
 
-  await cp(new URL(`${metricMigration}/`, migrationRoot), path.join(migrations, metricMigration), {
-    recursive: true,
-  });
-  assert.match(
-    await prisma(url, ["migrate", "deploy", "--config", config]),
-    /20261004090000_metric_snapshots/u,
-  );
+  await restoreMetricMigrations(client, url, config, migrations);
   assert.equal(
     (await client.query('SELECT name FROM "Product" WHERE id=$1', ["metric-legacy-product"]))
       .rows[0].name,

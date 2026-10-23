@@ -418,8 +418,8 @@ async function authorize(
     `SELECT set_config('app.user_id',$1,true),
     set_config('app.organization_id',$2,true),set_config('app.workspace_id',$3,true),
     set_config('app.store_id',$4,true),set_config('app.connection_id',$5,true),
-    set_config('app.external_store_id',$6,true)`,
-    values,
+    set_config('app.external_store_id',$6,true),set_config('app.merchant_id',$7,true)`,
+    [...values, actor.merchantId],
   );
   const result = await client.query(
     `SELECT public.metric_scope_access($1,$2,$3,$4,$5,$6) AS allowed`,

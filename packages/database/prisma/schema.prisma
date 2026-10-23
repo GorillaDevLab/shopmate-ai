@@ -250,6 +250,7 @@ model CommerceSourceScope {
   campaignMetrics  CanonicalCampaignMetricListing[]
   productCommits   SyncProductPageCommit[]
   canonicalCommits SyncCanonicalPageCommit[]
+  metricBundles    MetricSourceBundleRow[]
 
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, provider, generation], map: "SourceScope_namespace_key")
   @@unique([id, organizationId, workspaceId, storeId], map: "SourceScope_tenant_key")
@@ -1242,6 +1243,21 @@ model MetricDefinitionRow {
 
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, key, definitionVersion], map: "metric_definitions_scope_version_key")
   @@map("metric_definitions")
+  @@schema("public")
+}
+
+model MetricSourceBundleRow {
+  scopeId        String              @db.Uuid
+  organizationId String
+  workspaceId    String
+  storeId        String
+  inputRevision  String
+  payload        Json
+  capturedAt     DateTime            @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  scope          CommerceSourceScope @relation(fields: [scopeId, organizationId, workspaceId, storeId], references: [id, organizationId, workspaceId, storeId], onDelete: Restrict, onUpdate: NoAction, map: "metric_source_bundles_scopeId_organizationId_workspaceId_s_fkey")
+
+  @@id([scopeId, inputRevision])
+  @@map("metric_source_bundles")
   @@schema("public")
 }
 
