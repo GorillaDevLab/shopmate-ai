@@ -10,6 +10,8 @@ export class MetricsApiFixture {
   advance(at: string): Promise<void>;
   counts(): Promise<{ archives: number; snapshots: number; definitions: number }>;
   membership(active: boolean): Promise<void>;
+  reset(): Promise<void>;
+  sourceFenceSecurity(): Promise<Record<string, boolean>>;
   conflictDefinition(): Promise<ConnectorBinding>;
   sourceFailure<T>(action: () => Promise<T>): Promise<T>;
   close(): Promise<void>;

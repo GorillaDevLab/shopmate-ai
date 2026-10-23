@@ -108,6 +108,23 @@ let runtime: MetricRuntimeService;
 let initial: readonly MetricSnapshotV1[];
 let revision: string;
 let inputHash: string;
+let resetCursor: string;
+const resetFilters = { ...filters(), visibleAt: "2026-01-03T00:00:00.000Z" };
+async function noGenerationZeroSnapshots(inputRevision?: string) {
+  const selected = { ...resetFilters, ...(inputRevision ? { inputRevision } : {}) };
+  const read = await request(app.getHttpServer())
+    .get(path)
+    .query(selected)
+    .set("Cookie", cookie())
+    .expect(200);
+  expect(read.body).toMatchObject({ status: "UNAVAILABLE", snapshots: [], reason: "NO_SNAPSHOT" });
+  const history = await request(app.getHttpServer())
+    .get(`${path}/history`)
+    .query(selected)
+    .set("Cookie", cookie())
+    .expect(200);
+  expect(history.body).toMatchObject({ items: [], nextCursor: null, reason: "NO_SNAPSHOT" });
+}
 beforeAll(async () => {
   await fixture.initialize();
   await fixture.seed();
@@ -361,6 +378,66 @@ it("computes preprovisioned definitions without writer credentials", async () =>
   } finally {
     await reader.onModuleDestroy();
   }
+});
+it("fences implicit and explicit persisted reads after reset with the same binding", async () => {
+  const history = await request(app.getHttpServer())
+    .get(`${path}/history`)
+    .query({ ...resetFilters, limit: "1" })
+    .set("Cookie", cookie())
+    .expect(200);
+  expect(history.body.items).toHaveLength(1);
+  expect(typeof history.body.nextCursor).toBe("string");
+  resetCursor = history.body.nextCursor;
+  await fixture.reset();
+  expect(await runtime.resolve(actor, scope.storeId)).toEqual(binding);
+  const before = await fixture.counts();
+  await noGenerationZeroSnapshots();
+  await noGenerationZeroSnapshots(revision);
+  expect(await fixture.counts()).toEqual(before);
+});
+it("installs a restrictive source fence with a private owner RPC and no raw archive grant", async () => {
+  expect(await fixture.sourceFenceSecurity()).toEqual({
+    restrictive: true,
+    narrow_owner: true,
+    private: true,
+    source_only: true,
+    archive_hidden: true,
+  });
+});
+it("rejects a signed old-generation history cursor and exact old archive replay", async () => {
+  await request(app.getHttpServer())
+    .get(`${path}/history`)
+    .query({ ...resetFilters, limit: "1", cursor: resetCursor })
+    .set("Cookie", cookie())
+    .expect(404);
+  expect(
+    await runtime.compute({
+      actor,
+      query: query(["PAID_REVENUE"], { inputRevision: revision }),
+      computedAt: cutoff,
+    }),
+  ).toMatchObject({ ok: false, error: { code: "NOT_FOUND" } });
+});
+it("keeps current-generation paid10500 visible while excluding old revisions", async () => {
+  const current = values(await runtime.compute({ actor, query: query(), computedAt: cutoff }));
+  expect(current[0]!.metric.value).toBe(10500);
+  expect(current[0]!.inputRevision).not.toBe(revision);
+  const read = await request(app.getHttpServer())
+    .get(path)
+    .query(resetFilters)
+    .set("Cookie", cookie())
+    .expect(200);
+  expect(read.body.snapshots).toHaveLength(1);
+  expect(read.body.snapshots[0].inputRevision).toBe(current[0]!.inputRevision);
+  const history = await request(app.getHttpServer())
+    .get(`${path}/history`)
+    .query(resetFilters)
+    .set("Cookie", cookie())
+    .expect(200);
+  expect(history.body.items).toHaveLength(1);
+  expect(history.body.items[0].snapshot.inputRevision).toBe(current[0]!.inputRevision);
+  expect(history.body.nextCursor).toBeNull();
+  await noGenerationZeroSnapshots(revision);
 });
 it("fails closed for owner runtime credentials", async () => {
   vi.stubEnv("METRIC_DATABASE_URL", process.env.TENANT_TEST_OPERATOR_URL!);

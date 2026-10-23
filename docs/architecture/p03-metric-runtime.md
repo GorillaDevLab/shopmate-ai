@@ -5,6 +5,13 @@
 GET/history read persisted snapshots only. They never capture source facts, calculate,
 provision definitions, or call a connector/LLM. There is no public compute endpoint.
 
+For logins inheriting `shopmate_metric_source`, a restrictive snapshot SELECT policy
+also requires each exact `inputRevision` archive to belong to a currently authorized
+source generation. It intersects P15 membership checks in the returned row's statement
+snapshot, including history pagination and cursor anchors. A reset cannot revive old
+snapshots when the same five-field binding receives a new current source scope. Generic
+P15 readers without the source capability retain their existing storage contract.
+
 The server-only `MetricRuntimeService.compute({ actor, query, computedAt })` validates
 the query and exact `metrics-g4-v1` version, resolves the complete current binding,
 checks immutable database definition hashes/units, and captures a source bundle when
@@ -24,7 +31,8 @@ revision is idempotent.
 ## Release configuration and provisioning
 
 - Apply the existing tenant/P2/metric migrations, including
-  `20261022090000_metric_source_bundles`, through the separately authorized release process.
+  `20261022090000_metric_source_bundles` and
+  `20261023090000_metric_snapshot_current_source`, through the separately authorized release process.
   This change does not apply an online migration or deploy the API.
 - `DATABASE_URL` remains the restricted tenant membership connection.
 - `METRIC_DATABASE_URL` must explicitly identify a restricted login inheriting only

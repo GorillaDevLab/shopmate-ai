@@ -33,7 +33,7 @@ async function syncGrant(admin, current, id) {
       "source-worker",
       ...Object.values(currentBinding),
       "MOCK",
-      0,
+      current.generation,
       opening,
     ],
   );
@@ -166,6 +166,42 @@ export class MetricsApiFixture {
       active ? "ACTIVE" : "INACTIVE",
       "metric-api-metric-api-human",
     ]);
+  }
+  async reset() {
+    const current = { ...scope, generation: 1 };
+    await operatorControl(
+      this.admin,
+      'UPDATE "PlatformConnection" SET generation=generation+1 WHERE id=$1',
+      [scope.connectionId],
+      scope,
+      "metric-api-human",
+    );
+    await this.initializeSource(current, "metric-api-reset-source");
+    await syncGrant(this.admin, current, "metric-api-reset-sync");
+    await this.worker.end();
+    this.worker = await connectSyncWorker(
+      this.url,
+      "metric_api_sync_login",
+      "metric-api-reset-sync",
+    );
+    await this.advance(cutoff);
+    await this.seed();
+  }
+  async sourceFenceSecurity() {
+    return (
+      await this.admin.query(`
+        SELECT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid='public.metric_snapshots'::regclass
+          AND polname='metric_snapshots_current_source' AND NOT polpermissive AND polcmd='r'
+          AND polroles=ARRAY['shopmate_metric_source'::regrole::oid]) AS restrictive,
+          p.prosecdef AND p.provolatile='s' AND p.proconfig=ARRAY['search_path=pg_catalog']
+          AND p.proowner=(SELECT proowner FROM pg_proc WHERE oid='public.metric_source_read(jsonb,jsonb,timestamptz,text)'::regprocedure) AS narrow_owner,
+          NOT EXISTS (SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0) AS private,
+          has_function_privilege('shopmate_metric_source',p.oid,'EXECUTE')
+          AND NOT has_function_privilege('shopmate_metric_writer',p.oid,'EXECUTE') AS source_only,
+          NOT has_table_privilege('shopmate_metric_api','public.metric_source_bundles','SELECT') AS archive_hidden
+        FROM pg_proc p WHERE p.oid='public.metric_source_revision_current(text,text,text,text,text,text)'::regprocedure
+      `)
+    ).rows[0];
   }
   async conflictDefinition() {
     const other = {

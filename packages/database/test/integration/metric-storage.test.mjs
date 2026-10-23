@@ -1014,6 +1014,7 @@ function rejectMetricRuntimeTargets(runner, runtime, member, metrics) {
   );
 }
 const metricMigration = "20261004090000_metric_snapshots";
+const deferredMetricMigrations = [metricMigration, "20261023090000_metric_snapshot_current_source"];
 const databaseRoot = fileURLToPath(new URL("../../", import.meta.url));
 async function prisma(url, args) {
   const { tenantEnvironment } = await import("../../../../scripts/test-tenant-database.mjs");
@@ -1035,7 +1036,7 @@ async function migrationHistory(action) {
     const migrations = path.join(directory, "migrations");
     await mkdir(migrations);
     for (const name of await readdir(migrationRoot)) {
-      if (name === metricMigration) continue;
+      if (deferredMetricMigrations.includes(name)) continue;
       await cp(new URL(name, migrationRoot), path.join(migrations, name), { recursive: true });
     }
     const config = path.join(directory, "prisma.config.mjs");
@@ -1081,17 +1082,44 @@ test("Prisma deploy installs metric history freshly with an empty schema diff", 
 });
 async function assertLaterHistory(client) {
   const later = (await readdir(migrationRoot))
-    .filter((name) => /^\d{14}_/u.test(name) && name > metricMigration)
+    .filter(
+      (name) =>
+        /^\d{14}_/u.test(name) &&
+        name > metricMigration &&
+        !deferredMetricMigrations.includes(name),
+    )
     .sort();
   const installed = await client.query(
-    'SELECT migration_name FROM "_prisma_migrations" WHERE migration_name>$1 ORDER BY migration_name',
-    [metricMigration],
+    'SELECT migration_name FROM "_prisma_migrations" WHERE migration_name>$1 AND NOT migration_name=ANY($2::text[]) ORDER BY migration_name',
+    [metricMigration, deferredMetricMigrations],
   );
   assert.deepEqual(
     installed.rows.map((row) => row.migration_name),
     later,
   );
   assert.ok(later.length > 0);
+}
+async function restoreMetricMigrations(client, url, config, migrations) {
+  assert.deepEqual(
+    (
+      await client.query(
+        "SELECT to_regprocedure('public.metric_source_revision_current(text,text,text,text,text,text)') AS predicate,EXISTS (SELECT 1 FROM pg_policy WHERE polname='metric_snapshots_current_source') AS policy",
+      )
+    ).rows[0],
+    { predicate: null, policy: false },
+  );
+  for (const name of deferredMetricMigrations)
+    await cp(new URL(`${name}/`, migrationRoot), path.join(migrations, name), { recursive: true });
+  const deployed = await prisma(url, ["migrate", "deploy", "--config", config]);
+  for (const name of deferredMetricMigrations) assert.ok(deployed.includes(name));
+  assert.equal(
+    (
+      await client.query(
+        "SELECT count(*)::int AS policies FROM pg_policy WHERE polname='metric_snapshots_current_source' AND polrelid='metric_snapshots'::regclass AND NOT polpermissive",
+      )
+    ).rows[0].policies,
+    1,
+  );
 }
 async function populatedUpgrade(client, url, config, migrations) {
   await prisma(url, ["migrate", "deploy", "--config", config]);
@@ -1106,13 +1134,7 @@ async function populatedUpgrade(client, url, config, migrations) {
   );
   await assertLaterHistory(client);
 
-  await cp(new URL(`${metricMigration}/`, migrationRoot), path.join(migrations, metricMigration), {
-    recursive: true,
-  });
-  assert.match(
-    await prisma(url, ["migrate", "deploy", "--config", config]),
-    /20261004090000_metric_snapshots/u,
-  );
+  await restoreMetricMigrations(client, url, config, migrations);
   assert.equal(
     (await client.query('SELECT name FROM "Product" WHERE id=$1', ["metric-legacy-product"]))
       .rows[0].name,
