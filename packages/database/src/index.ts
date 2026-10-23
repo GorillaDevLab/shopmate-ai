@@ -2,6 +2,12 @@ export { disconnectPrismaClient, getPrismaClient } from "./client.js";
 export { resolveTenantMembership, type TenantMembershipRecord } from "./tenant-membership.js";
 export { verifyPassword } from "./password-hash.js";
 export { createMetricSnapshotRepository } from "./metric-snapshot.repository.js";
+export { createMetricRuntimePool } from "./metric-runtime-pool.js";
+export type { MetricRuntimePool } from "./metric-runtime-pool.js";
+export {
+  ensureMetricDefinitions,
+  type RuntimeMetricDefinition,
+} from "./metric-definition.repository.js";
 export { createMetricSourceBundleRepository } from "./metric-source-bundle.repository.js";
 export type * from "./metric-source-bundle.types.js";
 export type {
