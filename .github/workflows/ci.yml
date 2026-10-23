@@ -64,11 +64,23 @@ jobs:
 
       # The tenant runner ignores inherited database URLs and starts its own throwaway
       # cluster, so it needs PostgreSQL 16 binaries (the runner image only ships 18).
+      # Debian builds put the Unix socket in /var/run/postgresql, which the runner user
+      # cannot write; the smoke start prints the server log if the cluster cannot boot.
       - name: Install PostgreSQL 16 binaries
         run: |
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y --no-install-recommends postgresql-16
-          echo "PG_BIN=/usr/lib/postgresql/16/bin" >> "$GITHUB_ENV"
+          sudo install -d -m 1777 /var/run/postgresql
+          bin=/usr/lib/postgresql/16/bin
+          smoke="$(mktemp -d)"
+          "$bin/initdb" -D "$smoke/data" -U smoke --auth=trust >/dev/null
+          if ! "$bin/pg_ctl" -D "$smoke/data" -l "$smoke/log" -o "-h 127.0.0.1 -p 55432" -w start; then
+            cat "$smoke/log"
+            exit 1
+          fi
+          "$bin/pg_ctl" -D "$smoke/data" -m fast -w stop
+          rm -rf "$smoke"
+          echo "PG_BIN=$bin" >> "$GITHUB_ENV"
 
       - name: Required tenant database and API isolation
         run: pnpm test:tenant
