@@ -288,6 +288,8 @@ it.each([
   rate(null, 1, 0),
   rate(1, 3, 3334),
   rate(2, 1, 20000),
+  rate(100001, 100000, 10000),
+  rate(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1, 10000),
   rate(Number.MAX_SAFE_INTEGER + 1, 1, 1),
 ])("rejects invalid ratio %j", (value) => {
   expect(EventRateSchema.safeParse(value).success).toBe(false);
@@ -298,6 +300,8 @@ it.each([
   rate(1, null, null),
   rate(1, 3, 3333),
   rate(1, 32, 313),
+  rate(99999, 100000, 10000),
+  rate(100000, 100000, 10000),
   rate(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, 10000),
 ])("accepts exact nullable ratio %j", (value) => {
   expect(EventRateSchema.safeParse(value).success).toBe(true);
@@ -305,6 +309,25 @@ it.each([
 it("distinguishes ROAS multiplier from probability rates", () => {
   expect(EventRoasSchema.safeParse(rate(30000, 10000, 30000)).success).toBe(true);
   expect(EventRateSchema.safeParse(rate(30000, 10000, 30000)).success).toBe(false);
+});
+it("rejects refunded orders above the cohort even when the rate rounds to 10000", () => {
+  const facts = {
+    ...refundFacts,
+    paidCohortOrders: 100000,
+    refundedOrders: 100001,
+    currentRate: rate(100001, 100000, 10000),
+    affectedSkuShare: rate(10, 100001, 1),
+  };
+  expect(accepts({ ...evidence(2), facts })).toBe(false);
+});
+it("rejects paid orders above visitors even when conversion rounds to 10000", () => {
+  const facts = {
+    ...funnelFacts,
+    visitors: 100000,
+    paidOrders: 100001,
+    conversion: rate(100001, 100000, 10000),
+  };
+  expect(accepts({ ...evidence(8), facts })).toBe(false);
 });
 it.each([
   { currentRate: rate(10, 100, 1000) },

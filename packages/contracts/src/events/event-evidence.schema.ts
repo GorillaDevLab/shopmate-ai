@@ -139,6 +139,14 @@ function exactRatio(value: RatioFields): boolean {
 export const EventRateSchema = z
   .strictObject({ ...ratioFields, valueBasisPoints: BasisPointsSchema.nullable() })
   .refine(
+    (value) =>
+      value.numerator === null ||
+      value.denominator === null ||
+      value.denominator === 0 ||
+      value.numerator <= value.denominator,
+    "Probability numerator cannot exceed a positive denominator",
+  )
+  .refine(
     exactRatio,
     "Rate must equal the exact rounded ratio, or null for missing/zero denominator",
   )
