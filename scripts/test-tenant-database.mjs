@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,13 +9,41 @@ import {
   isolatedPostgres,
   requireIsolatedDatabaseUrl,
 } from "../packages/database/test/helpers/isolated-postgres.mjs";
-import { prepareTenantApiRuntime } from "../packages/database/test/helpers/tenant-api-fixture.mjs";
+import {
+  prepareTenantApiRuntime,
+  prepareMetricApiRuntime,
+} from "../packages/database/test/helpers/tenant-api-fixture.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const apiTargets = ["test/tenant-database.e2e-spec.ts", "test/demo-commerce-database.e2e-spec.ts"];
+const apiTargets = [
+  "test/tenant-database.e2e-spec.ts",
+  "test/demo-commerce-database.e2e-spec.ts",
+  "test/metrics-database.e2e-spec.ts",
+];
 const forbiddenEnvironment =
-  /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_|^NODE_TEST_CONTEXT$/iu;
-export function tenantEnvironment(inherited, isolatedUrl, runtimeUrl) {
+  /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_|^NODE_TEST_CONTEXT$|^METRIC_CURSOR_SECRET$/iu;
+function metricRuntimeEnvironment(isolatedUrl, metrics) {
+  if (!metrics) return {};
+  const isolated = new URL(isolatedUrl);
+  for (const [key, login] of [
+    ["METRIC_DATABASE_URL", "shopmate_metric_api"],
+    ["METRIC_DEFINITION_DATABASE_URL", "shopmate_metric_definition_api"],
+  ]) {
+    const value = metrics[key];
+    requireIsolatedDatabaseUrl(value);
+    const url = new URL(value);
+    if (url.host !== isolated.host || url.pathname !== isolated.pathname || url.username !== login)
+      throw new Error(
+        "Metric URL must use its prepared restricted login on the owned isolated database",
+      );
+  }
+  return {
+    METRIC_DATABASE_URL: metrics.METRIC_DATABASE_URL,
+    METRIC_DEFINITION_DATABASE_URL: metrics.METRIC_DEFINITION_DATABASE_URL,
+    METRIC_CURSOR_SECRET: randomBytes(48).toString("hex"),
+  };
+}
+export function tenantEnvironment(inherited, isolatedUrl, runtimeUrl, metrics) {
   requireIsolatedDatabaseUrl(isolatedUrl);
   if (runtimeUrl) {
     requireIsolatedDatabaseUrl(runtimeUrl);
@@ -34,6 +63,7 @@ export function tenantEnvironment(inherited, isolatedUrl, runtimeUrl) {
     DATABASE_URL: runtimeUrl ?? isolatedUrl,
     TEST_DATABASE_URL: isolatedUrl,
     ...(runtimeUrl ? { TENANT_TEST_OPERATOR_URL: isolatedUrl } : {}),
+    ...metricRuntimeEnvironment(isolatedUrl, metrics),
     DOTENV_CONFIG_OVERRIDE: "false",
   };
 }
@@ -130,13 +160,14 @@ async function run(directory, script, args, environment, apiReportPath) {
   const capture = { output: "" };
   const child = spawn(
     process.execPath,
-    [...(apiReportPath ? [] : ["--test-reporter=tap"]), script, ...args],
+    [...requiredNodeArguments(script, apiReportPath), script, ...args],
     {
       cwd: path.join(root, directory),
       env: tenantEnvironment(
         process.env,
         isolatedUrl,
         apiReportPath ? environment.DATABASE_URL : undefined,
+        apiReportPath ? environment.metrics : undefined,
       ),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
@@ -156,6 +187,12 @@ async function run(directory, script, args, environment, apiReportPath) {
     );
   }
 }
+function requiredNodeArguments(script, apiReportPath) {
+  if (apiReportPath) return [];
+  return script === "test/integration/metric-source-bundle.test.mjs"
+    ? ["--import", "tsx", "--test-reporter=tap"]
+    : ["--test-reporter=tap"];
+}
 async function removeReportDirectory(directory) {
   if (!directory) return;
   const absolute = path.resolve(directory);
@@ -168,6 +205,7 @@ async function removeReportDirectory(directory) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  delete process.env.TEST_DATABASE_URL;
   const server = await isolatedPostgres();
   let reportDirectory;
   try {
@@ -327,7 +365,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     await run("packages/database", "test/integration/metric-storage.test.mjs", [], {
       TEST_DATABASE_URL: server.url,
     });
+    await run("packages/database", "test/integration/metric-source-bundle.test.mjs", [], {
+      TEST_DATABASE_URL: server.url,
+    });
     const runtimeUrl = await prepareTenantApiRuntime(server.url);
+    const metrics = await prepareMetricApiRuntime(server.url);
     const reportPath = path.join(reportDirectory, "api.json");
     await run(
       "apps/api",
@@ -340,7 +382,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         "--reporter=json",
         `--outputFile=${reportPath}`,
       ],
-      { DATABASE_URL: runtimeUrl, TENANT_TEST_OPERATOR_URL: server.url },
+      { DATABASE_URL: runtimeUrl, TENANT_TEST_OPERATOR_URL: server.url, metrics },
       reportPath,
     );
   } catch (error) {

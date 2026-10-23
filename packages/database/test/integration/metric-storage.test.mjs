@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -721,16 +722,20 @@ async function hardenedDefiner(t, client, roles) {
     );
   });
 }
-const apiTargets = ["test/tenant-database.e2e-spec.ts", "test/demo-commerce-database.e2e-spec.ts"];
+const apiTargets = [
+  "test/tenant-database.e2e-spec.ts",
+  "test/demo-commerce-database.e2e-spec.ts",
+  "test/metrics-database.e2e-spec.ts",
+];
 function apiReport() {
   return {
     success: true,
-    numTotalTestSuites: 2,
-    numPassedTestSuites: 2,
+    numTotalTestSuites: apiTargets.length,
+    numPassedTestSuites: apiTargets.length,
     numFailedTestSuites: 0,
     numPendingTestSuites: 0,
-    numTotalTests: 2,
-    numPassedTests: 2,
+    numTotalTests: apiTargets.length,
+    numPassedTests: apiTargets.length,
     numFailedTests: 0,
     numPendingTests: 0,
     numTodoTests: 0,
@@ -761,6 +766,12 @@ const invalidApiReports = [
     "zero file assertions",
     (r) => {
       r.testResults[0].assertionResults = [];
+    },
+  ],
+  [
+    "zero mandatory metrics assertions",
+    (r) => {
+      r.testResults[2].assertionResults = [];
     },
   ],
   [
@@ -865,6 +876,9 @@ const poisonedEnvironment = {
   TENANT_TEST_OPERATOR_URL: "unsafe",
   MOCK_PLATFORM_WORKER_DATABASE_URL: "unsafe",
   MIGRATION_DATABASE_URL: "unsafe",
+  METRIC_DATABASE_URL: "unsafe",
+  METRIC_DEFINITION_DATABASE_URL: "unsafe",
+  METRIC_CURSOR_SECRET: "inherited-production-key-never-use",
   DOTENV_CONFIG_OVERRIDE: "true",
   DOTENV_CONFIG_PATH: "unsafe",
   PGHOST: "unsafe",
@@ -918,6 +932,7 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
   await runnerReports(t, runner);
   await nodeReporterProof(t, source, runner);
   await runnerEnvironment(t, runner);
+  await metricRunnerEnvironment(t, runner);
   assert.match(
     source,
     /await run\("packages\/database", "test\/integration\/metric-storage.test.mjs"/u,
@@ -935,7 +950,59 @@ test("mandatory tenant runner rejects empty/skipped reports and poisoned inherit
     assert.ok(ordinary.includes(file));
   }
   assert.match(ordinary, /exclude:/u);
+  assert.match(source, /delete process\.env\.TEST_DATABASE_URL/u);
+  assert.ok(
+    source.indexOf('"test/integration/metric-source-bundle.test.mjs", []') <
+      source.indexOf("const runtimeUrl = await prepareTenantApiRuntime"),
+  );
 });
+async function metricRunnerEnvironment(t, runner) {
+  await t.test(
+    "metric URLs use only prepared restricted logins on the owned database and replace inherited key",
+    () => {
+      const runtime = new URL(serverUrl),
+        definition = new URL(serverUrl),
+        member = new URL(serverUrl);
+      runtime.username = "shopmate_metric_api";
+      definition.username = "shopmate_metric_definition_api";
+      member.username = "shopmate_tenant_api";
+      const metrics = {
+        METRIC_DATABASE_URL: runtime.toString(),
+        METRIC_DEFINITION_DATABASE_URL: definition.toString(),
+      };
+      const env = runner.tenantEnvironment(
+        poisonedEnvironment,
+        serverUrl,
+        member.toString(),
+        metrics,
+      );
+      assert.equal(env.METRIC_DATABASE_URL, metrics.METRIC_DATABASE_URL);
+      assert.equal(env.METRIC_DEFINITION_DATABASE_URL, metrics.METRIC_DEFINITION_DATABASE_URL);
+      assert.notEqual(env.METRIC_CURSOR_SECRET, poisonedEnvironment.METRIC_CURSOR_SECRET);
+      assert.equal(Buffer.byteLength(env.METRIC_CURSOR_SECRET), 96);
+      rejectMetricRuntimeTargets(runner, runtime, member, metrics);
+    },
+  );
+}
+function rejectMetricRuntimeTargets(runner, runtime, member, metrics) {
+  for (const bad of [
+    serverUrl,
+    "postgresql://shopmate_metric_api@example.com/shopmate_tenant_test",
+    runtime.toString().replace("shopmate_tenant_test", "shopmate_tenant_test_other"),
+  ])
+    assert.throws(() =>
+      runner.tenantEnvironment(poisonedEnvironment, serverUrl, member.toString(), {
+        ...metrics,
+        METRIC_DATABASE_URL: bad,
+      }),
+    );
+  assert.throws(() =>
+    runner.tenantEnvironment(poisonedEnvironment, serverUrl, member.toString(), {
+      ...metrics,
+      METRIC_DEFINITION_DATABASE_URL: metrics.METRIC_DATABASE_URL,
+    }),
+  );
+}
 const metricMigration = "20261004090000_metric_snapshots";
 const databaseRoot = fileURLToPath(new URL("../../", import.meta.url));
 async function prisma(url, args) {
