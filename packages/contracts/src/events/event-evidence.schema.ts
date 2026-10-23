@@ -245,6 +245,10 @@ const stockoutFacts = z
     inventoryAgeSeconds: QuantitySchema.nullable(),
     inventoryStatus: MetricStatusSchema,
   })
+  .refine(
+    (value) => value.inventoryStatus !== "VERIFIED" || value.availableUnits !== null,
+    "Verified inventory requires known availability",
+  )
   .readonly();
 const stagnationFacts = z
   .strictObject({

@@ -272,13 +272,42 @@ it.each([
 ])("rejects falsely aligned baseline %j", (patch) => {
   expect(accepts({ ...evidence(), ...patch })).toBe(false);
 });
-it("preserves independently verified stockout with absent baseline and diagnostics", () => {
+it.each([0, 10])("preserves verified inventory %i with absent diagnostics", (availableUnits) => {
   const value = {
     ...evidence(),
     baseline: null,
     baselineVersion: null,
     baselineAlignment: "MISSING",
-    facts: { ...stockFacts, estimatedHoursRemaining: null, inventoryAgeSeconds: null },
+    facts: {
+      ...stockFacts,
+      availableUnits,
+      salesUnits: null,
+      estimatedHoursRemaining: null,
+      inventoryObservedAt: null,
+      inventoryAgeSeconds: null,
+    },
+  };
+  expect(accepts(value)).toBe(true);
+});
+it.each([
+  { availableUnits: null },
+  {
+    availableUnits: null,
+    salesUnits: null,
+    estimatedHoursRemaining: null,
+    inventoryObservedAt: null,
+    inventoryAgeSeconds: null,
+  },
+])("rejects verified stockout inventory without a known availability %j", (facts) => {
+  expect(accepts({ ...evidence(), facts: { ...stockFacts, ...facts } })).toBe(false);
+});
+it("retains unavailable inventory with an explicit quality limitation", () => {
+  const value = {
+    ...evidence(),
+    dataStatus: "UNAVAILABLE",
+    coverageBasisPoints: 0,
+    issues: [{ code: "INVENTORY_UNKNOWN", field: "availableUnits", evidenceIds: ["metric-a"] }],
+    facts: { ...stockFacts, availableUnits: null, inventoryStatus: "UNAVAILABLE" },
   };
   expect(accepts(value)).toBe(true);
 });
