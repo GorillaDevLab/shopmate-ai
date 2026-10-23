@@ -10,6 +10,7 @@ import { MonitoringModule } from "./monitoring/monitoring.module.js";
 import { TenantModule } from "./tenant/tenant.module.js";
 import { AgentActionsModule } from "./ai/actions/agent-actions.module.js";
 import { DemoCommerceModule } from "./demo-commerce/demo-commerce.module.js";
+import { MetricsModule } from "./metrics/metrics.module.js";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { DemoCommerceModule } from "./demo-commerce/demo-commerce.module.js";
     TenantModule,
     AgentActionsModule,
     DemoCommerceModule,
+    MetricsModule,
   ],
 })
 export class AppModule {}
