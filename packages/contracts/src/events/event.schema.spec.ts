@@ -1,10 +1,6 @@
 import { expect, expectTypeOf, it } from "vitest";
-import {
-  EventEvidenceV1Schema,
-  EventRateSchema,
-  EventRoasSchema,
-} from "./event-evidence.schema.js";
-import type { EventEvidenceV1 } from "./event-evidence.schema.js";
+import { EventEvidenceV1Schema, EventRateSchema, EventRoasSchema } from "../index.js";
+import type { EventEvidenceV1 } from "../index.js";
 
 const start = "2026-10-01T16:00:00Z";
 const end = "2026-10-02T06:00:00Z";
@@ -461,7 +457,7 @@ it.each([{ lastSuccessAt: future }, { lagSeconds: 1 }, { typedErrorCode: "raw ex
   },
 );
 it("publishes candidate, policy and authenticated consumer contracts", async () => {
-  const path = "./event.schema.js";
+  const path = "../index.js";
   const module = await import(path).catch((error: unknown) => ({ missingBoundary: error }));
   expect(module).toHaveProperty("EventCandidateSchema");
 });
@@ -495,19 +491,14 @@ import {
   BaselineRequestSchema,
   EventDetectionRequestSchema,
   EventDetectionOutcomeSchema,
-} from "./event.schema.js";
-import type {
-  BaselinePort,
-  EventDetector,
-  EventRepository,
-  EventQueryPort,
-} from "./event-ports.js";
+} from "../index.js";
+import type { BaselinePort, EventDetector, EventRepository, EventQueryPort } from "../index.js";
 import type {
   EventCandidate,
   EventDetectionRequest,
   EventStateTransition,
   BaselineRequest,
-} from "./event.schema.js";
+} from "../index.js";
 import type { TenantContext } from "../tenant/tenant.schema.js";
 const actor = {
   userId: "user-a",
