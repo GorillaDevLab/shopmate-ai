@@ -389,3 +389,7 @@ export type { MockReadFailureRule } from "./demo/demo-failure-rules.schema.js";
 
 export * from "./metrics/metric.schema.js";
 export type * from "./metrics/metric-ports.js";
+
+export * from "./events/event-evidence.schema.js";
+export * from "./events/event.schema.js";
+export type * from "./events/event-ports.js";
