@@ -1,17 +1,17 @@
 import { expect, expectTypeOf, it } from "vitest";
-import type { DecisionProvider, DecisionControl } from "./decision-provider.js";
-import type { DecisionOutboxRequest } from "./decision-ports.js";
+import type { DecisionProvider, DecisionControl } from "../index.js";
+import type { DecisionOutboxRequest } from "../index.js";
 import type {
   DecisionLabels,
   DecisionRun,
   SanitizedDecisionInput,
   ShadowDecisionRun,
-} from "./decision.schema.js";
+} from "../index.js";
 import {
   DecisionRunSchema,
   SanitizedDecisionInputSchema,
   ShadowComparisonSchema,
-} from "./decision.schema.js";
+} from "../index.js";
 
 const observedAt = "2026-10-25T01:00:00Z";
 const input = SanitizedDecisionInputSchema.parse({

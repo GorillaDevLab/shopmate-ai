@@ -11,10 +11,10 @@ import {
   SanitizedDecisionBaselineSchema,
   DecisionRulesetV1Schema,
   RoutedPrimaryDecisionRunSchema,
-} from "./decision.schema.js";
-import type { DecisionProvider, DecisionControl } from "./decision-provider.js";
-import { DecisionControlSchema } from "./decision-provider.js";
-import type { SecurityClock } from "./decision-ports.js";
+} from "../index.js";
+import type { DecisionProvider, DecisionControl } from "../index.js";
+import { DecisionControlSchema } from "../index.js";
+import type { SecurityClock } from "../index.js";
 
 const instant = "2026-10-25T01:00:00Z";
 const binding = {
