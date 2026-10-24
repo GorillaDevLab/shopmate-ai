@@ -269,6 +269,48 @@ it.each([
   },
 );
 
+it.each(["WINDOW_MISMATCH", "VERSION_MISMATCH"] as const)(
+  "gates dependent sales with %s while keeping reliable sold-out facts",
+  (code) => {
+    const limitation = issue(code, "facts.salesUnits");
+    const value = {
+      ...nontrivialCover(2),
+      dataStatus: "UNAVAILABLE" as const,
+      issues: [limitation],
+    };
+    const result = outcome(value);
+    expect(result).toMatchObject({ disposition: "NO_CANDIDATE", reason: "INSUFFICIENT_EVIDENCE" });
+    expect(result.quality.issues).toContainEqual(limitation);
+    const soldOut = {
+      ...value,
+      facts: { ...value.facts, availableUnits: 0, estimatedHoursRemaining: 0 },
+    };
+    expect(outcome(soldOut).disposition).toBe("CANDIDATE");
+  },
+);
+
+it.each(["WINDOW_MISMATCH", "VERSION_MISMATCH"] as const)(
+  "keeps %s limited to its inventory, lead-time or cost dependency",
+  (code) => {
+    const value = nontrivialCover(2);
+    const limited = (field: string): Stockout => ({
+      ...value,
+      dataStatus: "INSUFFICIENT",
+      issues: [issue(code, field)],
+    });
+    expect(outcome(limited("facts.availableUnits")).disposition).toBe("NO_CANDIDATE");
+    expect(outcome(limited("facts.supplierLeadTimeHours")).disposition).toBe("NO_CANDIDATE");
+    expect(outcome(limited("frozenCosts")).disposition).toBe("CANDIDATE");
+    const soldOut = limited("facts.supplierLeadTimeHours");
+    expect(
+      outcome({
+        ...soldOut,
+        facts: { ...soldOut.facts, availableUnits: 0, estimatedHoursRemaining: 0 },
+      }).disposition,
+    ).toBe("CANDIDATE");
+  },
+);
+
 it("derives inventory age from the observation cutoff when diagnostic age is absent", () => {
   const result = outcome(
     evidence({ inventoryAgeSeconds: null, inventoryObservedAt: "2026-10-24T22:59:59Z" }),

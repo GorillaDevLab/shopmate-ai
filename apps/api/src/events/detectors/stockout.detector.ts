@@ -64,6 +64,8 @@ function affects(row: DataQualityIssueV1, dependency: Dependency): boolean {
       "NOT_SYNCHRONIZED",
       "PARTIAL_COVERAGE",
       "SOURCE_TIME_MISSING",
+      "WINDOW_MISMATCH",
+      "VERSION_MISMATCH",
     ].includes(row.code)
   ) {
     if (/sourcewatermark|^source$/u.test(field)) return true;
