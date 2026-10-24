@@ -361,3 +361,84 @@ it("rejects future visibility even when the metric and reference look historical
     "INVALID_INPUT",
   );
 });
+it.each(["periodStart", "periodEnd", "visibleAt", "computedAt", "sourceWatermark", "all"] as const)(
+  "deduplicates equivalent UTC spellings of %s",
+  (field) => {
+    const item = snapshot(100, 1);
+    const equivalent = { ...item };
+    const fields = [
+      "periodStart",
+      "periodEnd",
+      "visibleAt",
+      "computedAt",
+      "sourceWatermark",
+    ] as const;
+    for (const key of fields) {
+      const value = item[key];
+      if ((field === "all" || field === key) && value !== null)
+        equivalent[key] = value.replace(".000Z", "Z");
+    }
+    const remaining = [snapshot(110, 2), snapshot(120, 3)];
+    const input = request([item, equivalent, ...remaining], {
+      sourceReferences: [item, ...remaining].map(reference),
+    });
+    expect(evaluate(input)).toMatchObject({ status: "AVAILABLE", median: 110, sampleSize: 3 });
+  },
+);
+it("deduplicates immutable references with equivalent timestamp spellings", () => {
+  const rows = [snapshot(100, 1), snapshot(110, 2), snapshot(120, 3)];
+  const original = reference(rows[0]);
+  const equivalent = {
+    ...original,
+    observedAt: original.observedAt.replace(".000Z", "Z"),
+    period: {
+      ...original.period,
+      periodStart: original.period.periodStart.replace(".000Z", "Z"),
+      periodEnd: original.period.periodEnd.replace(".000Z", "Z"),
+    },
+  };
+  const result = evaluate(
+    request(rows, { sourceReferences: [original, equivalent, ...rows.slice(1).map(reference)] }),
+  );
+  expect(result).toMatchObject({ status: "AVAILABLE", median: 110, sampleSize: 3 });
+  expect(result.sourceReferences).toHaveLength(3);
+});
+it("keeps reference selection stable across equivalent timestamp spellings", () => {
+  const item = snapshot(100, 1);
+  const base = { ...reference(item), id: "a-reference", hash: "same-proof" };
+  const later = { ...base, id: "z-reference", observedAt: "2026-10-18T06:00:00.100Z" };
+  const compact = { ...base, observedAt: base.observedAt.replace(".000Z", "Z") };
+  const other = [snapshot(110, 2), snapshot(120, 3)];
+  const normal = evaluate(
+    request([item, ...other], { sourceReferences: [base, later, ...other.map(reference)] }),
+  );
+  const alternative = evaluate(
+    request([item, ...other], { sourceReferences: [compact, later, ...other.map(reference)] }),
+  );
+  expect(alternative.sourceReferences.map((ref) => ref.id)).toEqual(
+    normal.sourceReferences.map((ref) => ref.id),
+  );
+});
+it("ignores property insertion order for validated observations and references", () => {
+  const item = snapshot(100, 1);
+  const reordered = Object.fromEntries(Object.entries(item).reverse()) as MetricSnapshotV1;
+  const original = reference(item);
+  const reorderedReference = Object.fromEntries(
+    Object.entries(original).reverse(),
+  ) as EventSourceReference;
+  const other = [snapshot(110, 2), snapshot(120, 3)];
+  expect(
+    evaluate(
+      request([item, reordered, ...other], {
+        sourceReferences: [original, reorderedReference, ...other.map(reference)],
+      }),
+    ),
+  ).toMatchObject({ median: 110, sampleSize: 3 });
+});
+it("still rejects genuinely different source watermarks at the same observation instant", () => {
+  const item = snapshot(100, 1, {
+    visibleAt: "2026-10-18T07:00:00.000Z",
+    computedAt: "2026-10-18T07:00:00.000Z",
+  });
+  rejected(request([item, { ...item, sourceWatermark: "2026-10-18T06:30:00.000Z" }]), "CONFLICT");
+});

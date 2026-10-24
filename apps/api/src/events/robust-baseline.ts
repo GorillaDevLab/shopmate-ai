@@ -48,11 +48,32 @@ function matchesReference(snapshot: MetricSnapshotV1, ref: EventSourceReference)
     Date.parse(ref.observedAt) >= Date.parse(snapshot.computedAt)
   );
 }
+function periodInstants(period: { readonly periodStart: string; readonly periodEnd: string }) {
+  return { periodStart: Date.parse(period.periodStart), periodEnd: Date.parse(period.periodEnd) };
+}
+function referenceContent(ref: EventSourceReference): string {
+  return JSON.stringify({
+    ...ref,
+    period: { ...ref.period, ...periodInstants(ref.period) },
+    observedAt: Date.parse(ref.observedAt),
+  });
+}
+function snapshotContent(snapshot: MetricSnapshotV1): string {
+  // Validated object field order is fixed; timestamp spellings identify instants, not revisions.
+  return JSON.stringify({
+    ...snapshot,
+    ...periodInstants(snapshot),
+    visibleAt: Date.parse(snapshot.visibleAt),
+    computedAt: Date.parse(snapshot.computedAt),
+    sourceWatermark:
+      snapshot.sourceWatermark === null ? null : Date.parse(snapshot.sourceWatermark),
+  });
+}
 function referenceConflict(refs: readonly EventSourceReference[]): boolean {
   const seen = new Map<string, string>();
   for (const ref of refs) {
     const key = JSON.stringify([ref.kind, ref.id, ref.version]);
-    const content = JSON.stringify(ref);
+    const content = referenceContent(ref);
     if (seen.has(key) && seen.get(key) !== content) return true;
     seen.set(key, content);
   }
@@ -63,7 +84,7 @@ function samples(request: BaselineRequest): EventResult<readonly Sample[]> {
   const output: Sample[] = [];
   for (const snapshot of request.candidates) {
     const refs = request.sourceReferences.filter((ref) => matchesReference(snapshot, ref));
-    refs.sort((left, right) => compareText(JSON.stringify(left), JSON.stringify(right)));
+    refs.sort((left, right) => compareText(referenceContent(left), referenceContent(right)));
     if (!refs[0]) return failure("INVALID_INPUT", snapshot.evidenceIds);
     output.push({ snapshot, reference: refs[0] });
   }
@@ -108,7 +129,11 @@ function uniqueWindows(input: readonly Sample[]): EventResult<readonly Sample[]>
     ]);
     const prior = groups.get(key);
     const order = prior ? observationOrder(sample.snapshot, prior.snapshot) : 1;
-    if (prior && order === 0 && JSON.stringify(sample.snapshot) !== JSON.stringify(prior.snapshot))
+    if (
+      prior &&
+      order === 0 &&
+      snapshotContent(sample.snapshot) !== snapshotContent(prior.snapshot)
+    )
       return failure("CONFLICT", [
         ...new Set([...prior.snapshot.evidenceIds, ...sample.snapshot.evidenceIds]),
       ]);
