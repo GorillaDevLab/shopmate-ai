@@ -483,3 +483,68 @@ it("rejects overflowing lead-time and buffer sums", () => {
     ),
   ).toMatchObject({ ok: false, error: { code: "OVERFLOW" } });
 });
+
+function nontrivialCover(availableUnits = 5): Stockout {
+  const salesWindow = { ...period, periodStart: "2026-10-24T10:48:00Z" };
+  const value = evidence({
+    availableUnits,
+    salesUnits: 11,
+    salesWindow,
+    salesWindowHours: 13.2,
+    estimatedHoursRemaining: availableUnits * 1.2,
+  });
+  return {
+    ...value,
+    ...salesWindow,
+    sourceReferences: value.sourceReferences.map((row) => ({ ...row, period: salesWindow })),
+  };
+}
+
+it.each([4, 5, 6])(
+  "compares exact critical cover for %s units over the nontrivial 13.2-hour window",
+  (units) => {
+    expect(outcome(nontrivialCover(units))).toMatchObject({
+      disposition: units < 5 ? "CANDIDATE" : "NO_CANDIDATE",
+    });
+  },
+);
+
+it("keeps the exact lead-time boundary exclusive with a nontrivial coverage ratio", () => {
+  const value = nontrivialCover();
+  const configured = {
+    ...policy,
+    rules: policy.rules.map((row) => ({
+      ...row,
+      thresholds: { criticalHoursRemaining: 3, leadTimeBufferHours: 1 },
+    })),
+  };
+  expect(
+    new StockoutDetector().detect({
+      ...request({ ...value, facts: { ...value.facts, supplierLeadTimeHours: 5 } }),
+      policy: configured,
+    }),
+  ).toMatchObject({ ok: true, value: { disposition: "NO_CANDIDATE" } });
+});
+
+it.each(["2026-10-25T05:59:59.999Z", "2026-10-25T06:00:00Z", "2026-10-25T06:00:00.001Z"])(
+  "compares ETA %s exactly at depletion",
+  (inboundETA) => {
+    const value = nontrivialCover();
+    const configured = {
+      ...policy,
+      rules: policy.rules.map((row) => ({
+        ...row,
+        thresholds: { criticalHoursRemaining: 3, leadTimeBufferHours: 1 },
+      })),
+    };
+    expect(
+      new StockoutDetector().detect({
+        ...request({ ...value, facts: { ...value.facts, inboundETA } }),
+        policy: configured,
+      }),
+    ).toMatchObject({
+      ok: true,
+      value: { disposition: inboundETA.endsWith("00.001Z") ? "CANDIDATE" : "NO_CANDIDATE" },
+    });
+  },
+);

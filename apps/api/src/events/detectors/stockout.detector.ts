@@ -20,6 +20,7 @@ type Reason = Extract<EventDetectionOutcome, { disposition: "NO_CANDIDATE" }>["r
 type Dependency = "inventory" | "sales" | "leadTime";
 type Assessment = { issues: DataQualityIssueV1[]; blocked: boolean };
 type Frame = { request: EventDetectionRequest; evidence: Stockout; rule: Rule };
+type Fraction = readonly [numerator: bigint, denominator: bigint];
 const kinds = {
   inventory: "INVENTORY_AVAILABLE",
   sales: "PAID_UNITS",
@@ -211,26 +212,41 @@ function candidate(
     },
   };
 }
-function coverage(frame: Frame): number | null {
-  const { availableUnits, salesUnits, salesWindowHours } = frame.evidence.facts;
-  return availableUnits === null || !salesUnits
-    ? null
-    : (availableUnits / salesUnits) * salesWindowHours;
+function fraction(value: number): Fraction {
+  const [mantissa = "0", exponent = "0"] = value.toString().split("e");
+  const [whole = "0", decimals = ""] = mantissa.split(".");
+  const scale = decimals.length - Number(exponent);
+  return [
+    BigInt(whole + decimals) * 10n ** BigInt(Math.max(-scale, 0)),
+    10n ** BigInt(Math.max(scale, 0)),
+  ];
+}
+function compare(left: Fraction, right: Fraction): bigint {
+  return left[0] * right[1] - right[0] * left[1];
+}
+function leadThreshold(frame: Frame): Fraction {
+  const { supplierLeadTimeHours, safetyBufferHours } = frame.evidence.facts;
+  const lead = fraction(supplierLeadTimeHours ?? 0);
+  const buffer = fraction(safetyBufferHours ?? frame.rule.thresholds.leadTimeBufferHours);
+  return [lead[0] * buffer[1] + buffer[0] * lead[1], lead[1] * buffer[1]];
+}
+function coverage(frame: Frame): Fraction | null {
+  const { availableUnits, salesUnits, salesWindow } = frame.evidence.facts;
+  if (availableUnits === null || !salesUnits) return null;
+  const elapsedMs = Date.parse(salesWindow.periodEnd) - Date.parse(salesWindow.periodStart);
+  return [BigInt(availableUnits) * BigInt(elapsedMs), BigInt(salesUnits) * 3600000n];
 }
 function conflicts(frame: Frame, hours: number): boolean {
   const supplied = frame.evidence.facts.estimatedHoursRemaining;
   return supplied !== null && Math.abs(supplied - hours) > Number.EPSILON * Math.max(1, hours) * 4;
 }
-function severity(frame: Frame, hours: number): EventSeverity | null {
-  const { supplierLeadTimeHours, safetyBufferHours, inboundETA } = frame.evidence.facts;
-  if (hours < frame.rule.thresholds.criticalHoursRemaining) return "HIGH";
-  const buffer = safetyBufferHours ?? frame.rule.thresholds.leadTimeBufferHours;
-  if (supplierLeadTimeHours !== null && hours < supplierLeadTimeHours + buffer) return "MEDIUM";
-  const etaHours =
-    inboundETA === null
-      ? null
-      : (Date.parse(inboundETA) - Date.parse(frame.evidence.observedAt)) / 3600000;
-  return etaHours !== null && etaHours > hours ? "MEDIUM" : null;
+function severity(frame: Frame, hours: Fraction): EventSeverity | null {
+  const { supplierLeadTimeHours, inboundETA } = frame.evidence.facts;
+  if (compare(hours, fraction(frame.rule.thresholds.criticalHoursRemaining)) < 0n) return "HIGH";
+  if (supplierLeadTimeHours !== null && compare(hours, leadThreshold(frame)) < 0n) return "MEDIUM";
+  if (inboundETA === null) return null;
+  const etaMs = Date.parse(inboundETA) - Date.parse(frame.evidence.observedAt);
+  return compare(hours, [BigInt(etaMs), 3600000n]) < 0n ? "MEDIUM" : null;
 }
 function baselineMissing(frame: Frame): boolean {
   if (!frame.rule.requireAlignedBaseline) return false;
@@ -251,16 +267,15 @@ function evaluateForecast(
     issues.push(issue(frame, "LOW_SAMPLE", "baseline"));
     return { ok: true, value: noCandidate(frame, issues, "BASELINE_UNAVAILABLE") };
   }
-  const { supplierLeadTimeHours: lead, safetyBufferHours } = frame.evidence.facts;
-  const buffer = safetyBufferHours ?? frame.rule.thresholds.leadTimeBufferHours;
-  if (lead !== null && lead + buffer > Number.MAX_SAFE_INTEGER)
+  if (compare(leadThreshold(frame), fraction(Number.MAX_SAFE_INTEGER)) > 0n)
     return failure("OVERFLOW", ids(frame));
   const hours = coverage(frame);
   if (hours === null)
     return { ok: true, value: noCandidate(frame, issues, "INSUFFICIENT_EVIDENCE") };
-  if (!Number.isFinite(hours) || hours > Number.MAX_SAFE_INTEGER)
+  if (compare(hours, fraction(Number.MAX_SAFE_INTEGER)) > 0n)
     return failure("OVERFLOW", ids(frame));
-  if (conflicts(frame, hours)) {
+  // Floating tolerance is limited to checking a supplied diagnostic, never threshold decisions.
+  if (conflicts(frame, Number(hours[0]) / Number(hours[1]))) {
     issues.push(issue(frame, "SOURCE_INCONSISTENT", "facts.estimatedHoursRemaining"));
     return { ok: true, value: noCandidate(frame, issues, "SOURCE_CONFLICT") };
   }
