@@ -7,6 +7,8 @@ import {
   type BaselineRequest,
   type EventErrorCode,
   type EventCancellationObservation,
+  type EventAdSpendObservation,
+  type EventNormalizedObservation,
   type EventResult,
   type EventSourceReference,
   type MetricSnapshotV1,
@@ -120,6 +122,40 @@ function cancellationSample(item: EventCancellationObservation): Sample {
     content,
   };
 }
+function spendSample(item: EventAdSpendObservation): Sample {
+  const measuredCoverage =
+    item.measuredCoverage === null
+      ? null
+      : {
+          ...item.measuredCoverage,
+          ...periodInstants(item.measuredCoverage),
+          observedAt: Date.parse(item.measuredCoverage.observedAt),
+        };
+  const content = JSON.stringify({
+    ...item,
+    reference: referenceContent(item.reference),
+    measuredCoverage,
+    visibleAt: Date.parse(item.visibleAt),
+    computedAt: Date.parse(item.computedAt),
+    sourceWatermark: item.sourceWatermark === null ? null : Date.parse(item.sourceWatermark),
+  });
+  return {
+    period: item.reference.period,
+    value: item.spendMinor,
+    visibleAt: item.visibleAt,
+    computedAt: item.computedAt,
+    sourceWatermark: item.sourceWatermark,
+    status: item.quality.dataStatus,
+    sampleSize: item.quality.sampleSize,
+    issues: item.quality.issues,
+    evidenceIds: item.evidenceIds,
+    reference: item.reference,
+    content,
+  };
+}
+function normalizedSample(item: EventNormalizedObservation): Sample {
+  return "spendMinor" in item ? spendSample(item) : cancellationSample(item);
+}
 function aggregatePayloadConflict(input: readonly Sample[]): boolean {
   const seen = new Map<string, string>();
   for (const sample of input) {
@@ -153,7 +189,7 @@ function samples(request: BaselineRequest): EventResult<readonly Sample[]> {
     if (!refs[0]) return failure("INVALID_INPUT", snapshot.evidenceIds);
     output.push(metricSample(snapshot, refs[0]));
   }
-  output.push(...(request.normalizedObservations ?? []).map(cancellationSample));
+  output.push(...(request.normalizedObservations ?? []).map(normalizedSample));
   return aggregatePayloadConflict(output) ? failure("CONFLICT") : { ok: true, value: output };
 }
 function compareText(left: string, right: string): number {
