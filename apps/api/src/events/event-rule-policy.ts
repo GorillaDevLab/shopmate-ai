@@ -180,8 +180,7 @@ export class EventRulePolicyRegistry {
   readonly #policies = new Map<string, EventRulePolicyV1>();
 
   constructor(policies: readonly unknown[]) {
-    for (const input of policies) {
-      const policy = EventRulePolicyV1Schema.parse(input);
+    for (const policy of z.array(EventRulePolicyV1Schema).parse(policies)) {
       if (this.#policies.has(policy.version))
         throw new RangeError(`Event policy version already registered: ${policy.version}`);
       this.#policies.set(policy.version, policy);

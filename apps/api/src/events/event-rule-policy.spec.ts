@@ -13,6 +13,10 @@ function policy(version = "event-policy-v2") {
 function events() {
   return new EventRulePolicyRegistry([DEFAULT_EVENT_RULE_POLICY]);
 }
+
+it("rejects iterable configuration containers that are not the server-owned array shape", () => {
+  expect(() => Reflect.construct(EventRulePolicyRegistry, [new Set([policy()])])).toThrow();
+});
 it("provides validated product defaults across all twelve event types", () => {
   const value = EventRulePolicyV1Schema.parse(DEFAULT_EVENT_RULE_POLICY);
   expect(value.rules).toHaveLength(12);
