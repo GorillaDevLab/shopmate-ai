@@ -590,3 +590,91 @@ it.each(["2026-10-25T05:59:59.999Z", "2026-10-25T06:00:00Z", "2026-10-25T06:00:0
     });
   },
 );
+
+type OptionalField = "inboundETA" | "safetyBufferHours";
+const optionalLimitations = [
+  ["inboundETA", "STALE_SOURCE"],
+  ["safetyBufferHours", "STALE_SOURCE"],
+  ["inboundETA", "WINDOW_MISMATCH"],
+  ["safetyBufferHours", "WINDOW_MISMATCH"],
+  ["inboundETA", "VERSION_MISMATCH"],
+  ["safetyBufferHours", "VERSION_MISMATCH"],
+  ["inboundETA", "SOURCE_INCONSISTENT"],
+  ["safetyBufferHours", "SOURCE_INCONSISTENT"],
+] as const;
+function optionalSupply(field: OptionalField, code?: DataQualityIssueV1["code"]): Stockout {
+  const facts =
+    field === "inboundETA" ? { inboundETA: "2026-10-25T13:00:00Z" } : { safetyBufferHours: 20 };
+  const value = evidence({ availableUnits: 12, estimatedHoursRemaining: 12, ...facts });
+  return code === undefined
+    ? value
+    : { ...value, dataStatus: "INSUFFICIENT", issues: [issue(code, `facts.${field}`)] };
+}
+
+it("uses only observed optional supply values to extend an otherwise adequate cover risk", () => {
+  expect(outcome(evidence({ availableUnits: 12, estimatedHoursRemaining: 12 })).disposition).toBe(
+    "NO_CANDIDATE",
+  );
+  expect(outcome(optionalSupply("inboundETA")).disposition).toBe("CANDIDATE");
+  expect(outcome(optionalSupply("safetyBufferHours")).disposition).toBe("CANDIDATE");
+});
+
+it.each(optionalLimitations)(
+  "does not let limited %s with %s trigger its optional risk branch",
+  (field, code) => {
+    const value = optionalSupply(field, code);
+    const result = outcome(value);
+    expect(result.disposition).toBe("NO_CANDIDATE");
+    expect(result.quality.issues).toContainEqual(value.issues[0]);
+  },
+);
+
+it.each(optionalLimitations)(
+  "preserves independent critical, sold-out and reliable lead risk despite %s %s",
+  (field, code) => {
+    const value = optionalSupply(field, code);
+    const withFacts = (facts: Partial<Stockout["facts"]>) =>
+      outcome({ ...value, facts: { ...value.facts, ...facts } });
+    expect(withFacts({ availableUnits: 4, estimatedHoursRemaining: 4 })).toMatchObject({
+      disposition: "CANDIDATE",
+      candidate: { severityFloor: "HIGH" },
+    });
+    expect(withFacts({ availableUnits: 0, estimatedHoursRemaining: null })).toMatchObject({
+      disposition: "CANDIDATE",
+      candidate: { severityFloor: "CRITICAL" },
+    });
+    const leadRisk = withFacts({ supplierLeadTimeHours: 13 });
+    expect(leadRisk).toMatchObject({
+      disposition: "CANDIDATE",
+      candidate: { severityFloor: "MEDIUM" },
+    });
+    expect(leadRisk.quality.issues).toContainEqual(value.issues[0]);
+  },
+);
+
+it("falls back to the policy buffer when the observed buffer is unreliable", () => {
+  const value = optionalSupply("safetyBufferHours", "STALE_SOURCE");
+  const result = outcome({
+    ...value,
+    facts: { ...value.facts, supplierLeadTimeHours: 11.5, safetyBufferHours: 0 },
+  });
+  expect(result).toMatchObject({
+    disposition: "CANDIDATE",
+    candidate: { severityFloor: "MEDIUM" },
+  });
+  expect(result.quality.issues).toContainEqual(value.issues[0]);
+});
+
+it("keeps valid optional supply branches independent from each other's limitations", () => {
+  const etaLimited = optionalSupply("inboundETA", "SOURCE_INCONSISTENT");
+  const bufferLimited = optionalSupply("safetyBufferHours", "VERSION_MISMATCH");
+  expect(
+    outcome({ ...etaLimited, facts: { ...etaLimited.facts, safetyBufferHours: 20 } }).disposition,
+  ).toBe("CANDIDATE");
+  expect(
+    outcome({
+      ...bufferLimited,
+      facts: { ...bufferLimited.facts, inboundETA: "2026-10-25T13:00:00Z" },
+    }).disposition,
+  ).toBe("CANDIDATE");
+});

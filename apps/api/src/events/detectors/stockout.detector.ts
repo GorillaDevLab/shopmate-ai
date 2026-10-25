@@ -18,6 +18,7 @@ type Rule = Extract<EventRulePolicyV1["rules"][number], { eventType: "STOCKOUT_R
 type Quality = EventDetectionOutcome["quality"];
 type Reason = Extract<EventDetectionOutcome, { disposition: "NO_CANDIDATE" }>["reason"];
 type Dependency = "inventory" | "sales" | "leadTime";
+type OptionalField = "inboundETA" | "safetyBufferHours";
 type Assessment = { issues: DataQualityIssueV1[]; blocked: boolean };
 type Frame = { request: EventDetectionRequest; evidence: Stockout; rule: Rule };
 type Fraction = readonly [numerator: bigint, denominator: bigint];
@@ -45,7 +46,16 @@ function expected(frame: Frame, dependency: Dependency): number | null {
   if (dependency === "inventory") return facts.availableUnits;
   return dependency === "sales" ? facts.salesUnits : facts.supplierLeadTimeHours;
 }
+function optionalField(field: string): OptionalField | null {
+  const value = field.toLowerCase();
+  if (/(?:^|[._])(?:inboundeta|eta)(?:[._]|$)/u.test(value)) return "inboundETA";
+  return /(?:^|[._])safetybufferhours(?:[._]|$)/u.test(value) ? "safetyBufferHours" : null;
+}
+function usableOptional(frame: Frame, field: OptionalField): boolean {
+  return !frame.evidence.issues.some((row) => optionalField(row.field) === field);
+}
 function affects(row: DataQualityIssueV1, dependency: Dependency): boolean {
+  if (optionalField(row.field) !== null) return false;
   const field = row.field.toLowerCase();
   if (/cost|fee|profit|marketing|traffic/u.test(field)) return false;
   if (dependency === "inventory" && /hour|extension|lead|supplier|estimated/u.test(field))
@@ -229,7 +239,9 @@ function compare(left: Fraction, right: Fraction): bigint {
 function leadThreshold(frame: Frame): Fraction {
   const { supplierLeadTimeHours, safetyBufferHours } = frame.evidence.facts;
   const lead = fraction(supplierLeadTimeHours ?? 0);
-  const buffer = fraction(safetyBufferHours ?? frame.rule.thresholds.leadTimeBufferHours);
+  // An unusable observation cannot replace the independently configured policy buffer.
+  const observed = usableOptional(frame, "safetyBufferHours") ? safetyBufferHours : null;
+  const buffer = fraction(observed ?? frame.rule.thresholds.leadTimeBufferHours);
   return [lead[0] * buffer[1] + buffer[0] * lead[1], lead[1] * buffer[1]];
 }
 function coverage(frame: Frame): Fraction | null {
@@ -246,7 +258,7 @@ function severity(frame: Frame, hours: Fraction): EventSeverity | null {
   const { supplierLeadTimeHours, inboundETA } = frame.evidence.facts;
   if (compare(hours, fraction(frame.rule.thresholds.criticalHoursRemaining)) < 0n) return "HIGH";
   if (supplierLeadTimeHours !== null && compare(hours, leadThreshold(frame)) < 0n) return "MEDIUM";
-  if (inboundETA === null) return null;
+  if (inboundETA === null || !usableOptional(frame, "inboundETA")) return null;
   const etaMs = Date.parse(inboundETA) - Date.parse(frame.evidence.observedAt);
   return compare(hours, [BigInt(etaMs), 3600000n]) < 0n ? "MEDIUM" : null;
 }
