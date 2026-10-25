@@ -1116,7 +1116,8 @@ it("accepts event-only cancellation histories without changing P3 metrics", () =
   expect(EventMeasureSchema.safeParse(cancellationMeasure).success).toBe(true);
   const parsed = BaselineRequestSchema.parse(cancellationRequest());
   expect(Object.isFrozen(parsed)).toBe(true);
-  expect(Object.isFrozen(parsed.normalizedObservations?.[0]?.rate)).toBe(true);
+  const observation = parsed.normalizedObservations?.[0];
+  expect(observation && "rate" in observation && Object.isFrozen(observation.rate)).toBe(true);
   expect(MetricValueSchema.safeParse({ ...cancellationMeasure, value: 100 }).success).toBe(false);
   expect(
     MetricSnapshotV1Schema.safeParse({
