@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   EventDetectionOutcomeSchema,
   EventDetectionRequestSchema,
+  EventMeasureSchema,
   createEventFingerprint,
   type DataQualityIssueV1,
   type EventDetectionOutcome,
@@ -422,4 +423,170 @@ it("strictly rejects unrecognized input and absent policy rules", () => {
   expect(
     new ConversionDropDetector().detect({ ...request(), policy: { ...policy, rules: [] } }),
   ).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
+});
+
+function snapshot(
+  kind: "CONVERSION_RATE" | "PAID_ORDERS" | "CART_RATE" | "CHECKOUT_RATE",
+  value: number,
+): MetricSnapshotV1 {
+  return {
+    schemaVersion: 1,
+    definitionVersion: "metrics-v1",
+    inputRevision: "source-v1",
+    binding,
+    ...period,
+    visibleAt: period.periodEnd,
+    computedAt: period.periodEnd,
+    sourceWatermark: period.periodEnd,
+    evidenceIds: [reference.id],
+    sampleSize: 1000,
+    coverageBasisPoints: 10000,
+    status: "VERIFIED",
+    issues: [],
+    subject: { kind: "STORE" },
+    metric:
+      kind === "PAID_ORDERS"
+        ? { kind, unit: "units", value }
+        : { kind, unit: "basisPoints", value },
+  };
+}
+function referenced(value: Conversion, rows: readonly MetricSnapshotV1[]): Conversion {
+  return {
+    ...value,
+    sourceReferences: [
+      reference,
+      ...rows.map((row, index) => ({
+        ...reference,
+        kind: "METRIC_SNAPSHOT" as const,
+        id: `snapshot-${index}`,
+        measure: EventMeasureSchema.parse({ kind: row.metric.kind, unit: row.metric.unit }),
+      })),
+    ],
+  };
+}
+function withSnapshots(rows: readonly MetricSnapshotV1[]): EventDetectionOutcome {
+  return outcome(referenced(evidence(), rows), rows);
+}
+it("checks consistent observed snapshots without requiring new snapshots", () => {
+  const rows = [
+    snapshot("CONVERSION_RATE", 650),
+    snapshot("PAID_ORDERS", 65),
+    snapshot("CART_RATE", 3000),
+    snapshot("CHECKOUT_RATE", 1500),
+  ];
+  expect(withSnapshots(rows).disposition).toBe("CANDIDATE");
+});
+it.each(["CONVERSION_RATE", "PAID_ORDERS"] as const)(
+  "rejects contradictions in the supplied %s snapshot",
+  (kind) => {
+    const result = withSnapshots([snapshot(kind, 100)]);
+    expect(result).toMatchObject({ disposition: "NO_CANDIDATE", reason: "SOURCE_CONFLICT" });
+    expect(result.quality.issues.some((row) => row.code === "SOURCE_INCONSISTENT")).toBe(true);
+  },
+);
+it.each(["STALE_SOURCE", "WINDOW_MISMATCH", "VERSION_MISMATCH", "SOURCE_INCONSISTENT"] as const)(
+  "gates a supplied current conversion snapshot with %s",
+  (code) => {
+    const row = {
+      ...snapshot("CONVERSION_RATE", 650),
+      status: "INSUFFICIENT" as const,
+      issues: [issue(code, "traffic")],
+    };
+    const result = withSnapshots([row]);
+    expect(result.disposition).toBe("NO_CANDIDATE");
+    expect(result.quality.issues).toContainEqual(row.issues[0]);
+  },
+);
+it.each(["STALE_SOURCE", "WINDOW_MISMATCH", "VERSION_MISMATCH", "SOURCE_INCONSISTENT"] as const)(
+  "keeps a limited optional funnel snapshot independent for %s",
+  (code) => {
+    const row = {
+      ...snapshot("CART_RATE", 3000),
+      status: "INSUFFICIENT" as const,
+      issues: [issue(code, "traffic")],
+    };
+    const result = withSnapshots([row]);
+    expect(result.disposition).toBe("CANDIDATE");
+    expect(result.quality.issues).toContainEqual(row.issues[0]);
+    expect(result.quality.dataStatus).not.toBe("VERIFIED");
+  },
+);
+it("retains funnel snapshot contradictions as an independent context limitation", () => {
+  const result = withSnapshots([snapshot("CHECKOUT_RATE", 100)]);
+  expect(result.disposition).toBe("CANDIDATE");
+  expect(result.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "SOURCE_INCONSISTENT", field: "snapshots.CHECKOUT_RATE" }),
+  );
+});
+it("does not compare known funnel observations against an unknown count", () => {
+  const rows = [snapshot("CART_RATE", 3000)];
+  const result = outcome(referenced(evidence({ cart: null }), rows), rows);
+  expect(result.disposition).toBe("CANDIDATE");
+  expect(result.quality.issues.some((row) => row.code === "SOURCE_INCONSISTENT")).toBe(false);
+});
+it("gates low samples, partial coverage and stale times on supplied current metrics", () => {
+  const base = snapshot("CONVERSION_RATE", 650);
+  expect(withSnapshots([{ ...base, sampleSize: 9 }]).disposition).toBe("NO_CANDIDATE");
+  expect(
+    withSnapshots([
+      {
+        ...base,
+        coverageBasisPoints: 8999,
+        status: "INSUFFICIENT",
+        issues: [issue("PARTIAL_COVERAGE", "traffic")],
+      },
+    ]).disposition,
+  ).toBe("NO_CANDIDATE");
+  expect(
+    withSnapshots([
+      {
+        ...base,
+        sourceWatermark: "2026-10-24T22:00:00Z",
+        status: "STALE",
+        issues: [issue("STALE_SOURCE", "traffic")],
+      },
+    ]),
+  ).toMatchObject({ disposition: "NO_CANDIDATE", reason: "STALE_SOURCE" });
+});
+it("rejects scope, definition, period, baseline version and unknown evidence fields", () => {
+  const value = request();
+  const detector = new ConversionDropDetector();
+  const invalid = [
+    { ...value.evidence, binding: { ...binding, storeId: "other" } },
+    { ...value.evidence, definitionVersion: "other" },
+    { ...value.evidence, periodStart: "2026-10-23T00:00:00Z" },
+    { ...value.evidence, baselineVersion: "other" },
+    { ...value.evidence, unrecognized: true },
+  ];
+  for (const evidence of invalid)
+    expect(detector.detect({ ...value, evidence })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+});
+
+it("retains a missing current snapshot as unavailable rather than inventing a source contradiction", () => {
+  const base = snapshot("CONVERSION_RATE", 650);
+  const row: MetricSnapshotV1 = {
+    ...base,
+    metric: { ...base.metric, value: null },
+    sourceWatermark: null,
+    status: "UNAVAILABLE",
+    issues: [issue("NOT_SYNCHRONIZED", "traffic")],
+  };
+  const result = withSnapshots([row]);
+  expect(result).toMatchObject({ disposition: "NO_CANDIDATE", reason: "INSUFFICIENT_EVIDENCE" });
+  expect(result.quality.issues.some((row) => row.code === "SOURCE_INCONSISTENT")).toBe(false);
+});
+
+it("preserves an unavailable snapshot status in the outcome quality", () => {
+  const base = snapshot("CONVERSION_RATE", 650);
+  const row: MetricSnapshotV1 = {
+    ...base,
+    metric: { ...base.metric, value: null },
+    sourceWatermark: null,
+    status: "UNAVAILABLE",
+    issues: [issue("NOT_SYNCHRONIZED", "traffic")],
+  };
+  expect(withSnapshots([row]).quality.dataStatus).toBe("UNAVAILABLE");
 });

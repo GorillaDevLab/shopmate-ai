@@ -9,6 +9,7 @@ import {
   type EventEvidenceV1,
   type EventResult,
   type EventRulePolicyV1,
+  type MetricSnapshotV1,
 } from "@shopmate/contracts";
 
 type Conversion = Extract<EventEvidenceV1, { eventType: "CONVERSION_DROP" }>;
@@ -113,7 +114,10 @@ function canonical(issues: readonly DataQualityIssueV1[]): DataQualityIssueV1[] 
 }
 function quality(frame: Frame, extra: readonly DataQualityIssueV1[]): Quality {
   const issues = canonical([...frame.evidence.issues, ...extra]);
-  const statuses: Quality["dataStatus"][] = [frame.evidence.dataStatus];
+  const statuses: Quality["dataStatus"][] = [
+    frame.evidence.dataStatus,
+    ...frame.request.snapshots.map((row) => row.status),
+  ];
   if (issues.length > 0) statuses.push("INSUFFICIENT");
   if (issues.some((row) => row.code === "STALE_SOURCE")) statuses.push("STALE");
   return {
@@ -177,10 +181,55 @@ function meetsDrop(frame: Frame): boolean {
     BigInt(visitors) * numerator * BigInt(10000 - frame.rule.thresholds.relativeDropBasisPoints)
   );
 }
+function expectedSnapshot(frame: Frame, kind: string): number | null {
+  const facts = frame.evidence.facts;
+  if (kind === "PAID_ORDERS") return facts.paidOrders;
+  if (kind === "CONVERSION_RATE") return facts.conversion.valueBasisPoints;
+  const count = kind === "CART_RATE" ? facts.cart : facts.checkout;
+  if (count === null || !facts.visitors) return null;
+  const scaled = BigInt(count) * 10000n,
+    denominator = BigInt(facts.visitors);
+  return Number(scaled / denominator + ((scaled % denominator) * 2n >= denominator ? 1n : 0n));
+}
+function snapshotIssues(frame: Frame, row: MetricSnapshotV1): DataQualityIssueV1[] {
+  const issues = [...row.issues];
+  const field = `snapshots.${row.metric.kind}`;
+  const expected = expectedSnapshot(frame, row.metric.kind);
+  if (expected !== null && row.metric.value !== null && row.metric.value !== expected)
+    issues.push(issue(frame, "SOURCE_INCONSISTENT", field));
+  if (row.status !== "VERIFIED")
+    issues.push(issue(frame, row.status === "STALE" ? "STALE_SOURCE" : "PARTIAL_COVERAGE", field));
+  if (row.sampleSize < frame.rule.minimumSampleSize) issues.push(issue(frame, "LOW_SAMPLE", field));
+  if (row.coverageBasisPoints < frame.rule.minimumCoverageBasisPoints)
+    issues.push(issue(frame, "PARTIAL_COVERAGE", field));
+  if (row.sourceWatermark === null) issues.push(issue(frame, "SOURCE_TIME_MISSING", field));
+  else if (
+    (Date.parse(frame.evidence.observedAt) - Date.parse(row.sourceWatermark)) / 1000 >
+    frame.rule.maximumAgeSeconds
+  )
+    issues.push(issue(frame, "STALE_SOURCE", field));
+  return issues;
+}
+function snapshots(frame: Frame): {
+  blocking: DataQualityIssueV1[];
+  context: DataQualityIssueV1[];
+} {
+  const blocking: DataQualityIssueV1[] = [],
+    context: DataQualityIssueV1[] = [];
+  for (const row of frame.request.snapshots) {
+    if (["CONVERSION_RATE", "PAID_ORDERS"].includes(row.metric.kind))
+      blocking.push(...snapshotIssues(frame, row));
+    else if (["CART_RATE", "CHECKOUT_RATE"].includes(row.metric.kind))
+      context.push(...snapshotIssues(frame, row));
+    else context.push(...row.issues);
+  }
+  return { blocking, context };
+}
 function evaluate(frame: Frame): EventDetectionOutcome {
-  const current = currentIssues(frame),
+  const supplied = snapshots(frame);
+  const current = [...currentIssues(frame), ...supplied.blocking],
     historical = baselineIssues(frame);
-  const issues = [...current, ...historical, ...contextIssues(frame)];
+  const issues = [...current, ...historical, ...contextIssues(frame), ...supplied.context];
   if (current.length > 0) return noCandidate(frame, issues, reason(current));
   if (historical.length > 0) return noCandidate(frame, issues, "BASELINE_UNAVAILABLE");
   return meetsDrop(frame)
