@@ -209,7 +209,7 @@ function snapshot(overrides: Partial<MetricSnapshotV1> = {}): MetricSnapshotV1 {
     ...overrides,
   };
 }
-function withSnapshot(row: MetricSnapshotV1): EventDetectionRequest {
+function withSnapshot(row: MetricSnapshotV1, value = evidence()): EventDetectionRequest {
   const ref = {
     ...reference,
     kind: "METRIC_SNAPSHOT" as const,
@@ -219,9 +219,64 @@ function withSnapshot(row: MetricSnapshotV1): EventDetectionRequest {
     }),
     id: "profit-snapshot",
   };
-  const value = evidence({ sourceReferences: [reference, ref] });
-  return request(value, [row]);
+  return request({ ...value, sourceReferences: [...value.sourceReferences, ref] }, [row]);
 }
+it.each(["GROSS_PROFIT", "CONTRIBUTION"] as const)(
+  "withholds known %s when current return facts remain uncertain",
+  (kind) => {
+    const limitation = issue("RETURN_UNKNOWN", "returnFacts");
+    const value = evidence({
+      baseline: baseline(10000, kind),
+      dataStatus: "INSUFFICIENT",
+      issues: [limitation],
+      facts: facts({ grossProfitMinor: 7000 }),
+    });
+    expect(detect(value)).toMatchObject({
+      disposition: "NO_CANDIDATE",
+      reason: "INSUFFICIENT_EVIDENCE",
+      quality: { dataStatus: "INSUFFICIENT", issues: [limitation] },
+    });
+  },
+);
+it.each(["GROSS_PROFIT", "CONTRIBUTION"] as const)(
+  "withholds known %s when its matching snapshot has return uncertainty",
+  (kind) => {
+    const limitation = issue("RETURN_UNKNOWN", "returnFacts");
+    const value = evidence({
+      baseline: baseline(10000, kind),
+      facts: facts({ grossProfitMinor: 7000 }),
+    });
+    const row = snapshot({
+      metric: { kind, unit: "minorCNY", value: 7000 },
+      status: "ESTIMATED",
+      issues: [limitation],
+    });
+    expect(new ProfitMarginDropDetector().detect(withSnapshot(row, value))).toMatchObject({
+      ok: true,
+      value: {
+        disposition: "NO_CANDIDATE",
+        reason: "INSUFFICIENT_EVIDENCE",
+        quality: { dataStatus: "INSUFFICIENT", issues: [limitation] },
+      },
+    });
+  },
+);
+it.each(["GROSS_PROFIT", "CONTRIBUTION"] as const)(
+  "preserves independent %s when return uncertainty belongs only to attribution",
+  (kind) => {
+    const limitation = issue("RETURN_UNKNOWN", "attribution.returnFacts");
+    const value = evidence({
+      baseline: baseline(10000, kind),
+      dataStatus: "INSUFFICIENT",
+      issues: [limitation],
+      facts: facts({ grossProfitMinor: 7000 }),
+    });
+    const result = detect(value);
+    expect(result.disposition).toBe("CANDIDATE");
+    expect(result.quality.dataStatus).toBe("INSUFFICIENT");
+    expect(result.quality.issues).toContainEqual(limitation);
+  },
+);
 it("preserves a fresh matching snapshot as verified evidence", () => {
   expect(new ProfitMarginDropDetector().detect(withSnapshot(snapshot()))).toMatchObject({
     ok: true,

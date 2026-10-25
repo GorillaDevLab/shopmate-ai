@@ -30,6 +30,7 @@ const blockers = new Set([
   "SOURCE_TIME_MISSING",
   "PAYMENT_UNKNOWN",
   "REFUND_UNKNOWN",
+  "RETURN_UNKNOWN",
   "LOW_SAMPLE",
 ]);
 
