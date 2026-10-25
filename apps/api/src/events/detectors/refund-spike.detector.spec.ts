@@ -363,6 +363,39 @@ it("allows the zero quantity branch to retain an unrelated rate diagnostic", () 
     quality: { issues: input.evidence.issues },
   });
 });
+it.each(["refundedOrders", "paidCohortOrders", "refundFacts.source"])(
+  "blocks zero-baseline count/source conflicts on %s inside a rate snapshot",
+  (field) => {
+    const input = withBaseline(request(), baseline(0));
+    const diagnostic = issue("SOURCE_INCONSISTENT", field);
+    const item = {
+      ...snapshot(input, { ...measure, value: 3000 }),
+      status: "INSUFFICIENT" as const,
+      issues: [diagnostic],
+    };
+    const result = noCandidate(withSnapshot(input, item), "SOURCE_CONFLICT");
+    expect(result.quality.issues).toContainEqual(diagnostic);
+  },
+);
+it.each([
+  { code: "SOURCE_INCONSISTENT", field: "currentRate" },
+  { code: "STALE_SOURCE", field: "REFUND_COHORT_ORDER_RATE" },
+  { code: "ZERO_DENOMINATOR", field: "currentRate" },
+] as const)(
+  "keeps zero-baseline quantity independent from rate-only $code in a snapshot",
+  ({ code, field }) => {
+    const input = withBaseline(request(), baseline(0));
+    const diagnostic = issue(code, field);
+    const item = {
+      ...snapshot(input, { ...measure, value: 3000 }),
+      status: "INSUFFICIENT" as const,
+      issues: [diagnostic],
+    };
+    const result = detect(withSnapshot(input, item));
+    expect(result.disposition).toBe("CANDIDATE");
+    expect(result.quality.issues).toContainEqual(diagnostic);
+  },
+);
 it.each(["paidCohortOrders", "refundedOrders"])(
   "blocks the zero quantity branch for stale %s",
   (field) => {

@@ -171,7 +171,12 @@ function collectSnapshots(request: EventDetectionRequest, evidence: Evidence, ru
     if (!countKinds.has(item.metric.kind) && item.metric.kind !== rateKind) continue;
     const issues = snapshotIssues(evidence, item, rule);
     all.push(...issues);
-    if (!zero || item.metric.kind !== rateKind) blocking.push(...issues);
+    // Count/source faults retain authority regardless of the snapshot carrying them.
+    const dependent =
+      zero && item.metric.kind === rateKind
+        ? issues.filter((diagnostic) => relevant(diagnostic, true))
+        : issues;
+    blocking.push(...dependent);
   }
   return { all, blocking };
 }
