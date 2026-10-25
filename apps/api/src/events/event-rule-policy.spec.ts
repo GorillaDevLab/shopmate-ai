@@ -1,14 +1,21 @@
 import { expect, it } from "vitest";
-import { EventRulePolicyV1Schema } from "@shopmate/contracts";
+import { DecisionRulesetV1Schema, EventRulePolicyV1Schema } from "@shopmate/contracts";
 import {
   DEFAULT_EVENT_RULE_POLICY,
   EVENT_THRESHOLD_BOUNDARIES,
   EventRulePolicyRegistry,
   compareEventThreshold,
 } from "./event-rule-policy.js";
+import {
+  DEFAULT_DECISION_RULESET,
+  DecisionRulesetRegistry,
+} from "../decisions/decision-ruleset.js";
 
 function policy(version = "event-policy-v2") {
   return { ...DEFAULT_EVENT_RULE_POLICY, version };
+}
+function ruleset(version = "decision-rules-v2") {
+  return { ...DEFAULT_DECISION_RULESET, version };
 }
 function events() {
   return new EventRulePolicyRegistry([DEFAULT_EVENT_RULE_POLICY]);
@@ -17,10 +24,25 @@ function events() {
 it("rejects iterable configuration containers that are not the server-owned array shape", () => {
   expect(() => Reflect.construct(EventRulePolicyRegistry, [new Set([policy()])])).toThrow();
 });
+
+function decisions() {
+  return new DecisionRulesetRegistry(events(), [
+    { eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version, ruleset: DEFAULT_DECISION_RULESET },
+  ]);
+}
+
+it("rejects iterable decision containers that are not the server-owned array shape", () => {
+  const input = new Set([
+    { eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version, ruleset: ruleset() },
+  ]);
+  expect(() => Reflect.construct(DecisionRulesetRegistry, [events(), input])).toThrow();
+});
+
 it("provides validated product defaults across all twelve event types", () => {
   const value = EventRulePolicyV1Schema.parse(DEFAULT_EVENT_RULE_POLICY);
   expect(value.rules).toHaveLength(12);
   expect(value.baselineVersion).toBe("robust-baseline-v1");
+  expect(DecisionRulesetV1Schema.parse(DEFAULT_DECISION_RULESET)).toEqual(DEFAULT_DECISION_RULESET);
   expect(value.rules.find((rule) => rule.eventType === "REFUND_SPIKE")?.thresholds).toMatchObject({
     relativeIncreaseBasisPoints: 10000,
   });
@@ -144,4 +166,148 @@ it("keeps tolerance boundaries exact for subnormal and fractional observations",
   expect(compareEventThreshold(0.125, 0.125, "ABOVE", "EXCLUSIVE", 0)).toBe(false);
   expect(compareEventThreshold(0, 0, "ABOVE", "INCLUSIVE", 10000)).toBe(true);
   expect(compareEventThreshold(1, 0, "BELOW", "INCLUSIVE", 10000)).toBe(false);
+});
+
+it("pins decision replay to exact event and baseline versions", () => {
+  const old = decisions();
+  const next = old.append({
+    eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version,
+    ruleset: ruleset(),
+  });
+  expect(next.get(DEFAULT_DECISION_RULESET.version)).toEqual(
+    old.get(DEFAULT_DECISION_RULESET.version),
+  );
+  expect(next.get("decision-rules-v2").baselineVersion).toBe(
+    DEFAULT_EVENT_RULE_POLICY.baselineVersion,
+  );
+  expect(next.get("decision-rules-v2").eventPolicyVersion).toBe(DEFAULT_EVENT_RULE_POLICY.version);
+  expect(next.get("decision-rules-v2").ruleset.version).toBe("decision-rules-v2");
+  expect(() => old.get("decision-rules-v2")).toThrow(/Unknown decision ruleset version/u);
+  expect(() =>
+    next.append({ eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version, ruleset: ruleset() }),
+  ).toThrow(/already registered/u);
+});
+
+it.each([{ version: "" }, { execute: true }])(
+  "rejects malformed decision rulesets: %j",
+  (patch) => {
+    expect(
+      () =>
+        new DecisionRulesetRegistry(events(), [
+          {
+            eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version,
+            ruleset: { ...ruleset(), ...patch },
+          },
+        ]),
+    ).toThrow();
+  },
+);
+
+it("rejects unknown or mismatched pinned policy configuration", () => {
+  expect(
+    () =>
+      new DecisionRulesetRegistry(events(), [
+        { eventPolicyVersion: "missing", ruleset: ruleset() },
+      ]),
+  ).toThrow();
+  const inventory = { ...DEFAULT_DECISION_RULESET.inventory, criticalHoursRemaining: 7 };
+  expect(() =>
+    decisions().append({
+      eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version,
+      ruleset: { ...ruleset(), inventory },
+    }),
+  ).toThrow(/disagree/u);
+  const refund = { ...DEFAULT_DECISION_RULESET.refund, maximumAgeSeconds: 1 };
+  expect(() =>
+    decisions().append({
+      eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version,
+      ruleset: { ...ruleset(), refund },
+    }),
+  ).toThrow(/disagree/u);
+  expect(() =>
+    decisions().append({
+      eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version,
+      ruleset: ruleset(),
+      baselineVersion: "override",
+    }),
+  ).toThrow();
+});
+
+it("freezes decision labels and isolates the registry from caller-owned configuration", () => {
+  const input = structuredClone(DEFAULT_DECISION_RULESET);
+  const registry = new DecisionRulesetRegistry(events(), [
+    { eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version, ruleset: input },
+  ]);
+  Reflect.set(input.inventory.labels, "severity", "INFO");
+  const saved = registry.get(input.version);
+  expect(saved.ruleset.inventory.labels.severity).toBe("HIGH");
+  expect(Object.isFrozen(registry)).toBe(true);
+  expect(Object.isFrozen(saved)).toBe(true);
+  expect(Object.isFrozen(saved.ruleset.inventory.labels.reasonCodes)).toBe(true);
+  expect(Reflect.set(saved.ruleset.inventory.labels, "severity", "INFO")).toBe(false);
+});
+
+it("retains earlier event and baseline pins when registering a later server policy", () => {
+  const policies = events().append({ ...policy(), baselineVersion: "robust-baseline-v2" });
+  const registry = new DecisionRulesetRegistry(policies, [
+    { eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version, ruleset: DEFAULT_DECISION_RULESET },
+  ]).append({ eventPolicyVersion: "event-policy-v2", ruleset: ruleset() });
+  expect(registry.get(DEFAULT_DECISION_RULESET.version).baselineVersion).toBe("robust-baseline-v1");
+  expect(registry.get("decision-rules-v2").baselineVersion).toBe("robust-baseline-v2");
+  expect(registry.get(DEFAULT_DECISION_RULESET.version).ruleset).toEqual(DEFAULT_DECISION_RULESET);
+});
+
+it("requires a new matching decision version when a product threshold changes", () => {
+  const rules = policy().rules.map((rule) =>
+    rule.eventType === "STOCKOUT_RISK"
+      ? { ...rule, thresholds: { ...rule.thresholds, criticalHoursRemaining: 4 } }
+      : rule,
+  );
+  const policies = events().append({ ...policy(), rules });
+  const registry = new DecisionRulesetRegistry(policies, [
+    { eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version, ruleset: DEFAULT_DECISION_RULESET },
+  ]);
+  const inventory = { ...DEFAULT_DECISION_RULESET.inventory, criticalHoursRemaining: 4 };
+  const updated = registry.append({
+    eventPolicyVersion: "event-policy-v2",
+    ruleset: { ...ruleset(), inventory },
+  });
+  expect(
+    updated.get(DEFAULT_DECISION_RULESET.version).ruleset.inventory.criticalHoursRemaining,
+  ).toBe(6);
+  expect(updated.get("decision-rules-v2").ruleset.inventory.criticalHoursRemaining).toBe(4);
+  expect(() =>
+    registry.append({ eventPolicyVersion: "event-policy-v2", ruleset: ruleset() }),
+  ).toThrow(/disagree/u);
+});
+
+it.each([{ maximumAgeSeconds: -1 }, { minimumCoverageBasisPoints: 10001 }, { confidence: 1 }])(
+  "rejects malformed nested decision configuration: %j",
+  (patch) => {
+    const inventory = { ...DEFAULT_DECISION_RULESET.inventory, ...patch };
+    expect(() =>
+      decisions().append({
+        eventPolicyVersion: DEFAULT_EVENT_RULE_POLICY.version,
+        ruleset: { ...ruleset(), inventory },
+      }),
+    ).toThrow();
+  },
+);
+
+it("rejects absent policy rules and unsupported decision tolerance semantics", () => {
+  const missing = new EventRulePolicyRegistry([{ ...policy(), rules: [policy().rules[0]] }]);
+  expect(
+    () =>
+      new DecisionRulesetRegistry(missing, [
+        { eventPolicyVersion: "event-policy-v2", ruleset: ruleset() },
+      ]),
+  ).toThrow(/requires stockout and refund/u);
+  const rules = policy().rules.map((rule) => ({ ...rule, toleranceBasisPoints: 1 }));
+  const tolerant = new EventRulePolicyRegistry([{ ...policy(), rules }]);
+  expect(
+    () =>
+      new DecisionRulesetRegistry(tolerant, [
+        { eventPolicyVersion: "event-policy-v2", ruleset: ruleset() },
+      ]),
+  ).toThrow(/disagree/u);
 });
