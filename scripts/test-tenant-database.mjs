@@ -365,6 +365,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     await run("packages/database", "test/integration/metric-storage.test.mjs", [], {
       TEST_DATABASE_URL: server.url,
     });
+    await run("packages/database", "test/integration/event-storage.test.mjs", [], {
+      TEST_DATABASE_URL: server.url,
+    });
     await run("packages/database", "test/integration/metric-source-bundle.test.mjs", [], {
       TEST_DATABASE_URL: server.url,
     });

@@ -1014,7 +1014,12 @@ function rejectMetricRuntimeTargets(runner, runtime, member, metrics) {
   );
 }
 const metricMigration = "20261004090000_metric_snapshots";
-const deferredMetricMigrations = [metricMigration, "20261023090000_metric_snapshot_current_source"];
+// The event evidence FK depends on metric_snapshots, so restore it after metric history too.
+const deferredMetricMigrations = [
+  metricMigration,
+  "20261023090000_metric_snapshot_current_source",
+  "20261025090000_events_evidence",
+];
 const databaseRoot = fileURLToPath(new URL("../../", import.meta.url));
 async function prisma(url, args) {
   const { tenantEnvironment } = await import("../../../../scripts/test-tenant-database.mjs");
