@@ -661,3 +661,42 @@ it("rejects cancellation input scope/hash/future/definition/version mismatches",
   }
   rejected(cancellationInput([item], { baselineVersion: "wrong" }), "VERSION_MISMATCH");
 });
+
+it("keeps zero-denominator cancellation history unavailable with its issue", () => {
+  const item = cancellationSample(0, 1);
+  const unavailable = {
+    ...item,
+    sourceWatermark: null,
+    rate: { ...item.rate, numerator: 0, denominator: 0, valueBasisPoints: null },
+    quality: {
+      dataStatus: "UNAVAILABLE" as const,
+      sampleSize: 0,
+      coverageBasisPoints: 0,
+      issues: [
+        { code: "ZERO_DENOMINATOR" as const, field: "cohort", evidenceIds: item.evidenceIds },
+      ],
+    },
+  };
+  expect(evaluate(cancellationInput([unavailable]))).toMatchObject({
+    status: "INSUFFICIENT",
+    median: null,
+    sampleSize: 0,
+  });
+});
+it("breaks cancellation visibility ties by computedAt before choosing the window", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const revised = { ...cancellationRevision(items[0], 1000), visibleAt: items[0].visibleAt };
+  expect(evaluate(cancellationInput([...items, revised])).sourceReferences[0]).toEqual(
+    revised.reference,
+  );
+});
+it("compares cancellation counts and evidence even when the numerical rate is unchanged", () => {
+  const item = cancellationSample(100, 1);
+  const changed = {
+    ...item,
+    rate: { ...item.rate, numerator: 200, denominator: 20000 },
+    quality: { ...item.quality, sampleSize: 20000 },
+  };
+  rejected(cancellationInput([item, changed]), "CONFLICT");
+  rejected(cancellationInput([item, { ...item, evidenceIds: ["different-cohort"] }]), "CONFLICT");
+});

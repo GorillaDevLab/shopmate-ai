@@ -1248,3 +1248,33 @@ it("does not allow cancellation measures on another event's evidence", () => {
     }),
   ).toBe(false);
 });
+
+it("rejects a verified cancellation observation with unknown rate or a zero cohort", () => {
+  for (const denominator of [null, 0]) {
+    const value = cancellationRequest();
+    const item = cancellationObservation();
+    const observation = {
+      ...item,
+      rate: { ...item.rate, numerator: null, denominator, valueBasisPoints: null },
+      quality: { ...quality, sampleSize: 0 },
+    };
+    expect(
+      BaselineRequestSchema.safeParse({ ...value, normalizedObservations: [observation] }).success,
+    ).toBe(false);
+  }
+});
+it("matches exact external SKU identity on normalized observations", () => {
+  const value = cancellationRequest();
+  const item = { ...cancellationObservation(), entity: { kind: "SKU", externalSkuId: "sku-a" } };
+  expect(
+    BaselineRequestSchema.safeParse({ ...value, entity: sku, normalizedObservations: [item] })
+      .success,
+  ).toBe(true);
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...value,
+      entity: sku,
+      normalizedObservations: [{ ...item, entity: { ...item.entity, externalSkuId: "sku-b" } }],
+    }).success,
+  ).toBe(false);
+});
