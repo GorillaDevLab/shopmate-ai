@@ -697,3 +697,32 @@ it("keeps ROAS multiplier fractions above probability limits valid", () => {
     true,
   );
 });
+
+it.each([
+  { status: "AVAILABLE", median: 100.5, mad: 0.5, valid: true },
+  { status: "AVAILABLE", median: -0.5, mad: 0.5, valid: false },
+  { status: "AVAILABLE", median: 10000.5, mad: 0.5, valid: false },
+  { status: "AVAILABLE", median: 100.5, mad: 10000.5, valid: false },
+  { status: "ZERO", median: 0, mad: 0.5, valid: true },
+  { status: "ZERO", median: 0, mad: 10000.5, valid: false },
+])(
+  "preserves cancellation probability domains across full/projected/provider boundaries %j",
+  ({ status, median, mad, valid }) => {
+    const projected = {
+      ...projectedBaseline({ kind: "CONVERSION_RATE", unit: "basisPoints" }, median, mad),
+      status,
+      measure: { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" },
+    };
+    const full = {
+      ...projected,
+      version: "baseline-v1",
+      sourceReferences: [{ ...source, kind: "NORMALIZED_AGGREGATE", measure: projected.measure }],
+    };
+    expect(RobustBaselineV1Schema.safeParse(full).success).toBe(valid);
+    expect(SanitizedDecisionBaselineSchema.safeParse(projected).success).toBe(valid);
+    expect(SanitizedDecisionInputSchema.safeParse({ ...input, baseline: projected }).success).toBe(
+      valid,
+    );
+    expect(SanitizedDecisionBaselineSchema.safeParse(full).success).toBe(false);
+  },
+);
