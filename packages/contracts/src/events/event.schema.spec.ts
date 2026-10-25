@@ -1078,3 +1078,173 @@ it("rejects inconsistent explicit baseline alignment", () => {
     false,
   );
 });
+
+import { EventMeasureSchema, MetricValueSchema, MetricSnapshotV1Schema } from "../index.js";
+const cancellationMeasure = { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" } as const;
+function cancellationObservation() {
+  const reference = {
+    ...sourceRef,
+    kind: "NORMALIZED_AGGREGATE",
+    measure: cancellationMeasure,
+    period: baselinePeriod,
+    observedAt: baselinePeriod.periodEnd,
+  };
+  return {
+    reference,
+    entity: store,
+    rate: { numerator: 1, denominator: 100, valueBasisPoints: 100, period: baselinePeriod },
+    visibleAt: baselinePeriod.periodEnd,
+    computedAt: baselinePeriod.periodEnd,
+    sourceWatermark: baselinePeriod.periodEnd,
+    evidenceIds: ["cohort-a"],
+    quality,
+  };
+}
+function cancellationRequest() {
+  const observation = cancellationObservation();
+  return {
+    ...baselineRequest,
+    eventType: "CANCELLED_ORDER_SPIKE",
+    entity: store,
+    measure: cancellationMeasure,
+    candidates: [],
+    normalizedObservations: [observation],
+    sourceReferences: [observation.reference],
+  };
+}
+it("accepts event-only cancellation histories without changing P3 metrics", () => {
+  expect(EventMeasureSchema.safeParse(cancellationMeasure).success).toBe(true);
+  const parsed = BaselineRequestSchema.parse(cancellationRequest());
+  expect(Object.isFrozen(parsed)).toBe(true);
+  expect(Object.isFrozen(parsed.normalizedObservations?.[0]?.rate)).toBe(true);
+  expect(MetricValueSchema.safeParse({ ...cancellationMeasure, value: 100 }).success).toBe(false);
+  expect(
+    MetricSnapshotV1Schema.safeParse({
+      ...snapshot,
+      metric: { ...cancellationMeasure, value: 100 },
+    }).success,
+  ).toBe(false);
+});
+it("accepts cancellation AVAILABLE/ZERO evidence and direct empty-snapshot detection", () => {
+  for (const median of [100.5, 0]) {
+    const baseline = {
+      ...common.baseline,
+      measure: cancellationMeasure,
+      median,
+      status: median === 0 ? "ZERO" : "AVAILABLE",
+      sourceReferences: [cancellationObservation().reference],
+    };
+    const currentRef = { ...cancellationObservation().reference, period, observedAt: end };
+    const value = { ...evidence(3), baseline, sourceReferences: [currentRef] };
+    expect(
+      EventDetectionRequestSchema.safeParse({ evidence: value, baseline, snapshots: [], policy })
+        .success,
+    ).toBe(true);
+  }
+});
+it.each([
+  { entity: sku },
+  { binding: { ...binding, storeId: "foreign" } },
+  { definitionVersion: "foreign" },
+  { eventType: "REFUND_SPIKE" },
+  { measure: { kind: "REFUND_ORDER_RATE", unit: "basisPoints" } },
+  { sourceReferences: [] },
+  { candidates: [snapshot] },
+  { normalizedObservations: Array.from({ length: 1001 }, cancellationObservation) },
+])("rejects cancellation request scope/provenance mismatch %j", (patch) => {
+  expect(BaselineRequestSchema.safeParse({ ...cancellationRequest(), ...patch }).success).toBe(
+    false,
+  );
+});
+const invalidObservationPatches = [
+  { extra: true },
+  { entity: campaign },
+  { visibleAt: start },
+  { computedAt: future },
+  { visibleAt: "2026-09-25T06:00:00.0001Z" },
+  { sourceWatermark: null },
+  { sourceWatermark: baselinePeriod.periodStart },
+  { rate: { numerator: 1, denominator: 100, valueBasisPoints: 101, period: baselinePeriod } },
+  { rate: { numerator: 1, denominator: 100, valueBasisPoints: 100, period } },
+  { quality: { ...quality, sampleSize: 99 } },
+  { quality: { ...quality, coverageBasisPoints: 9999 } },
+  {
+    quality: {
+      ...quality,
+      issues: [{ code: "LOW_SAMPLE", field: "cohort", evidenceIds: ["cohort-a"] }],
+    },
+  },
+  {
+    quality: {
+      ...quality,
+      dataStatus: "INSUFFICIENT",
+      issues: [{ code: "LOW_SAMPLE", field: "cohort", evidenceIds: ["foreign"] }],
+    },
+  },
+];
+it.each(invalidObservationPatches)(
+  "rejects invalid normalized cancellation observation %j",
+  (patch) => {
+    const value = cancellationRequest();
+    expect(
+      BaselineRequestSchema.safeParse({
+        ...value,
+        normalizedObservations: [{ ...value.normalizedObservations[0], ...patch }],
+      }).success,
+    ).toBe(false);
+  },
+);
+it.each([
+  { kind: "METRIC_SNAPSHOT" },
+  { hash: "different" },
+  { id: "different" },
+  { version: "different" },
+  { observedAt: end },
+  { measure: { kind: "CANCELLED_ORDER_RATE", unit: "minorCNY" } },
+])("requires the exact aggregate reference %j", (patch) => {
+  const value = cancellationRequest();
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...value,
+      sourceReferences: [{ ...value.sourceReferences[0], ...patch }],
+    }).success,
+  ).toBe(false);
+});
+it("represents zero-denominator and missing-time aggregates with explicit limitations", () => {
+  for (const [denominator, code] of [
+    [0, "ZERO_DENOMINATOR"],
+    [null, "SOURCE_TIME_MISSING"],
+  ] as const) {
+    const value = cancellationRequest();
+    const observation = {
+      ...cancellationObservation(),
+      sourceWatermark: null,
+      rate: { numerator: null, denominator, valueBasisPoints: null, period: baselinePeriod },
+      quality: {
+        dataStatus: "UNAVAILABLE",
+        sampleSize: 0,
+        coverageBasisPoints: 0,
+        issues: [{ code, field: "cohort", evidenceIds: ["cohort-a"] }],
+      },
+    };
+    expect(
+      BaselineRequestSchema.safeParse({ ...value, normalizedObservations: [observation] }).success,
+    ).toBe(true);
+  }
+});
+it("leaves normalized histories optional for existing typed callers", () => {
+  const oldShape: Omit<BaselineRequest, "normalizedObservations"> =
+    BaselineRequestSchema.parse(baselineRequest);
+  const legacy: BaselineRequest = oldShape;
+  expect(BaselineRequestSchema.parse(legacy)).not.toHaveProperty("normalizedObservations");
+});
+it("does not allow cancellation measures on another event's evidence", () => {
+  expect(
+    accepts({
+      ...evidence(),
+      sourceReferences: [
+        { ...sourceRef, kind: "NORMALIZED_AGGREGATE", measure: cancellationMeasure },
+      ],
+    }),
+  ).toBe(false);
+});

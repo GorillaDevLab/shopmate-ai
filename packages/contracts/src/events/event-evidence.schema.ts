@@ -11,6 +11,7 @@ import {
   BasisPointsSchema,
   DataQualityIssueV1Schema,
   MetricStatusSchema,
+  MetricEvidenceIdsSchema,
   MetricValueSchema,
   SignedMinorSchema,
 } from "../metrics/metric.schema.js";
@@ -81,9 +82,13 @@ export function sameEventPeriod(left: EventPeriod, right: EventPeriod): boolean 
     left.currency === right.currency
   );
 }
-export const EventMeasureSchema = z.union(
-  MetricValueSchema.options.map((option) => option.unwrap().omit({ value: true }).readonly()),
-);
+export const EventCancellationMeasureSchema = z
+  .strictObject({ kind: z.literal("CANCELLED_ORDER_RATE"), unit: z.literal("basisPoints") })
+  .readonly();
+export const EventMeasureSchema = z.union([
+  ...MetricValueSchema.options.map((option) => option.unwrap().omit({ value: true }).readonly()),
+  EventCancellationMeasureSchema,
+]);
 export const EventSourceReferenceSchema = z
   .strictObject({
     kind: z.enum(["METRIC_SNAPSHOT", "NORMALIZED_AGGREGATE"]),
@@ -101,7 +106,9 @@ export const EventSourceReferenceSchema = z
     "Reference is not observed",
   )
   .refine(
-    (value) => value.kind !== "METRIC_SNAPSHOT" || value.measure !== null,
+    (value) =>
+      value.kind !== "METRIC_SNAPSHOT" ||
+      (value.measure !== null && value.measure.kind !== "CANCELLED_ORDER_RATE"),
     "Metric reference requires typed measure",
   )
   .readonly();
@@ -171,6 +178,64 @@ export const EventQualitySchema = z
     "Quality must retain status and limitations",
   )
   .readonly();
+const cancellationObservationObject = z.strictObject({
+  reference: EventSourceReferenceSchema.refine(
+    (value) =>
+      value.kind === "NORMALIZED_AGGREGATE" && value.measure?.kind === "CANCELLED_ORDER_RATE",
+    "Cancellation requires a typed normalized aggregate",
+  ),
+  entity: businessEntity,
+  rate: EventRateSchema,
+  visibleAt: EventTimestampSchema,
+  computedAt: EventTimestampSchema,
+  sourceWatermark: EventTimestampSchema.nullable(),
+  evidenceIds: MetricEvidenceIdsSchema.unwrap().max(1000).readonly(),
+  quality: EventQualitySchema,
+});
+type CancellationObservation = z.infer<typeof cancellationObservationObject>;
+function validCancellationObservationTime(value: CancellationObservation): boolean {
+  return (
+    sameEventPeriod(value.rate.period, value.reference.period) &&
+    Date.parse(value.reference.period.periodEnd) <= Date.parse(value.visibleAt) &&
+    Date.parse(value.visibleAt) <= Date.parse(value.computedAt) &&
+    Date.parse(value.computedAt) <= Date.parse(value.reference.observedAt) &&
+    (value.sourceWatermark === null ||
+      Date.parse(value.sourceWatermark) <= Date.parse(value.visibleAt))
+  );
+}
+function validCancellationObservationQuality(value: CancellationObservation): boolean {
+  const { quality, rate, sourceWatermark } = value;
+  if (quality.sampleSize !== (rate.denominator ?? 0)) return false;
+  if (
+    !quality.issues.every((issue) =>
+      issue.evidenceIds.every((id) => value.evidenceIds.includes(id)),
+    )
+  )
+    return false;
+  if (sourceWatermark === null && quality.dataStatus !== "UNAVAILABLE") return false;
+  if (quality.dataStatus === "UNAVAILABLE" && rate.valueBasisPoints !== null) return false;
+  if (rate.denominator === 0 && !quality.issues.some((issue) => issue.code === "ZERO_DENOMINATOR"))
+    return false;
+  return (
+    quality.dataStatus !== "VERIFIED" ||
+    (rate.denominator !== null &&
+      rate.denominator > 0 &&
+      rate.valueBasisPoints !== null &&
+      sourceWatermark !== null &&
+      Date.parse(sourceWatermark) >= Date.parse(value.reference.period.periodEnd))
+  );
+}
+export const EventCancellationObservationSchema = cancellationObservationObject
+  .refine(
+    validCancellationObservationTime,
+    "Cancellation observation period or visibility mismatch",
+  )
+  .refine(
+    validCancellationObservationQuality,
+    "Cancellation observation quality or cohort mismatch",
+  )
+  .readonly();
+export type EventCancellationObservation = z.infer<typeof EventCancellationObservationSchema>;
 const finiteHours = z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER);
 const baselineFields = {
   alignment: z.literal("ALIGNED"),
@@ -512,6 +577,14 @@ function validBaseline(value: Evidence): boolean {
   );
 }
 function validCommon(value: Evidence): boolean {
+  if (
+    value.eventType !== "CANCELLED_ORDER_SPIKE" &&
+    (value.baseline?.measure.kind === "CANCELLED_ORDER_RATE" ||
+      [...value.sourceReferences, ...(value.baseline?.sourceReferences ?? [])].some(
+        (ref) => ref.measure?.kind === "CANCELLED_ORDER_RATE",
+      ))
+  )
+    return false;
   const observed = Date.parse(value.observedAt);
   if (
     Date.parse(value.periodStart) >= Date.parse(value.periodEnd) ||
