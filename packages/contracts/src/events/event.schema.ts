@@ -445,7 +445,7 @@ function validNormalizedObservations(value: BaselineInput): boolean {
   const observations = value.normalizedObservations ?? [];
   if (value.measure.kind === "CANCELLED_ORDER_RATE" && value.eventType !== "CANCELLED_ORDER_SPIKE")
     return false;
-  if (observations.length === 0) return true;
+  if (value.normalizedObservations === undefined) return true;
   return (
     value.eventType === "CANCELLED_ORDER_SPIKE" &&
     value.measure.kind === "CANCELLED_ORDER_RATE" &&

@@ -1278,3 +1278,9 @@ it("matches exact external SKU identity on normalized observations", () => {
     }).success,
   ).toBe(false);
 });
+
+it("limits even an explicitly empty normalized observation channel to cancellation requests", () => {
+  expect(
+    BaselineRequestSchema.safeParse({ ...baselineRequest, normalizedObservations: [] }).success,
+  ).toBe(false);
+});
