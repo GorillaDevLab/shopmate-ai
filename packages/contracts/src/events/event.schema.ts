@@ -10,7 +10,7 @@ import { BasisPointsSchema, MetricSnapshotV1Schema } from "../metrics/metric.sch
 import { TenantContextSchema } from "../tenant/tenant.schema.js";
 import {
   EventEntitySchema,
-  EventCancellationObservationSchema,
+  EventNormalizedObservationSchema,
   EventEvidenceV1Schema,
   EventMeasureSchema,
   EventPeriodSchema,
@@ -417,11 +417,7 @@ const baselineRequestObject = z.strictObject({
   measure: EventMeasureSchema,
   candidates: z.array(MetricSnapshotV1Schema).max(1000).readonly(),
   sourceReferences: z.array(EventSourceReferenceSchema).max(1000).readonly(),
-  normalizedObservations: z
-    .array(EventCancellationObservationSchema)
-    .max(1000)
-    .readonly()
-    .optional(),
+  normalizedObservations: z.array(EventNormalizedObservationSchema).max(1000).readonly().optional(),
 });
 type BaselineInput = z.infer<typeof baselineRequestObject>;
 function exactObservationReference(
@@ -441,16 +437,26 @@ function exactObservationReference(
     left.measure?.unit === right.measure?.unit
   );
 }
+function normalizedRequestDomain(value: BaselineInput): boolean {
+  return (
+    (value.eventType === "CANCELLED_ORDER_SPIKE" &&
+      value.measure.kind === "CANCELLED_ORDER_RATE") ||
+    (value.eventType === "AD_SPEND_SPIKE" && value.measure.kind === "AD_SPEND")
+  );
+}
 function validNormalizedObservations(value: BaselineInput): boolean {
-  const observations = value.normalizedObservations ?? [];
-  if (value.measure.kind === "CANCELLED_ORDER_RATE" && value.eventType !== "CANCELLED_ORDER_SPIKE")
+  if (
+    (value.measure.kind === "CANCELLED_ORDER_RATE" || value.measure.kind === "AD_SPEND") &&
+    !normalizedRequestDomain(value)
+  )
     return false;
   if (value.normalizedObservations === undefined) return true;
   return (
-    value.eventType === "CANCELLED_ORDER_SPIKE" &&
-    value.measure.kind === "CANCELLED_ORDER_RATE" &&
-    observations.every(
+    normalizedRequestDomain(value) &&
+    value.normalizedObservations.every(
       (item) =>
+        item.reference.measure?.kind === value.measure.kind &&
+        item.reference.measure?.unit === value.measure.unit &&
         sameEventBinding(item.reference.binding, value.binding) &&
         item.reference.definitionVersion === value.definitionVersion &&
         sameEntity(item.entity, value.entity, value.binding) &&

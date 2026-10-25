@@ -12,6 +12,7 @@ import {
   DataQualityIssueV1Schema,
   MetricStatusSchema,
   MetricEvidenceIdsSchema,
+  MetricMeasuredCoverageSchema,
   MetricValueSchema,
   SignedMinorSchema,
 } from "../metrics/metric.schema.js";
@@ -85,9 +86,13 @@ export function sameEventPeriod(left: EventPeriod, right: EventPeriod): boolean 
 export const EventCancellationMeasureSchema = z
   .strictObject({ kind: z.literal("CANCELLED_ORDER_RATE"), unit: z.literal("basisPoints") })
   .readonly();
+export const EventAdSpendMeasureSchema = z
+  .strictObject({ kind: z.literal("AD_SPEND"), unit: z.literal("minorCNY") })
+  .readonly();
 export const EventMeasureSchema = z.union([
   ...MetricValueSchema.options.map((option) => option.unwrap().omit({ value: true }).readonly()),
   EventCancellationMeasureSchema,
+  EventAdSpendMeasureSchema,
 ]);
 export const EventSourceReferenceSchema = z
   .strictObject({
@@ -108,7 +113,9 @@ export const EventSourceReferenceSchema = z
   .refine(
     (value) =>
       value.kind !== "METRIC_SNAPSHOT" ||
-      (value.measure !== null && value.measure.kind !== "CANCELLED_ORDER_RATE"),
+      (value.measure !== null &&
+        value.measure.kind !== "CANCELLED_ORDER_RATE" &&
+        value.measure.kind !== "AD_SPEND"),
     "Metric reference requires typed measure",
   )
   .readonly();
@@ -236,6 +243,81 @@ export const EventCancellationObservationSchema = cancellationObservationObject
   )
   .readonly();
 export type EventCancellationObservation = z.infer<typeof EventCancellationObservationSchema>;
+const adSpendObservationObject = z.strictObject({
+  reference: EventSourceReferenceSchema.refine(
+    (value) => value.kind === "NORMALIZED_AGGREGATE" && value.measure?.kind === "AD_SPEND",
+    "Spend requires a typed normalized aggregate",
+  ),
+  entity: campaignEntity,
+  spendMinor: MinorAmountSchema.nullable(),
+  measuredCoverage: MetricMeasuredCoverageSchema.nullable(),
+  visibleAt: EventTimestampSchema,
+  computedAt: EventTimestampSchema,
+  sourceWatermark: EventTimestampSchema.nullable(),
+  evidenceIds: MetricEvidenceIdsSchema.unwrap().max(1000).readonly(),
+  quality: EventQualitySchema,
+});
+type AdSpendObservation = z.infer<typeof adSpendObservationObject>;
+function validAdSpendObservationTime(value: AdSpendObservation): boolean {
+  return (
+    Date.parse(value.reference.period.periodEnd) <= Date.parse(value.visibleAt) &&
+    Date.parse(value.visibleAt) <= Date.parse(value.computedAt) &&
+    Date.parse(value.computedAt) <= Date.parse(value.reference.observedAt) &&
+    (value.sourceWatermark === null ||
+      Date.parse(value.sourceWatermark) <= Date.parse(value.visibleAt))
+  );
+}
+function validAdSpendCoverage(value: AdSpendObservation): boolean {
+  const coverage = value.measuredCoverage;
+  if (coverage === null)
+    return (
+      value.quality.coverageBasisPoints === 0 &&
+      value.quality.issues.some(
+        (issue) => issue.code === "WINDOW_MISMATCH" || issue.code === "PARTIAL_COVERAGE",
+      )
+    );
+  return (
+    sameEventBinding(coverage.binding, value.reference.binding) &&
+    sameEventPeriod(coverage, value.reference.period) &&
+    [coverage.periodStart, coverage.periodEnd, coverage.observedAt].every(
+      (time) => EventTimestampSchema.safeParse(time).success,
+    ) &&
+    Date.parse(coverage.observedAt) <= Date.parse(value.visibleAt) &&
+    coverage.evidenceIds.every((id) => value.evidenceIds.includes(id)) &&
+    value.quality.coverageBasisPoints <= coverage.coverageBasisPoints
+  );
+}
+function validAdSpendQuality(value: AdSpendObservation): boolean {
+  const { quality, sourceWatermark, measuredCoverage } = value;
+  if (
+    !quality.issues.every((issue) =>
+      issue.evidenceIds.every((id) => value.evidenceIds.includes(id)),
+    )
+  )
+    return false;
+  if (sourceWatermark === null && quality.dataStatus !== "UNAVAILABLE") return false;
+  if (quality.dataStatus === "UNAVAILABLE" && value.spendMinor !== null) return false;
+  return (
+    quality.dataStatus !== "VERIFIED" ||
+    (value.spendMinor !== null &&
+      quality.sampleSize > 0 &&
+      measuredCoverage !== null &&
+      measuredCoverage.coverageBasisPoints === 10000 &&
+      sourceWatermark !== null &&
+      Date.parse(sourceWatermark) >= Date.parse(value.reference.period.periodEnd))
+  );
+}
+export const EventAdSpendObservationSchema = adSpendObservationObject
+  .refine(validAdSpendObservationTime, "Spend observation visibility mismatch")
+  .refine(validAdSpendCoverage, "Spend measurement coverage mismatch")
+  .refine(validAdSpendQuality, "Spend source quality mismatch")
+  .readonly();
+export type EventAdSpendObservation = z.infer<typeof EventAdSpendObservationSchema>;
+export const EventNormalizedObservationSchema = z.union([
+  EventCancellationObservationSchema,
+  EventAdSpendObservationSchema,
+]);
+export type EventNormalizedObservation = z.infer<typeof EventNormalizedObservationSchema>;
 const finiteHours = z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER);
 const baselineFields = {
   alignment: z.literal("ALIGNED"),
@@ -576,7 +658,7 @@ function validBaseline(value: Evidence): boolean {
       Date.parse(ref.observedAt) <= Date.parse(value.observedAt),
   );
 }
-function validCommon(value: Evidence): boolean {
+function validEventOnlyMeasures(value: Evidence): boolean {
   if (
     value.eventType !== "CANCELLED_ORDER_SPIKE" &&
     (value.baseline?.measure.kind === "CANCELLED_ORDER_RATE" ||
@@ -585,6 +667,20 @@ function validCommon(value: Evidence): boolean {
       ))
   )
     return false;
+  if (
+    value.eventType !== "AD_SPEND_SPIKE" &&
+    (value.baseline?.measure.kind === "AD_SPEND" ||
+      value.baseline?.sourceReferences.some((ref) => ref.measure?.kind === "AD_SPEND"))
+  )
+    return false;
+  return (
+    value.eventType === "AD_SPEND_SPIKE" ||
+    value.eventType === "ROAS_DROP" ||
+    value.sourceReferences.every((ref) => ref.measure?.kind !== "AD_SPEND")
+  );
+}
+function validCommon(value: Evidence): boolean {
+  if (!validEventOnlyMeasures(value)) return false;
   const observed = Date.parse(value.observedAt);
   if (
     Date.parse(value.periodStart) >= Date.parse(value.periodEnd) ||
