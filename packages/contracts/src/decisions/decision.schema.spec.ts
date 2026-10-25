@@ -726,3 +726,51 @@ it.each([
     expect(SanitizedDecisionBaselineSchema.safeParse(full).success).toBe(false);
   },
 );
+
+it.each([
+  { status: "AVAILABLE", median: 20000.5, mad: 15000.5, valid: true },
+  {
+    status: "AVAILABLE",
+    median: Number.MAX_SAFE_INTEGER,
+    mad: Number.MAX_SAFE_INTEGER,
+    valid: true,
+  },
+  { status: "AVAILABLE", median: -0.5, mad: 0.5, valid: false },
+  { status: "AVAILABLE", median: 20000.5, mad: -0.5, valid: false },
+  { status: "AVAILABLE", median: Number.MAX_SAFE_INTEGER + 1, mad: 0, valid: false },
+  { status: "AVAILABLE", median: 20000.5, mad: Number.MAX_SAFE_INTEGER + 1, valid: false },
+  { status: "AVAILABLE", median: NaN, mad: 0, valid: false },
+  { status: "AVAILABLE", median: Infinity, mad: 0, valid: false },
+  { status: "AVAILABLE", median: 20000.5, mad: NaN, valid: false },
+  { status: "AVAILABLE", median: 20000.5, mad: Infinity, valid: false },
+  { status: "ZERO", median: 0, mad: 15000.5, valid: true },
+  { status: "ZERO", median: 0, mad: Number.MAX_SAFE_INTEGER, valid: true },
+  { status: "ZERO", median: 0, mad: -0.5, valid: false },
+  { status: "ZERO", median: 0, mad: Number.MAX_SAFE_INTEGER + 1, valid: false },
+])(
+  "preserves ad spend monetary domains across full/projected/provider boundaries %j",
+  ({ status, median, mad, valid }) => {
+    const projected = {
+      status,
+      alignment: "ALIGNED",
+      measure: { kind: "AD_SPEND", unit: "minorCNY" },
+      aggregation: "EXACT_MEDIAN",
+      period: input.period,
+      median,
+      mad,
+      sampleSize: 3,
+      coverageBasisPoints: 10000,
+    };
+    const full = {
+      ...projected,
+      version: "baseline-v1",
+      sourceReferences: [{ ...source, kind: "NORMALIZED_AGGREGATE", measure: projected.measure }],
+    };
+    expect(RobustBaselineV1Schema.safeParse(full).success).toBe(valid);
+    expect(SanitizedDecisionBaselineSchema.safeParse(projected).success).toBe(valid);
+    expect(SanitizedDecisionInputSchema.safeParse({ ...input, baseline: projected }).success).toBe(
+      valid,
+    );
+    expect(SanitizedDecisionBaselineSchema.safeParse(full).success).toBe(false);
+  },
+);
