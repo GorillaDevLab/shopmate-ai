@@ -8,6 +8,7 @@ import {
   BasisPointsSchema,
   MetricIssueCodeSchema,
   MetricStatusSchema,
+  MetricValueSchema,
 } from "../metrics/metric.schema.js";
 import {
   EventEvidenceV1Schema,
@@ -141,22 +142,38 @@ const baselineMask = {
   sampleSize: true,
   coverageBasisPoints: true,
 } as const;
-/** Explicit projection of the frozen baseline contract; no reference IDs or merchant identifiers. */
-export const SanitizedDecisionBaselineSchema = z
-  .union([
-    z
-      .strictObject(baselineVariants[0].unwrap().shape)
-      .pick(baselineMask)
-      .refine((value) => value.median !== 0)
-      .readonly(),
-    baselineVariants[1].unwrap().pick(baselineMask).readonly(),
-    baselineVariants[2].unwrap().pick(baselineMask).readonly(),
-  ])
-  .refine((value) => {
-    if (value.alignment === "ALIGNED" && value.period === null) return false;
-    if (value.status === "MISSING") return value.alignment === "MISSING" && value.period === null;
-    return value.status !== "UNALIGNED" || value.alignment === "UNALIGNED";
-  }, "Projected baseline status, alignment or period mismatch")
+const projectedBaseline = z.union([
+  z
+    .strictObject(baselineVariants[0].unwrap().shape)
+    .pick(baselineMask)
+    .refine((value) => value.median !== 0)
+    .readonly(),
+  baselineVariants[1].unwrap().pick(baselineMask).readonly(),
+  baselineVariants[2].unwrap().pick(baselineMask).readonly(),
+]);
+const signedBaselineKinds = new Set<string>(
+  MetricValueSchema.options[1].unwrap().shape.kind.options,
+);
+function validProjectedBaseline(value: z.infer<typeof projectedBaseline>): boolean {
+  if (value.alignment === "ALIGNED" && value.period === null) return false;
+  if (value.status === "MISSING" && (value.alignment !== "MISSING" || value.period !== null))
+    return false;
+  if (value.status === "UNALIGNED" && value.alignment !== "UNALIGNED") return false;
+  if (value.median === null) return true;
+  if (!signedBaselineKinds.has(value.measure.kind) && value.median < 0) return false;
+  // Baseline medians/MAD can be fractional; scalar integer validators would reject valid statistics.
+  return (
+    value.measure.unit !== "basisPoints" ||
+    value.measure.kind === "ROAS" ||
+    (value.median <= 10000 && value.mad <= 10000)
+  );
+}
+/** Explicit projection retains frozen measure domains without reference IDs or merchant identifiers. */
+export const SanitizedDecisionBaselineSchema = projectedBaseline
+  .refine(
+    validProjectedBaseline,
+    "Projected baseline measure, status, alignment or period mismatch",
+  )
   .nullable();
 const sanitizedFields = {
   ...resultFields,

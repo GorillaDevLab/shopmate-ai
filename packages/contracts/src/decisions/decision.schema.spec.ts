@@ -11,6 +11,8 @@ import {
   SanitizedDecisionBaselineSchema,
   DecisionRulesetV1Schema,
   RoutedPrimaryDecisionRunSchema,
+  MetricValueSchema,
+  RobustBaselineV1Schema,
 } from "../index.js";
 import type { DecisionProvider, DecisionControl } from "../index.js";
 import { DecisionControlSchema } from "../index.js";
@@ -619,4 +621,79 @@ it("requires verified source watermark to cover the observed period", () => {
     SanitizedDecisionInputSchema.safeParse({ ...input, sourceWatermark: input.period.periodStart })
       .success,
   ).toBe(false);
+});
+
+const signedBaselineMeasures = new Set([
+  "NET_REVENUE_SETTLEMENT",
+  "NET_MERCHANDISE_REVENUE",
+  "GROSS_PROFIT",
+  "CONTRIBUTION",
+  "ESTIMATED_NET_PROFIT",
+  "PROFIT_DELTA",
+]);
+const baselineMeasures = MetricValueSchema.options.flatMap((option) => {
+  const shape = option.unwrap().shape;
+  return shape.kind.options.map((kind) => ({ kind, unit: shape.unit.value }));
+});
+function projectedBaseline(measure: (typeof baselineMeasures)[number], median: number, mad = 0.5) {
+  return {
+    status: "AVAILABLE",
+    alignment: "ALIGNED",
+    measure,
+    aggregation: "EXACT_MEDIAN",
+    period: input.period,
+    median,
+    mad,
+    sampleSize: 4,
+    coverageBasisPoints: 10000,
+  };
+}
+function expectBaselineDomain(value: ReturnType<typeof projectedBaseline>, allowed: boolean) {
+  expect(SanitizedDecisionBaselineSchema.safeParse(value).success).toBe(allowed);
+  const full = {
+    ...value,
+    version: "baseline-v1",
+    sourceReferences: [{ ...source, measure: value.measure }],
+  };
+  expect(RobustBaselineV1Schema.safeParse(full).success).toBe(allowed);
+  expect(SanitizedDecisionInputSchema.safeParse({ ...input, baseline: value }).success).toBe(
+    allowed,
+  );
+}
+
+it.each(baselineMeasures)("preserves the median sign domain for $kind", (measure) => {
+  const signed = signedBaselineMeasures.has(measure.kind);
+  expectBaselineDomain(projectedBaseline(measure, -1), signed);
+  expectBaselineDomain(projectedBaseline(measure, -0.5), signed);
+  expectBaselineDomain(projectedBaseline(measure, 0.5), true);
+  expectBaselineDomain(projectedBaseline(measure, 0), false);
+});
+
+it.each(baselineMeasures)("preserves median and MAD upper/fraction bounds for $kind", (measure) => {
+  const probability = measure.unit === "basisPoints" && measure.kind !== "ROAS";
+  const upper = probability ? 10000 : Number.MAX_SAFE_INTEGER;
+  expectBaselineDomain(projectedBaseline(measure, upper, upper), true);
+  expectBaselineDomain(projectedBaseline(measure, upper + (probability ? 0.5 : 1)), false);
+  expectBaselineDomain(projectedBaseline(measure, 0.5, upper + (probability ? 0.5 : 1)), false);
+  expectBaselineDomain(projectedBaseline(measure, 0.5, -0.5), false);
+});
+
+it.each(baselineMeasures)(
+  "preserves the lower signed bound and ZERO MAD domain for $kind",
+  (measure) => {
+    const signed = signedBaselineMeasures.has(measure.kind);
+    expectBaselineDomain(projectedBaseline(measure, -Number.MAX_SAFE_INTEGER), signed);
+    expectBaselineDomain(projectedBaseline(measure, -Number.MAX_SAFE_INTEGER - 1), false);
+    const zero = { ...projectedBaseline(measure, 0), status: "ZERO" };
+    expectBaselineDomain(zero, true);
+    const probability = measure.unit === "basisPoints" && measure.kind !== "ROAS";
+    expectBaselineDomain({ ...zero, mad: 10000.5 }, !probability);
+  },
+);
+
+it("keeps ROAS multiplier fractions above probability limits valid", () => {
+  expectBaselineDomain(
+    projectedBaseline({ kind: "ROAS", unit: "basisPoints" }, 30000.5, 10000.5),
+    true,
+  );
 });
