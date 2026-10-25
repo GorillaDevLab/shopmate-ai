@@ -479,6 +479,74 @@ it("does not copy a sold-goods cost snapshot into inventory exposure", () => {
     candidate: { evidence: { facts: { inventoryCostMinor: 12300 } } },
   });
 });
+it.each(blockers)("scopes original global-looking optional COGS diagnostics: %s", (code) => {
+  const diagnostic = issue(code, "sourceWatermark");
+  const cost = snapshot({
+    metric: { kind: "COGS", unit: "minorCNY", value: 999 },
+    status: code === "STALE_SOURCE" ? "STALE" : "INSUFFICIENT",
+    issues: [diagnostic],
+    sourceWatermark: code === "STALE_SOURCE" ? "2026-10-24T00:00:00.000Z" : period.periodEnd,
+  });
+  const result = detect(withSnapshot(cost));
+  expect(result).toMatchObject({
+    disposition: "CANDIDATE",
+    candidate: {
+      evidence: {
+        facts: { inventoryCostMinor: null, availableUnits: 100, salesUnits: 30 },
+      },
+    },
+  });
+  expect(result.quality.issues).toContainEqual(diagnostic);
+  expect(result.quality.issues).toContainEqual(
+    expect.objectContaining({ code, field: "inventoryCostMinor" }),
+  );
+});
+it.each(["COST_MISSING", "COST_ESTIMATED"] as const)(
+  "scopes optional COGS cost limitations: %s",
+  (code) => {
+    const diagnostic = issue(code, "sourceWatermark");
+    const cost = snapshot({
+      metric: { kind: "COGS", unit: "minorCNY", value: 999 },
+      status: "INSUFFICIENT",
+      issues: [diagnostic],
+    });
+    const result = detect(withSnapshot(cost));
+    expect(result).toMatchObject({
+      disposition: "CANDIDATE",
+      candidate: { evidence: { facts: { inventoryCostMinor: null } } },
+    });
+    expect(result.quality.issues).toContainEqual(diagnostic);
+  },
+);
+it.each(blockers)(
+  "keeps matching required diagnostics blocking alongside optional COGS: %s",
+  (code) => {
+    const diagnostic = issue(code, "sourceWatermark");
+    const inventory = snapshot({ status: "INSUFFICIENT", issues: [diagnostic] });
+    const cost = snapshot({
+      metric: { kind: "COGS", unit: "minorCNY", value: 999 },
+      status: "INSUFFICIENT",
+      issues: [diagnostic],
+    });
+    const input = withSnapshot(inventory);
+    const costRef: EventSourceReference = {
+      ...aggregate(),
+      id: "cost-snapshot",
+      kind: "METRIC_SNAPSHOT",
+      measure: { kind: "COGS", unit: "minorCNY" },
+    };
+    const result = detect({
+      ...input,
+      snapshots: [inventory, cost],
+      evidence: {
+        ...input.evidence,
+        sourceReferences: [...input.evidence.sourceReferences, costRef],
+      },
+    });
+    expect(result.disposition).toBe("NO_CANDIDATE");
+    expect(result.quality.issues).toContainEqual(diagnostic);
+  },
+);
 it.each(["store", "version", "window", "unknown", "future"])(
   "rejects invalid %s evidence",
   (mutation) => {

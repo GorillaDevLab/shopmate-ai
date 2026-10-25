@@ -189,10 +189,16 @@ function snapshotQuality(
   rule: Rule,
   field: string,
   issues: DataQualityIssueV1[],
+  costOnly: Set<DataQualityIssueV1>,
 ): void {
   issues.push(...snapshot.issues);
+  if (field === "inventoryCostMinor")
+    for (const diagnostic of snapshot.issues) costOnly.add(diagnostic);
   for (const diagnostic of snapshot.issues)
-    if (blockers.has(diagnostic.code) && !affects(diagnostic, costs))
+    if (
+      (field === "inventoryCostMinor" || blockers.has(diagnostic.code)) &&
+      !affects(diagnostic, costs)
+    )
       addIssue(item, issues, diagnostic.code, field);
   if (snapshot.status === "UNAVAILABLE") addIssue(item, issues, "NOT_SYNCHRONIZED", field);
   if (snapshot.status === "STALE") addIssue(item, issues, "STALE_SOURCE", field);
@@ -212,6 +218,7 @@ function snapshotChecks(
   item: Evidence,
   rule: Rule,
   issues: DataQualityIssueV1[],
+  costOnly: Set<DataQualityIssueV1>,
 ): void {
   for (const snapshot of request.snapshots) {
     const kind = snapshot.metric.kind;
@@ -225,7 +232,7 @@ function snapshotChecks(
     // COGS is a cost-quality dependency, never an inventory valuation to copy or compare.
     if (kind !== "COGS" && snapshot.metric.value !== item.facts[field])
       addIssue(item, issues, "SOURCE_INCONSISTENT", field);
-    snapshotQuality(item, snapshot, rule, field, issues);
+    snapshotQuality(item, snapshot, rule, field, issues, costOnly);
   }
 }
 function knownCost(item: Evidence, issues: DataQualityIssueV1[]): number | null {
@@ -237,12 +244,16 @@ function knownCost(item: Evidence, issues: DataQualityIssueV1[]): number | null 
   if (issues.some((diagnostic) => affects(diagnostic, costs))) return null;
   return facts.inventoryCostMinor;
 }
-function quality(item: Evidence, issues: readonly DataQualityIssueV1[]): EventQuality {
+function quality(
+  item: Evidence,
+  issues: readonly DataQualityIssueV1[],
+  eligibleIssues: readonly DataQualityIssueV1[],
+): EventQuality {
   return {
     dataStatus:
       issues.length === 0
         ? item.dataStatus
-        : issues.some((entry) => entry.code === "STALE_SOURCE" && coreIssue(entry))
+        : eligibleIssues.some((entry) => entry.code === "STALE_SOURCE" && coreIssue(entry))
           ? "STALE"
           : "INSUFFICIENT",
     sampleSize: item.sampleSize,
@@ -271,15 +282,19 @@ function evaluate(
   rule: Rule,
 ): EventResult<EventDetectionOutcome> {
   const issues = [...item.issues];
+  const costOnly = new Set<DataQualityIssueV1>();
   sourceChecks(item, rule, issues);
   sampleChecks(item, rule, issues);
   listingChecks(item, rule, issues);
   coverageChecks(item, issues);
-  snapshotChecks(request, item, rule, issues);
+  snapshotChecks(request, item, rule, issues, costOnly);
   const inventoryCostMinor = knownCost(item, issues);
   if (issues.length > 100) return { ok: false, error: { code: "OVERFLOW", evidenceIds: [] } };
-  const resultQuality = quality(item, issues);
-  const reason = blockedReason(issues) ?? (threshold(item, rule) ? null : "BELOW_THRESHOLD");
+  // Preserve original cost reasons, while their snapshot provenance limits their authority.
+  const eligibleIssues = issues.filter((issue) => !costOnly.has(issue));
+  const resultQuality = quality(item, issues, eligibleIssues);
+  const reason =
+    blockedReason(eligibleIssues) ?? (threshold(item, rule) ? null : "BELOW_THRESHOLD");
   const output =
     reason === null
       ? {
