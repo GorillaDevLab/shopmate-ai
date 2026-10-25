@@ -6,6 +6,7 @@ import {
   type BaselinePort,
   type BaselineRequest,
   type EventErrorCode,
+  type EventCancellationObservation,
   type EventResult,
   type EventSourceReference,
   type MetricSnapshotV1,
@@ -29,7 +30,19 @@ const policySchema = z
   .refine((value) => value.minimumSamples <= value.lookbackWeeks)
   .readonly();
 export type RobustBaselinePolicy = z.infer<typeof policySchema>;
-type Sample = Readonly<{ snapshot: MetricSnapshotV1; reference: EventSourceReference }>;
+type Sample = Readonly<{
+  period: EventSourceReference["period"];
+  value: number | null;
+  visibleAt: string;
+  computedAt: string;
+  sourceWatermark: string | null;
+  status: MetricSnapshotV1["status"];
+  sampleSize: number;
+  issues: MetricSnapshotV1["issues"];
+  evidenceIds: readonly string[];
+  reference: EventSourceReference;
+  content: string;
+}>;
 const weekMs = 7 * 86400000;
 const dateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
@@ -69,6 +82,58 @@ function snapshotContent(snapshot: MetricSnapshotV1): string {
       snapshot.sourceWatermark === null ? null : Date.parse(snapshot.sourceWatermark),
   });
 }
+function metricSample(snapshot: MetricSnapshotV1, reference: EventSourceReference): Sample {
+  return {
+    period: reference.period,
+    value: snapshot.metric.value,
+    visibleAt: snapshot.visibleAt,
+    computedAt: snapshot.computedAt,
+    sourceWatermark: snapshot.sourceWatermark,
+    status: snapshot.status,
+    sampleSize: snapshot.sampleSize,
+    issues: snapshot.issues,
+    evidenceIds: snapshot.evidenceIds,
+    reference,
+    content: snapshotContent(snapshot),
+  };
+}
+function cancellationSample(item: EventCancellationObservation): Sample {
+  const content = JSON.stringify({
+    ...item,
+    reference: referenceContent(item.reference),
+    rate: { ...item.rate, period: { ...item.rate.period, ...periodInstants(item.rate.period) } },
+    visibleAt: Date.parse(item.visibleAt),
+    computedAt: Date.parse(item.computedAt),
+    sourceWatermark: item.sourceWatermark === null ? null : Date.parse(item.sourceWatermark),
+  });
+  return {
+    period: item.reference.period,
+    value: item.rate.valueBasisPoints,
+    visibleAt: item.visibleAt,
+    computedAt: item.computedAt,
+    sourceWatermark: item.sourceWatermark,
+    status: item.quality.dataStatus,
+    sampleSize: item.quality.sampleSize,
+    issues: item.quality.issues,
+    evidenceIds: item.evidenceIds,
+    reference: item.reference,
+    content,
+  };
+}
+function aggregatePayloadConflict(input: readonly Sample[]): boolean {
+  const seen = new Map<string, string>();
+  for (const sample of input) {
+    if (sample.reference.kind !== "NORMALIZED_AGGREGATE") continue;
+    const key = JSON.stringify([
+      sample.reference.kind,
+      sample.reference.id,
+      sample.reference.version,
+    ]);
+    if (seen.has(key) && seen.get(key) !== sample.content) return true;
+    seen.set(key, sample.content);
+  }
+  return false;
+}
 function referenceConflict(refs: readonly EventSourceReference[]): boolean {
   const seen = new Map<string, string>();
   for (const ref of refs) {
@@ -86,9 +151,10 @@ function samples(request: BaselineRequest): EventResult<readonly Sample[]> {
     const refs = request.sourceReferences.filter((ref) => matchesReference(snapshot, ref));
     refs.sort((left, right) => compareText(referenceContent(left), referenceContent(right)));
     if (!refs[0]) return failure("INVALID_INPUT", snapshot.evidenceIds);
-    output.push({ snapshot, reference: refs[0] });
+    output.push(metricSample(snapshot, refs[0]));
   }
-  return { ok: true, value: output };
+  output.push(...(request.normalizedObservations ?? []).map(cancellationSample));
+  return aggregatePayloadConflict(output) ? failure("CONFLICT") : { ok: true, value: output };
 }
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -105,14 +171,12 @@ function aligned(request: BaselineRequest, sample: Sample): boolean {
   });
   const result = windows.align(
     request.period,
-    businessDate(sample.snapshot.periodStart),
+    businessDate(sample.period.periodStart),
     request.observedAt,
   );
-  return (
-    result.ok && result.value.aligned && sameEventPeriod(result.value.baseline, sample.snapshot)
-  );
+  return result.ok && result.value.aligned && sameEventPeriod(result.value.baseline, sample.period);
 }
-function observationOrder(left: MetricSnapshotV1, right: MetricSnapshotV1): number {
+function observationOrder(left: Sample, right: Sample): number {
   return (
     Date.parse(left.visibleAt) - Date.parse(right.visibleAt) ||
     Date.parse(left.computedAt) - Date.parse(right.computedAt)
@@ -120,48 +184,42 @@ function observationOrder(left: MetricSnapshotV1, right: MetricSnapshotV1): numb
 }
 function uniqueWindows(input: readonly Sample[]): EventResult<readonly Sample[]> {
   // Inspect newest observations first so superseded ties cannot depend on input order.
-  const ordered = [...input].sort((a, b) => observationOrder(b.snapshot, a.snapshot));
+  const ordered = [...input].sort((a, b) => observationOrder(b, a));
   const groups = new Map<string, Sample>();
   for (const sample of ordered) {
     const key = JSON.stringify([
-      Date.parse(sample.snapshot.periodStart),
-      Date.parse(sample.snapshot.periodEnd),
+      Date.parse(sample.period.periodStart),
+      Date.parse(sample.period.periodEnd),
     ]);
     const prior = groups.get(key);
-    const order = prior ? observationOrder(sample.snapshot, prior.snapshot) : 1;
-    if (
-      prior &&
-      order === 0 &&
-      snapshotContent(sample.snapshot) !== snapshotContent(prior.snapshot)
-    )
-      return failure("CONFLICT", [
-        ...new Set([...prior.snapshot.evidenceIds, ...sample.snapshot.evidenceIds]),
-      ]);
+    const order = prior ? observationOrder(sample, prior) : 1;
+    if (prior && order === 0 && sample.content !== prior.content)
+      return failure("CONFLICT", [...new Set([...prior.evidenceIds, ...sample.evidenceIds])]);
     if (!prior || order > 0) groups.set(key, sample);
   }
   return {
     ok: true,
     value: [...groups.values()].sort(
-      (a, b) => Date.parse(b.snapshot.periodStart) - Date.parse(a.snapshot.periodStart),
+      (a, b) => Date.parse(b.period.periodStart) - Date.parse(a.period.periodStart),
     ),
   };
 }
 function stale(sample: Sample, request: BaselineRequest, policy: RobustBaselinePolicy): boolean {
-  const age = Date.parse(request.observedAt) - Date.parse(sample.snapshot.periodEnd);
-  const distance = Date.parse(request.period.periodStart) - Date.parse(sample.snapshot.periodStart);
+  const age = Date.parse(request.observedAt) - Date.parse(sample.period.periodEnd);
+  const distance = Date.parse(request.period.periodStart) - Date.parse(sample.period.periodStart);
   return (
     distance > policy.lookbackWeeks * weekMs ||
     age > policy.maximumAgeSeconds * 1000 ||
-    sample.snapshot.status === "STALE" ||
-    sample.snapshot.issues.some((issue) => issue.code === "STALE_SOURCE")
+    sample.status === "STALE" ||
+    sample.issues.some((issue) => issue.code === "STALE_SOURCE")
   );
 }
 function usable(sample: Sample, request: BaselineRequest, policy: RobustBaselinePolicy): boolean {
   return (
     !stale(sample, request, policy) &&
-    sample.snapshot.status === "VERIFIED" &&
-    sample.snapshot.metric.value !== null &&
-    sample.snapshot.sampleSize > 0
+    sample.status === "VERIFIED" &&
+    sample.value !== null &&
+    sample.sampleSize > 0
   );
 }
 /** Fixed dyadic scale retains every IEEE-754 input and both median half steps exactly. */
@@ -199,8 +257,8 @@ function boundedNumber(value: bigint): number | null {
 function statistics(input: readonly Sample[]): EventResult<{ median: number; mad: number }> {
   const values: bigint[] = [];
   for (const sample of input) {
-    if (sample.snapshot.metric.value === null) return failure("INVALID_INPUT");
-    values.push(exactValue(sample.snapshot.metric.value));
+    if (sample.value === null) return failure("INVALID_INPUT");
+    values.push(exactValue(sample.value));
   }
   const center = median(values);
   const deviation = median(values.map((value) => magnitude(value - center)));

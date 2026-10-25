@@ -442,3 +442,222 @@ it("still rejects genuinely different source watermarks at the same observation 
   });
   rejected(request([item, { ...item, sourceWatermark: "2026-10-18T06:30:00.000Z" }]), "CONFLICT");
 });
+
+import {
+  EventCancellationObservationSchema,
+  type EventCancellationObservation,
+} from "@shopmate/contracts";
+function cancellationSample(value: number, weeks: number): EventCancellationObservation {
+  const item = snapshot(value, weeks);
+  const ref = reference(item);
+  return EventCancellationObservationSchema.parse({
+    reference: {
+      ...ref,
+      kind: "NORMALIZED_AGGREGATE",
+      measure: { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" },
+    },
+    entity: { kind: "STORE" },
+    rate: { numerator: value, denominator: 10000, valueBasisPoints: value, period: ref.period },
+    visibleAt: item.visibleAt,
+    computedAt: item.computedAt,
+    sourceWatermark: item.sourceWatermark,
+    evidenceIds: item.evidenceIds,
+    quality: { dataStatus: "VERIFIED", sampleSize: 10000, coverageBasisPoints: 10000, issues: [] },
+  });
+}
+function cancellationInput(
+  observations: readonly EventCancellationObservation[] = [],
+  patch: Partial<BaselineRequest> = {},
+): BaselineRequest {
+  return request([], {
+    eventType: "CANCELLED_ORDER_SPIKE",
+    measure: { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" },
+    normalizedObservations: observations,
+    sourceReferences: observations.map((item) => item.reference),
+    ...patch,
+  });
+}
+function cancellationRevision(
+  item: EventCancellationObservation,
+  value: number,
+  seconds = 1,
+): EventCancellationObservation {
+  const time = new Date(Date.parse(item.computedAt) + seconds * 1000).toISOString();
+  return {
+    ...item,
+    reference: {
+      ...item.reference,
+      id: `${item.reference.id}-revision`,
+      version: "revision-new",
+      hash: "hash-new",
+      observedAt: time,
+    },
+    visibleAt: time,
+    computedAt: time,
+    rate: { ...item.rate, numerator: value, valueBasisPoints: value },
+  };
+}
+function limitedCancellation(
+  item: EventCancellationObservation,
+  status: "INSUFFICIENT" | "ESTIMATED" | "STALE" | "UNAVAILABLE" = "UNAVAILABLE",
+): EventCancellationObservation {
+  return {
+    ...item,
+    sourceWatermark: status === "UNAVAILABLE" ? null : item.sourceWatermark,
+    rate: {
+      ...item.rate,
+      valueBasisPoints: status === "UNAVAILABLE" ? null : item.rate.valueBasisPoints,
+      numerator: status === "UNAVAILABLE" ? null : item.rate.numerator,
+    },
+    quality: {
+      ...item.quality,
+      dataStatus: status,
+      coverageBasisPoints: 5000,
+      issues: [
+        {
+          code: status === "STALE" ? "STALE_SOURCE" : "SOURCE_TIME_MISSING",
+          field: "cohort",
+          evidenceIds: item.evidenceIds,
+        },
+      ],
+    },
+  };
+}
+it("computes cancellation median/MAD using contributor-only aggregate references", () => {
+  const items = [
+    cancellationSample(100, 1),
+    cancellationSample(200, 2),
+    cancellationSample(9000, 3),
+  ];
+  const value = evaluate(cancellationInput(items));
+  expect(value).toMatchObject({
+    status: "AVAILABLE",
+    median: 200,
+    mad: 100,
+    sampleSize: 3,
+    coverageBasisPoints: 3750,
+  });
+  expect(value.sourceReferences).toEqual(items.map((item) => item.reference));
+});
+it("preserves cancellation fractional statistics and verified zero numerators", () => {
+  expect(
+    evaluate(cancellationInput([cancellationSample(100, 1), cancellationSample(101, 2)]), {
+      ...policy,
+      minimumSamples: 2,
+    }),
+  ).toMatchObject({ median: 100.5, mad: 0.5 });
+  expect(
+    evaluate(cancellationInput([1, 2, 3].map((weeks) => cancellationSample(0, weeks)))),
+  ).toMatchObject({ status: "ZERO", median: 0, mad: 0 });
+});
+it("selects the latest cancellation revision without inflating window count", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const revised = cancellationRevision(items[0], 1000);
+  expect(evaluate(cancellationInput([...items, revised, revised]))).toMatchObject({
+    median: 100,
+    sampleSize: 3,
+  });
+  expect(evaluate(cancellationInput([...items, revised])).sourceReferences[0]).toEqual(
+    revised.reference,
+  );
+});
+it("does not resurrect complete cancellation history behind a newer unavailable revision", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const unavailable = limitedCancellation(cancellationRevision(items[0], 100));
+  expect(evaluate(cancellationInput([...items, unavailable]))).toMatchObject({
+    status: "INSUFFICIENT",
+    sampleSize: 2,
+    median: null,
+  });
+});
+it("rejects equal-time cancellation disagreements independently of order", () => {
+  const item = cancellationSample(100, 1);
+  const changed = cancellationRevision(item, 200, 0);
+  rejected(cancellationInput([item, changed]), "CONFLICT");
+  rejected(cancellationInput([changed, item]), "CONFLICT");
+});
+it("rejects differing payloads claiming one immutable aggregate even at different visibility times", () => {
+  const item = cancellationSample(100, 1);
+  const changed = { ...item, rate: { ...item.rate, numerator: 101, valueBasisPoints: 101 } };
+  rejected(cancellationInput([item, changed]), "CONFLICT");
+  const later = {
+    ...changed,
+    visibleAt: period.periodEnd,
+    computedAt: period.periodEnd,
+    reference: { ...item.reference, observedAt: period.periodEnd },
+  };
+  const original = { ...item, reference: later.reference };
+  rejected(cancellationInput([original, later]), "CONFLICT");
+});
+it("compares every cancellation timestamp canonically and collapses exact repeats", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const item = items[0];
+  const spelling = (time: string) => time.replace(".000Z", "Z");
+  const historicalPeriod = {
+    ...item.reference.period,
+    periodStart: spelling(item.reference.period.periodStart),
+    periodEnd: spelling(item.reference.period.periodEnd),
+  };
+  const equivalent = {
+    ...item,
+    visibleAt: spelling(item.visibleAt),
+    computedAt: spelling(item.computedAt),
+    sourceWatermark: spelling(item.sourceWatermark!),
+    reference: {
+      ...item.reference,
+      observedAt: spelling(item.reference.observedAt),
+      period: historicalPeriod,
+    },
+    rate: { ...item.rate, period: historicalPeriod },
+  };
+  expect(evaluate(cancellationInput([...items, equivalent]))).toMatchObject({
+    sampleSize: 3,
+    median: 100,
+  });
+});
+it.each(["INSUFFICIENT", "ESTIMATED", "STALE", "UNAVAILABLE"] as const)(
+  "never uses numeric cancellation observations with %s quality",
+  (status) => {
+    const items = [1, 2, 3].map((weeks) =>
+      limitedCancellation(cancellationSample(100, weeks), status),
+    );
+    expect(evaluate(cancellationInput(items))).toMatchObject({
+      status: status === "STALE" ? "STALE" : "INSUFFICIENT",
+      median: null,
+      sampleSize: 0,
+    });
+  },
+);
+it("retains missing, unaligned, stale and exact cancellation age/lookback boundaries", () => {
+  expect(evaluate(cancellationInput())).toMatchObject({ status: "MISSING", median: null });
+  expect(evaluate(cancellationInput([cancellationSample(100, 0)]))).toMatchObject({
+    status: "UNALIGNED",
+  });
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  expect(
+    evaluate(cancellationInput(items), { ...policy, maximumAgeSeconds: 21 * 86400 }),
+  ).toMatchObject({ status: "AVAILABLE", sampleSize: 3 });
+  expect(
+    evaluate(cancellationInput(items), { ...policy, maximumAgeSeconds: 21 * 86400 - 1 }),
+  ).toMatchObject({ status: "INSUFFICIENT", sampleSize: 2 });
+  expect(
+    evaluate(cancellationInput(items), { ...policy, maximumAgeSeconds: 6 * 86400 }),
+  ).toMatchObject({ status: "STALE", sampleSize: 0 });
+  expect(evaluate(cancellationInput(items), { ...policy, lookbackWeeks: 3 })).toMatchObject({
+    status: "AVAILABLE",
+    coverageBasisPoints: 10000,
+  });
+});
+it("rejects cancellation input scope/hash/future/definition/version mismatches", () => {
+  const item = cancellationSample(100, 1);
+  for (const patch of [
+    { entity: { kind: "SKU", externalSkuId: "wrong" } } as const,
+    { binding: { ...binding, storeId: "wrong" } },
+    { definitionVersion: "wrong" },
+    { observedAt: "2026-10-01T00:00:00Z" },
+    { sourceReferences: [{ ...item.reference, hash: "wrong" }] },
+  ]) {
+    rejected(cancellationInput([item], patch), "INVALID_INPUT");
+  }
+  rejected(cancellationInput([item], { baselineVersion: "wrong" }), "VERSION_MISMATCH");
+});
