@@ -25,6 +25,7 @@ model PlatformConnection {
   commerceScopes    CommerceSourceScope[]
   metricDefinitions MetricDefinitionRow[]
   metricSnapshots   MetricSnapshotRow[]
+  events            EventRow[]
 
   @@unique([storeId, provider])
   @@unique([id, organizationId, workspaceId, storeId, externalStoreId])
@@ -875,6 +876,7 @@ model Store {
   connections       PlatformConnection[]
   metricDefinitions MetricDefinitionRow[]
   metricSnapshots   MetricSnapshotRow[]
+  events            EventRow[]
 
   @@unique([merchantId, id])
   @@unique([organizationId, workspaceId, id])
@@ -1297,8 +1299,96 @@ model MetricSnapshotRow {
   connection          PlatformConnection  @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "metric_snapshots_connection_fkey")
   definition          MetricDefinitionRow @relation(fields: [organizationId, workspaceId, storeId, connectionId, externalStoreId, key, definitionVersion], references: [organizationId, workspaceId, storeId, connectionId, externalStoreId, key, definitionVersion], onDelete: Restrict, onUpdate: NoAction, map: "metric_snapshots_definition_fkey")
 
+  evidenceReferences EventEvidenceMetricRow[]
+
+  @@unique([id, organizationId, workspaceId, storeId, connectionId, externalStoreId], map: "metric_snapshots_event_scope_key")
   @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, key, subjectKind, subjectId, definitionVersion, periodStart, periodEnd, inputRevision], map: "metric_snapshots_identity_revision_key")
   @@index([organizationId, workspaceId, storeId, key, periodStart, periodEnd, computedAt], map: "metric_snapshots_scope_period_history_idx")
   @@map("metric_snapshots")
+  @@schema("public")
+}
+
+model EventRow {
+  id                     String             @id
+  organizationId         String
+  workspaceId            String
+  storeId                String
+  connectionId           String
+  externalStoreId        String
+  schemaVersion          Int
+  eventType              String
+  entityKind             String
+  entityId               String
+  baselineVersion        String?
+  fingerprint            String
+  severityFloor          String
+  rulePolicyVersion      String
+  state                  String
+  revision               BigInt
+  firstSeenAt            DateTime           @db.Timestamptz(3)
+  lastSeenAt             DateTime           @db.Timestamptz(3)
+  currentEvidenceId      String
+  currentEvidenceVersion String
+  currentEvidenceHash    String
+  store                  Store              @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "events_store_fkey")
+  connection             PlatformConnection @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "events_connection_fkey")
+  currentEvidence        EventEvidenceRow   @relation("CurrentEventEvidence", fields: [currentEvidenceId, id, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint, currentEvidenceVersion, currentEvidenceHash], references: [id, eventId, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint, version, hash], onDelete: Restrict, onUpdate: NoAction, map: "events_current_evidence_fkey")
+  evidence               EventEvidenceRow[] @relation("EventEvidenceHistory")
+
+  @@unique([id, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint], map: "events_scope_identity_key")
+  @@index([organizationId, workspaceId, storeId, lastSeenAt, id], map: "events_scope_history_idx")
+  @@map("events")
+  @@schema("public")
+}
+
+model EventEvidenceRow {
+  id                  String                   @id
+  eventId             String
+  organizationId      String
+  workspaceId         String
+  storeId             String
+  connectionId        String
+  externalStoreId     String
+  evidenceRevision    BigInt
+  schemaVersion       Int
+  fingerprint         String
+  version             String
+  hash                String
+  definitionVersion   String
+  periodStart         DateTime                 @db.Timestamptz(3)
+  periodEnd           DateTime                 @db.Timestamptz(3)
+  observedAt          DateTime                 @db.Timestamptz(3)
+  sourceWatermark     DateTime?                @db.Timestamptz(3)
+  timezone            String
+  currency            String
+  dataStatus          String
+  sampleSize          BigInt
+  coverageBasisPoints Int
+  issues              Json
+  payload             Json
+  event               EventRow                 @relation("EventEvidenceHistory", fields: [eventId, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint], onDelete: Restrict, onUpdate: NoAction, map: "event_evidence_event_fkey")
+  currentFor          EventRow[]               @relation("CurrentEventEvidence")
+  metrics             EventEvidenceMetricRow[]
+
+  @@unique([eventId, evidenceRevision], map: "event_evidence_event_revision_key")
+  @@unique([id, organizationId, workspaceId, storeId, connectionId, externalStoreId], map: "event_evidence_scope_key")
+  @@unique([id, eventId, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint, version, hash], map: "event_evidence_reference_key")
+  @@map("event_evidence")
+  @@schema("public")
+}
+
+model EventEvidenceMetricRow {
+  evidenceId       String
+  metricSnapshotId String            @db.Uuid
+  organizationId   String
+  workspaceId      String
+  storeId          String
+  connectionId     String
+  externalStoreId  String
+  evidence         EventEvidenceRow  @relation(fields: [evidenceId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "event_evidence_metrics_evidence_fkey")
+  metric           MetricSnapshotRow @relation(fields: [metricSnapshotId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "event_evidence_metrics_metric_fkey")
+
+  @@id([evidenceId, metricSnapshotId])
+  @@map("event_evidence_metrics")
   @@schema("public")
 }
