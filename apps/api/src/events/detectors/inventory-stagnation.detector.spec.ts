@@ -188,6 +188,15 @@ it("rejects a contradictory demand coverage fact with explicit source conflict",
     },
   });
 });
+it("accepts the existing P03 fractional demand coverage representation", () => {
+  const demandCoverageDays = ((94 / 31) * 720) / 24;
+  expect(demandCoverageDays).toBe(90.96774193548386);
+  const item = evidence({ availableUnits: 94, salesUnits: 31, demandCoverageDays });
+  expect(detect(request(item))).toMatchObject({
+    disposition: "CANDIDATE",
+    candidate: { evidence: { facts: { demandCoverageDays } } },
+  });
+});
 it.each([null, 9000])("preserves the inventory signal with unavailable/partial cost %s", (cost) => {
   const item = evidence({
     inventoryCostMinor: cost,

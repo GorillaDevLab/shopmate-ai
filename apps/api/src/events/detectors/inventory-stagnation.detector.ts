@@ -170,13 +170,17 @@ function listingChecks(item: Evidence, rule: Rule, issues: DataQualityIssueV1[])
 }
 function coverageChecks(item: Evidence, issues: DataQualityIssueV1[]): void {
   const demand = coverage(item);
-  if (
-    demand !== null &&
-    item.facts.demandCoverageDays !== null &&
-    item.facts.demandCoverageDays !==
-      Number(demand.numerator / demand.denominator) +
-        Number(demand.numerator % demand.denominator) / Number(demand.denominator)
-  )
+  const facts = item.facts;
+  if (demand === null || facts.demandCoverageDays === null) return;
+  const rationalDisplay =
+    Number(demand.numerator / demand.denominator) +
+    Number(demand.numerator % demand.denominator) / Number(demand.denominator);
+  // P03 divides units before converting hours to days; its valid IEEE rounding may differ.
+  const producerDisplay =
+    facts.availableUnits === null || !facts.salesUnits
+      ? null
+      : ((facts.availableUnits / facts.salesUnits) * facts.salesWindowHours) / 24;
+  if (facts.demandCoverageDays !== rationalDisplay && facts.demandCoverageDays !== producerDisplay)
     addIssue(item, issues, "SOURCE_INCONSISTENT", "demandCoverageDays");
 }
 function snapshotQuality(
