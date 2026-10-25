@@ -540,3 +540,81 @@ it.each(["traffic", "inventoryExtensions", "refundFacts", "returnReceipts", "mar
     expect(result.quality.issues).toContainEqual(value.issues[0]);
   },
 );
+
+it.each([
+  ["costCoverageBasisPoints", "COST_ESTIMATED", "facts.grossProfitMinor"],
+  ["feeCoverageBasisPoints", "FEE_ESTIMATED", "facts.contributionMinor"],
+] as const)(
+  "retains 9500 %s as an independent estimated limitation above the 9000 policy minimum",
+  (field, code, target) => {
+    const value = evidence({ [field]: 9500 }),
+      before = JSON.stringify(value),
+      result = outcome(value);
+    expect(result).toMatchObject({
+      disposition: "CANDIDATE",
+      quality: { dataStatus: "ESTIMATED", coverageBasisPoints: 10000 },
+    });
+    expect(result.quality.issues).toContainEqual(issue(code, target));
+    if (result.disposition !== "CANDIDATE") throw new Error("Expected discount candidate");
+    expect(result.candidate.evidence.facts).toEqual(value.facts);
+    expect(JSON.stringify(value)).toBe(before);
+  },
+);
+it.each([
+  ["costCoverageBasisPoints", "COST_ESTIMATED", "facts.grossProfitMinor"],
+  ["feeCoverageBasisPoints", "FEE_ESTIMATED", "facts.contributionMinor"],
+] as const)(
+  "keeps partial %s below the core policy minimum independent from discount eligibility",
+  (field, code, target) => {
+    const result = outcome(evidence({ [field]: 8999 }));
+    expect(result).toMatchObject({
+      disposition: "CANDIDATE",
+      quality: { dataStatus: "ESTIMATED" },
+    });
+    expect(result.quality.issues).toContainEqual(issue(code, target));
+  },
+);
+it.each([
+  ["costCoverageBasisPoints", "COST_MISSING", "facts.grossProfitMinor"],
+  ["feeCoverageBasisPoints", "FEE_MISSING", "facts.contributionMinor"],
+] as const)(
+  "retains zero %s as missing without suppressing the independent discount",
+  (field, code, target) => {
+    const result = outcome(evidence({ [field]: 0 }));
+    expect(result).toMatchObject({
+      disposition: "CANDIDATE",
+      quality: { dataStatus: "INSUFFICIENT" },
+    });
+    expect(result.quality.issues).toContainEqual(issue(code, target));
+  },
+);
+it.each([0, 7000])(
+  "preserves full coverage and known zero-valued financial inputs for gross profit %s",
+  (grossProfitMinor) => {
+    const value = evidence({ grossProfitMinor, contributionMinor: grossProfitMinor });
+    const result = outcome(value);
+    expect(result).toMatchObject({
+      disposition: "CANDIDATE",
+      quality: { dataStatus: "VERIFIED", issues: [] },
+    });
+    if (result.disposition !== "CANDIDATE") throw new Error("Expected discount candidate");
+    expect(result.candidate.evidence.facts).toEqual(value.facts);
+  },
+);
+it.each([
+  ["INSUFFICIENT", "COST_MISSING"],
+  ["STALE", "STALE_SOURCE"],
+] as const)(
+  "does not upgrade existing %s quality when partial financial estimates are added",
+  (dataStatus, code) => {
+    const value = {
+      ...limited(code, "frozenCosts"),
+      dataStatus,
+      facts: facts({ feeCoverageBasisPoints: 9500 }),
+    };
+    const result = outcome(value);
+    expect(result).toMatchObject({ disposition: "CANDIDATE", quality: { dataStatus } });
+    expect(result.quality.issues).toContainEqual(value.issues[0]);
+    expect(result.quality.issues).toContainEqual(issue("FEE_ESTIMATED", "facts.contributionMinor"));
+  },
+);

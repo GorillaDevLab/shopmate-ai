@@ -140,13 +140,14 @@ function discountIssues(frame: Frame): DataQualityIssueV1[] {
 function financialIssues(frame: Frame): DataQualityIssueV1[] {
   const { facts } = frame.evidence;
   const rows: DataQualityIssueV1[] = [];
-  if (
-    facts.grossProfitMinor === null ||
-    facts.costCoverageBasisPoints < frame.rule.minimumCoverageBasisPoints
-  )
+  if (facts.grossProfitMinor === null || facts.costCoverageBasisPoints === 0)
     rows.push(issue(frame, "COST_MISSING", "facts.grossProfitMinor"));
-  if (facts.feeCoverageBasisPoints < frame.rule.minimumCoverageBasisPoints)
+  else if (facts.costCoverageBasisPoints < 10000)
+    rows.push(issue(frame, "COST_ESTIMATED", "facts.grossProfitMinor"));
+  if (facts.feeCoverageBasisPoints === 0)
     rows.push(issue(frame, "FEE_MISSING", "facts.contributionMinor"));
+  else if (facts.feeCoverageBasisPoints < 10000)
+    rows.push(issue(frame, "FEE_ESTIMATED", "facts.contributionMinor"));
   return rows;
 }
 function canonical(rows: readonly DataQualityIssueV1[]): DataQualityIssueV1[] {
@@ -160,7 +161,12 @@ function canonical(rows: readonly DataQualityIssueV1[]): DataQualityIssueV1[] {
 function quality(frame: Frame, extra: readonly DataQualityIssueV1[]): Quality {
   const issues = canonical([...frame.evidence.issues, ...extra]);
   const statuses: Quality["dataStatus"][] = [frame.evidence.dataStatus];
-  if (issues.length > 0) statuses.push("INSUFFICIENT");
+  if (issues.length > 0)
+    statuses.push(
+      issues.every((row) => ["COST_ESTIMATED", "FEE_ESTIMATED"].includes(row.code))
+        ? "ESTIMATED"
+        : "INSUFFICIENT",
+    );
   if (issues.some((row) => row.code === "STALE_SOURCE")) statuses.push("STALE");
   return {
     dataStatus: precedence.find((status) => statuses.includes(status)) ?? "VERIFIED",
