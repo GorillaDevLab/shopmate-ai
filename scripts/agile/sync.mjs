@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, appendFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
+import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import { fileURLToPath } from "node:url";
 import { createGitHub } from "./github.mjs";
@@ -78,6 +79,28 @@ async function summary(result) {
   process.stdout.write(`Agile reconciliation ${result.status}; ${changed.length} changed cards.\n`);
 }
 
+// Several PRs merged within a minute race on the same cards. A "conflict" means the card
+// changed after planning and nothing was written, so a fresh snapshot is safe to retry.
+// Partial writes and data errors (e.g. ambiguous stages) still fail for a human to inspect.
+const CONFLICT_RETRY_DELAYS_MS = [5_000, 15_000];
+
+export async function reconcileWithConflictRetry({
+  run,
+  sleep = delay,
+  delays = CONFLICT_RETRY_DELAYS_MS,
+}) {
+  let attempts = 1;
+  let result = await run();
+  while (result.status === "conflict" && attempts <= delays.length) {
+    process.stdout.write(`Agile reconciliation conflict; retrying (attempt ${attempts + 1}).
+`);
+    await sleep(delays[attempts - 1]);
+    attempts += 1;
+    result = await run();
+  }
+  return { ...result, attempts };
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -93,13 +116,16 @@ async function main() {
     repoToken: process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
     projectToken: process.env.PROJECT_TOKEN,
   });
-  const result = await reconcile({
-    api,
-    cards,
-    config,
-    apply: args.apply,
-    labelsOnly: args.labelsOnly,
-    persist: (report) => persist(args.report, report),
+  const result = await reconcileWithConflictRetry({
+    run: () =>
+      reconcile({
+        api,
+        cards,
+        config,
+        apply: args.apply,
+        labelsOnly: args.labelsOnly,
+        persist: (report) => persist(args.report, report),
+      }),
   });
   await summary(result);
   if (!["dry-run", "applied"].includes(result.status)) process.exitCode = 2;
