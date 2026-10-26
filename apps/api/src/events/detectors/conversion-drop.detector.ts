@@ -31,9 +31,7 @@ function issue(frame: Frame, code: DataQualityIssueV1["code"], field: string): D
 }
 function affectsConversion(row: DataQualityIssueV1): boolean {
   const field = row.field.toLowerCase();
-  if (
-    /cart|checkout|funnel|price|variant|baselineconversion|cost|fee|refund|attribution/u.test(field)
-  )
+  if (/cart|checkout|price|variant|baselineconversion|cost|fee|refund|attribution/u.test(field))
     return false;
   if (["PAYMENT_UNKNOWN", "TRAFFIC_MISSING", "ZERO_DENOMINATOR", "LOW_SAMPLE"].includes(row.code))
     return true;

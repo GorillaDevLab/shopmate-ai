@@ -268,6 +268,8 @@ it.each(["STALE_SOURCE", "SOURCE_INCONSISTENT", "WINDOW_MISMATCH", "VERSION_MISM
     for (const field of [
       "facts.cart",
       "facts.checkout",
+      "traffic.funnel.cart",
+      "traffic.funnel.checkout",
       "facts.priceChangeBasisPoints",
       "facts.priceEffectiveAt",
       "facts.variantAvailabilityBasisPoints",
@@ -280,6 +282,12 @@ it.each(["STALE_SOURCE", "SOURCE_INCONSISTENT", "WINDOW_MISMATCH", "VERSION_MISM
     }
   },
 );
+it("suppresses conversion for the upstream shared traffic funnel conflict", () => {
+  const value = limited("SOURCE_INCONSISTENT", "traffic.funnel");
+  const result = outcome(value);
+  expect(result).toMatchObject({ disposition: "NO_CANDIDATE", reason: "SOURCE_CONFLICT" });
+  expect(result.quality.issues).toContainEqual(value.issues[0]);
+});
 it("retains missing price, funnel and variant context as explicit limitations", () => {
   const value = evidence({
     cart: null,
