@@ -492,3 +492,19 @@ it("does not trust a large aggregate sample when paid orders are tiny", () => {
     reason: "INSUFFICIENT_EVIDENCE",
   });
 });
+it("discloses a conflicting optional gross profit snapshot without erasing sales opportunity", () => {
+  const rows: MetricSnapshotV1[] = [
+    {
+      ...snapshot("PAID_UNITS", 48),
+      metric: { kind: "GROSS_PROFIT", unit: "minorCNY", value: 999 },
+    },
+  ];
+  const result = outcome(snapshotEvidence(rows), rows);
+  expect(result.disposition).toBe("CANDIDATE");
+  expect(result.quality.issues).toContainEqual({
+    ...issue("SOURCE_INCONSISTENT", "snapshots.GROSS_PROFIT"),
+    evidenceIds: ["visible-breakout", "snapshot-0"],
+  });
+  if (result.disposition === "CANDIDATE")
+    expect(result.candidate.evidence.facts).toMatchObject({ grossProfitMinor: 0 });
+});

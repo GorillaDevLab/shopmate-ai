@@ -40,6 +40,7 @@ function expected(frame: Frame, row: MetricSnapshotV1): number | null {
   const { facts } = frame.evidence;
   if (row.metric.kind === "PAID_UNITS") return facts.salesUnits;
   if (row.metric.kind === "PAID_ORDERS") return facts.conversion.numerator;
+  if (row.metric.kind === "GROSS_PROFIT") return facts.grossProfitMinor;
   return facts.conversion.valueBasisPoints;
 }
 function snapshotIssues(frame: Frame, row: MetricSnapshotV1): DataQualityIssueV1[] {
@@ -91,8 +92,10 @@ function marginIssues(frame: Frame): DataQualityIssueV1[] {
     issues.push(issue(frame, "PARTIAL_COVERAGE", "facts.costCoverageBasisPoints"));
   if (facts.netRevenueMinor === null)
     issues.push(issue(frame, "SOURCE_INCONSISTENT", "facts.netRevenueMinor"));
-  for (const row of frame.request.snapshots)
-    if (!requiredKinds.has(row.metric.kind)) issues.push(...row.issues);
+  for (const row of frame.request.snapshots) {
+    if (row.metric.kind === "GROSS_PROFIT") issues.push(...snapshotIssues(frame, row));
+    else if (!requiredKinds.has(row.metric.kind)) issues.push(...row.issues);
+  }
   return issues;
 }
 function baselineAvailable(frame: Frame): boolean {
