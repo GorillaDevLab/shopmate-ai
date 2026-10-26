@@ -30,6 +30,7 @@ import {
   type EventType,
   type MetricReadPort,
   type MetricSnapshotV1,
+  type RobustBaselineV1,
   type TenantContext,
 } from "@shopmate/contracts";
 import { z } from "zod";
@@ -154,6 +155,8 @@ export class EventDetectorRegistry {
 function jobError(run: Run, job: Job, registry: EventDetectorRegistry): EventErrorCode | null {
   const evidence = job.evidence;
   if (!registry.has(evidence.eventType)) return "INVALID_INPUT";
+  if (evidence.baseline !== null && !observedBaseline(evidence.baseline, run.observedAt))
+    return "WINDOW_MISMATCH";
   if (!sameEventBinding(evidence.binding, run.binding)) return "SCOPE_MISMATCH";
   if (!sameEventPeriod(evidence, run.period)) return "WINDOW_MISMATCH";
   if (
@@ -223,6 +226,14 @@ function outcomeError(
 }
 function diagnostic(issue: DataQualityIssueV1): string {
   return canonical({ ...issue, evidenceIds: [...issue.evidenceIds].sort(compare) });
+}
+function observedBaseline(baseline: RobustBaselineV1, observedAt: string): boolean {
+  const period = baseline.period;
+  return (
+    period === null ||
+    (Date.parse(period.periodEnd) <= Date.parse(observedAt) &&
+      baseline.sourceReferences.some((ref) => sameEventPeriod(ref.period, period)))
+  );
 }
 function conservesQuality(request: EventDetectionRequest, outcome: EventDetectionOutcome): boolean {
   const quality = outcome.quality;
@@ -403,6 +414,7 @@ export class EventEvaluationService {
     if (!parsed.success) return failure("INVALID_INPUT");
     if (!parsed.data.ok) return parsed.data;
     const baseline = parsed.data.value;
+    if (!observedBaseline(baseline, request.observedAt)) return failure("WINDOW_MISMATCH");
     if (
       baseline.version !== this.registry.policy.baselineVersion ||
       canonical(baseline.measure) !== canonical(request.measure)

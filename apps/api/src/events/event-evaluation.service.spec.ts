@@ -223,7 +223,7 @@ function baselineRequest(): BaselineRequest {
     sourceReferences: [],
   };
 }
-function missingBaseline(): RobustBaselineV1 {
+function missingBaseline(): Extract<RobustBaselineV1, { readonly median: null }> {
   return {
     status: "MISSING",
     alignment: "MISSING",
@@ -801,5 +801,105 @@ it("retains fresh sold-out inventory beside blocked stale orders through the rea
       dataStatus: "STALE",
       issues: expect.arrayContaining([...evidence.issues]),
     },
+  });
+});
+
+it.each(["2026-11-01", "2026-10-18"])("rejects an unobserved baseline period %s", async (date) => {
+  const baseline: BaselinePort = {
+    evaluate: () => ({
+      ok: true,
+      value: {
+        ...missingBaseline(),
+        status: "UNALIGNED",
+        alignment: "UNALIGNED",
+        period: { ...period, periodStart: `${date}T00:00:00Z`, periodEnd: `${date}T23:00:00Z` },
+      },
+    }),
+  };
+  const input = request([stock()]);
+  const jobs = [{ ...input.jobs[0], baselineRequest: baselineRequest() }];
+  expect(
+    await setup(undefined, undefined, baseline).service.evaluate({ ...input, jobs }),
+  ).toMatchObject({ ok: false, error: { code: "WINDOW_MISMATCH" } });
+});
+
+function historicalRequest(): BaselineRequest {
+  const history = {
+    ...period,
+    periodStart: "2026-10-17T00:00:00Z",
+    periodEnd: "2026-10-18T00:00:00Z",
+  };
+  const measure = { kind: "PAID_UNITS", unit: "units" } as const;
+  const ref = {
+    ...reference,
+    kind: "METRIC_SNAPSHOT",
+    measure,
+    period: history,
+    version: "history-v1",
+    observedAt: history.periodEnd,
+  } as const;
+  const row = snapshot({
+    ...history,
+    metric: { ...measure, value: 24 },
+    inputRevision: ref.version,
+    visibleAt: history.periodEnd,
+    computedAt: history.periodEnd,
+    sourceWatermark: history.periodEnd,
+  });
+  return { ...baselineRequest(), candidates: [row], sourceReferences: [ref] };
+}
+function availableBaseline(input: BaselineRequest): RobustBaselineV1 {
+  const ref = input.sourceReferences[0];
+  if (!ref) throw new Error("Missing historical reference fixture");
+  return {
+    status: "AVAILABLE",
+    alignment: "ALIGNED",
+    measure: input.measure,
+    aggregation: "EXACT_MEDIAN",
+    version: input.baselineVersion,
+    period: ref.period,
+    median: 24,
+    mad: 0,
+    sampleSize: 1,
+    coverageBasisPoints: 10000,
+    sourceReferences: [ref],
+  };
+}
+it("allows a historical baseline with its own observed revision and cutoff", async () => {
+  const history = historicalRequest();
+  const baseline: BaselinePort = {
+    evaluate: (entry) => ({ ok: true, value: availableBaseline(entry) }),
+  };
+  const input = request([stock()]);
+  const jobs = [
+    {
+      ...input.jobs[0],
+      baselineRequest: history,
+    },
+  ];
+  const result = value(
+    await setup(undefined, undefined, baseline).service.evaluate({ ...input, jobs }),
+  );
+  expect(result.candidates[0]?.evidence.baseline?.sourceReferences).toEqual(
+    history.sourceReferences,
+  );
+});
+
+it("rejects a supplied baseline with no observed support for its period", async () => {
+  const baseline = {
+    ...missingBaseline(),
+    status: "UNALIGNED",
+    alignment: "UNALIGNED",
+    period: { ...period, periodStart: "2026-11-01T00:00:00Z", periodEnd: "2026-11-02T00:00:00Z" },
+  } as const;
+  const evidence = {
+    ...stock(),
+    baseline,
+    baselineVersion: baseline.version,
+    baselineAlignment: baseline.alignment,
+  };
+  expect(await setup().service.evaluate(request([evidence]))).toMatchObject({
+    ok: false,
+    error: { code: "WINDOW_MISMATCH" },
   });
 });
