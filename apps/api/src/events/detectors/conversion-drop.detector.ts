@@ -94,6 +94,9 @@ function contextIssues(frame: Frame): DataQualityIssueV1[] {
   }
   if (facts.variantAvailabilityBasisPoints === null)
     issues.push(issue(frame, "INVENTORY_UNKNOWN", "facts.variantAvailabilityBasisPoints"));
+  // Known unsellable variants limit price association without making availability unknown.
+  else if (facts.variantAvailabilityBasisPoints < 10000)
+    issues.push(issue(frame, "PARTIAL_COVERAGE", "facts.variantAvailabilityBasisPoints"));
   // A mixed or pre-change window cannot establish even a full post-change association.
   if (
     facts.priceEffectiveAt !== null &&

@@ -312,19 +312,29 @@ it("retains missing price, funnel and variant context as explicit limitations", 
     ).toBe(true);
   }
 });
-it("preserves known zero variant availability as an independent fact without inventing unknown data", () => {
-  const value = evidence({ variantAvailabilityBasisPoints: 0 });
-  const result = outcome(value);
-  expect(result).toMatchObject({
-    disposition: "CANDIDATE",
-    quality: { dataStatus: "VERIFIED", issues: [] },
-  });
-  if (
-    result.disposition === "CANDIDATE" &&
-    result.candidate.evidence.eventType === "CONVERSION_DROP"
-  )
-    expect(result.candidate.evidence.facts.variantAvailabilityBasisPoints).toBe(0);
-});
+it.each([0, 5000, 9999])(
+  "retains known %s availability while limiting price association for unsellable variants",
+  (variantAvailabilityBasisPoints) => {
+    const result = outcome(evidence({ variantAvailabilityBasisPoints }));
+    expect(result).toMatchObject({
+      disposition: "CANDIDATE",
+      quality: { dataStatus: "INSUFFICIENT" },
+    });
+    expect(result.quality.issues).toContainEqual(
+      issue("PARTIAL_COVERAGE", "facts.variantAvailabilityBasisPoints"),
+    );
+    expect(result.quality.issues.some((row) => row.code === "INVENTORY_UNKNOWN")).toBe(false);
+    if (
+      result.disposition === "CANDIDATE" &&
+      result.candidate.evidence.eventType === "CONVERSION_DROP"
+    ) {
+      expect(result.candidate.evidence.facts.variantAvailabilityBasisPoints).toBe(
+        variantAvailabilityBasisPoints,
+      );
+      expect(result.candidate.evidence.facts.relationship).toBe("CORRELATION_ONLY");
+    }
+  },
+);
 it.each(["2026-10-24T12:00:00Z", "2026-10-25T00:00:00Z"])(
   "retains a drop while marking the price at %s as outside a full post-change window",
   (priceEffectiveAt) => {
