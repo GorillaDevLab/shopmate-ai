@@ -10,6 +10,7 @@ import { BasisPointsSchema, MetricSnapshotV1Schema } from "../metrics/metric.sch
 import { TenantContextSchema } from "../tenant/tenant.schema.js";
 import {
   EventEntitySchema,
+  EventNormalizedObservationSchema,
   EventEvidenceV1Schema,
   EventMeasureSchema,
   EventPeriodSchema,
@@ -416,10 +417,58 @@ const baselineRequestObject = z.strictObject({
   measure: EventMeasureSchema,
   candidates: z.array(MetricSnapshotV1Schema).max(1000).readonly(),
   sourceReferences: z.array(EventSourceReferenceSchema).max(1000).readonly(),
+  normalizedObservations: z.array(EventNormalizedObservationSchema).max(1000).readonly().optional(),
 });
+type BaselineInput = z.infer<typeof baselineRequestObject>;
+function exactObservationReference(
+  left: z.infer<typeof EventSourceReferenceSchema>,
+  right: z.infer<typeof EventSourceReferenceSchema>,
+): boolean {
+  return (
+    left.kind === right.kind &&
+    left.id === right.id &&
+    left.version === right.version &&
+    left.hash === right.hash &&
+    sameEventBinding(left.binding, right.binding) &&
+    left.definitionVersion === right.definitionVersion &&
+    sameEventPeriod(left.period, right.period) &&
+    Date.parse(left.observedAt) === Date.parse(right.observedAt) &&
+    left.measure?.kind === right.measure?.kind &&
+    left.measure?.unit === right.measure?.unit
+  );
+}
+function normalizedRequestDomain(value: BaselineInput): boolean {
+  return (
+    (value.eventType === "CANCELLED_ORDER_SPIKE" &&
+      value.measure.kind === "CANCELLED_ORDER_RATE") ||
+    (value.eventType === "AD_SPEND_SPIKE" && value.measure.kind === "AD_SPEND")
+  );
+}
+function validNormalizedObservations(value: BaselineInput): boolean {
+  if (
+    (value.measure.kind === "CANCELLED_ORDER_RATE" || value.measure.kind === "AD_SPEND") &&
+    !normalizedRequestDomain(value)
+  )
+    return false;
+  if (value.normalizedObservations === undefined) return true;
+  return (
+    normalizedRequestDomain(value) &&
+    value.normalizedObservations.every(
+      (item) =>
+        item.reference.measure?.kind === value.measure.kind &&
+        item.reference.measure?.unit === value.measure.unit &&
+        sameEventBinding(item.reference.binding, value.binding) &&
+        item.reference.definitionVersion === value.definitionVersion &&
+        sameEntity(item.entity, value.entity, value.binding) &&
+        Date.parse(item.reference.observedAt) <= Date.parse(value.observedAt) &&
+        value.sourceReferences.some((ref) => exactObservationReference(ref, item.reference)),
+    )
+  );
+}
 function validBaselineRequest(value: z.infer<typeof baselineRequestObject>): boolean {
   return (
     validEntity(value) &&
+    validNormalizedObservations(value) &&
     Date.parse(value.period.periodEnd) <= Date.parse(value.observedAt) &&
     value.sourceReferences.every(
       (ref) =>

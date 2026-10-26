@@ -33,7 +33,7 @@ export interface EventPage<T> {
   readonly items: readonly T[];
   readonly nextCursor: string | null;
 }
-/** Pure selection over supplied observed snapshots; never reads future data or fetches a provider. */
+/** Pure selection over supplied observed snapshots and normalized observations; never reads future data or fetches a provider. */
 export interface BaselinePort {
   readonly evaluate: (request: BaselineRequest) => EventResult<RobustBaselineV1>;
 }

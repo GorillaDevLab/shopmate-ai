@@ -442,3 +442,497 @@ it("still rejects genuinely different source watermarks at the same observation 
   });
   rejected(request([item, { ...item, sourceWatermark: "2026-10-18T06:30:00.000Z" }]), "CONFLICT");
 });
+
+import {
+  EventCancellationObservationSchema,
+  type EventCancellationObservation,
+} from "@shopmate/contracts";
+function cancellationSample(value: number, weeks: number): EventCancellationObservation {
+  const item = snapshot(value, weeks);
+  const ref = reference(item);
+  return EventCancellationObservationSchema.parse({
+    reference: {
+      ...ref,
+      kind: "NORMALIZED_AGGREGATE",
+      measure: { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" },
+    },
+    entity: { kind: "STORE" },
+    rate: { numerator: value, denominator: 10000, valueBasisPoints: value, period: ref.period },
+    visibleAt: item.visibleAt,
+    computedAt: item.computedAt,
+    sourceWatermark: item.sourceWatermark,
+    evidenceIds: item.evidenceIds,
+    quality: { dataStatus: "VERIFIED", sampleSize: 10000, coverageBasisPoints: 10000, issues: [] },
+  });
+}
+function cancellationInput(
+  observations: readonly EventCancellationObservation[] = [],
+  patch: Partial<BaselineRequest> = {},
+): BaselineRequest {
+  return request([], {
+    eventType: "CANCELLED_ORDER_SPIKE",
+    measure: { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" },
+    normalizedObservations: observations,
+    sourceReferences: observations.map((item) => item.reference),
+    ...patch,
+  });
+}
+function cancellationRevision(
+  item: EventCancellationObservation,
+  value: number,
+  seconds = 1,
+): EventCancellationObservation {
+  const time = new Date(Date.parse(item.computedAt) + seconds * 1000).toISOString();
+  return {
+    ...item,
+    reference: {
+      ...item.reference,
+      id: `${item.reference.id}-revision`,
+      version: "revision-new",
+      hash: "hash-new",
+      observedAt: time,
+    },
+    visibleAt: time,
+    computedAt: time,
+    rate: { ...item.rate, numerator: value, valueBasisPoints: value },
+  };
+}
+function limitedCancellation(
+  item: EventCancellationObservation,
+  status: "INSUFFICIENT" | "ESTIMATED" | "STALE" | "UNAVAILABLE" = "UNAVAILABLE",
+): EventCancellationObservation {
+  return {
+    ...item,
+    sourceWatermark: status === "UNAVAILABLE" ? null : item.sourceWatermark,
+    rate: {
+      ...item.rate,
+      valueBasisPoints: status === "UNAVAILABLE" ? null : item.rate.valueBasisPoints,
+      numerator: status === "UNAVAILABLE" ? null : item.rate.numerator,
+    },
+    quality: {
+      ...item.quality,
+      dataStatus: status,
+      coverageBasisPoints: 5000,
+      issues: [
+        {
+          code: status === "STALE" ? "STALE_SOURCE" : "SOURCE_TIME_MISSING",
+          field: "cohort",
+          evidenceIds: item.evidenceIds,
+        },
+      ],
+    },
+  };
+}
+it("computes cancellation median/MAD using contributor-only aggregate references", () => {
+  const items = [
+    cancellationSample(100, 1),
+    cancellationSample(200, 2),
+    cancellationSample(9000, 3),
+  ];
+  const value = evaluate(cancellationInput(items));
+  expect(value).toMatchObject({
+    status: "AVAILABLE",
+    median: 200,
+    mad: 100,
+    sampleSize: 3,
+    coverageBasisPoints: 3750,
+  });
+  expect(value.sourceReferences).toEqual(items.map((item) => item.reference));
+});
+it("preserves cancellation fractional statistics and verified zero numerators", () => {
+  expect(
+    evaluate(cancellationInput([cancellationSample(100, 1), cancellationSample(101, 2)]), {
+      ...policy,
+      minimumSamples: 2,
+    }),
+  ).toMatchObject({ median: 100.5, mad: 0.5 });
+  expect(
+    evaluate(cancellationInput([1, 2, 3].map((weeks) => cancellationSample(0, weeks)))),
+  ).toMatchObject({ status: "ZERO", median: 0, mad: 0 });
+});
+it("selects the latest cancellation revision without inflating window count", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const revised = cancellationRevision(items[0], 1000);
+  expect(evaluate(cancellationInput([...items, revised, revised]))).toMatchObject({
+    median: 100,
+    sampleSize: 3,
+  });
+  expect(evaluate(cancellationInput([...items, revised])).sourceReferences[0]).toEqual(
+    revised.reference,
+  );
+});
+it("does not resurrect complete cancellation history behind a newer unavailable revision", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const unavailable = limitedCancellation(cancellationRevision(items[0], 100));
+  expect(evaluate(cancellationInput([...items, unavailable]))).toMatchObject({
+    status: "INSUFFICIENT",
+    sampleSize: 2,
+    median: null,
+  });
+});
+it("rejects equal-time cancellation disagreements independently of order", () => {
+  const item = cancellationSample(100, 1);
+  const changed = cancellationRevision(item, 200, 0);
+  rejected(cancellationInput([item, changed]), "CONFLICT");
+  rejected(cancellationInput([changed, item]), "CONFLICT");
+});
+it("rejects differing payloads claiming one immutable aggregate even at different visibility times", () => {
+  const item = cancellationSample(100, 1);
+  const changed = { ...item, rate: { ...item.rate, numerator: 101, valueBasisPoints: 101 } };
+  rejected(cancellationInput([item, changed]), "CONFLICT");
+  const later = {
+    ...changed,
+    visibleAt: period.periodEnd,
+    computedAt: period.periodEnd,
+    reference: { ...item.reference, observedAt: period.periodEnd },
+  };
+  const original = { ...item, reference: later.reference };
+  rejected(cancellationInput([original, later]), "CONFLICT");
+});
+it("compares every cancellation timestamp canonically and collapses exact repeats", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const item = items[0];
+  const spelling = (time: string) => time.replace(".000Z", "Z");
+  const historicalPeriod = {
+    ...item.reference.period,
+    periodStart: spelling(item.reference.period.periodStart),
+    periodEnd: spelling(item.reference.period.periodEnd),
+  };
+  const equivalent = {
+    ...item,
+    visibleAt: spelling(item.visibleAt),
+    computedAt: spelling(item.computedAt),
+    sourceWatermark: spelling(item.sourceWatermark!),
+    reference: {
+      ...item.reference,
+      observedAt: spelling(item.reference.observedAt),
+      period: historicalPeriod,
+    },
+    rate: { ...item.rate, period: historicalPeriod },
+  };
+  expect(evaluate(cancellationInput([...items, equivalent]))).toMatchObject({
+    sampleSize: 3,
+    median: 100,
+  });
+});
+it.each(["INSUFFICIENT", "ESTIMATED", "STALE", "UNAVAILABLE"] as const)(
+  "never uses numeric cancellation observations with %s quality",
+  (status) => {
+    const items = [1, 2, 3].map((weeks) =>
+      limitedCancellation(cancellationSample(100, weeks), status),
+    );
+    expect(evaluate(cancellationInput(items))).toMatchObject({
+      status: status === "STALE" ? "STALE" : "INSUFFICIENT",
+      median: null,
+      sampleSize: 0,
+    });
+  },
+);
+it("retains missing, unaligned, stale and exact cancellation age/lookback boundaries", () => {
+  expect(evaluate(cancellationInput())).toMatchObject({ status: "MISSING", median: null });
+  expect(evaluate(cancellationInput([cancellationSample(100, 0)]))).toMatchObject({
+    status: "UNALIGNED",
+  });
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  expect(
+    evaluate(cancellationInput(items), { ...policy, maximumAgeSeconds: 21 * 86400 }),
+  ).toMatchObject({ status: "AVAILABLE", sampleSize: 3 });
+  expect(
+    evaluate(cancellationInput(items), { ...policy, maximumAgeSeconds: 21 * 86400 - 1 }),
+  ).toMatchObject({ status: "INSUFFICIENT", sampleSize: 2 });
+  expect(
+    evaluate(cancellationInput(items), { ...policy, maximumAgeSeconds: 6 * 86400 }),
+  ).toMatchObject({ status: "STALE", sampleSize: 0 });
+  expect(evaluate(cancellationInput(items), { ...policy, lookbackWeeks: 3 })).toMatchObject({
+    status: "AVAILABLE",
+    coverageBasisPoints: 10000,
+  });
+});
+it("rejects cancellation input scope/hash/future/definition/version mismatches", () => {
+  const item = cancellationSample(100, 1);
+  for (const patch of [
+    { entity: { kind: "SKU", externalSkuId: "wrong" } } as const,
+    { binding: { ...binding, storeId: "wrong" } },
+    { definitionVersion: "wrong" },
+    { observedAt: "2026-10-01T00:00:00Z" },
+    { sourceReferences: [{ ...item.reference, hash: "wrong" }] },
+  ]) {
+    rejected(cancellationInput([item], patch), "INVALID_INPUT");
+  }
+  rejected(cancellationInput([item], { baselineVersion: "wrong" }), "VERSION_MISMATCH");
+});
+
+it("keeps zero-denominator cancellation history unavailable with its issue", () => {
+  const item = cancellationSample(0, 1);
+  const unavailable = {
+    ...item,
+    sourceWatermark: null,
+    rate: { ...item.rate, numerator: 0, denominator: 0, valueBasisPoints: null },
+    quality: {
+      dataStatus: "UNAVAILABLE" as const,
+      sampleSize: 0,
+      coverageBasisPoints: 0,
+      issues: [
+        { code: "ZERO_DENOMINATOR" as const, field: "cohort", evidenceIds: item.evidenceIds },
+      ],
+    },
+  };
+  expect(evaluate(cancellationInput([unavailable]))).toMatchObject({
+    status: "INSUFFICIENT",
+    median: null,
+    sampleSize: 0,
+  });
+});
+it("breaks cancellation visibility ties by computedAt before choosing the window", () => {
+  const items = [1, 2, 3].map((weeks) => cancellationSample(100, weeks));
+  const revised = { ...cancellationRevision(items[0], 1000), visibleAt: items[0].visibleAt };
+  expect(evaluate(cancellationInput([...items, revised])).sourceReferences[0]).toEqual(
+    revised.reference,
+  );
+});
+it("compares cancellation counts and evidence even when the numerical rate is unchanged", () => {
+  const item = cancellationSample(100, 1);
+  const changed = {
+    ...item,
+    rate: { ...item.rate, numerator: 200, denominator: 20000 },
+    quality: { ...item.quality, sampleSize: 20000 },
+  };
+  rejected(cancellationInput([item, changed]), "CONFLICT");
+  rejected(cancellationInput([item, { ...item, evidenceIds: ["different-cohort"] }]), "CONFLICT");
+});
+
+import { EventAdSpendObservationSchema, type EventAdSpendObservation } from "@shopmate/contracts";
+function spendSample(value: number, weeks: number): EventAdSpendObservation {
+  const ref = reference(snapshot(value, weeks));
+  return EventAdSpendObservationSchema.parse({
+    reference: {
+      ...ref,
+      kind: "NORMALIZED_AGGREGATE",
+      measure: { kind: "AD_SPEND", unit: "minorCNY" },
+    },
+    entity: { kind: "CAMPAIGN", externalCampaignId: "campaign-a" },
+    spendMinor: value,
+    measuredCoverage: {
+      binding,
+      ...ref.period,
+      observedAt: ref.observedAt,
+      sourceVersion: "measured-source-v1",
+      evidenceIds: ["campaign-record"],
+      coverageBasisPoints: 10000,
+    },
+    visibleAt: ref.observedAt,
+    computedAt: ref.observedAt,
+    sourceWatermark: ref.period.periodEnd,
+    evidenceIds: ["campaign-record"],
+    quality: { dataStatus: "VERIFIED", sampleSize: 1, coverageBasisPoints: 10000, issues: [] },
+  });
+}
+function spendInput(
+  items: readonly EventAdSpendObservation[] = [],
+  patch: Partial<BaselineRequest> = {},
+): BaselineRequest {
+  return request([], {
+    eventType: "AD_SPEND_SPIKE",
+    entity: { kind: "CAMPAIGN", externalCampaignId: "campaign-a" },
+    measure: { kind: "AD_SPEND", unit: "minorCNY" },
+    normalizedObservations: items,
+    sourceReferences: items.map((item) => item.reference),
+    ...patch,
+  });
+}
+function spendRevision(
+  item: EventAdSpendObservation,
+  value: number,
+  seconds = 1,
+): EventAdSpendObservation {
+  const time = new Date(Date.parse(item.computedAt) + seconds * 1000).toISOString();
+  return {
+    ...item,
+    spendMinor: value,
+    visibleAt: time,
+    computedAt: time,
+    reference: {
+      ...item.reference,
+      id: `${item.reference.id}-new`,
+      version: "new-revision",
+      hash: "new-hash",
+      observedAt: time,
+    },
+  };
+}
+function limitedSpend(
+  item: EventAdSpendObservation,
+  status: "INSUFFICIENT" | "ESTIMATED" | "STALE" | "UNAVAILABLE" = "INSUFFICIENT",
+): EventAdSpendObservation {
+  return {
+    ...item,
+    spendMinor: status === "UNAVAILABLE" ? null : item.spendMinor,
+    measuredCoverage: null,
+    sourceWatermark: status === "UNAVAILABLE" ? null : item.sourceWatermark,
+    quality: {
+      ...item.quality,
+      dataStatus: status,
+      coverageBasisPoints: 0,
+      issues: [
+        {
+          code: status === "STALE" ? "STALE_SOURCE" : "PARTIAL_COVERAGE",
+          field: "spend",
+          evidenceIds: item.evidenceIds,
+        },
+        { code: "WINDOW_MISMATCH", field: "measuredCoverage", evidenceIds: item.evidenceIds },
+      ],
+    },
+  };
+}
+it("normalizes ad spend without trying to read cancellation rate fields", () => {
+  const input = spendInput([spendSample(10000, 1)]);
+  expect(() => createRobustBaseline(policy).evaluate(input)).not.toThrow();
+});
+it("computes a robust monetary spend baseline from measured campaign windows", () => {
+  const items = [spendSample(10000, 1), spendSample(20000, 2), spendSample(900000, 3)];
+  const value = evaluate(spendInput(items));
+  expect(value).toMatchObject({
+    status: "AVAILABLE",
+    median: 20000,
+    mad: 10000,
+    sampleSize: 3,
+    coverageBasisPoints: 3750,
+  });
+  expect(value.sourceReferences).toEqual(items.map((item) => item.reference));
+});
+it("keeps fractional monetary statistics and verified measured zero spend", () => {
+  expect(
+    evaluate(spendInput([spendSample(10000, 1), spendSample(10001, 2)]), {
+      ...policy,
+      minimumSamples: 2,
+    }),
+  ).toMatchObject({ median: 10000.5, mad: 0.5 });
+  expect(evaluate(spendInput([1, 2, 3].map((weeks) => spendSample(0, weeks))))).toMatchObject({
+    status: "ZERO",
+    median: 0,
+    mad: 0,
+    sampleSize: 3,
+  });
+});
+it("preserves safe monetary bounds and reports exact-statistic overflow", () => {
+  const items = [1, 2, 3].map((weeks) => spendSample(Number.MAX_SAFE_INTEGER, weeks));
+  expect(evaluate(spendInput(items))).toMatchObject({ median: Number.MAX_SAFE_INTEGER, mad: 0 });
+  const input = spendInput([
+    spendSample(Number.MAX_SAFE_INTEGER, 1),
+    spendSample(Number.MAX_SAFE_INTEGER - 1, 2),
+  ]);
+  expect(createRobustBaseline({ ...policy, minimumSamples: 2 }).evaluate(input)).toMatchObject({
+    ok: false,
+    error: { code: "OVERFLOW" },
+  });
+});
+it("deduplicates spend revisions and uses computed time to break visibility ties", () => {
+  const items = [1, 2, 3].map((weeks) => spendSample(10000, weeks));
+  const latest = { ...spendRevision(items[0], 50000), visibleAt: items[0].visibleAt };
+  const value = evaluate(spendInput([...items, latest, latest]));
+  expect(value).toMatchObject({ median: 10000, sampleSize: 3 });
+  expect(value.sourceReferences[0]).toEqual(latest.reference);
+});
+it("does not resurrect complete measured spend behind a newer incomplete revision", () => {
+  const items = [1, 2, 3].map((weeks) => spendSample(10000, weeks));
+  const incomplete = limitedSpend(spendRevision(items[0], 20000));
+  expect(evaluate(spendInput([...items, incomplete]))).toMatchObject({
+    status: "INSUFFICIENT",
+    sampleSize: 2,
+    median: null,
+  });
+});
+it.each(["INSUFFICIENT", "ESTIMATED", "STALE", "UNAVAILABLE"] as const)(
+  "never counts %s spend as a numeric baseline contributor",
+  (status) => {
+    const item = limitedSpend(spendSample(10000, 1), status);
+    expect(evaluate(spendInput([item]))).toMatchObject({
+      status: status === "STALE" ? "STALE" : "INSUFFICIENT",
+      sampleSize: 0,
+      median: null,
+    });
+  },
+);
+it("retains spend missing/alignment/lookback and exact period-end age semantics", () => {
+  expect(evaluate(spendInput())).toMatchObject({ status: "MISSING" });
+  expect(evaluate(spendInput([spendSample(10000, 0)]))).toMatchObject({ status: "UNALIGNED" });
+  const items = [1, 2, 3].map((weeks) => spendSample(10000, weeks));
+  expect(evaluate(spendInput(items), { ...policy, lookbackWeeks: 3 })).toMatchObject({
+    status: "AVAILABLE",
+    coverageBasisPoints: 10000,
+  });
+  expect(evaluate(spendInput(items), { ...policy, maximumAgeSeconds: 21 * 86400 })).toMatchObject({
+    status: "AVAILABLE",
+    sampleSize: 3,
+  });
+  expect(
+    evaluate(spendInput(items), { ...policy, maximumAgeSeconds: 21 * 86400 - 1 }),
+  ).toMatchObject({ status: "INSUFFICIENT", sampleSize: 2 });
+  expect(evaluate(spendInput(items), { ...policy, maximumAgeSeconds: 6 * 86400 })).toMatchObject({
+    status: "STALE",
+    sampleSize: 0,
+  });
+});
+it("rejects same-identity spend payload changes including measurement provenance", () => {
+  const item = spendSample(10000, 1);
+  for (const changed of [
+    { ...item, spendMinor: 20000 },
+    { ...item, measuredCoverage: { ...item.measuredCoverage!, sourceVersion: "changed-source" } },
+    { ...item, evidenceIds: ["campaign-record", "extra"] },
+  ]) {
+    rejected(spendInput([item, changed]), "CONFLICT");
+  }
+});
+it("rejects conflicting newest spend ties and immutable reference hash changes", () => {
+  const item = spendSample(10000, 1);
+  const changed = spendRevision(item, 20000, 0);
+  rejected(spendInput([item, changed]), "CONFLICT");
+  rejected(spendInput([changed, item]), "CONFLICT");
+  rejected(
+    spendInput([item, { ...item, reference: { ...item.reference, hash: "different" } }]),
+    "CONFLICT",
+  );
+});
+it("compares spend measurement timestamps as instants while retaining opaque IDs", () => {
+  const items = [1, 2, 3].map((weeks) => spendSample(10000, weeks));
+  const item = items[0];
+  const spelling = (time: string) => time.replace(".000Z", "Z");
+  const historical = {
+    ...item.reference.period,
+    periodStart: spelling(item.reference.period.periodStart),
+    periodEnd: spelling(item.reference.period.periodEnd),
+  };
+  const duplicate = {
+    ...item,
+    visibleAt: spelling(item.visibleAt),
+    computedAt: spelling(item.computedAt),
+    sourceWatermark: spelling(item.sourceWatermark!),
+    reference: {
+      ...item.reference,
+      period: historical,
+      observedAt: spelling(item.reference.observedAt),
+    },
+    measuredCoverage: {
+      ...item.measuredCoverage!,
+      ...historical,
+      observedAt: spelling(item.measuredCoverage!.observedAt),
+    },
+  };
+  expect(evaluate(spendInput([...items, duplicate]))).toMatchObject({
+    sampleSize: 3,
+    median: 10000,
+  });
+});
+it("rejects spend campaign/scope/definition/future/hash/policy mismatches", () => {
+  const item = spendSample(10000, 1);
+  for (const patch of [
+    { entity: { kind: "CAMPAIGN", externalCampaignId: "foreign" } } as const,
+    { binding: { ...binding, organizationId: "foreign" } },
+    { definitionVersion: "foreign" },
+    { observedAt: "2026-10-01T00:00:00Z" },
+    { sourceReferences: [{ ...item.reference, hash: "foreign" }] },
+  ]) {
+    rejected(spendInput([item], patch), "INVALID_INPUT");
+  }
+  rejected(spendInput([item], { baselineVersion: "foreign" }), "VERSION_MISMATCH");
+});
