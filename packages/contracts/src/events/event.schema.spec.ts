@@ -1078,3 +1078,491 @@ it("rejects inconsistent explicit baseline alignment", () => {
     false,
   );
 });
+
+import { EventMeasureSchema, MetricValueSchema, MetricSnapshotV1Schema } from "../index.js";
+const cancellationMeasure = { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" } as const;
+function cancellationObservation() {
+  const reference = {
+    ...sourceRef,
+    kind: "NORMALIZED_AGGREGATE",
+    measure: cancellationMeasure,
+    period: baselinePeriod,
+    observedAt: baselinePeriod.periodEnd,
+  };
+  return {
+    reference,
+    entity: store,
+    rate: { numerator: 1, denominator: 100, valueBasisPoints: 100, period: baselinePeriod },
+    visibleAt: baselinePeriod.periodEnd,
+    computedAt: baselinePeriod.periodEnd,
+    sourceWatermark: baselinePeriod.periodEnd,
+    evidenceIds: ["cohort-a"],
+    quality,
+  };
+}
+function cancellationRequest() {
+  const observation = cancellationObservation();
+  return {
+    ...baselineRequest,
+    eventType: "CANCELLED_ORDER_SPIKE",
+    entity: store,
+    measure: cancellationMeasure,
+    candidates: [],
+    normalizedObservations: [observation],
+    sourceReferences: [observation.reference],
+  };
+}
+it("accepts event-only cancellation histories without changing P3 metrics", () => {
+  expect(EventMeasureSchema.safeParse(cancellationMeasure).success).toBe(true);
+  const parsed = BaselineRequestSchema.parse(cancellationRequest());
+  expect(Object.isFrozen(parsed)).toBe(true);
+  const observation = parsed.normalizedObservations?.[0];
+  expect(observation && "rate" in observation && Object.isFrozen(observation.rate)).toBe(true);
+  expect(MetricValueSchema.safeParse({ ...cancellationMeasure, value: 100 }).success).toBe(false);
+  expect(
+    MetricSnapshotV1Schema.safeParse({
+      ...snapshot,
+      metric: { ...cancellationMeasure, value: 100 },
+    }).success,
+  ).toBe(false);
+});
+it("accepts cancellation AVAILABLE/ZERO evidence and direct empty-snapshot detection", () => {
+  for (const median of [100.5, 0]) {
+    const baseline = {
+      ...common.baseline,
+      measure: cancellationMeasure,
+      median,
+      status: median === 0 ? "ZERO" : "AVAILABLE",
+      sourceReferences: [cancellationObservation().reference],
+    };
+    const currentRef = { ...cancellationObservation().reference, period, observedAt: end };
+    const value = { ...evidence(3), baseline, sourceReferences: [currentRef] };
+    expect(
+      EventDetectionRequestSchema.safeParse({ evidence: value, baseline, snapshots: [], policy })
+        .success,
+    ).toBe(true);
+  }
+});
+it.each([
+  { entity: sku },
+  { binding: { ...binding, storeId: "foreign" } },
+  { definitionVersion: "foreign" },
+  { eventType: "REFUND_SPIKE" },
+  { measure: { kind: "REFUND_ORDER_RATE", unit: "basisPoints" } },
+  { sourceReferences: [] },
+  { candidates: [snapshot] },
+  { normalizedObservations: Array.from({ length: 1001 }, cancellationObservation) },
+])("rejects cancellation request scope/provenance mismatch %j", (patch) => {
+  expect(BaselineRequestSchema.safeParse({ ...cancellationRequest(), ...patch }).success).toBe(
+    false,
+  );
+});
+const invalidObservationPatches = [
+  { extra: true },
+  { entity: campaign },
+  { visibleAt: start },
+  { computedAt: future },
+  { visibleAt: "2026-09-25T06:00:00.0001Z" },
+  { sourceWatermark: null },
+  { sourceWatermark: baselinePeriod.periodStart },
+  { rate: { numerator: 1, denominator: 100, valueBasisPoints: 101, period: baselinePeriod } },
+  { rate: { numerator: 1, denominator: 100, valueBasisPoints: 100, period } },
+  { quality: { ...quality, sampleSize: 99 } },
+  { quality: { ...quality, coverageBasisPoints: 9999 } },
+  {
+    quality: {
+      ...quality,
+      issues: [{ code: "LOW_SAMPLE", field: "cohort", evidenceIds: ["cohort-a"] }],
+    },
+  },
+  {
+    quality: {
+      ...quality,
+      dataStatus: "INSUFFICIENT",
+      issues: [{ code: "LOW_SAMPLE", field: "cohort", evidenceIds: ["foreign"] }],
+    },
+  },
+];
+it.each(invalidObservationPatches)(
+  "rejects invalid normalized cancellation observation %j",
+  (patch) => {
+    const value = cancellationRequest();
+    expect(
+      BaselineRequestSchema.safeParse({
+        ...value,
+        normalizedObservations: [{ ...value.normalizedObservations[0], ...patch }],
+      }).success,
+    ).toBe(false);
+  },
+);
+it.each([
+  { kind: "METRIC_SNAPSHOT" },
+  { hash: "different" },
+  { id: "different" },
+  { version: "different" },
+  { observedAt: end },
+  { measure: { kind: "CANCELLED_ORDER_RATE", unit: "minorCNY" } },
+])("requires the exact aggregate reference %j", (patch) => {
+  const value = cancellationRequest();
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...value,
+      sourceReferences: [{ ...value.sourceReferences[0], ...patch }],
+    }).success,
+  ).toBe(false);
+});
+it("represents zero-denominator and missing-time aggregates with explicit limitations", () => {
+  for (const [denominator, code] of [
+    [0, "ZERO_DENOMINATOR"],
+    [null, "SOURCE_TIME_MISSING"],
+  ] as const) {
+    const value = cancellationRequest();
+    const observation = {
+      ...cancellationObservation(),
+      sourceWatermark: null,
+      rate: { numerator: null, denominator, valueBasisPoints: null, period: baselinePeriod },
+      quality: {
+        dataStatus: "UNAVAILABLE",
+        sampleSize: 0,
+        coverageBasisPoints: 0,
+        issues: [{ code, field: "cohort", evidenceIds: ["cohort-a"] }],
+      },
+    };
+    expect(
+      BaselineRequestSchema.safeParse({ ...value, normalizedObservations: [observation] }).success,
+    ).toBe(true);
+  }
+});
+it("leaves normalized histories optional for existing typed callers", () => {
+  const oldShape: Omit<BaselineRequest, "normalizedObservations"> =
+    BaselineRequestSchema.parse(baselineRequest);
+  const legacy: BaselineRequest = oldShape;
+  expect(BaselineRequestSchema.parse(legacy)).not.toHaveProperty("normalizedObservations");
+});
+it("does not allow cancellation measures on another event's evidence", () => {
+  expect(
+    accepts({
+      ...evidence(),
+      sourceReferences: [
+        { ...sourceRef, kind: "NORMALIZED_AGGREGATE", measure: cancellationMeasure },
+      ],
+    }),
+  ).toBe(false);
+});
+
+it("rejects a verified cancellation observation with unknown rate or a zero cohort", () => {
+  for (const denominator of [null, 0]) {
+    const value = cancellationRequest();
+    const item = cancellationObservation();
+    const observation = {
+      ...item,
+      rate: { ...item.rate, numerator: null, denominator, valueBasisPoints: null },
+      quality: { ...quality, sampleSize: 0 },
+    };
+    expect(
+      BaselineRequestSchema.safeParse({ ...value, normalizedObservations: [observation] }).success,
+    ).toBe(false);
+  }
+});
+it("matches exact external SKU identity on normalized observations", () => {
+  const value = cancellationRequest();
+  const item = { ...cancellationObservation(), entity: { kind: "SKU", externalSkuId: "sku-a" } };
+  expect(
+    BaselineRequestSchema.safeParse({ ...value, entity: sku, normalizedObservations: [item] })
+      .success,
+  ).toBe(true);
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...value,
+      entity: sku,
+      normalizedObservations: [{ ...item, entity: { ...item.entity, externalSkuId: "sku-b" } }],
+    }).success,
+  ).toBe(false);
+});
+
+it("limits even an explicitly empty normalized observation channel to cancellation requests", () => {
+  expect(
+    BaselineRequestSchema.safeParse({ ...baselineRequest, normalizedObservations: [] }).success,
+  ).toBe(false);
+});
+
+const spendMeasure = { kind: "AD_SPEND", unit: "minorCNY" } as const;
+function spendObservation() {
+  const reference = {
+    ...sourceRef,
+    kind: "NORMALIZED_AGGREGATE",
+    measure: spendMeasure,
+    period: baselinePeriod,
+    observedAt: baselinePeriod.periodEnd,
+  };
+  return {
+    reference,
+    entity: campaign,
+    spendMinor: 20000,
+    measuredCoverage: {
+      binding,
+      ...baselinePeriod,
+      observedAt: baselinePeriod.periodEnd,
+      sourceVersion: "measurement-source-v1",
+      evidenceIds: ["campaign-record"],
+      coverageBasisPoints: 10000,
+    },
+    visibleAt: baselinePeriod.periodEnd,
+    computedAt: baselinePeriod.periodEnd,
+    sourceWatermark: baselinePeriod.periodEnd,
+    evidenceIds: ["campaign-record"],
+    quality: { ...quality, sampleSize: 1 },
+  };
+}
+function spendRequest() {
+  const observation = spendObservation();
+  return {
+    ...baselineRequest,
+    eventType: "AD_SPEND_SPIKE",
+    entity: campaign,
+    measure: spendMeasure,
+    candidates: [],
+    normalizedObservations: [observation],
+    sourceReferences: [observation.reference],
+  };
+}
+function spendRequestWithObservation(patch: object) {
+  const value = spendRequest();
+  return { ...value, normalizedObservations: [{ ...spendObservation(), ...patch }] };
+}
+it("accepts a strict measured ad-spend observation without attribution dependency", () => {
+  expect(EventMeasureSchema.safeParse(spendMeasure).success).toBe(true);
+  const parsed = BaselineRequestSchema.parse(spendRequest());
+  expect(Object.isFrozen(parsed.normalizedObservations)).toBe(true);
+  expect(Object.isFrozen(parsed.normalizedObservations?.[0])).toBe(true);
+  expect(MetricValueSchema.safeParse({ ...spendMeasure, value: 20000 }).success).toBe(false);
+  expect(
+    MetricSnapshotV1Schema.safeParse({ ...snapshot, metric: { ...spendMeasure, value: 20000 } })
+      .success,
+  ).toBe(false);
+});
+it("accepts AVAILABLE/ZERO ad-spend baseline and direct aggregate detection", () => {
+  for (const median of [20000.5, 0]) {
+    const baseline = {
+      ...common.baseline,
+      measure: spendMeasure,
+      median,
+      mad: 15000.5,
+      status: median === 0 ? "ZERO" : "AVAILABLE",
+      sourceReferences: [spendObservation().reference],
+    };
+    const current = { ...spendObservation().reference, period, observedAt: end };
+    expect(
+      EventDetectionRequestSchema.safeParse({
+        evidence: { ...evidence(7), baseline, sourceReferences: [current] },
+        baseline,
+        snapshots: [],
+        policy,
+      }).success,
+    ).toBe(true);
+  }
+});
+it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, null])(
+  "rejects invalid verified spend amount %s",
+  (spendMinor) => {
+    expect(
+      BaselineRequestSchema.safeParse(spendRequestWithObservation({ spendMinor })).success,
+    ).toBe(false);
+  },
+);
+it("accepts explicitly measured zero spend with positive source sample size", () => {
+  expect(
+    BaselineRequestSchema.safeParse(spendRequestWithObservation({ spendMinor: 0 })).success,
+  ).toBe(true);
+});
+it.each([
+  { extra: true },
+  { entity: store },
+  { entity: sku },
+  { entity: { ...campaign, externalCampaignId: "other" } },
+  { visibleAt: baselinePeriod.periodStart },
+  { computedAt: future },
+  { visibleAt: "2026-09-25T06:00:00.0001Z" },
+  { sourceWatermark: null },
+  { sourceWatermark: baselinePeriod.periodStart },
+  { measuredCoverage: null },
+  { quality: { ...quality, sampleSize: 0 } },
+  { quality: { ...quality, sampleSize: 1, coverageBasisPoints: 9999 } },
+  {
+    quality: {
+      ...quality,
+      sampleSize: 1,
+      issues: [{ code: "SOURCE_INCONSISTENT", field: "spend", evidenceIds: ["campaign-record"] }],
+    },
+  },
+])("rejects invalid spend observation %j", (patch) => {
+  expect(BaselineRequestSchema.safeParse(spendRequestWithObservation(patch)).success).toBe(false);
+});
+it.each([
+  { binding: { ...binding, connectionId: "foreign" } },
+  { periodStart: start },
+  { currency: "USD" },
+  { evidenceIds: ["foreign"] },
+  { observedAt: end },
+  { observedAt: "2026-09-25T06:00:00.0001Z" },
+  { periodStart: "2026-09-24T16:00:00.0001Z" },
+  { periodEnd: "2026-09-25T06:00:00.0001Z" },
+  { coverageBasisPoints: 9999 },
+])("rejects inconsistent measured spend coverage %j", (patch) => {
+  const measuredCoverage = { ...spendObservation().measuredCoverage, ...patch };
+  expect(
+    BaselineRequestSchema.safeParse(spendRequestWithObservation({ measuredCoverage })).success,
+  ).toBe(false);
+});
+it.each([
+  { kind: "METRIC_SNAPSHOT" },
+  { hash: "foreign" },
+  { id: "foreign" },
+  { version: "foreign" },
+  { definitionVersion: "foreign" },
+  { binding: { ...binding, storeId: "foreign" } },
+  { measure: { kind: "AD_SPEND", unit: "basisPoints" } },
+])("requires exact normalized spend reference %j", (patch) => {
+  const value = spendRequest();
+  expect(
+    BaselineRequestSchema.safeParse({
+      ...value,
+      sourceReferences: [{ ...value.sourceReferences[0], ...patch }],
+    }).success,
+  ).toBe(false);
+});
+it.each([
+  { eventType: "ROAS_DROP" },
+  { eventType: "CANCELLED_ORDER_SPIKE" },
+  { entity: store },
+  { measure: { kind: "ROAS", unit: "basisPoints" } },
+  { definitionVersion: "foreign" },
+  { binding: { ...binding, workspaceId: "foreign" } },
+  { sourceReferences: [] },
+  { normalizedObservations: [spendObservation(), cancellationObservation()] },
+  { normalizedObservations: Array.from({ length: 1001 }, spendObservation) },
+])("rejects wrong spend request domain or scope %j", (patch) => {
+  expect(BaselineRequestSchema.safeParse({ ...spendRequest(), ...patch }).success).toBe(false);
+});
+it("keeps explicit unavailable and unmeasured diagnostic spend with limitations", () => {
+  for (const dataStatus of ["UNAVAILABLE", "INSUFFICIENT"] as const) {
+    const patch = {
+      spendMinor: dataStatus === "UNAVAILABLE" ? null : 20000,
+      measuredCoverage: null,
+      sourceWatermark: dataStatus === "UNAVAILABLE" ? null : baselinePeriod.periodEnd,
+      quality: {
+        dataStatus,
+        sampleSize: 0,
+        coverageBasisPoints: 0,
+        issues: [{ code: "WINDOW_MISMATCH", field: "spend", evidenceIds: ["campaign-record"] }],
+      },
+    };
+    const parsed = BaselineRequestSchema.parse(spendRequestWithObservation(patch));
+    expect(parsed.normalizedObservations?.[0]?.quality.issues[0]?.code).toBe("WINDOW_MISMATCH");
+  }
+});
+it.each([
+  {
+    quality: {
+      dataStatus: "INSUFFICIENT",
+      sampleSize: 1,
+      coverageBasisPoints: 1,
+      issues: [{ code: "PARTIAL_COVERAGE", field: "spend", evidenceIds: ["campaign-record"] }],
+    },
+  },
+  {
+    quality: {
+      dataStatus: "INSUFFICIENT",
+      sampleSize: 1,
+      coverageBasisPoints: 0,
+      issues: [{ code: "LOW_SAMPLE", field: "spend", evidenceIds: ["campaign-record"] }],
+    },
+  },
+])("requires zero coverage and a relevant issue when measured provenance is absent %j", (patch) => {
+  expect(
+    BaselineRequestSchema.safeParse(
+      spendRequestWithObservation({ measuredCoverage: null, ...patch }),
+    ).success,
+  ).toBe(false);
+});
+it("limits partial coverage claims and checks every spend issue evidence ID", () => {
+  const item = spendObservation();
+  const quality = {
+    ...item.quality,
+    dataStatus: "INSUFFICIENT",
+    coverageBasisPoints: 5000,
+    issues: [{ code: "PARTIAL_COVERAGE", field: "spend", evidenceIds: ["campaign-record"] }],
+  };
+  const partial = {
+    ...item,
+    quality,
+    measuredCoverage: { ...item.measuredCoverage, coverageBasisPoints: 5000 },
+  };
+  expect(BaselineRequestSchema.safeParse(spendRequestWithObservation(partial)).success).toBe(true);
+  expect(
+    BaselineRequestSchema.safeParse(
+      spendRequestWithObservation({
+        ...partial,
+        quality: { ...quality, coverageBasisPoints: 5001 },
+      }),
+    ).success,
+  ).toBe(false);
+  expect(
+    BaselineRequestSchema.safeParse(
+      spendRequestWithObservation({
+        ...partial,
+        quality: {
+          ...quality,
+          issues: [{ code: "PARTIAL_COVERAGE", field: "spend", evidenceIds: ["foreign"] }],
+        },
+      }),
+    ).success,
+  ).toBe(false);
+});
+it("allows current spend references on both marketing events, with spend baseline only on spend spike", () => {
+  const current = { ...spendObservation().reference, period, observedAt: end };
+  expect(accepts({ ...evidence(6), sourceReferences: [current] })).toBe(true);
+  expect(accepts({ ...evidence(7), sourceReferences: [current] })).toBe(true);
+  expect(accepts({ ...evidence(), sourceReferences: [current] })).toBe(false);
+  const baseline = {
+    ...common.baseline,
+    measure: spendMeasure,
+    sourceReferences: [spendObservation().reference],
+  };
+  expect(accepts({ ...evidence(6), baseline, sourceReferences: [current] })).toBe(false);
+});
+it("scopes event-only measures even without observations, and permits empty spend history", () => {
+  const { normalizedObservations: omitted, ...value } = spendRequest();
+  expect(omitted).toHaveLength(1);
+  expect(BaselineRequestSchema.safeParse(value).success).toBe(true);
+  expect(BaselineRequestSchema.safeParse({ ...value, normalizedObservations: [] }).success).toBe(
+    true,
+  );
+  expect(BaselineRequestSchema.safeParse({ ...value, eventType: "ROAS_DROP" }).success).toBe(false);
+});
+
+import {
+  EventCancellationObservationSchema,
+  EventAdSpendObservationSchema,
+  EventNormalizedObservationSchema,
+  type EventCancellationObservation,
+} from "../index.js";
+it("preserves typed cancellation arrays and frozen measured spend provenance in the two-variant union", () => {
+  const cancellations: readonly EventCancellationObservation[] = [
+    EventCancellationObservationSchema.parse(cancellationObservation()),
+  ];
+  const legacy: BaselineRequest = {
+    ...BaselineRequestSchema.parse(cancellationRequest()),
+    normalizedObservations: cancellations,
+  };
+  expect(BaselineRequestSchema.parse(legacy).normalizedObservations).toEqual(cancellations);
+  const spend = EventAdSpendObservationSchema.parse(spendObservation());
+  expect(Object.isFrozen(spend.measuredCoverage)).toBe(true);
+  expect(Object.isFrozen(spend.measuredCoverage?.evidenceIds)).toBe(true);
+  expect(EventNormalizedObservationSchema.safeParse(cancellations[0]).success).toBe(true);
+  expect(EventNormalizedObservationSchema.safeParse(spend).success).toBe(true);
+  expect(
+    EventNormalizedObservationSchema.safeParse({ ...spend, rate: cancellationObservation().rate })
+      .success,
+  ).toBe(false);
+});
