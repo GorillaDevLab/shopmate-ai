@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   createEventFingerprint,
+  BaselineRequestSchema,
   type BaselinePort,
   type BaselineRequest,
   type EventDetectionOutcome,
@@ -848,7 +849,9 @@ function historicalRequest(): BaselineRequest {
   });
   return { ...baselineRequest(), candidates: [row], sourceReferences: [ref] };
 }
-function availableBaseline(input: BaselineRequest): RobustBaselineV1 {
+function availableBaseline(
+  input: BaselineRequest,
+): Extract<RobustBaselineV1, { status: "AVAILABLE" }> {
   const ref = input.sourceReferences[0];
   if (!ref) throw new Error("Missing historical reference fixture");
   return {
@@ -903,3 +906,153 @@ it("rejects a supplied baseline with no observed support for its period", async 
     error: { code: "WINDOW_MISMATCH" },
   });
 });
+
+const eventOnlyMeasures = [
+  { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" },
+  { kind: "AD_SPEND", unit: "minorCNY" },
+] as const;
+it.each(eventOnlyMeasures)(
+  "rejects event-only snapshot measure $kind before reading",
+  async (measure) => {
+    const { service, reads } = setup();
+    const input = request([stock()]);
+    const jobs = input.jobs.map((job) => ({ ...job, measures: [measure] }));
+    expect(await service.evaluate({ ...input, jobs })).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" },
+    });
+    expect(reads).toHaveLength(0);
+  },
+);
+
+const cancellationFixture = {
+  ...common,
+  eventType: "CANCELLED_ORDER_SPIKE",
+  entity: { kind: "STORE" },
+  facts: {
+    cohort: period,
+    cohortOrders: 24,
+    paidCancelledOrders: 6,
+    pendingCancelledOrders: 0,
+    currentRate: { numerator: 6, denominator: 24, valueBasisPoints: 2500, period },
+    baselineRate: null,
+    reasonCounts: [],
+  },
+} as const satisfies EventEvidenceV1;
+const spendFixture = {
+  ...common,
+  eventType: "AD_SPEND_SPIKE",
+  entity: { kind: "CAMPAIGN", externalCampaignId: "campaign-a" },
+  facts: {
+    spendMinor: 24,
+    attributedRevenueMinor: 48,
+    impressions: 100,
+    clicks: 24,
+    attributedOrders: 12,
+    attributionCoverageBasisPoints: 10000,
+    roas: {
+      numerator: 48,
+      denominator: 24,
+      valueBasisPoints: 20000,
+      period,
+    },
+  },
+} as const satisfies EventEvidenceV1;
+const normalizedPeriod = {
+  ...period,
+  periodStart: "2026-10-17T00:00:00Z",
+  periodEnd: "2026-10-18T00:00:00Z",
+};
+const normalizedCommon = {
+  visibleAt: normalizedPeriod.periodEnd,
+  computedAt: normalizedPeriod.periodEnd,
+  sourceWatermark: normalizedPeriod.periodEnd,
+  evidenceIds: [reference.id],
+  quality: { dataStatus: "VERIFIED", sampleSize: 24, coverageBasisPoints: 10000, issues: [] },
+} as const;
+const normalizedReference = {
+  ...reference,
+  period: normalizedPeriod,
+  observedAt: normalizedPeriod.periodEnd,
+};
+const normalizedFixtures = [
+  {
+    evidence: cancellationFixture,
+    median: 2500,
+    observation: {
+      ...normalizedCommon,
+      entity: cancellationFixture.entity,
+      reference: { ...normalizedReference, measure: eventOnlyMeasures[0] },
+      rate: { numerator: 6, denominator: 24, valueBasisPoints: 2500, period: normalizedPeriod },
+    },
+  },
+  {
+    evidence: spendFixture,
+    median: 24,
+    observation: {
+      ...normalizedCommon,
+      entity: spendFixture.entity,
+      spendMinor: 24,
+      reference: { ...normalizedReference, measure: eventOnlyMeasures[1] },
+      measuredCoverage: {
+        binding,
+        ...normalizedPeriod,
+        observedAt: normalizedPeriod.periodEnd,
+        sourceVersion: "measurement-v1",
+        evidenceIds: [reference.id],
+        coverageBasisPoints: 10000,
+      },
+    },
+  },
+] as const;
+function normalizedRequest(fixture: (typeof normalizedFixtures)[number]): BaselineRequest {
+  const { evidence, observation } = fixture;
+  return BaselineRequestSchema.parse({
+    binding,
+    period,
+    eventType: evidence.eventType,
+    entity: evidence.entity,
+    observedAt: period.periodEnd,
+    definitionVersion: common.definitionVersion,
+    baselineVersion: policy.baselineVersion,
+    measure: observation.reference.measure,
+    candidates: [],
+    sourceReferences: [observation.reference],
+    normalizedObservations: [observation],
+  });
+}
+it.each(normalizedFixtures)(
+  "keeps $evidence.eventType on its normalized baseline channel",
+  async (fixture) => {
+    const { evidence, observation } = fixture;
+    const baselineRequest = normalizedRequest(fixture);
+    const baseline: BaselinePort = {
+      evaluate: (entry) => {
+        expect(entry.normalizedObservations).toEqual([observation]);
+        expect(Object.isFrozen(entry.normalizedObservations?.[0])).toBe(true);
+        return { ok: true, value: { ...availableBaseline(entry), median: fixture.median } };
+      },
+    };
+    const registry = new EventDetectorRegistry(policy, [
+      {
+        eventType: evidence.eventType,
+        rulePolicyVersion: policy.version,
+        detector: { detect: candidate },
+      },
+    ]);
+    const metrics: MetricReadPort = {
+      read: async (entry) => {
+        expect(entry.query.kinds).toEqual([]);
+        return { ok: true, value: [] };
+      },
+    };
+    const service = new EventEvaluationService(actor, metrics, baseline, registry);
+    const result = value(
+      await service.evaluate({
+        ...request([evidence]),
+        jobs: [{ evidence, measures: [], baselineRequest }],
+      }),
+    );
+    expect(result.candidates[0]?.evidence.baseline?.measure).toEqual(observation.reference.measure);
+  },
+);

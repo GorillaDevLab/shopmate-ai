@@ -4,13 +4,13 @@ import {
   EventDetectionOutcomeSchema,
   EventDetectionRequestSchema,
   EventEvidenceV1Schema,
-  EventMeasureSchema,
   EventPeriodSchema,
   EventRulePolicyV1Schema,
   EventTimestampSchema,
   EventTypeSchema,
   ExternalIdSchema,
   MetricSnapshotV1Schema,
+  MetricValueSchema,
   RobustBaselineV1Schema,
   SourceVersionSchema,
   TenantContextSchema,
@@ -30,15 +30,19 @@ import {
   type EventType,
   type MetricReadPort,
   type MetricSnapshotV1,
+  type MetricSnapshotQuery,
   type RobustBaselineV1,
   type TenantContext,
 } from "@shopmate/contracts";
 import { z } from "zod";
 
+const metricMeasureSchema = z.union(
+  MetricValueSchema.options.map((option) => option.unwrap().omit({ value: true }).readonly()),
+);
 const jobSchema = z
   .strictObject({
     evidence: EventEvidenceV1Schema,
-    measures: z.array(EventMeasureSchema).max(100).readonly(),
+    measures: z.array(metricMeasureSchema).max(100).readonly(),
     baselineRequest: BaselineRequestSchema.nullable(),
   })
   .readonly();
@@ -438,7 +442,7 @@ export class EventEvaluationService {
   }
 }
 
-function metricQuery(run: Run, job: Job) {
+function metricQuery(run: Run, job: Job): MetricSnapshotQuery {
   // A connection has no metric subject; an empty store read still enforces store ownership.
   const subject =
     job.evidence.entity.kind === "CONNECTION" ? { kind: "STORE" as const } : job.evidence.entity;
