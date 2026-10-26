@@ -128,7 +128,8 @@ function namedResources(field: string): readonly Resource[] {
   if (/refund|return/u.test(field)) found.push("REFUNDS");
   if (/marketing|campaign|advertis|spend|attribut|roas/u.test(field)) found.push("MARKETING");
   if (/product|listedat|cost|cogs|price|discount/u.test(field)) found.push("PRODUCTS");
-  if (/order|sales|sold|paid|payment|revenue|gmv/u.test(field)) found.push("ORDERS");
+  if (/order|sales|sold|paid|payment|revenue|gmv|traffic|visitors|cart|checkout/u.test(field))
+    found.push("ORDERS");
   return found;
 }
 function issueResources(evidence: EventEvidenceV1, item: DataQualityIssueV1): readonly Resource[] {

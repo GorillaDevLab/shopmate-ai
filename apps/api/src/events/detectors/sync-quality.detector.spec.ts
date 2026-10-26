@@ -16,6 +16,7 @@ import { SyncQualityDetector } from "./sync-quality.detector.js";
 type Sync = Extract<EventEvidenceV1, { eventType: "SYNC_FAILURE" }>;
 type Revenue = Extract<EventEvidenceV1, { eventType: "REVENUE_DROP" }>;
 type Stockout = Extract<EventEvidenceV1, { eventType: "STOCKOUT_RISK" }>;
+type Conversion = Extract<EventEvidenceV1, { eventType: "CONVERSION_DROP" }>;
 const binding = {
   organizationId: "org-sync",
   workspaceId: "workspace-sync",
@@ -53,6 +54,12 @@ const policy = {
       eventType: "STOCKOUT_RISK",
       requireAlignedBaseline: false,
       thresholds: { criticalHoursRemaining: 6, leadTimeBufferHours: 1 },
+    },
+    {
+      ...ruleQuality,
+      eventType: "CONVERSION_DROP",
+      requireAlignedBaseline: false,
+      thresholds: { relativeDropBasisPoints: 2000, minimumVisitors: 10 },
     },
   ],
 } satisfies EventRulePolicyV1;
@@ -146,6 +153,27 @@ function stockout(): Stockout {
       inventoryObservedAt: period.periodEnd,
       inventoryAgeSeconds: 0,
       inventoryStatus: "VERIFIED",
+    },
+  };
+}
+function conversion(original: DataQualityIssueV1): Conversion {
+  return {
+    ...common(),
+    dataStatus: "INSUFFICIENT",
+    issues: [original],
+    eventType: "CONVERSION_DROP",
+    entity: { kind: "STORE" },
+    facts: {
+      visitors: 100,
+      cart: 40,
+      checkout: 30,
+      paidOrders: 20,
+      conversion: { numerator: 20, denominator: 100, valueBasisPoints: 2000, period },
+      baselineConversion: null,
+      priceChangeBasisPoints: null,
+      priceEffectiveAt: null,
+      variantAvailabilityBasisPoints: null,
+      relationship: "CORRELATION_ONLY",
     },
   };
 }
@@ -608,5 +636,83 @@ it("keeps an independent source blocker when the original reason list is full", 
     reason: "STALE_SOURCE",
     blockedResources: ["ORDERS"],
     quality: { dataStatus: "STALE", issues: originals },
+  });
+});
+
+it.each([
+  ["WINDOW_MISMATCH", "traffic.window"],
+  ["SOURCE_INCONSISTENT", "traffic.funnel"],
+  ["STALE_SOURCE", "visitors"],
+  ["VERSION_MISMATCH", "cart"],
+  ["SOURCE_TIME_MISSING", "checkout"],
+  ["NOT_SYNCHRONIZED", "facts.visitors"],
+  ["WINDOW_MISMATCH", "facts.cart"],
+  ["SOURCE_INCONSISTENT", "facts.checkout"],
+  ["NOT_SYNCHRONIZED", "traffic"],
+] as const)("attributes %s on %s only to the funnel source", (code, field) => {
+  const original = issue(code, field);
+  expect(outcome(conversion(original))).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    reason:
+      code === "STALE_SOURCE"
+        ? "STALE_SOURCE"
+        : code === "SOURCE_INCONSISTENT"
+          ? "SOURCE_CONFLICT"
+          : "INSUFFICIENT_EVIDENCE",
+    blockedResources: ["ORDERS"],
+    quality: { issues: [original] },
+  });
+});
+
+it.each([
+  ["WINDOW_MISMATCH", "traffic.window"],
+  ["SOURCE_INCONSISTENT", "traffic.funnel"],
+] as const)("preserves independent sold-out inventory despite %s on %s", (code, field) => {
+  const original = issue(code, field);
+  const value = { ...stockout(), dataStatus: "INSUFFICIENT" as const, issues: [original] };
+  expect(outcome(value)).toMatchObject({
+    blockedResources: ["ORDERS"],
+    quality: { issues: [original] },
+  });
+  expect(new StockoutDetector().detect(request(value))).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE", candidate: { severityFloor: "CRITICAL" } },
+  });
+});
+
+it.each([
+  ["CONVERSION_RATE", "visitors"],
+  ["CART_RATE", "cart"],
+  ["CHECKOUT_RATE", "checkout"],
+] as const)("keeps %s snapshot and %s fact blockers consistent", (kind, field) => {
+  const original = issue("WINDOW_MISMATCH", "traffic.window");
+  const row: MetricSnapshotV1 = {
+    ...snapshot(),
+    status: "INSUFFICIENT",
+    issues: [original],
+    metric: { kind, unit: "basisPoints", value: 2000 },
+  };
+  const result = new SyncQualityDetector().detect(snapshotRequest(row));
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error.code);
+  const fact = outcome(conversion(issue(original.code, field)));
+  expect(result.value.blockedResources).toEqual(["ORDERS"]);
+  expect(fact.blockedResources).toEqual(result.value.blockedResources);
+  expect(result.value.quality.issues).toEqual(expect.arrayContaining([original]));
+});
+
+it("does not turn missing traffic measurements into a source-failure blocker", () => {
+  const original = issue("TRAFFIC_MISSING", "traffic.window");
+  expect(outcome(conversion(original))).toMatchObject({
+    blockedResources: [],
+    quality: { issues: [original] },
+  });
+});
+
+it("does not invent resource blame for an unrelated diagnostic field", () => {
+  const original = issue("WINDOW_MISMATCH", "unrelated.window");
+  expect(outcome(conversion(original))).toMatchObject({
+    blockedResources: [],
+    quality: { issues: [original] },
   });
 });
