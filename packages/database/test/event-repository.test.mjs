@@ -558,3 +558,12 @@ test("immutable observation time remains hash bound while trusted host clock adv
   assert.equal(Date.parse(repeated.lastSeenAt), Date.parse(later));
   assert.deepEqual(repeated.currentEvidence, original.currentEvidence);
 });
+
+test("malformed stored reference scalar is rejected without coercion", async () => {
+  const db = database();
+  const event = await seed(db);
+  db.state.events[0].currentEvidenceHash = 123;
+  const result = await db.repository.detail(detailRequest(event));
+  assert.equal(result.ok, false, "Persisted scalar types must retain their public contract");
+  assert.equal(result.error.code, "SOURCE_UNAVAILABLE");
+});

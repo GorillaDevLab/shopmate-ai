@@ -7,6 +7,7 @@ import {
   EventDetailQuerySchema,
   EventEvidenceQuerySchema,
   EventEvidenceRecordSchema,
+  EventEvidenceReferenceSchema,
   EventHistoryQuerySchema,
   EventListQuerySchema,
   EventRecordSchema,
@@ -100,9 +101,11 @@ function same(left: unknown, right: unknown): boolean {
 function time(value: unknown): string {
   return EventTimestampSchema.parse(value instanceof Date ? value.toISOString() : value);
 }
-function integer(value: unknown): number {
+function integer(value: unknown, minimum = 1): number {
+  if (typeof value === "string" && !/^(0|[1-9][0-9]*)$/u.test(value))
+    throw new TypeError("Invalid stored integer");
   const number = typeof value === "bigint" || typeof value === "string" ? Number(value) : value;
-  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1)
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < minimum)
     throw new TypeError("Invalid event revision");
   return number;
 }
@@ -122,17 +125,17 @@ function entityId(entity: EventEntity, binding: ConnectorBinding): string {
   }
 }
 function reference(row: Row, evidence: EventEvidenceV1): EventEvidenceReference {
-  return {
+  return EventEvidenceReferenceSchema.parse({
     schemaVersion: 1,
-    id: String(row.id),
-    version: String(row.version),
-    hash: String(row.hash),
+    id: row.id,
+    version: row.version,
+    hash: row.hash,
     binding: evidence.binding,
     eventType: evidence.eventType,
     entity: evidence.entity,
     definitionVersion: evidence.definitionVersion,
     baselineVersion: evidence.baselineVersion,
-  };
+  });
 }
 function decodeEvidence(row: Row): EventEvidenceRecord {
   const parsed = EventEvidenceRecordSchema.parse({
@@ -160,7 +163,7 @@ function decodeEvidence(row: Row): EventEvidenceRecord {
     Object.keys(expected).map((key) => [
       key,
       key === "sampleSize"
-        ? Number(row[key])
+        ? integer(row[key], 0)
         : row[key] instanceof Date
           ? time(row[key])
           : row[key],
