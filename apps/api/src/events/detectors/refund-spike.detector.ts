@@ -208,11 +208,13 @@ function exceeds(evidence: Evidence, rule: Rule): boolean {
   if (refunded === 0 || refunded < rule.thresholds.minimumRefundedOrders) return false;
   if (baseline.status === "ZERO") return true;
   // Compare the unrounded cohort ratio with the exact statistical median in basis points.
-  const left = BigInt(refunded) * 10000n * 10000n * scale;
+  const left = BigInt(refunded) * 10000n * 100000000n * scale;
   const right =
     BigInt(paid) *
     scaled(baseline.median) *
-    (10000n + BigInt(rule.thresholds.relativeIncreaseBasisPoints));
+    (100000000n +
+      BigInt(rule.thresholds.relativeIncreaseBasisPoints) *
+        BigInt(10000 + rule.toleranceBasisPoints));
   return left >= right;
 }
 function outcome(
