@@ -212,8 +212,10 @@ function syncFailure(evidence: Sync, rule: Extract<Rule, { eventType: "SYNC_FAIL
     evidence.issues.some((item) =>
       issueResources(evidence, item).includes(evidence.facts.affectedResourceKind),
     ) ||
-    ageMilliseconds(evidence.observedAt, lastSuccessAt) >
-      BigInt(rule.thresholds.maximumLagSeconds) * 1000n
+    ageMilliseconds(evidence.observedAt, lastSuccessAt) * 10000n >
+      BigInt(rule.thresholds.maximumLagSeconds) *
+        1000n *
+        (10000n + BigInt(rule.toleranceBasisPoints))
   );
 }
 function candidate(

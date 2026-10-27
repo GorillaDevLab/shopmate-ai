@@ -261,6 +261,139 @@ function lagged(seconds: number): Sync {
   };
 }
 
+function laggedMilliseconds(milliseconds: number): Sync {
+  const value = lagged(0);
+  return {
+    ...value,
+    observedAt: new Date(Date.parse(period.periodEnd) + milliseconds).toISOString(),
+    facts: { ...value.facts, lagSeconds: null },
+  };
+}
+function toleratedOutcome(
+  value: Sync,
+  toleranceBasisPoints = 1000,
+  maximumLagSeconds = 600,
+): EventDetectionOutcome {
+  const input = EventDetectionRequestSchema.parse({
+    ...request(value),
+    policy: {
+      ...policy,
+      rules: [
+        {
+          ...ruleQuality,
+          eventType: "SYNC_FAILURE",
+          toleranceBasisPoints,
+          thresholds: { maximumLagSeconds },
+        },
+      ],
+    },
+  });
+  const result = new SyncQualityDetector().detect(input);
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error.code);
+  expect(EventDetectionOutcomeSchema.safeParse(result.value).success).toBe(true);
+  return result.value;
+}
+
+it.each([
+  [659, "NO_CANDIDATE"],
+  [660, "NO_CANDIDATE"],
+  [661, "CANDIDATE"],
+] as const)(
+  "applies lag tolerance at %s seconds while source age remains fresh",
+  (seconds, expected) => {
+    const result = toleratedOutcome(lagged(seconds));
+    expect(result.disposition).toBe(expected);
+    expect(result.blockedResources).toEqual(expected === "CANDIDATE" ? ["ORDERS"] : []);
+  },
+);
+
+it.each([
+  [1000, 659999, "NO_CANDIDATE"],
+  [1000, 660000, "NO_CANDIDATE"],
+  [1000, 660001, "CANDIDATE"],
+  [0, 599999, "NO_CANDIDATE"],
+  [0, 600000, "NO_CANDIDATE"],
+  [0, 600001, "CANDIDATE"],
+  [10000, 1199999, "NO_CANDIDATE"],
+  [10000, 1200000, "NO_CANDIDATE"],
+  [10000, 1200001, "CANDIDATE"],
+] as const)(
+  "keeps tolerance %s exclusive at %s milliseconds",
+  (tolerance, milliseconds, expected) => {
+    const value = laggedMilliseconds(milliseconds);
+    const result = toleratedOutcome(value, tolerance);
+    expect(result.disposition).toBe(expected);
+    expect(result.blockedResources).toEqual(expected === "CANDIDATE" ? ["ORDERS"] : []);
+    expect(value.facts.lagSeconds).toBeNull();
+  },
+);
+
+it.each([
+  [3600000, "NO_CANDIDATE"],
+  [3600001, "CANDIDATE"],
+  [3601000, "CANDIDATE"],
+] as const)("preserves the raw source-age limit at %s milliseconds", (milliseconds, expected) => {
+  const result = toleratedOutcome(laggedMilliseconds(milliseconds), 1000, 6000);
+  expect(result.disposition).toBe(expected);
+  expect(result.blockedResources).toEqual(expected === "CANDIDATE" ? ["ORDERS"] : []);
+  expect(result.quality.issues.some((row) => row.code === "STALE_SOURCE")).toBe(
+    expected === "CANDIDATE",
+  );
+});
+
+it.each([
+  "TIMEOUT",
+  "RATE_LIMIT",
+  "AUTH_EXPIRED",
+  "PERMISSION_DENIED",
+  "TEMPORARY",
+  "INVALID_RESPONSE",
+] as const)("preserves explicit %s failures inside the tolerated lag band", (typedErrorCode) => {
+  const value = lagged(660);
+  expect(toleratedOutcome({ ...value, facts: { ...value.facts, typedErrorCode } })).toMatchObject({
+    disposition: "CANDIDATE",
+    blockedResources: ["ORDERS"],
+  });
+});
+
+it.each(["lastSuccessAt", "sourceWatermark"] as const)(
+  "keeps missing %s as an independent sync failure under tolerance",
+  (field) => {
+    const value = laggedMilliseconds(660000);
+    const missing: Sync =
+      field === "lastSuccessAt"
+        ? { ...value, facts: { ...value.facts, lastSuccessAt: null } }
+        : {
+            ...value,
+            sourceWatermark: null,
+            dataStatus: "UNAVAILABLE",
+            issues: [issue("SOURCE_TIME_MISSING", "sourceWatermark")],
+          };
+    expect(toleratedOutcome(missing)).toMatchObject({
+      disposition: "CANDIDATE",
+      blockedResources: ["ORDERS"],
+    });
+  },
+);
+
+it.each([
+  ["orders", "CANDIDATE", "ORDERS"],
+  ["traffic.window", "CANDIDATE", "ORDERS"],
+  ["facts.inventoryObservedAt", "NO_CANDIDATE", "INVENTORY"],
+] as const)(
+  "retains the independent %s source blocker inside tolerance",
+  (field, expected, resource) => {
+    const original = issue("WINDOW_MISMATCH", field);
+    const value: Sync = { ...lagged(660), dataStatus: "INSUFFICIENT", issues: [original] };
+    expect(toleratedOutcome(value)).toMatchObject({
+      disposition: expected,
+      blockedResources: [resource],
+      quality: { issues: expect.arrayContaining([original]) },
+    });
+  },
+);
+
 it.each([599, 600, 601])(
   "compares %s seconds to the exact exclusive policy lag limit",
   (seconds) => {
