@@ -743,7 +743,9 @@ function createRunner(bound: EventRepositoryOptions) {
     write: boolean,
     work: (request: R) => Promise<EventResult<T>>,
   ): Promise<EventResult<T>> {
-    const snapshot = structuredClone(request);
+    const parsed = schema.safeParse(request);
+    if (!parsed.success) return Promise.resolve(failure("INVALID_INPUT"));
+    const snapshot = structuredClone(parsed.data);
     const result = pending.then(() => execute(bound, schema, snapshot, write, work));
     pending = result.then(
       () => undefined,

@@ -567,3 +567,12 @@ test("malformed stored reference scalar is rejected without coercion", async () 
   assert.equal(result.ok, false, "Persisted scalar types must retain their public contract");
   assert.equal(result.error.code, "SOURCE_UNAVAILABLE");
 });
+
+test("strict parser rejects uncloneable unknown fields with a typed result", async () => {
+  const db = database();
+  await assert.doesNotReject(async () => {
+    const result = await db.repository.current({ ...currentRequest(), extra: () => undefined });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "INVALID_INPUT");
+  });
+});
