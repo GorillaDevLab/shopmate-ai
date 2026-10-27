@@ -6,6 +6,9 @@ import {
   SanitizedDecisionInputSchema,
   createEventFingerprint,
   type DecisionInputSanitizer,
+  type DecisionProvider,
+  type DecisionControl,
+  type DecisionResult,
   type DecisionPortResult,
   type EvaluationContext,
   type EventEvidenceV1,
@@ -15,6 +18,10 @@ import {
   CanonicalHostEvidenceHash,
   DefaultDecisionInputSanitizer,
 } from "./decision-input-sanitizer.js";
+import {
+  DecisionResultValidator,
+  type PreparedDecisionValidation,
+} from "./decision-result-validator.js";
 
 const instant = "2026-10-25T01:00:00Z";
 const period = {
@@ -593,3 +600,313 @@ it.each([10001, -1, Number.POSITIVE_INFINITY, 1.1])(
     expect(sanitizer.sanitize(invalid)).toEqual({ ok: false, code: "INVALID_INPUT" });
   },
 );
+
+const descriptor = { key: "rules", version: "provider-v1", supportedInputVersions: [1] } as const;
+const validatorOptions = { descriptor, rulesetVersion: "rules-v1", supportedInputVersions: [1] };
+const validator = new DecisionResultValidator(validatorOptions);
+const labels = {
+  severity: "LOW",
+  notificationRoute: "DAILY_BRIEF",
+  llmEscalation: "NO_LLM_NEEDED",
+  evidenceSufficiency: "SUFFICIENT",
+  attentionPriority: "NORMAL_PRIORITY",
+  reasonCodes: ["SYNC_FAILURE"],
+} as const;
+
+function evaluatedFixture(): DecisionResult {
+  return {
+    schemaVersion: 1,
+    status: "EVALUATED",
+    correlationId,
+    rulesetVersion: "rules-v1",
+    labels,
+    confidenceMetadata: null,
+  };
+}
+
+function controlFixture(signal = new AbortController().signal): DecisionControl {
+  return { timeDomain: "SECURITY_UTC", deadlineAt: "2026-10-25T02:00:00Z", signal };
+}
+
+function preparedFixture(context: EvaluationContext, control: DecisionControl) {
+  const prepared = value(validator.prepare(context, control));
+  if (prepared.status !== "PREPARED") throw new Error("Expected prepared host binding");
+  return prepared;
+}
+
+function expectInvalidResult(raw: unknown) {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  expect(value(validator.validate(raw, prepared, context, descriptor, control))).toEqual({
+    schemaVersion: 1,
+    status: "UNAVAILABLE",
+    correlationId,
+    code: "INVALID_RESULT",
+  });
+}
+
+it("prepares an opaque frozen host binding that is separate from the provider payload", () => {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  expect(prepared).toEqual({ status: "PREPARED" });
+  expect(Object.isFrozen(prepared)).toBe(true);
+  expect(SanitizedDecisionInputSchema.safeParse(prepared).success).toBe(false);
+  expect(JSON.stringify(value(sanitizer.sanitize(context)))).not.toContain("PREPARED");
+});
+
+it("accepts a strictly bound evaluated result and preserves null confidence", () => {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  const raw = structuredClone(evaluatedFixture());
+  const before = JSON.stringify(raw);
+  const result = value(validator.validate(raw, prepared, context, descriptor, control));
+  expect(result).toEqual(raw);
+  expect(Object.isFrozen(result)).toBe(true);
+  if (result.status !== "EVALUATED") throw new Error("Expected evaluated result");
+  expect(Object.isFrozen(result.labels.reasonCodes)).toBe(true);
+  expect(result.confidenceMetadata).toBeNull();
+  expect(Object.isFrozen(raw)).toBe(false);
+  expect(JSON.stringify(raw)).toBe(before);
+});
+
+it.each([
+  null,
+  {},
+  { ...evaluatedFixture(), schemaVersion: 2 },
+  { ...evaluatedFixture(), approvalRequired: false },
+  { ...evaluatedFixture(), executionPermission: "ALL" },
+  { ...evaluatedFixture(), evidenceHash: "sha256:forged" },
+  { ...evaluatedFixture(), provider: descriptor },
+  { ...evaluatedFixture(), policyVersion: "unrecognized" },
+  { ...evaluatedFixture(), rulesetVersion: "old-rules" },
+  { ...evaluatedFixture(), correlationId: "199b61fd-4d67-4189-bc45-294ef59beeba" },
+  { ...evaluatedFixture(), labels: { ...labels, severity: "UNKNOWN" } },
+  { ...evaluatedFixture(), labels: { ...labels, reasonCodes: ["APPROVE_ALL"] } },
+  { ...evaluatedFixture(), labels: { ...labels, reasonCodes: [] } },
+  { ...evaluatedFixture(), labels: { ...labels, reasonCodes: ["SYNC_FAILURE", "SYNC_FAILURE"] } },
+  { ...evaluatedFixture(), labels: { ...labels, rateBasisPoints: 10001 } },
+  { ...evaluatedFixture(), confidenceMetadata: { kind: "VENDOR_PROBABILITY", value: 0.99 } },
+  { schemaVersion: 1, status: "UNAVAILABLE", correlationId, code: "INVALID_INPUT" },
+  {
+    schemaVersion: 1,
+    status: "UNAVAILABLE",
+    correlationId,
+    code: "TIMEOUT",
+    rulesetVersion: "rules-v1",
+  },
+])(
+  "turns malformed, unbound or authority-extending output into INVALID_RESULT: %j",
+  expectInvalidResult,
+);
+
+it.each([
+  "TIMEOUT",
+  "ABORTED",
+  "PROVIDER_FAILURE",
+  "INVALID_RESULT",
+  "UNSUPPORTED_SCHEMA",
+] as const)(
+  "preserves a bound provider UNAVAILABLE %s without inventing evaluated fields",
+  (code) => {
+    const context = contextFixture();
+    const control = controlFixture();
+    const prepared = preparedFixture(context, control);
+    const raw = { schemaVersion: 1, status: "UNAVAILABLE", correlationId, code };
+    expect(value(validator.validate(raw, prepared, context, descriptor, control))).toEqual(raw);
+  },
+);
+
+it("rejects forged and cross-instance prepared bindings with existing typed port errors", () => {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  const other = new DecisionResultValidator(validatorOptions);
+  const forged: PreparedDecisionValidation = Object.freeze({ status: "PREPARED" });
+  expect(validator.validate(evaluatedFixture(), forged, context, descriptor, control)).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+  expect(other.validate(evaluatedFixture(), prepared, context, descriptor, control)).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+});
+
+it("rejects an old correlation replay against a newly prepared invocation", () => {
+  const context = EvaluationContextSchema.parse({
+    ...contextFixture(),
+    correlationId: "199b61fd-4d67-4189-bc45-294ef59beeba",
+  });
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  const result = value(
+    validator.validate(evaluatedFixture(), prepared, context, descriptor, control),
+  );
+  expect(result).toEqual({
+    schemaVersion: 1,
+    status: "UNAVAILABLE",
+    correlationId: context.correlationId,
+    code: "INVALID_RESULT",
+  });
+});
+
+it("rejects same-correlation cross-scope results after recomputing a valid current hash", () => {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  const scoped = { ...binding, storeId: "store-b" };
+  const other = contextFixture(
+    evidenceFixture({ binding: scoped, sourceReferences: [{ ...source, binding: scoped }] }),
+  );
+  expect(EvaluationContextSchema.safeParse(other).success).toBe(true);
+  const result = value(
+    validator.validate(evaluatedFixture(), prepared, other, descriptor, control),
+  );
+  expect(result).toMatchObject({ status: "UNAVAILABLE", code: "INVALID_RESULT", correlationId });
+});
+
+it.each(["hash", "version", "id"] as const)(
+  "rejects a changed trusted evidence reference %s",
+  (key) => {
+    const context = contextFixture();
+    const control = controlFixture();
+    const prepared = preparedFixture(context, control);
+    const reference = { ...context.evidence.reference, [key]: "changed-reference" };
+    const current = {
+      ...context,
+      event: { ...context.event, currentEvidence: reference },
+      evidence: { ...context.evidence, reference },
+    };
+    expect(EvaluationContextSchema.safeParse(current).success).toBe(true);
+    expect(
+      value(validator.validate(evaluatedFixture(), prepared, current, descriptor, control)),
+    ).toMatchObject({ status: "UNAVAILABLE", code: "INVALID_RESULT" });
+  },
+);
+
+it("rejects changed source facts even when the current context has a newly valid hash", () => {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  const current = contextFixture(
+    evidenceFixture({ sourceReferences: [{ ...source, version: "source-v2" }] }),
+  );
+  expect(
+    value(validator.validate(evaluatedFixture(), prepared, current, descriptor, control)),
+  ).toMatchObject({ status: "UNAVAILABLE", code: "INVALID_RESULT" });
+});
+
+it.each([
+  { key: "other-provider", version: "provider-v1", supportedInputVersions: [1] },
+  { ...descriptor, version: "provider-v2" },
+] as const)("rejects a changed server-selected provider descriptor %j", (current) => {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  expect(
+    value(validator.validate(evaluatedFixture(), prepared, context, current, control)),
+  ).toMatchObject({ status: "UNAVAILABLE", code: "INVALID_RESULT" });
+});
+
+it("rejects a changed host request, actor, event revision or event policy version", () => {
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = preparedFixture(context, control);
+  const candidates = [
+    { ...context, requestId: "request-next" },
+    { ...context, actor: { ...actor, userId: "other-user" } },
+    { ...context, event: { ...context.event, revision: 2 } },
+    { ...context, event: { ...context.event, rulePolicyVersion: "policy-next" } },
+  ];
+  for (const current of candidates)
+    expect(
+      value(validator.validate(evaluatedFixture(), prepared, current, descriptor, control)),
+    ).toMatchObject({ status: "UNAVAILABLE", code: "INVALID_RESULT" });
+});
+
+it("checks control identity and UTC deadline continuity without freezing the native signal", () => {
+  const context = contextFixture();
+  const controller = new AbortController();
+  const control = controlFixture(controller.signal);
+  const prepared = preparedFixture(context, control);
+  expect(Object.isFrozen(controller.signal)).toBe(false);
+  const candidates = [controlFixture(), { ...control, deadlineAt: "2026-10-25T02:00:01Z" }];
+  for (const current of candidates)
+    expect(
+      value(validator.validate(evaluatedFixture(), prepared, context, descriptor, current)),
+    ).toMatchObject({ status: "UNAVAILABLE", code: "INVALID_RESULT" });
+  controller.abort();
+  expect(controller.signal.aborted).toBe(true);
+});
+
+it("returns UNSUPPORTED_SCHEMA at preflight and the test-only caller skips the provider", async () => {
+  const restricted = new DecisionResultValidator({
+    ...validatorOptions,
+    supportedInputVersions: [2],
+  });
+  let calls = 0;
+  const provider: DecisionProvider = {
+    descriptor,
+    evaluate: async () => {
+      calls++;
+      return evaluatedFixture();
+    },
+  };
+  const context = contextFixture();
+  const control = controlFixture();
+  const prepared = value(restricted.prepare(context, control));
+  if (prepared.status === "PREPARED")
+    await provider.evaluate(value(sanitizer.sanitize(context)), control);
+  expect(calls).toBe(0);
+  expect(prepared).toEqual({
+    schemaVersion: 1,
+    status: "UNAVAILABLE",
+    correlationId,
+    code: "UNSUPPORTED_SCHEMA",
+  });
+});
+
+it("returns typed input errors for malformed context or forged reference hashes during preflight", () => {
+  expect(validator.prepare({ correlationId }, controlFixture())).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+  const context = contextFixture();
+  const reference = { ...context.evidence.reference, hash: "forged" };
+  const forged = {
+    ...context,
+    event: { ...context.event, currentEvidence: reference },
+    evidence: { ...context.evidence, reference },
+  };
+  expect(validator.prepare(forged, controlFixture())).toEqual({ ok: false, code: "HASH_MISMATCH" });
+});
+
+it("captures detached server configuration and context without mutating input metadata", () => {
+  const context = structuredClone(contextFixture());
+  const control = controlFixture();
+  const mutableDescriptor = {
+    key: descriptor.key,
+    version: String(descriptor.version),
+    supportedInputVersions: [1] as [1],
+  };
+  const supported = [1];
+  const configured = new DecisionResultValidator({
+    ...validatorOptions,
+    descriptor: mutableDescriptor,
+    supportedInputVersions: supported,
+  });
+  const prepared = value(configured.prepare(context, control));
+  if (prepared.status !== "PREPARED") throw new Error("Expected prepared binding");
+  mutableDescriptor.version = "mutated-provider";
+  supported.splice(0, 1, 2);
+  expect(Object.isFrozen(context)).toBe(false);
+  expect(Object.isFrozen(control)).toBe(false);
+  expect(
+    value(configured.validate(evaluatedFixture(), prepared, context, descriptor, control)),
+  ).toEqual(evaluatedFixture());
+  const next = value(configured.prepare(contextFixture(), control));
+  expect(next.status).toBe("PREPARED");
+});
