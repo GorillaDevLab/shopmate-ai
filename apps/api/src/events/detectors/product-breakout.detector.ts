@@ -180,11 +180,12 @@ function reachesThreshold(frame: Frame): boolean {
     ? BigInt(baseline.median) * 2n
     : BigInt(baseline.median * 2);
   const thresholds = frame.rule.thresholds;
+  const growth =
+    BigInt(thresholds.relativeGrowthBasisPoints) * BigInt(10000 + frame.rule.toleranceBasisPoints);
   // Equal elapsed windows make unit counts comparable; BigInt avoids rounded growth/conversion alarms.
   return (
     facts.salesUnits >= thresholds.minimumSalesUnits &&
-    BigInt(facts.salesUnits) * 20000n >=
-      medianTwice * (10000n + BigInt(thresholds.relativeGrowthBasisPoints)) &&
+    BigInt(facts.salesUnits) * 200000000n >= medianTwice * (100000000n + growth) &&
     BigInt(facts.conversion.numerator) * 10000n >=
       BigInt(facts.conversion.denominator) * BigInt(thresholds.minimumConversionBasisPoints)
   );
