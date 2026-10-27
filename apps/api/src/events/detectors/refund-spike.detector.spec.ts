@@ -651,3 +651,48 @@ it.each([
     error: { code: "INVALID_INPUT" },
   });
 });
+
+function toleratedRefund(n: number, d = 100, tolerance = 1000, minimum = 10, growth = 10000) {
+  return withRule(request(counts(n, d), { sampleSize: d }), {
+    toleranceBasisPoints: tolerance,
+    thresholds: {
+      ...rule.thresholds,
+      relativeIncreaseBasisPoints: growth,
+      minimumRefundedOrders: minimum,
+    },
+  });
+}
+it.each([
+  [20, "NO_CANDIDATE"],
+  [21, "CANDIDATE"],
+  [22, "CANDIDATE"],
+] as const)("compares tolerated refund growth inclusively at %s refunds", (n, disposition) => {
+  expect(detect(toleratedRefund(n)).disposition).toBe(disposition);
+});
+it("preserves the raw refund count minimum and maturity at nonzero tolerance", () => {
+  expect(detect(toleratedRefund(21, 100, 1000, 21)).disposition).toBe("CANDIDATE");
+  noCandidate(toleratedRefund(21, 100, 1000, 22), "BELOW_THRESHOLD");
+  const immature = toleratedRefund(21);
+  noCandidate(
+    withRule(immature, {
+      toleranceBasisPoints: 1000,
+      thresholds: { ...rule.thresholds, relativeIncreaseBasisPoints: 10000, maturityHours: 49 },
+    }),
+    "INSUFFICIENT_EVIDENCE",
+  );
+});
+it("keeps fractional and large refund boundaries exact with tolerance", () => {
+  const input = withBaseline(toleratedRefund(41979, 200000), baseline(999.5));
+  expect(detect(input).disposition).toBe("CANDIDATE");
+  noCandidate(withBaseline(toleratedRefund(41978, 200000), baseline(999.5)), "BELOW_THRESHOLD");
+  noCandidate(toleratedRefund(1680000000000000 - 1, 8000000000000000), "BELOW_THRESHOLD");
+  expect(detect(toleratedRefund(1680000000000000, 8000000000000000)).disposition).toBe("CANDIDATE");
+});
+it("keeps zero growth and ZERO-baseline count branches at full tolerance", () => {
+  expect(detect(toleratedRefund(30, 100, 10000)).disposition).toBe("CANDIDATE");
+  noCandidate(toleratedRefund(29, 100, 10000), "BELOW_THRESHOLD");
+  expect(detect(toleratedRefund(10, 100, 10000, 10, 0)).disposition).toBe("CANDIDATE");
+  expect(detect(withBaseline(toleratedRefund(10, 100, 10000), baseline(0))).disposition).toBe(
+    "CANDIDATE",
+  );
+});

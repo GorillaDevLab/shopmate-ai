@@ -176,10 +176,13 @@ function meetsDrop(frame: Frame): boolean {
   const median = frame.request.baseline?.median;
   if (!visitors || paidOrders === null || median === null || median === undefined) return false;
   const [numerator, denominator] = fraction(median);
+  const relative =
+    BigInt(frame.rule.thresholds.relativeDropBasisPoints) *
+    BigInt(10000 + frame.rule.toleranceBasisPoints);
   // Compare raw counts against the exact median: rounded display rates must not decide alarms.
   return (
-    BigInt(paidOrders) * 100000000n * denominator <=
-    BigInt(visitors) * numerator * BigInt(10000 - frame.rule.thresholds.relativeDropBasisPoints)
+    BigInt(paidOrders) * 10000n * 100000000n * denominator <=
+    BigInt(visitors) * numerator * (100000000n - relative)
   );
 }
 function expectedSnapshot(frame: Frame, kind: string): number | null {

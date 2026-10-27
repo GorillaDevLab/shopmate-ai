@@ -256,7 +256,12 @@ function conflicts(frame: Frame, hours: number): boolean {
 }
 function severity(frame: Frame, hours: Fraction): EventSeverity | null {
   const { supplierLeadTimeHours, inboundETA } = frame.evidence.facts;
-  if (compare(hours, fraction(frame.rule.thresholds.criticalHoursRemaining)) < 0n) return "HIGH";
+  const critical = fraction(frame.rule.thresholds.criticalHoursRemaining);
+  const tolerated: Fraction = [
+    critical[0] * BigInt(10000 - frame.rule.toleranceBasisPoints),
+    critical[1] * 10000n,
+  ];
+  if (compare(hours, tolerated) < 0n) return "HIGH";
   if (supplierLeadTimeHours !== null && compare(hours, leadThreshold(frame)) < 0n) return "MEDIUM";
   if (inboundETA === null || !usableOptional(frame, "inboundETA")) return null;
   const etaMs = Date.parse(inboundETA) - Date.parse(frame.evidence.observedAt);

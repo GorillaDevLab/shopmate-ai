@@ -678,3 +678,58 @@ it("keeps valid optional supply branches independent from each other's limitatio
     }).disposition,
   ).toBe("CANDIDATE");
 });
+
+function toleratedStockout(availableUnits: number, salesUnits = 24000, tolerance = 2500) {
+  const input = request(
+    evidence({
+      availableUnits,
+      salesUnits,
+      estimatedHoursRemaining: (availableUnits / salesUnits) * 24,
+      supplierLeadTimeHours: 0,
+      safetyBufferHours: 0,
+    }),
+  );
+  return new StockoutDetector().detect({
+    ...input,
+    policy: {
+      ...policy,
+      rules: policy.rules.map((row) => ({ ...row, toleranceBasisPoints: tolerance })),
+    },
+  });
+}
+it.each([
+  [4499, "CANDIDATE"],
+  [4500, "NO_CANDIDATE"],
+  [4501, "NO_CANDIDATE"],
+] as const)(
+  "applies exclusive multiplicative critical tolerance at %s raw units",
+  (units, disposition) => {
+    expect(toleratedStockout(units)).toMatchObject({ ok: true, value: { disposition } });
+  },
+);
+it("preserves exact large coverage fractions inside the tolerance band", () => {
+  expect(toleratedStockout(1500000000000000, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedStockout(1499999999999999, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+});
+it("retains sold-out and observed supply branches at full critical tolerance", () => {
+  expect(toleratedStockout(1, 24000, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedStockout(0, 24000, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE", candidate: { severityFloor: "CRITICAL" } },
+  });
+  const input = request(evidence({ availableUnits: 4, supplierLeadTimeHours: 5 }));
+  const rules = policy.rules.map((row) => ({ ...row, toleranceBasisPoints: 10000 }));
+  expect(new StockoutDetector().detect({ ...input, policy: { ...policy, rules } })).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE", candidate: { severityFloor: "MEDIUM" } },
+  });
+});

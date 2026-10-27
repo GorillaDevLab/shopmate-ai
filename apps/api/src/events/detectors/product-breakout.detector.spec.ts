@@ -508,3 +508,80 @@ it("discloses a conflicting optional gross profit snapshot without erasing sales
   if (result.disposition === "CANDIDATE")
     expect(result.candidate.evidence.facts).toMatchObject({ grossProfitMinor: 0 });
 });
+
+function toleratedBreakout(
+  units: number,
+  median = 24,
+  tolerance = 2500,
+  growth = 10000,
+  conversion = facts().conversion,
+) {
+  const value = {
+    ...withBaseline(baseline(median)),
+    facts: facts({ salesUnits: units, salesUnitsPerHour: units / 24, conversion }),
+  };
+  const rules = policy.rules.map((row) => ({
+    ...row,
+    toleranceBasisPoints: tolerance,
+    thresholds: { ...row.thresholds, relativeGrowthBasisPoints: growth },
+  }));
+  return new ProductBreakoutDetector().detect({ ...request(value), policy: { ...policy, rules } });
+}
+it.each([
+  [53, "NO_CANDIDATE"],
+  [54, "CANDIDATE"],
+  [55, "CANDIDATE"],
+] as const)("compares tolerated breakout growth inclusively at %s units", (units, disposition) => {
+  expect(toleratedBreakout(units)).toMatchObject({ ok: true, value: { disposition } });
+});
+it("keeps half-unit medians and large growth ratios exact under tolerance", () => {
+  expect(toleratedBreakout(48, 24.5, 10000, 5000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedBreakout(49, 24.5, 10000, 5000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedBreakout(6749999999999999, 3000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedBreakout(6750000000000000, 3000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+});
+it("keeps sales and conversion minima raw with nonzero growth tolerance", () => {
+  expect(toleratedBreakout(20, 8)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedBreakout(19, 8)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  const conversion = { numerator: 20, denominator: 401, valueBasisPoints: 499, period };
+  expect(toleratedBreakout(54, 24, 2500, 10000, conversion)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+});
+it("preserves zero growth and full-tolerance breakout boundaries", () => {
+  expect(toleratedBreakout(71, 24, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedBreakout(72, 24, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedBreakout(24, 24, 10000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedBreakout(23, 24, 10000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+});

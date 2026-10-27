@@ -232,7 +232,10 @@ function meetsThresholds(frame: Frame): boolean {
   // The supplied P3 accounting values stay untouched; only compare the source discount ratio.
   return (
     discountMinor >= minimumDiscountMinor &&
-    BigInt(discountMinor) * 10000n >= BigInt(grossMerchandiseMinor) * BigInt(discountBasisPoints)
+    BigInt(discountMinor) * 100000000n >=
+      BigInt(grossMerchandiseMinor) *
+        BigInt(discountBasisPoints) *
+        BigInt(10000 + frame.rule.toleranceBasisPoints)
   );
 }
 function evaluate(frame: Frame): EventDetectionOutcome {

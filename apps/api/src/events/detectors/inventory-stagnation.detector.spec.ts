@@ -569,3 +569,45 @@ it.each(["store", "version", "window", "unknown", "future"])(
     expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } });
   },
 );
+
+function toleratedStagnation(patch: Partial<Facts>, tolerance = 1000) {
+  const input = request(evidence(patch));
+  const rules = input.policy.rules.map((row) => ({ ...row, toleranceBasisPoints: tolerance }));
+  return detect({ ...input, policy: { ...input.policy, rules } });
+}
+it.each([
+  [98, "NO_CANDIDATE"],
+  [99, "NO_CANDIDATE"],
+  [100, "CANDIDATE"],
+] as const)("applies exclusive coverage tolerance at %s days", (days, disposition) => {
+  expect(toleratedStagnation({ availableUnits: days, demandCoverageDays: days }).disposition).toBe(
+    disposition,
+  );
+});
+it("keeps holding and listing eligibility raw with nonzero tolerance", () => {
+  expect(
+    toleratedStagnation({ holdingDays: 90, listedAt: "2026-07-27T00:00:00.000Z" }).disposition,
+  ).toBe("CANDIDATE");
+  expect(toleratedStagnation({ holdingDays: 89.999 }).disposition).toBe("NO_CANDIDATE");
+});
+it("doubles only coverage at full tolerance and keeps exact large rational boundaries", () => {
+  expect(
+    toleratedStagnation({ availableUnits: 180, demandCoverageDays: 180 }, 10000).disposition,
+  ).toBe("NO_CANDIDATE");
+  expect(
+    toleratedStagnation({ availableUnits: 181, demandCoverageDays: 181 }, 10000).disposition,
+  ).toBe("CANDIDATE");
+  const salesUnits = 2000000000000000;
+  const availableUnits = 6600000000000000;
+  expect(
+    toleratedStagnation({ salesUnits, availableUnits, demandCoverageDays: 99 }).disposition,
+  ).toBe("NO_CANDIDATE");
+  const above = availableUnits + 1;
+  expect(
+    toleratedStagnation({
+      salesUnits,
+      availableUnits: above,
+      demandCoverageDays: ((above / salesUnits) * 720) / 24,
+    }).disposition,
+  ).toBe("CANDIDATE");
+});

@@ -608,3 +608,61 @@ it("preserves an unavailable snapshot status in the outcome quality", () => {
   };
   expect(withSnapshots([row]).quality.dataStatus).toBe("UNAVAILABLE");
 });
+
+function toleratedConversion(paid: number, visitors = 10000, tolerance = 1000, relative = 3500) {
+  const input = request(counts(paid, visitors));
+  const custom = {
+    ...rule,
+    toleranceBasisPoints: tolerance,
+    thresholds: { ...rule.thresholds, relativeDropBasisPoints: relative },
+  };
+  return new ConversionDropDetector().detect({ ...input, policy: { ...policy, rules: [custom] } });
+}
+it.each([
+  [616, "NO_CANDIDATE"],
+  [615, "CANDIDATE"],
+  [614, "CANDIDATE"],
+] as const)(
+  "compares the tolerated conversion drop inclusively for %s orders",
+  (paid, disposition) => {
+    expect(toleratedConversion(paid)).toMatchObject({ ok: true, value: { disposition } });
+  },
+);
+it("keeps large count fractions exact inside tolerated conversion boundaries", () => {
+  expect(toleratedConversion(492000000000001, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedConversion(492000000000000, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+});
+it("preserves the raw inclusive visitor minimum with nonzero tolerance", () => {
+  expect(toleratedConversion(6, 100)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedConversion(6, 99)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+});
+it("does not clamp unattainable full-tolerance drops or widen zero drop", () => {
+  expect(toleratedConversion(0, 1000, 10000, 5000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedConversion(0, 1000, 10000, 5001)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedConversion(100, 1000, 10000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedConversion(101, 1000, 10000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+});

@@ -618,3 +618,63 @@ it.each([
     expect(result.quality.issues).toContainEqual(issue("FEE_ESTIMATED", "facts.contributionMinor"));
   },
 );
+
+function toleratedDiscount(
+  discount: number,
+  original = 10000,
+  tolerance = 1000,
+  minimum = 3000,
+  threshold = 3000,
+) {
+  const input = request(discounted(discount, original));
+  const rules = policy.rules.map((row) => ({
+    ...row,
+    toleranceBasisPoints: tolerance,
+    thresholds: { discountBasisPoints: threshold, minimumDiscountMinor: minimum },
+  }));
+  return new UnusualDiscountDetector().detect({ ...input, policy: { ...policy, rules } });
+}
+it.each([
+  [3299, "NO_CANDIDATE"],
+  [3300, "CANDIDATE"],
+  [3301, "CANDIDATE"],
+] as const)(
+  "compares tolerated discount inclusively at %s minor units",
+  (discount, disposition) => {
+    expect(toleratedDiscount(discount)).toMatchObject({ ok: true, value: { disposition } });
+  },
+);
+it("does not round a large discount fraction into adjusted threshold equality", () => {
+  expect(toleratedDiscount(2639999999999999, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedDiscount(2640000000000000, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+});
+it("preserves the raw inclusive discount amount minimum under tolerance", () => {
+  expect(toleratedDiscount(3300, 10000, 1000, 3300)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedDiscount(3300, 10000, 1000, 3301)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+});
+it("scales only the rate at full tolerance and preserves a zero rate threshold", () => {
+  expect(toleratedDiscount(5999, 10000, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedDiscount(6000, 10000, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedDiscount(3000, 10000, 10000, 3000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+});
