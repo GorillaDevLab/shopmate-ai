@@ -185,6 +185,36 @@ function withSnapshot(value: Marketing, observed: MetricSnapshotV1): EventDetect
   if (!result.ok) throw new Error(result.error.code);
   return result.value;
 }
+function attributionObservation(observedAt: string, kind: Kind = "ROAS_DROP"): Marketing {
+  const value = evidence(kind);
+  return {
+    ...value,
+    observedAt: "2026-10-25T02:00:00Z",
+    sourceWatermark: "2026-10-25T02:00:00Z",
+    sourceReferences: value.sourceReferences.map((row) => ({
+      ...row,
+      observedAt: row.measure?.kind === "ROAS" ? observedAt : "2026-10-25T02:00:00Z",
+    })),
+  };
+}
+function metricAttributionObservation(): Marketing {
+  const value = attributionObservation("2026-10-25T01:00:00Z");
+  const sourceReferences = value.sourceReferences.map((row) =>
+    row.measure?.kind === "ROAS" ? { ...row, kind: "METRIC_SNAPSHOT" as const } : row,
+  );
+  return {
+    ...value,
+    sourceReferences: [
+      ...sourceReferences,
+      {
+        ...reference,
+        id: "normalized-attribution",
+        observedAt: "2026-10-25T01:00:00Z",
+        measure: { kind: "ROAS", unit: "basisPoints" },
+      },
+    ],
+  };
+}
 
 it("emits two campaign candidates from the same facts through distinct typed requests", () => {
   const values = facts(),
@@ -418,6 +448,68 @@ it("blocks stale actual-spend provenance despite a fresh global watermark", () =
     );
   }
 });
+it.each(["2026-10-25T00:00:00Z", "2026-10-25T00:59:59.999Z"])(
+  "blocks stale attribution at %s despite fresh actual spend and global watermark",
+  (observedAt) => {
+    const value = attributionObservation(observedAt);
+    expect(EventDetectionRequestSchema.safeParse(request(value)).success).toBe(true);
+    expect(outcome(value)).toMatchObject({
+      disposition: "NO_CANDIDATE",
+      reason: "STALE_SOURCE",
+      quality: { dataStatus: "STALE" },
+    });
+    expect(outcome(value).quality.issues).toContainEqual(
+      expect.objectContaining({ code: "STALE_SOURCE", field: "sourceReferences.ROAS" }),
+    );
+  },
+);
+it("accepts attribution exactly at its inclusive maximum-age boundary", () => {
+  const result = outcome(attributionObservation("2026-10-25T01:00:00Z"));
+  expect(result).toMatchObject({ disposition: "CANDIDATE", quality: { dataStatus: "VERIFIED" } });
+});
+it("preserves stale attribution reasons on an independently reliable spend spike", () => {
+  const value = attributionObservation("2026-10-25T00:00:00Z", "AD_SPEND_SPIKE");
+  const original = issue("PARTIAL_COVERAGE", "facts.attributionCoverageBasisPoints");
+  const result = outcome({ ...value, dataStatus: "INSUFFICIENT", issues: [original] });
+  expect(result).toMatchObject({ disposition: "CANDIDATE", quality: { dataStatus: "STALE" } });
+  expect(result.quality.issues).toContainEqual(original);
+  expect(result.quality.issues).toContainEqual(
+    expect.objectContaining({ code: "STALE_SOURCE", field: "sourceReferences.ROAS" }),
+  );
+});
+it.each(["computedAt", "inputRevision"] as const)(
+  "binds supplied metric attribution %s to its actual reference",
+  (field) => {
+    const input = metricAttributionObservation();
+    const observed = snapshot({
+      visibleAt: "2026-10-25T01:00:00Z",
+      computedAt: "2026-10-25T01:00:00Z",
+      sourceWatermark: "2026-10-25T01:00:00Z",
+    });
+    const sourceReferences = input.sourceReferences.map((row) =>
+      row.kind === "METRIC_SNAPSHOT" && field === "inputRevision"
+        ? { ...row, version: "inconsistent-revision" }
+        : row,
+    );
+    const patch = field === "inputRevision" ? {} : { [field]: "2026-10-25T01:00:00.001Z" };
+    expect(withSnapshot(input, observed).disposition).toBe("CANDIDATE");
+    const result = withSnapshot({ ...input, sourceReferences }, { ...observed, ...patch });
+    expect(result).toMatchObject({ disposition: "NO_CANDIDATE", reason: "SOURCE_CONFLICT" });
+    const independent = withSnapshot(
+      {
+        ...input,
+        sourceReferences,
+        eventType: "AD_SPEND_SPIKE",
+        baseline: baseline("AD_SPEND_SPIKE"),
+      },
+      { ...observed, ...patch },
+    );
+    expect(independent.disposition).toBe("CANDIDATE");
+    expect(independent.quality.issues).toContainEqual(
+      expect.objectContaining({ code: "SOURCE_INCONSISTENT", field: "sourceReferences.ROAS" }),
+    );
+  },
+);
 it.each(["ROAS_DROP", "AD_SPEND_SPIKE"] as const)(
   "requires the matching baseline for %s",
   (kind) => {

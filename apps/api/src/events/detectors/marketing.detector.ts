@@ -92,8 +92,39 @@ function provenance(frame: Frame): DataQualityIssueV1[] {
     )
   )
     rows.push(issue(frame, "STALE_SOURCE", "sourceReferences.AD_SPEND"));
-  if (frame.evidence.eventType === "ROAS_DROP" && !hasAttribution(frame))
+  if (frame.evidence.eventType === "ROAS_DROP") rows.push(...attributionProvenance(frame));
+  return rows;
+}
+function attributionProvenance(frame: Frame): DataQualityIssueV1[] {
+  const references = frame.evidence.sourceReferences.filter(
+    (row) => row.measure?.kind === "ROAS" && row.measure.unit === "basisPoints",
+  );
+  const rows: DataQualityIssueV1[] = [];
+  if (references.length === 0)
     rows.push(issue(frame, "ATTRIBUTION_MISSING", "facts.attributedRevenueMinor"));
+  if (
+    references.some(
+      (row) =>
+        BigInt(Date.parse(frame.evidence.observedAt)) - BigInt(Date.parse(row.observedAt)) >
+        BigInt(frame.rule.maximumAgeSeconds) * 1000n,
+    )
+  )
+    rows.push(issue(frame, "STALE_SOURCE", "sourceReferences.ROAS"));
+  // A sibling normalized reference cannot validate a metric snapshot's revision or observation time.
+  const supplied = frame.request.snapshots.filter((row) => row.metric.kind === "ROAS");
+  if (
+    supplied.length > 0 &&
+    references.some(
+      (ref) =>
+        ref.kind === "METRIC_SNAPSHOT" &&
+        !supplied.some(
+          (row) =>
+            row.inputRevision === ref.version &&
+            Date.parse(row.computedAt) <= Date.parse(ref.observedAt),
+        ),
+    )
+  )
+    rows.push(issue(frame, "SOURCE_INCONSISTENT", "sourceReferences.ROAS"));
   return rows;
 }
 function hasAttribution(frame: Frame): boolean {
@@ -147,6 +178,7 @@ function attributionIssues(
 function contextIssues(frame: Frame): DataQualityIssueV1[] {
   const { facts } = frame.evidence,
     rows: DataQualityIssueV1[] = [];
+  if (frame.evidence.eventType === "AD_SPEND_SPIKE") rows.push(...attributionProvenance(frame));
   if (facts.attributedRevenueMinor === null || !hasAttribution(frame))
     rows.push(issue(frame, "ATTRIBUTION_MISSING", "facts.attributedRevenueMinor"));
   if (facts.attributionCoverageBasisPoints < 10000)
