@@ -576,3 +576,32 @@ test("strict parser rejects uncloneable unknown fields with a typed result", asy
     assert.equal(result.error.code, "INVALID_INPUT");
   });
 });
+
+test("unavailable transaction fails closed before attempting membership or mutations", async () => {
+  const db = database();
+  db.state.fail = "SAVEPOINT";
+  await assert.doesNotReject(async () => {
+    const result = await db.repository.appendEvidence(appendRequest());
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "SOURCE_UNAVAILABLE");
+  });
+  assert.equal(db.state.calls.length, 1);
+});
+
+test("host clock is required, validated and monotonic without altering immutable evidence time", async () => {
+  const db = database();
+  assert.throws(() => createEventRepository({ actor, client: db.client }), TypeError);
+  db.state.now = later;
+  const first = await seed(db);
+  assert.equal(Date.parse(first.firstSeenAt), Date.parse(later));
+  db.state.now = end;
+  const repeated = await seed(db);
+  assert.equal(Date.parse(repeated.lastSeenAt), Date.parse(later));
+  db.state.now = "2026-10-01T00:00:00Z";
+  assert.equal((await db.repository.appendEvidence(appendRequest())).error.code, "INVALID_INPUT");
+  db.state.now = "invalid";
+  assert.equal(
+    (await db.repository.appendEvidence(appendRequest())).error.code,
+    "SOURCE_UNAVAILABLE",
+  );
+});

@@ -236,6 +236,14 @@ async function recover(client: EventTransactionClient): Promise<void> {
   await client.query("ROLLBACK TO SAVEPOINT event_repository_operation");
   await client.query("RELEASE SAVEPOINT event_repository_operation");
 }
+async function savepoint(client: EventTransactionClient): Promise<boolean> {
+  try {
+    await client.query("SAVEPOINT event_repository_operation");
+    return true;
+  } catch {
+    return false;
+  }
+}
 async function execute<T, R extends Authorized>(
   options: EventRepositoryOptions,
   schema: Parser<R>,
@@ -252,7 +260,7 @@ async function execute<T, R extends Authorized>(
     request.binding.workspaceId !== options.actor.workspaceId
   )
     return failure(write ? "FORBIDDEN" : "NOT_FOUND");
-  await options.client.query("SAVEPOINT event_repository_operation");
+  if (!(await savepoint(options.client))) return failure("SOURCE_UNAVAILABLE");
   try {
     const result = (await authorize(options, request, write))
       ? await work(request)
