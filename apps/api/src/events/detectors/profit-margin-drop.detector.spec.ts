@@ -569,3 +569,63 @@ it.each(["binding", "definition", "window"])("rejects mismatched %s", (field) =>
     error: { code: "INVALID_INPUT" },
   });
 });
+
+function toleratedProfit(current: number, before = 10000, tolerance = 100, relative = 1000) {
+  const input = request(changedProfit(current, before));
+  const rules = policy.rules.map((row) => ({
+    ...row,
+    toleranceBasisPoints: tolerance,
+    thresholds: { ...row.thresholds, relativeDropBasisPoints: relative },
+  }));
+  return new ProfitMarginDropDetector().detect({ ...input, policy: { ...policy, rules } });
+}
+it.each([
+  [8991, "NO_CANDIDATE"],
+  [8990, "CANDIDATE"],
+  [8989, "CANDIDATE"],
+] as const)(
+  "scales the relative profit cutoff inclusively for current profit %s",
+  (current, disposition) => {
+    expect(toleratedProfit(current)).toMatchObject({ ok: true, value: { disposition } });
+  },
+);
+it("preserves fractional and large signed profit baselines under tolerance", () => {
+  expect(toleratedProfit(8990, 10000.5)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedProfit(7192000000000001, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedProfit(7192000000000000, 8000000000000000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedProfit(-11010, -10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+});
+it("keeps the absolute minimum and zero relative cutoff raw at full tolerance", () => {
+  expect(toleratedProfit(9000, 10000, 10000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedProfit(9001, 10000, 10000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+  expect(toleratedProfit(-1000, 0, 10000, 0)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedProfit(8000, 10000, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "CANDIDATE" },
+  });
+  expect(toleratedProfit(8001, 10000, 10000)).toMatchObject({
+    ok: true,
+    value: { disposition: "NO_CANDIDATE" },
+  });
+});

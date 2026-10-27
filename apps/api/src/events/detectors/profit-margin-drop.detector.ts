@@ -173,10 +173,11 @@ function qualifies(frame: Frame, kind: Measure): boolean {
   const [base, denominator] = fraction(Math.abs(median));
   const { minimumDropMinor, relativeDropBasisPoints } = frame.rule.thresholds;
   // Signed deterioration uses baseline magnitude; zero has an explicit absolute-only policy.
-  const relative = BigInt(relativeDropBasisPoints + frame.rule.toleranceBasisPoints);
+  const relative =
+    BigInt(relativeDropBasisPoints) * BigInt(10000 + frame.rule.toleranceBasisPoints);
   return (
     delta[0] >= BigInt(minimumDropMinor) * delta[1] &&
-    delta[0] * 10000n * denominator >= base * relative * delta[1]
+    delta[0] * 100000000n * denominator >= base * relative * delta[1]
   );
 }
 function explanationIssues(frame: Frame, kind: Measure): DataQualityIssueV1[] {
