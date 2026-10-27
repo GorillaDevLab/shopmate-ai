@@ -269,10 +269,15 @@ function blockedReason(issues: readonly DataQualityIssueV1[]): Reason | null {
 }
 function threshold(item: Evidence, rule: Rule): boolean {
   const days = coverage(item);
+  const limit = decimal(rule.thresholds.minimumDemandCoverageDays);
+  const tolerated = {
+    numerator: limit.numerator * BigInt(10000 + rule.toleranceBasisPoints),
+    denominator: limit.denominator * 10000n,
+  };
   return (
     days !== null &&
     item.facts.holdingDays !== null &&
-    compare(days, decimal(rule.thresholds.minimumDemandCoverageDays)) > 0n &&
+    compare(days, tolerated) > 0n &&
     compare(decimal(item.facts.holdingDays), decimal(rule.thresholds.minimumHoldingDays)) >= 0n
   );
 }
