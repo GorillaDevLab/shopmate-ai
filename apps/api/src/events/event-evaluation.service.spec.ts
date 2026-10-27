@@ -9,6 +9,7 @@ import {
   type EventDetector,
   type EventEvidenceV1,
   type EventResult,
+  type EventQuality,
   type MetricReadPort,
   type MetricSnapshotV1,
   type RobustBaselineV1,
@@ -239,10 +240,9 @@ function missingBaseline(): Extract<RobustBaselineV1, { readonly median: null }>
     sourceReferences: [],
   };
 }
-function metricRequest() {
-  const row = snapshot();
+function metricRequest(row = snapshot(), value: EventEvidenceV1 = stock()) {
   const evidence = {
-    ...stock(),
+    ...value,
     sourceReferences: [
       {
         ...reference,
@@ -285,6 +285,143 @@ it("evaluates low stock and profit from one frozen visible version", async () =>
   expect(reads).toEqual(expect.arrayContaining([expect.objectContaining({ actor })]));
   expect(JSON.stringify(input)).toBe(original);
   expect(Object.isFrozen(observed[0]?.evidence.facts)).toBe(true);
+});
+
+function statusOutcome(
+  entry: EventDetectionRequest,
+  status: EventQuality["dataStatus"],
+  disposition: EventDetectionOutcome["disposition"],
+): EventResult<EventDetectionOutcome> {
+  const quality: EventQuality = {
+    dataStatus: status,
+    sampleSize: entry.evidence.sampleSize,
+    coverageBasisPoints: entry.evidence.coverageBasisPoints,
+    issues: [...entry.evidence.issues, ...entry.snapshots.flatMap((row) => row.issues)],
+  };
+  if (disposition === "NO_CANDIDATE")
+    return {
+      ok: true,
+      value: {
+        disposition,
+        reason: "INSUFFICIENT_EVIDENCE",
+        quality,
+        blockedResources: ["ORDERS"],
+      },
+    };
+  return candidate({ ...entry, evidence: { ...entry.evidence, ...quality } });
+}
+function staleSalesSnapshot(
+  code: "STALE_SOURCE" | "PARTIAL_COVERAGE" = "STALE_SOURCE",
+): MetricSnapshotV1 {
+  return snapshot({
+    metric: { kind: "PAID_UNITS", unit: "units", value: 24 },
+    status: "STALE",
+    sampleSize: 0,
+    coverageBasisPoints: 0,
+    issues: [{ code, field: "salesUnits", evidenceIds: [reference.id] }],
+  });
+}
+const understatedStatuses = [
+  { disposition: "CANDIDATE", status: "ESTIMATED" },
+  { disposition: "CANDIDATE", status: "INSUFFICIENT" },
+  { disposition: "CANDIDATE", status: "VERIFIED" },
+  { disposition: "NO_CANDIDATE", status: "ESTIMATED" },
+  { disposition: "NO_CANDIDATE", status: "INSUFFICIENT" },
+  { disposition: "NO_CANDIDATE", status: "VERIFIED" },
+] as const;
+it.each(understatedStatuses)(
+  "rejects $disposition $status despite a stale requested snapshot",
+  async (entry) => {
+    const row = staleSalesSnapshot();
+    const metrics: MetricReadPort = { read: async () => ({ ok: true, value: [row] }) };
+    const detector: EventDetector = {
+      detect: (request) => statusOutcome(request, entry.status, entry.disposition),
+    };
+    expect(await setup(detector, metrics).service.evaluate(metricRequest(row))).toMatchObject({
+      ok: false,
+      error: { code: entry.status === "VERIFIED" ? "INVALID_INPUT" : "CONFLICT" },
+    });
+  },
+);
+it.each(understatedStatuses)(
+  "rejects $disposition $status despite retained STALE_SOURCE",
+  async (entry) => {
+    const evidence = {
+      ...stock(),
+      dataStatus: "ESTIMATED",
+      issues: staleSalesSnapshot().issues,
+    } as const;
+    const detector: EventDetector = {
+      detect: (request) => statusOutcome(request, entry.status, entry.disposition),
+    };
+    expect(await setup(detector).service.evaluate(request([evidence]))).toMatchObject({
+      ok: false,
+      error: { code: entry.status === "VERIFIED" ? "INVALID_INPUT" : "CONFLICT" },
+    });
+  },
+);
+it.each(understatedStatuses)(
+  "rejects $disposition $status when a stale snapshot has another diagnostic",
+  async (entry) => {
+    const row = staleSalesSnapshot("PARTIAL_COVERAGE");
+    const metrics: MetricReadPort = { read: async () => ({ ok: true, value: [row] }) };
+    const detector: EventDetector = {
+      detect: (request) => statusOutcome(request, entry.status, entry.disposition),
+    };
+    expect(await setup(detector, metrics).service.evaluate(metricRequest(row))).toMatchObject({
+      ok: false,
+      error: { code: entry.status === "VERIFIED" ? "INVALID_INPUT" : "CONFLICT" },
+    });
+  },
+);
+it("keeps real fresh sold-out facts with stale sales sample 0 and coverage 0", async () => {
+  const row = staleSalesSnapshot();
+  const evidence = { ...stock(), facts: { ...stockFacts, availableUnits: 0 } };
+  const metrics: MetricReadPort = { read: async () => ({ ok: true, value: [row] }) };
+  const result = value(
+    await setup(new StockoutDetector(), metrics).service.evaluate(metricRequest(row, evidence)),
+  );
+  expect(result.candidates).toHaveLength(1);
+  expect(result.candidates[0]).toMatchObject({
+    severityFloor: "CRITICAL",
+    evidence: {
+      dataStatus: "STALE",
+      sampleSize: 24,
+      coverageBasisPoints: 10000,
+      facts: { availableUnits: 0, inventoryStatus: "VERIFIED" },
+      issues: expect.arrayContaining([...row.issues]),
+    },
+  });
+  expect(result.evaluations[0]?.outcome.quality).toMatchObject({
+    dataStatus: "STALE",
+    sampleSize: 24,
+    coverageBasisPoints: 10000,
+    issues: expect.arrayContaining([
+      ...row.issues,
+      expect.objectContaining({ code: "PARTIAL_COVERAGE", field: "snapshots.PAID_UNITS" }),
+      expect.objectContaining({ code: "LOW_SAMPLE", field: "snapshots.PAID_UNITS" }),
+    ]),
+  });
+});
+
+it("retains conservative no-candidate quality without replacing its sample population", async () => {
+  const row = staleSalesSnapshot();
+  const metrics: MetricReadPort = { read: async () => ({ ok: true, value: [row] }) };
+  const detector: EventDetector = {
+    detect: (entry) => statusOutcome(entry, "STALE", "NO_CANDIDATE"),
+  };
+  const result = value(await setup(detector, metrics).service.evaluate(metricRequest(row)));
+  expect(result.candidates).toEqual([]);
+  expect(result.evaluations[0]?.outcome).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    blockedResources: ["ORDERS"],
+    quality: {
+      dataStatus: "STALE",
+      sampleSize: 24,
+      coverageBasisPoints: 10000,
+      issues: row.issues,
+    },
+  });
 });
 
 it("sorts and deduplicates identical candidates without dropping evaluations", async () => {

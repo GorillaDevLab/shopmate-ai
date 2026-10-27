@@ -245,11 +245,19 @@ function conservesQuality(request: EventDetectionRequest, outcome: EventDetectio
   const issues = [...original.issues, ...request.snapshots.flatMap((row) => row.issues)];
   const reported = new Set(quality.issues.map(diagnostic));
   const precedence = ["UNAVAILABLE", "STALE", "INSUFFICIENT", "ESTIMATED", "VERIFIED"];
+  const stale =
+    quality.issues.some((issue) => issue.code === "STALE_SOURCE") ||
+    request.snapshots.some((row) => row.status === "STALE");
+  const ceiling = Math.min(
+    precedence.indexOf(original.dataStatus),
+    stale ? precedence.indexOf("STALE") : precedence.length - 1,
+  );
+  // Snapshot populations differ; status conservatism does not imply shared sample denominators.
   return (
     issues.every((issue) => reported.has(diagnostic(issue))) &&
     quality.sampleSize <= original.sampleSize &&
     quality.coverageBasisPoints <= original.coverageBasisPoints &&
-    precedence.indexOf(quality.dataStatus) <= precedence.indexOf(original.dataStatus)
+    precedence.indexOf(quality.dataStatus) <= ceiling
   );
 }
 function normalizeSnapshots(
