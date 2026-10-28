@@ -7,9 +7,15 @@ import {
   AuditQueryPageSchema,
   AuditQuerySchema,
   AuditTraceViewSchema,
+  AuditResourceSchema,
   AnonymousAuthSecurityEventSchema,
   TenantAuditEventSchema,
 } from "./audit.schema.js";
+import {
+  EventStateTransitionSchema,
+  EventStateSchema,
+  EventTransitionReasonSchema,
+} from "../events/event.schema.js";
 
 const at = "2026-10-22T08:00:00Z";
 const scope = {
@@ -36,6 +42,7 @@ const links = {
 };
 
 function eventMetadata(eventType: string) {
+  if (eventType === "EVENT_STATE_CHANGE") return lifecycleMetadata();
   if (eventType === "ROLE_CHANGE") {
     return { previousRole: "VIEWER", nextRole: "OPERATOR" };
   }
@@ -63,10 +70,13 @@ function tenant(eventType = "EXECUTION") {
     scopeKind: "TENANT",
     scope,
     actor,
-    resource: { type: "SKU", id: "sku-a" },
+    resource:
+      eventType === "EVENT_STATE_CHANGE"
+        ? { type: "EVENT", id: "event/alpha.1" }
+        : { type: "SKU", id: "sku-a" },
     result: "SUCCESS",
     occurredAt: at,
-    sourceOccurredAt: "2026-10-21T08:00:00Z",
+    sourceOccurredAt: eventType === "EVENT_STATE_CHANGE" ? null : "2026-10-21T08:00:00Z",
     links,
     event: { eventType, redactedMetadata: eventMetadata(eventType) },
   };
@@ -342,4 +352,141 @@ describe("P09-001 audit contract", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+const lifecycleBinding = { ...scope, connectionId: "connection-a", externalStoreId: "external-a" };
+function lifecycleMetadata() {
+  return {
+    fromState: "OPEN",
+    toState: "ACKNOWLEDGED",
+    reason: "ACKNOWLEDGED_BY_OPERATOR",
+    expectedRevision: 1,
+    revision: 2,
+    evidenceReference: {
+      schemaVersion: 1,
+      id: "evidence/alpha.1",
+      version: "version/1",
+      hash: "hash/1",
+      binding: lifecycleBinding,
+      eventType: "SYNC_FAILURE",
+      entity: { kind: "CONNECTION", connectionId: "connection-a" },
+      definitionVersion: "definition/1",
+      baselineVersion: null,
+    },
+  };
+}
+function lifecycle(changes: Record<string, unknown> = {}) {
+  return { ...tenant("EVENT_STATE_CHANGE"), ...changes };
+}
+function acceptsLifecycle(value: unknown): boolean[] {
+  const persistedValue = Object.assign({}, value, {
+    auditId: "audit-a",
+    sequence: 1,
+    hashVersion: 1,
+    prevHash: null,
+    entryHash: "a".repeat(64),
+  });
+  return [
+    AuditAppendInputSchema.safeParse(value).success,
+    AuditEntrySchema.safeParse(persistedValue).success,
+  ];
+}
+it("round trips lifecycle external identifiers without widening legacy resources", () => {
+  expect(acceptsLifecycle(lifecycle())).toEqual([true, true]);
+  const parsed = AuditAppendInputSchema.parse(lifecycle());
+  expect(parsed).toEqual(lifecycle());
+  expect(AuditResourceSchema.shape.id.safeParse("event/alpha.1").success).toBe(false);
+  expect(AuditResourceSchema.safeParse({ type: "EVENT", id: "event-a" }).success).toBe(false);
+});
+it("rejects lifecycle envelope mismatches through append and persisted entry", () => {
+  for (const changes of [
+    { result: "FAILED" },
+    { actor: { ...actor, actorKind: "SYSTEM" } },
+    { sourceOccurredAt: at },
+    { resource: null },
+    { resource: { type: "SKU", id: "sku-a" } },
+    { links: { ...links, evidenceId: "evidence-a" } },
+    { scope: { ...scope, storeId: "other" } },
+    { occurredAt: "2026-02-30T08:00:00Z" },
+    { extra: true },
+  ])
+    expect(acceptsLifecycle(lifecycle(changes))).toEqual([false, false]);
+  expect(acceptsLifecycle({ ...tenant(), resource: { type: "EVENT", id: "event-a" } })).toEqual([
+    false,
+    false,
+  ]);
+});
+it("rejects unsafe lifecycle revisions and metadata extensions", () => {
+  for (const changes of [
+    { expectedRevision: 0 },
+    { revision: 3 },
+    { expectedRevision: Number.MAX_SAFE_INTEGER, revision: Number.MAX_SAFE_INTEGER + 1 },
+    { revision: 1.5 },
+    { arbitrary: "secret" },
+    { evidenceReference: { ...lifecycleMetadata().evidenceReference, extra: true } },
+  ]) {
+    const event = {
+      eventType: "EVENT_STATE_CHANGE",
+      redactedMetadata: { ...lifecycleMetadata(), ...changes },
+    };
+    expect(acceptsLifecycle(lifecycle({ event }))).toEqual([false, false]);
+  }
+});
+it.each([" event-a", "event-a ", "event\u0000a", "a".repeat(257)])(
+  "rejects unsafe EVENT identifier %j",
+  (id) => {
+    expect(acceptsLifecycle(lifecycle({ resource: { type: "EVENT", id } }))).toEqual([
+      false,
+      false,
+    ]);
+  },
+);
+it("matches every event transition and reason combination", () => {
+  const tenantActor = {
+    userId: "user-a",
+    merchantId: "merchant-a",
+    organizationId: scope.organizationId,
+    workspaceId: scope.workspaceId,
+    role: "OPERATOR",
+    permissions: [],
+  };
+  for (const fromState of EventStateSchema.options)
+    for (const toState of EventStateSchema.options) {
+      for (const reason of EventTransitionReasonSchema.options) {
+        const transition = {
+          actor: tenantActor,
+          binding: lifecycleBinding,
+          eventId: "event/alpha.1",
+          expectedRevision: 1,
+          fromState,
+          toState,
+          reason,
+          changedAt: at,
+        };
+        const event = {
+          eventType: "EVENT_STATE_CHANGE",
+          redactedMetadata: { ...lifecycleMetadata(), fromState, toState, reason },
+        };
+        const expected = EventStateTransitionSchema.safeParse(transition).success;
+        expect(acceptsLifecycle(lifecycle({ event }))).toEqual([expected, expected]);
+      }
+    }
+});
+it("accepts every audit family together in query and access manifest", () => {
+  expect(
+    AuditQuerySchema.safeParse({
+      ...query(),
+      eventTypes: [...new Set([...AuditEventTypeSchema.options, "EVENT_STATE_CHANGE"])],
+    }).success,
+  ).toBe(true);
+  expect(
+    AuditQueryAccessManifestSchema.safeParse({
+      principalId: "user-a",
+      scope,
+      policyVersion: "v1",
+      decision: "ALLOW",
+      permittedEventTypes: [...new Set([...AuditEventTypeSchema.options, "EVENT_STATE_CHANGE"])],
+      evaluatedAt: at,
+    }).success,
+  ).toBe(true);
 });

@@ -397,3 +397,4 @@ export type * from "./events/event-ports.js";
 export * from "./decisions/decision.schema.js";
 export * from "./decisions/decision-provider.js";
 export type * from "./decisions/decision-ports.js";
+export * from "./audit/audit.schema.js";
