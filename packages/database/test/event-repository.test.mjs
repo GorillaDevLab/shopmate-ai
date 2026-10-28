@@ -618,3 +618,83 @@ test("fresh proposed evidence ID reuses the exact canonical version and hash", a
   assert.equal(Date.parse(result.value.lastSeenAt), Date.parse(later));
   assert.equal(db.state.evidence.length, 1);
 });
+
+test("current CAS permits a distinct opaque reference version at equal observation time", async () => {
+  const db = database();
+  const event = await seed(db);
+  const request = globalThis.structuredClone(appendRequest());
+  Object.assign(request.reference, { id: "new-reference", version: "a-new-provenance" });
+  const missing = await db.repository.appendEvidence(request);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error.code, "VERSION_MISMATCH");
+  const changed = await db.repository.appendEvidence({
+    ...request,
+    expectedRevision: event.revision,
+  });
+  assert.equal(changed.ok, true, "Explicit current CAS authorizes equal-time provenance append");
+  assert.equal(changed.value.currentEvidence.version, "a-new-provenance");
+  assert.equal(changed.value.revision, 2);
+  assert.equal(db.state.evidence.length, 2);
+  const old = await db.repository.evidence({
+    ...detailRequest(event),
+    reference: event.currentEvidence,
+  });
+  assert.deepEqual(old.value.evidence, request.candidate.evidence);
+  const stale = await db.repository.appendEvidence({
+    ...request,
+    expectedRevision: event.revision,
+  });
+  assert.equal(stale.error.code, "CONFLICT");
+});
+
+test("an existing evidence ID cannot be rebound to a new immutable reference version", async () => {
+  const db = database();
+  const event = await seed(db);
+  const request = globalThis.structuredClone(appendRequest());
+  request.reference.version = "a-new-version";
+  const result = await db.repository.appendEvidence({
+    ...request,
+    expectedRevision: event.revision,
+  });
+  assert.equal(result.error.code, "CONFLICT");
+  assert.equal(db.state.evidence.length, 1);
+});
+
+test("equal-time new source revisions retain unchanged facts through explicit current CAS", async () => {
+  const db = database();
+  const event = await seed(db);
+  const request = appendRequest("a-new", end);
+  assert.deepEqual(request.candidate.evidence.facts, appendRequest().candidate.evidence.facts);
+  const result = await db.repository.appendEvidence({
+    ...request,
+    expectedRevision: event.revision,
+  });
+  assert.equal(result.ok, true, "Current CAS supplies ordering for equal-time source revisions");
+  assert.equal(result.value.currentEvidence.version, "a-new");
+  assert.equal(db.state.evidence.length, 2);
+});
+
+test("equal-time source revisions require explicit CAS and older observations cannot use it", async () => {
+  const db = database();
+  const event = await seed(db, appendRequest("current", later));
+  const equal = appendRequest("equal", later);
+  assert.equal((await db.repository.appendEvidence(equal)).error.code, "VERSION_MISMATCH");
+  const older = { ...appendRequest("older", end), expectedRevision: event.revision };
+  assert.equal((await db.repository.appendEvidence(older)).error.code, "VERSION_MISMATCH");
+  assert.equal(db.state.evidence.length, 1);
+});
+
+test("equal-time CAS cannot rebind an immutable source version", async () => {
+  const db = database();
+  const event = await seed(db);
+  const request = globalThis.structuredClone(appendRequest("new", end));
+  const forged = sourceReference("z-old");
+  forged.hash = "changed-source-hash";
+  request.candidate.evidence.sourceReferences.push(forged);
+  const result = await db.repository.appendEvidence({
+    ...request,
+    expectedRevision: event.revision,
+  });
+  assert.equal(result.error.code, "VERSION_MISMATCH");
+  assert.equal(db.state.evidence.length, 1);
+});

@@ -581,16 +581,29 @@ async function appendStored(
   const reused = await duplicate(client, request, row, seenAt);
   if (reused) return reused;
   if (event.revision === Number.MAX_SAFE_INTEGER) return failure("OVERFLOW");
-  const prior = row.currentPayload as EventEvidenceV1;
-  if (
-    Date.parse(request.candidate.evidence.observedAt) <= Date.parse(prior.observedAt) ||
-    (await sourceReplay(client, request, event.id))
-  )
+  if (!(await appendOrderValid(client, request, event, row.currentPayload as EventEvidenceV1)))
     return failure("VERSION_MISMATCH");
   if (!(await validateMetrics(client, request.candidate.evidence)))
     return failure("VERSION_MISMATCH");
   await insertEvidence(client, request, event, event.revision + 1);
   return advance(client, request, event, seenAt);
+}
+async function appendOrderValid(
+  client: EventTransactionClient,
+  request: EventAppendEvidenceRequest,
+  event: EventRecord,
+  prior: EventEvidenceV1,
+): Promise<boolean> {
+  const difference =
+    Date.parse(request.candidate.evidence.observedAt) - Date.parse(prior.observedAt);
+  const currentCas = request.expectedRevision === event.revision;
+  if (difference < 0 || (difference === 0 && !currentCas)) return false;
+  // Opaque versions supply no chronology; current CAS orders an equal-time provenance append.
+  const provenanceOnly =
+    currentCas &&
+    request.reference.version !== event.currentEvidence.version &&
+    same(request.candidate.evidence, prior);
+  return provenanceOnly || !(await sourceReplay(client, request, event.id));
 }
 async function appendNew(
   client: EventTransactionClient,
