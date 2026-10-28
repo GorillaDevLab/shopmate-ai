@@ -321,15 +321,10 @@ async function duplicate(
   );
   if (!found.rows.length) return null;
   const prior = found.rows.map(decodeEvidence);
-  if (
-    prior.some(
-      (item) =>
-        !same(item.reference, request.reference) ||
-        !same(item.evidence, request.candidate.evidence),
-    )
-  )
-    return failure("CONFLICT");
-  if (request.reference.id !== event.currentEvidence.id) return { ok: true, value: event };
+  if (prior.some((item) => conflictingEvidence(item, request))) return failure("CONFLICT");
+  const canonical = prior.find((item) => item.reference.version === request.reference.version);
+  if (!canonical) return null;
+  if (canonical.reference.id !== event.currentEvidence.id) return { ok: true, value: event };
   const updated = await client.query(
     `UPDATE public.events SET "lastSeenAt"=GREATEST("lastSeenAt",$7::timestamptz)
     WHERE ${scoped} /* event:touch */ AND id=$6 RETURNING *`,
@@ -339,6 +334,21 @@ async function duplicate(
     ok: true,
     value: decodeEvent({ ...updated.rows[0], currentPayload: row.currentPayload }),
   };
+}
+function conflictingEvidence(
+  prior: EventEvidenceRecord,
+  request: EventAppendEvidenceRequest,
+): boolean {
+  const {
+    reference: ref,
+    candidate: { evidence },
+  } = request;
+  if (prior.reference.id === ref.id && !same(prior.reference, ref)) return true;
+  if (prior.reference.hash === ref.hash && !same(prior.evidence, evidence)) return true;
+  return (
+    prior.reference.version === ref.version &&
+    (prior.reference.hash !== ref.hash || !same(prior.evidence, evidence))
+  );
 }
 async function sourceReplay(
   client: EventTransactionClient,

@@ -605,3 +605,16 @@ test("host clock is required, validated and monotonic without altering immutable
     "SOURCE_UNAVAILABLE",
   );
 });
+
+test("fresh proposed evidence ID reuses the exact canonical version and hash", async () => {
+  const db = database();
+  const event = await seed(db);
+  db.state.now = later;
+  const request = globalThis.structuredClone(appendRequest());
+  request.reference.id = "fresh-proposal";
+  const result = await db.repository.appendEvidence(request);
+  assert.equal(result.ok, true, "Identical immutable provenance must reuse canonical evidence");
+  assert.deepEqual(result.value.currentEvidence, event.currentEvidence);
+  assert.equal(Date.parse(result.value.lastSeenAt), Date.parse(later));
+  assert.equal(db.state.evidence.length, 1);
+});
