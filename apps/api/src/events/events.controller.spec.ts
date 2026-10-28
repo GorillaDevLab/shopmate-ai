@@ -6,6 +6,8 @@ import {
   createEventFingerprint,
   EventRecordSchema,
   EventEvidenceRecordSchema,
+  DecisionRunSchema,
+  type DecisionRun,
   type EventEvidenceQuery,
   type TenantContext,
 } from "@shopmate/contracts";
@@ -21,8 +23,11 @@ import { TENANT_MEMBERSHIP_REPOSITORY } from "../tenant/tenant-membership.reposi
 import { EventsController } from "./events.controller.js";
 import {
   EVENT_QUERY_PORT,
+  EVENT_DECISION_SUMMARY_READER,
   EVENT_STORE_OWNERSHIP_RESOLVER,
   EventQueryService,
+  type EventDecisionSummaryReader,
+  type EventDecisionSummaryQuery,
 } from "./event-query.service.js";
 
 const key = randomBytes(48).toString("hex");
@@ -110,6 +115,72 @@ const evidenceFilters = {
   hash: oldReference.hash,
   definitionVersion: oldReference.definitionVersion,
 };
+const ignoredLabels = {
+  severity: "LOW",
+  notificationRoute: "IGNORE",
+  llmEscalation: "NO_LLM_NEEDED",
+  evidenceSufficiency: "INSUFFICIENT_DATA",
+  attentionPriority: "LOW_PRIORITY",
+  reasonCodes: ["SYNC_FAILURE"],
+} as const;
+const effectiveLabels = {
+  ...ignoredLabels,
+  severity: "HIGH",
+  notificationRoute: "NOTIFY_NOW",
+} as const;
+const oldRun = DecisionRunSchema.parse({
+  schemaVersion: 1,
+  id: "decision-v1",
+  eventId: event.id,
+  decisionKey: "key-v1",
+  requestId: "request-v1",
+  evidence: oldReference,
+  provider: { key: "rules", version: "v1", supportedInputVersions: [1] },
+  rulesetVersion: "rules-v1",
+  mode: "PRIMARY",
+  fallbackOf: null,
+  result: {
+    schemaVersion: 1,
+    status: "EVALUATED",
+    correlationId: "57a1befc-02cb-4acc-8a1a-6975b2016240",
+    rulesetVersion: "rules-v1",
+    labels: ignoredLabels,
+    confidenceMetadata: null,
+  },
+  latencyMs: 1,
+  createdAt: instant,
+  effective: effectiveLabels,
+  overrideReason: "SEVERITY_FLOOR",
+});
+const newRun = DecisionRunSchema.parse({
+  ...oldRun,
+  id: "decision-v2",
+  decisionKey: "key-v2",
+  evidence: reference,
+  rulesetVersion: "rules-v2",
+  result: { ...oldRun.result, rulesetVersion: "rules-v2", labels: effectiveLabels },
+  effective: effectiveLabels,
+  overrideReason: null,
+});
+class VersionedDecisionFixture implements EventDecisionSummaryReader {
+  runs: readonly DecisionRun[] = [];
+  async read(query: EventDecisionSummaryQuery) {
+    if (
+      query.binding.storeId !== binding.storeId ||
+      query.actor.organizationId !== binding.organizationId ||
+      query.binding.connectionId !== binding.connectionId
+    )
+      return { ok: false as const, code: "SCOPE_MISMATCH" as const };
+    return success(
+      this.runs.filter(
+        (run) =>
+          run.eventId === query.eventId &&
+          (query.decisionId === null || run.id === query.decisionId),
+      ),
+    );
+  }
+}
+const decisions = new VersionedDecisionFixture();
 const member = {
   userId: "user-a",
   merchantId: "merchant-a",
@@ -147,6 +218,7 @@ async function createApp() {
       { provide: TENANT_MEMBERSHIP_REPOSITORY, useValue: { resolve: membership } },
       { provide: EVENT_STORE_OWNERSHIP_RESOLVER, useValue: { resolve: ownership } },
       { provide: EVENT_QUERY_PORT, useValue: { list, detail, evidence, history } },
+      { provide: EVENT_DECISION_SUMMARY_READER, useValue: decisions },
     ],
   })
     .overrideProvider(DEMO_AUTH_CONFIG)
@@ -182,6 +254,7 @@ beforeEach(() => {
     success({ ...oldEvidence, reference: query.reference }),
   );
   history.mockResolvedValue(success({ items: [oldEvidence], nextCursor: null }));
+  decisions.runs = [oldRun, newRun];
 });
 
 it("requires the existing signed session guard", async () => {
@@ -405,3 +478,60 @@ it("returns 404 for unknown event or immutable evidence references", async () =>
   evidence.mockResolvedValueOnce({ ok: false, error: { code: "NOT_FOUND", evidenceIds: [] } });
   await get("/event-a/evidence/evidence-a").query(evidenceFilters).expect(404);
 });
+
+it("reads versioned decision summaries with original suggested/effective labels", async () => {
+  const response = await get("/event-a/decisions").expect(200);
+  expect(response.body).toEqual({ status: "AVAILABLE", items: [oldRun, newRun] });
+  expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ reference: oldReference }));
+  expect(evidence).toHaveBeenCalledWith(expect.objectContaining({ reference }));
+  const old = await get("/event-a/decisions/decision-v1").expect(200);
+  expect(old.body).toEqual({ status: "AVAILABLE", decision: oldRun });
+  expect(old.body.decision.result.labels.notificationRoute).toBe("IGNORE");
+  expect(old.body.decision.effective.notificationRoute).toBe("NOTIFY_NOW");
+  expect(old.body.decision.rulesetVersion).toBe("rules-v1");
+});
+it("keeps sync failure facts visible when a decision suggests IGNORE", async () => {
+  decisions.runs = [oldRun];
+  expect((await get().expect(200)).body.items).toEqual([event]);
+  expect((await get("/event-a").expect(200)).body.event).toEqual(event);
+  expect((await get("/event-a/decisions").expect(200)).body.items).toEqual([oldRun]);
+  expect(event.severityFloor).toBe("HIGH");
+});
+it("distinguishes empty decision history, unknown decision ID, and unavailable reader", async () => {
+  decisions.runs = [];
+  expect((await get("/event-a/decisions").expect(200)).body).toEqual({
+    status: "EMPTY",
+    items: [],
+  });
+  await get("/event-a/decisions/unknown").expect(404);
+  vi.spyOn(decisions, "read").mockRejectedValue(new Error("private provider failure"));
+  const response = await get("/event-a/decisions").expect(503);
+  expect(response.body.status).toBe("UNAVAILABLE");
+  expect(JSON.stringify(response.body)).not.toContain("private");
+  await get("/event-a").expect(200);
+});
+it.each([
+  { ...oldRun, id: "" },
+  { ...oldRun, eventId: "foreign-event" },
+  { ...oldRun, evidence: { ...oldReference, hash: "forged-hash" } },
+  { ...oldRun, evidence: { ...oldReference, definitionVersion: "forged-version" } },
+  { ...oldRun, rulesetVersion: "wrong-version" },
+  { ...oldRun, evidence: { ...oldReference, binding: { ...binding, storeId: "foreign-store" } } },
+])("rejects malformed, foreign or uncorrelated decision output %j", async (run) => {
+  vi.spyOn(decisions, "read").mockResolvedValue(success([run]));
+  evidence.mockResolvedValue(success(oldEvidence));
+  await get("/event-a/decisions").expect(503);
+});
+it("rejects mismatched decision IDs and duplicate histories", async () => {
+  vi.spyOn(decisions, "read").mockResolvedValueOnce(success([newRun]));
+  await get("/event-a/decisions/decision-v1").expect(503);
+  decisions.runs = [oldRun, oldRun];
+  await get("/event-a/decisions").expect(503);
+});
+it.each(["/event-a/decisions", "/event-a/decisions/decision-v1"])(
+  "strictly rejects unsupported decision filters for %s",
+  async (suffix) => {
+    await get(suffix).query({ rulesetVersion: "latest" }).expect(400);
+    expect(membership).not.toHaveBeenCalled();
+  },
+);

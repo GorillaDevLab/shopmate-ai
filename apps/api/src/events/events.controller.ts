@@ -27,4 +27,14 @@ export class EventsController {
   evidence(@Req() request: EventHttpRequest) {
     return this.service.evidence(request);
   }
+
+  @Get(":eventId/decisions")
+  decisions(@Req() request: EventHttpRequest) {
+    return this.service.decisions(request);
+  }
+
+  @Get(":eventId/decisions/:decisionId")
+  decision(@Req() request: EventHttpRequest) {
+    return this.service.decision(request);
+  }
 }

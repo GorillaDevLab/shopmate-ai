@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import {
   ConnectorBindingSchema,
+  DecisionRunSchema,
   CursorSchema,
   createEventFingerprint,
   EventDetailQuerySchema,
@@ -29,6 +30,8 @@ import {
   type EventDetailQuery,
   type EventEvidenceReference,
   type EventRecord,
+  type DecisionRun,
+  type DecisionPortResult,
   type TenantContext,
 } from "@shopmate/contracts";
 import { z } from "zod";
@@ -36,9 +39,19 @@ import type { AuthContext } from "../auth/contracts/index.js";
 import { TenantScopeService, tenantNotFound } from "../tenant/tenant-scope.service.js";
 
 export const EVENT_QUERY_PORT = Symbol("EVENT_QUERY_PORT");
+export const EVENT_DECISION_SUMMARY_READER = Symbol("EVENT_DECISION_SUMMARY_READER");
 export const EVENT_STORE_OWNERSHIP_RESOLVER = Symbol("EVENT_STORE_OWNERSHIP_RESOLVER");
 export interface EventStoreOwnershipResolver {
   resolve(actor: TenantContext, storeId: string): Promise<ConnectorBinding | null>;
+}
+/** Local read-model seam only; the append-only runtime repository is supplied at P04-027/029. */
+export interface EventDecisionSummaryQuery extends EventDetailQuery {
+  readonly decisionId: string | null;
+}
+export interface EventDecisionSummaryReader {
+  readonly read: (
+    query: EventDecisionSummaryQuery,
+  ) => Promise<DecisionPortResult<readonly DecisionRun[]>>;
 }
 export interface EventHttpRequest {
   readonly auth?: AuthContext;
@@ -67,6 +80,7 @@ const pathSchema = z.strictObject({
   workspaceId: TenantIdSchema.optional(),
   eventId: ExternalIdSchema.optional(),
   evidenceId: ExternalIdSchema.optional(),
+  decisionId: ExternalIdSchema.optional(),
 });
 const historyFiltersSchema = z.strictObject(paginationFilters);
 const evidenceFiltersSchema = z.strictObject({
@@ -84,6 +98,21 @@ const historyPageSchema = z.strictObject({
   items: z.array(EventEvidenceRecordSchema),
   nextCursor: CursorSchema.nullable(),
 });
+const decisionEnvelopeSchema = z.discriminatedUnion("ok", [
+  z.strictObject({ ok: z.literal(true), value: z.array(DecisionRunSchema).max(1000) }),
+  z.strictObject({
+    ok: z.literal(false),
+    code: z.enum([
+      "INVALID_INPUT",
+      "FORBIDDEN",
+      "SCOPE_MISMATCH",
+      "VERSION_MISMATCH",
+      "HASH_MISMATCH",
+      "CONFLICT",
+      "UNAVAILABLE",
+    ]),
+  }),
+]);
 const envelopeSchema = z.discriminatedUnion("ok", [
   z.strictObject({ ok: z.literal(true), value: z.unknown() }),
   z.strictObject({
@@ -149,6 +178,20 @@ function unwrap(value: unknown): unknown {
       throw unavailable();
   }
 }
+function unwrapDecisions(value: unknown): readonly DecisionRun[] {
+  const result = output(decisionEnvelopeSchema, value);
+  if (result.ok) return result.value;
+  switch (result.code) {
+    case "INVALID_INPUT":
+      throw invalid();
+    case "FORBIDDEN":
+      throw forbidden();
+    case "SCOPE_MISMATCH":
+      return tenantNotFound();
+    default:
+      throw unavailable();
+  }
+}
 function workspaceSelection(request: EventHttpRequest): string | undefined {
   const count = request.rawHeaders.filter(
     (header, index) => index % 2 === 0 && header.toLowerCase() === "x-workspace-id",
@@ -201,6 +244,7 @@ export class EventQueryService {
     @Inject(TenantScopeService) private readonly tenants: TenantScopeService,
     @Inject(EVENT_QUERY_PORT) private readonly events: EventQueryPort,
     @Inject(EVENT_STORE_OWNERSHIP_RESOLVER) private readonly ownership: EventStoreOwnershipResolver,
+    @Inject(EVENT_DECISION_SUMMARY_READER) private readonly summaries: EventDecisionSummaryReader,
   ) {}
 
   async list(request: EventHttpRequest) {
@@ -270,6 +314,45 @@ export class EventQueryService {
     };
     if (!matchesEvidence(reference, event)) throw invalid();
     return { status: "AVAILABLE", ...(await this.readEvidence(query, reference)) };
+  }
+
+  async decisions(request: EventHttpRequest) {
+    const items = await this.readDecisions(request, null);
+    return { status: items.length ? "AVAILABLE" : "EMPTY", items };
+  }
+
+  async decision(request: EventHttpRequest) {
+    validateRequest(request);
+    const decisionId = parse(ExternalIdSchema, request.params.decisionId);
+    const items = await this.readDecisions(request, decisionId);
+    if (!items.length) return tenantNotFound();
+    return { status: "AVAILABLE", decision: items[0] };
+  }
+
+  private async readDecisions(request: EventHttpRequest, decisionId: string | null) {
+    validateRequest(request);
+    parse(emptyFiltersSchema, request.query ?? {});
+    const { event, query } = await this.authorizedEvent(request);
+    const value = await invoke(() =>
+      this.summaries.read(structuredClone({ ...query, decisionId })),
+    );
+    const items = unwrapDecisions(value);
+    if (
+      new Set(items.map((item) => item.id)).size !== items.length ||
+      (decisionId !== null && items.length > 1)
+    )
+      throw unavailable();
+    for (const item of items) {
+      if (
+        item.eventId !== event.id ||
+        !matchesEvidence(item.evidence, event) ||
+        (decisionId !== null && item.id !== decisionId)
+      )
+        throw unavailable();
+      // Resolve the run's own immutable evidence, including older versions, before exposure.
+      await this.readEvidence(query, item.evidence);
+    }
+    return items;
   }
 
   private async authorizedEvent(request: EventHttpRequest) {
