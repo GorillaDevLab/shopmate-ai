@@ -500,16 +500,75 @@ test("full binding collision cannot overwrite an active fingerprint", async () =
   );
 });
 
-test("metric references require the exact stored scoped version/hash and append normalized links", async () => {
-  const db = database();
+function metricRequest() {
   const request = globalThis.structuredClone(appendRequest());
   Object.assign(request.candidate.evidence.sourceReferences[0], {
     kind: "METRIC_SNAPSHOT",
     id: "00000000-0000-4000-8000-000000000001",
     measure: { kind: "PAID_REVENUE", unit: "minorCNY" },
   });
+  return request;
+}
+
+test("missing scoped metric references reject the append before event creation", async () => {
+  const db = database();
+  const request = metricRequest();
   assert.equal((await db.repository.appendEvidence(request)).error.code, "VERSION_MISMATCH");
   assert.equal(db.state.events.length, 0);
+});
+
+test("accepted metric references retain exact scoped version hash cutoff and normalized links", async () => {
+  const db = database();
+  const request = metricRequest();
+  const ref = request.candidate.evidence.sourceReferences[0];
+  const query = async (sql, params) => {
+    if (!sql.includes("FROM public.metric_snapshots")) return db.client.query(sql, params);
+    assert.deepEqual(params, [
+      ...Object.values(binding),
+      ref.id,
+      ref.version,
+      ref.hash,
+      ref.definitionVersion,
+      start,
+      end,
+      ref.measure.kind,
+      period.timezone,
+      period.currency,
+      end,
+    ]);
+    assert.ok(sql.includes('"computedAt" <= $15 AND "visibleAt" <= $15'));
+    return { rows: [{ id: ref.id }] };
+  };
+  const repository = createEventRepository({ actor, client: { query }, now: () => end });
+  const result = await repository.appendEvidence(request);
+  assert.equal(result.ok, true);
+  const links = db.state.calls.filter(({ sql }) =>
+    sql.includes("INSERT INTO public.event_evidence_metrics"),
+  );
+  assert.equal(links.length, 1);
+  assert.deepEqual(links[0].params, [request.reference.id, ref.id, ...Object.values(binding)]);
+  assert.deepEqual(db.state.evidence[0].payload.sourceReferences, [ref]);
+});
+
+test("evidence round trip preserves unavailable quality and nullable facts without zero filling", async () => {
+  const db = database();
+  const request = globalThis.structuredClone(appendRequest());
+  Object.assign(request.candidate.evidence, {
+    sourceWatermark: null,
+    dataStatus: "UNAVAILABLE",
+    sampleSize: 0,
+    coverageBasisPoints: 0,
+    issues: [{ code: "NOT_SYNCHRONIZED", field: "sync", evidenceIds: ["source-a"] }],
+  });
+  const event = await seed(db, request);
+  const result = await db.repository.evidence({
+    ...detailRequest(event),
+    reference: event.currentEvidence,
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value.evidence, request.candidate.evidence);
+  assert.equal(result.value.evidence.facts.lastSuccessAt, null);
+  assert.equal(result.value.evidence.facts.lagSeconds, null);
 });
 
 test("SQL keeps hostile external IDs in bound parameters and sets all transaction-local RLS keys", async () => {
