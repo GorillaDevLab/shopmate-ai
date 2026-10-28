@@ -9,6 +9,7 @@ import {
   EventEvidenceRecordSchema,
   DecisionRunSchema,
   type DecisionRun,
+  type DecisionPortResult,
   type EventQueryPort,
   type EventListQuery,
   type EventEvidenceQuery,
@@ -167,7 +168,9 @@ const newRun = DecisionRunSchema.parse({
 });
 class VersionedDecisionFixture implements EventDecisionSummaryReader {
   runs: readonly DecisionRun[] = [];
-  async read(query: EventDecisionSummaryQuery) {
+  async read(
+    query: EventDecisionSummaryQuery,
+  ): Promise<DecisionPortResult<readonly DecisionRun[]>> {
     if (
       !isDeepStrictEqual(query.binding, binding) ||
       query.actor.organizationId !== binding.organizationId ||
