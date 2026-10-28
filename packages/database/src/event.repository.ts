@@ -760,7 +760,8 @@ async function historyStored(
     result.rows.length > request.limit && last
       ? cursorData(request, {
           time: time(last.observedAt),
-          id: String(last.id),
+          // History uses only revision; embedding a Unicode evidence ID can exceed CursorSchema.
+          id: "history",
           revision: integer(last.evidenceRevision),
         })
       : null;

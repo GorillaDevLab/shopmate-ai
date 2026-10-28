@@ -477,6 +477,20 @@ test("history cursor preserves old evidence and binds the event and page filters
   assert.equal((await db.repository.history(changed)).error.code, "INVALID_INPUT");
 });
 
+test("history cursors remain replayable for maximum legal Unicode evidence IDs", async () => {
+  const db = database();
+  const first = await seed(db);
+  const request = globalThis.structuredClone(appendRequest("new", later));
+  request.reference.id = "证".repeat(256);
+  await seed(db, request);
+  const query = { ...detailRequest(first), limit: 1, cursor: null };
+  const page = await db.repository.history(query);
+  assert.ok(page.value.nextCursor.length <= 1024, "A generated cursor must satisfy CursorSchema");
+  const next = await db.repository.history({ ...query, cursor: page.value.nextCursor });
+  assert.equal(next.ok, true);
+  assert.deepEqual(next.value.items[0].reference, first.currentEvidence);
+});
+
 test("full binding collision cannot overwrite an active fingerprint", async () => {
   const db = database();
   const original = await seed(db);
