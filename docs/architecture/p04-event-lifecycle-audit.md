@@ -6,10 +6,14 @@ commerce execution, proposal, approval or credential capability.
 
 ## Boundary and transaction
 
-AuthGuard supplies the identity. TenantScopeService resolves the strict workspace
+The existing global MerchantScopeGuard supplies the identity (the card calls this
+the AuthGuard boundary). TenantScopeService resolves the strict workspace
 selection and store ownership; mutation bodies independently accept only a safe
 expectedRevision and the operation's typed reason. The existing read-only
-TenantContextGuard keeps rejecting mutation bodies.
+TenantContextGuard keeps rejecting mutation bodies. The service generates request
+and occurrence identifiers on the server; an injected trusted correlation factory
+may instead bind an existing host request context. Client headers/body never set
+audit identities, target state, actor, binding or timestamps.
 
 A generic injected unit of work rechecks membership and ownership, then binds
 query/detail and stateTransition to its transaction. The service checks the current
@@ -40,6 +44,8 @@ Tests use a transaction-bound staged fixture: state mutation happens before an
 audit failure, and committed state/evidence/audits remain unchanged after rollback.
 Success records exactly one revision and one correlated audit. Fixtures cover
 revoked membership, read-only roles, foreign scope, strict inputs and competing CAS.
+The HTTP fixture uses the real existing signed-session guard. Fixture audit hashes
+only satisfy the entry shape; they do not prove real chain hashing or integrity.
 
 This is component verification. Current TenantScopeService membership lookup uses
 a separate transaction and alone cannot guarantee authorization at write time.
