@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
@@ -8,6 +9,8 @@ import {
   EventEvidenceRecordSchema,
   DecisionRunSchema,
   type DecisionRun,
+  type EventQueryPort,
+  type EventListQuery,
   type EventEvidenceQuery,
   type TenantContext,
 } from "@shopmate/contracts";
@@ -166,9 +169,9 @@ class VersionedDecisionFixture implements EventDecisionSummaryReader {
   runs: readonly DecisionRun[] = [];
   async read(query: EventDecisionSummaryQuery) {
     if (
-      query.binding.storeId !== binding.storeId ||
+      !isDeepStrictEqual(query.binding, binding) ||
       query.actor.organizationId !== binding.organizationId ||
-      query.binding.connectionId !== binding.connectionId
+      query.actor.workspaceId !== binding.workspaceId
     )
       return { ok: false as const, code: "SCOPE_MISMATCH" as const };
     return success(
@@ -194,6 +197,7 @@ const list = vi.fn();
 const detail = vi.fn();
 const evidence = vi.fn();
 const history = vi.fn();
+const eventPort: EventQueryPort = { list, detail, evidence, history };
 const path = "/api/v1/stores/store-a/events";
 let app: INestApplication;
 
@@ -217,7 +221,7 @@ async function createApp() {
       TenantScopeService,
       { provide: TENANT_MEMBERSHIP_REPOSITORY, useValue: { resolve: membership } },
       { provide: EVENT_STORE_OWNERSHIP_RESOLVER, useValue: { resolve: ownership } },
-      { provide: EVENT_QUERY_PORT, useValue: { list, detail, evidence, history } },
+      { provide: EVENT_QUERY_PORT, useValue: eventPort },
       { provide: EVENT_DECISION_SUMMARY_READER, useValue: decisions },
     ],
   })
@@ -535,3 +539,100 @@ it.each(["/event-a/decisions", "/event-a/decisions/decision-v1"])(
     expect(membership).not.toHaveBeenCalled();
   },
 );
+
+it.each([
+  "",
+  "/event-a",
+  "/event-a/history",
+  "/event-a/evidence/evidence-a",
+  "/event-a/decisions",
+  "/event-a/decisions/decision-v1",
+])("enforces current authentication, evidence permissions and ownership on %s", async (suffix) => {
+  const filters = suffix.includes("/evidence/") ? evidenceFilters : {};
+  await request(app.getHttpServer())
+    .get(path + suffix)
+    .query(filters)
+    .expect(401);
+  const scope = vi.spyOn(app.get(TenantScopeService), "resolve");
+  scope.mockResolvedValueOnce({ ...member, role: "VIEWER", permissions: [] });
+  await get(suffix).query(filters).expect(403);
+  expect(ownership).not.toHaveBeenCalled();
+  ownership.mockResolvedValueOnce(null);
+  await get(suffix).query(filters).expect(404);
+  membership.mockResolvedValueOnce(null);
+  await get(suffix).query(filters).expect(404);
+  expect(list).not.toHaveBeenCalled();
+  expect(detail).not.toHaveBeenCalled();
+  expect(evidence).not.toHaveBeenCalled();
+  expect(history).not.toHaveBeenCalled();
+});
+it("keeps unavailable historical decisions explicit without fabricating labels", async () => {
+  const unavailableRun = DecisionRunSchema.parse({
+    ...oldRun,
+    effective: null,
+    overrideReason: null,
+    result: {
+      schemaVersion: 1,
+      status: "UNAVAILABLE",
+      correlationId: oldRun.result.correlationId,
+      code: "PROVIDER_FAILURE",
+    },
+  });
+  decisions.runs = [unavailableRun];
+  const response = await get("/event-a/decisions/decision-v1").expect(200);
+  expect(response.body.decision).toEqual(unavailableRun);
+  expect(response.body.decision.result.labels).toBeUndefined();
+  expect(response.body.decision.effective).toBeNull();
+});
+it.each(["INVALID_INPUT", "FORBIDDEN", "SCOPE_MISMATCH", "UNAVAILABLE", "HASH_MISMATCH"] as const)(
+  "maps decision read-model failure %s without source details",
+  async (code) => {
+    vi.spyOn(decisions, "read").mockResolvedValue({ ok: false, code });
+    const status = {
+      INVALID_INPUT: 400,
+      FORBIDDEN: 403,
+      SCOPE_MISMATCH: 404,
+      UNAVAILABLE: 503,
+      HASH_MISMATCH: 503,
+    }[code];
+    await get("/event-a/decisions").expect(status);
+    expect(evidence).not.toHaveBeenCalled();
+  },
+);
+it("rejects malformed ownership and resolved identity mismatch", async () => {
+  ownership.mockResolvedValueOnce({ ...binding, connectionId: null });
+  await get().expect(503);
+  vi.spyOn(app.get(TenantScopeService), "resolve").mockResolvedValueOnce({
+    ...member,
+    userId: "different-user",
+    role: "VIEWER",
+    permissions: [],
+  });
+  await get().expect(503);
+  expect(list).not.toHaveBeenCalled();
+});
+it("preserves port receiver and prevents a mutated request from authorizing leaked data", async () => {
+  list.mockImplementationOnce(async function (this: EventQueryPort, query: EventListQuery) {
+    expect(this).toBe(eventPort);
+    const changed = { ...query.binding, externalStoreId: "foreign-external" };
+    Object.assign(query, { binding: changed });
+    const forged = EventRecordSchema.parse({
+      ...event,
+      binding: changed,
+      currentEvidence: { ...reference, binding: changed },
+    });
+    return success({ items: [forged], nextCursor: null });
+  });
+  await get().expect(503);
+});
+it("forwards opaque cursor replay scope for semantic port validation", async () => {
+  list.mockImplementationOnce(async (query: EventListQuery) => {
+    expect(query).toMatchObject({
+      cursor: "opaque-port-cursor",
+      eventTypes: ["ROAS_DROP"],
+      binding,
+    });
+    return { ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] } };
+  });
+  await get().query({ type: "ROAS_DROP", cursor: "opaque-port-cursor" }).expect(400);
+});
