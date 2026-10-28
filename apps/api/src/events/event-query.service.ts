@@ -10,15 +10,25 @@ import {
 import {
   ConnectorBindingSchema,
   CursorSchema,
+  createEventFingerprint,
+  EventDetailQuerySchema,
+  EventHistoryQuerySchema,
+  EventEvidenceQuerySchema,
+  EventEvidenceRecordSchema,
+  ExternalIdSchema,
   EventListQuerySchema,
   EventRecordSchema,
   EventStateSchema,
   EventTypeSchema,
   TenantContextSchema,
   TenantIdSchema,
+  SourceVersionSchema,
   type ConnectorBinding,
   type EventQueryPort,
   type EventListQuery,
+  type EventDetailQuery,
+  type EventEvidenceReference,
+  type EventRecord,
   type TenantContext,
 } from "@shopmate/contracts";
 import { z } from "zod";
@@ -55,9 +65,23 @@ const listFiltersSchema = z.strictObject({
 const pathSchema = z.strictObject({
   storeId: TenantIdSchema,
   workspaceId: TenantIdSchema.optional(),
+  eventId: ExternalIdSchema.optional(),
+  evidenceId: ExternalIdSchema.optional(),
 });
+const historyFiltersSchema = z.strictObject(paginationFilters);
+const evidenceFiltersSchema = z.strictObject({
+  version: SourceVersionSchema,
+  hash: ExternalIdSchema,
+  definitionVersion: SourceVersionSchema,
+  baselineVersion: SourceVersionSchema.optional(),
+});
+const emptyFiltersSchema = z.strictObject({});
 const pageSchema = z.strictObject({
   items: z.array(EventRecordSchema),
+  nextCursor: CursorSchema.nullable(),
+});
+const historyPageSchema = z.strictObject({
+  items: z.array(EventEvidenceRecordSchema),
   nextCursor: CursorSchema.nullable(),
 });
 const envelopeSchema = z.discriminatedUnion("ok", [
@@ -162,6 +186,14 @@ function validPage<T>(
     (page.nextCursor === null || (page.items.length > 0 && page.nextCursor !== query.cursor))
   );
 }
+function matchesEvidence(reference: EventEvidenceReference, event: EventRecord): boolean {
+  return (
+    isDeepStrictEqual(reference.binding, event.binding) &&
+    isDeepStrictEqual(reference.entity, event.entity) &&
+    reference.eventType === event.eventType &&
+    createEventFingerprint(reference) === event.fingerprint
+  );
+}
 
 @Injectable()
 export class EventQueryService {
@@ -191,6 +223,72 @@ export class EventQueryService {
     )
       throw unavailable();
     return { status: page.items.length ? "AVAILABLE" : "EMPTY", ...page };
+  }
+
+  async detail(request: EventHttpRequest) {
+    validateRequest(request);
+    parse(emptyFiltersSchema, request.query ?? {});
+    const { event } = await this.authorizedEvent(request);
+    return { status: "AVAILABLE", event };
+  }
+
+  async history(request: EventHttpRequest) {
+    validateRequest(request);
+    const filters = parse(historyFiltersSchema, request.query ?? {});
+    const { event, query: scope } = await this.authorizedEvent(request);
+    const query = parse(EventHistoryQuerySchema, {
+      ...scope,
+      cursor: filters.cursor ?? null,
+      limit: filters.limit,
+    });
+    const value = await invoke(() => this.events.history(structuredClone(query)));
+    const page = output(historyPageSchema, unwrap(value));
+    if (
+      !validPage(page, query, (item) =>
+        JSON.stringify([item.reference.id, item.reference.version]),
+      ) ||
+      !page.items.every((item) => matchesEvidence(item.reference, event))
+    )
+      throw unavailable();
+    return { status: page.items.length ? "AVAILABLE" : "EMPTY", ...page };
+  }
+
+  /** History supplies immutable metadata; the port deliberately does not offer an ID-only lookup. */
+  async evidence(request: EventHttpRequest) {
+    validateRequest(request);
+    const filters = parse(evidenceFiltersSchema, request.query ?? {});
+    const evidenceId = parse(ExternalIdSchema, request.params.evidenceId);
+    const { event, query } = await this.authorizedEvent(request);
+    const reference: EventEvidenceReference = {
+      schemaVersion: 1,
+      id: evidenceId,
+      ...filters,
+      baselineVersion: filters.baselineVersion ?? null,
+      binding: query.binding,
+      eventType: event.eventType,
+      entity: event.entity,
+    };
+    if (!matchesEvidence(reference, event)) throw invalid();
+    return { status: "AVAILABLE", ...(await this.readEvidence(query, reference)) };
+  }
+
+  private async authorizedEvent(request: EventHttpRequest) {
+    const eventId = parse(ExternalIdSchema, request.params.eventId);
+    const scope = await this.authorize(request);
+    const query = parse(EventDetailQuerySchema, { ...scope, eventId });
+    const value = await invoke(() => this.events.detail(structuredClone(query)));
+    const event = output(EventRecordSchema, unwrap(value));
+    if (event.id !== eventId || !isDeepStrictEqual(event.binding, query.binding))
+      throw unavailable();
+    return { event, query };
+  }
+
+  private async readEvidence(query: EventDetailQuery, reference: EventEvidenceReference) {
+    const request = parse(EventEvidenceQuerySchema, { ...query, reference });
+    const value = await invoke(() => this.events.evidence(structuredClone(request)));
+    const record = output(EventEvidenceRecordSchema, unwrap(value));
+    if (!isDeepStrictEqual(record.reference, reference)) throw unavailable();
+    return record;
   }
 
   private matches(event: z.infer<typeof EventRecordSchema>, query: EventListQuery): boolean {

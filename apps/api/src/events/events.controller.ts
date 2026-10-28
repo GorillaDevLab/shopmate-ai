@@ -12,4 +12,19 @@ export class EventsController {
   list(@Req() request: EventHttpRequest) {
     return this.service.list(request);
   }
+
+  @Get(":eventId")
+  detail(@Req() request: EventHttpRequest) {
+    return this.service.detail(request);
+  }
+
+  @Get(":eventId/history")
+  history(@Req() request: EventHttpRequest) {
+    return this.service.history(request);
+  }
+
+  @Get(":eventId/evidence/:evidenceId")
+  evidence(@Req() request: EventHttpRequest) {
+    return this.service.evidence(request);
+  }
 }

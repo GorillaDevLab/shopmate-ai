@@ -2,7 +2,13 @@ import "reflect-metadata";
 import { randomBytes } from "node:crypto";
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { createEventFingerprint, EventRecordSchema, type TenantContext } from "@shopmate/contracts";
+import {
+  createEventFingerprint,
+  EventRecordSchema,
+  EventEvidenceRecordSchema,
+  type EventEvidenceQuery,
+  type TenantContext,
+} from "@shopmate/contracts";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { configureApp } from "../app.config.js";
@@ -54,6 +60,56 @@ const event = EventRecordSchema.parse({
   lastSeenAt: instant,
   currentEvidence: reference,
 });
+const oldReference = { ...reference, version: "evidence-v1", hash: "hash-a-v1" };
+const period = {
+  periodStart: "2026-10-25T00:00:00Z",
+  periodEnd: instant,
+  timezone: "Asia/Shanghai",
+  currency: "CNY",
+} as const;
+const sourceReference = {
+  kind: "NORMALIZED_AGGREGATE",
+  id: "source-a",
+  version: "source-v1",
+  hash: "source-hash",
+  binding,
+  definitionVersion: "metrics-v1",
+  period,
+  observedAt: instant,
+  measure: null,
+};
+const oldEvidence = EventEvidenceRecordSchema.parse({
+  reference: oldReference,
+  evidence: {
+    schemaVersion: 1,
+    binding,
+    ...period,
+    observedAt: instant,
+    sourceWatermark: null,
+    dataStatus: "UNAVAILABLE",
+    sampleSize: 0,
+    coverageBasisPoints: 0,
+    issues: [{ code: "NOT_SYNCHRONIZED", field: "inventory", evidenceIds: ["source-a"] }],
+    definitionVersion: "metrics-v1",
+    baselineVersion: null,
+    baselineAlignment: "MISSING",
+    baseline: null,
+    sourceReferences: [sourceReference],
+    eventType: "SYNC_FAILURE",
+    entity: reference.entity,
+    facts: {
+      lastSuccessAt: null,
+      lagSeconds: null,
+      typedErrorCode: "TEMPORARY",
+      affectedResourceKind: "INVENTORY",
+    },
+  },
+});
+const evidenceFilters = {
+  version: oldReference.version,
+  hash: oldReference.hash,
+  definitionVersion: oldReference.definitionVersion,
+};
 const member = {
   userId: "user-a",
   merchantId: "merchant-a",
@@ -122,6 +178,10 @@ beforeEach(() => {
   );
   list.mockResolvedValue(success({ items: [event], nextCursor: null }));
   detail.mockResolvedValue(success(event));
+  evidence.mockImplementation(async (query: EventEvidenceQuery) =>
+    success({ ...oldEvidence, reference: query.reference }),
+  );
+  history.mockResolvedValue(success({ items: [oldEvidence], nextCursor: null }));
 });
 
 it("requires the existing signed session guard", async () => {
@@ -280,4 +340,68 @@ it("rejects request bodies and missing direct-call authentication", async () => 
       query: {},
     }),
   ).rejects.toMatchObject({ status: 401 });
+});
+
+it("reads exact event identity and preserves immutable event facts", async () => {
+  const response = await get("/event-a").expect(200);
+  expect(response.body).toEqual({ status: "AVAILABLE", event });
+  expect(detail).toHaveBeenCalledWith(expect.objectContaining({ binding, eventId: "event-a" }));
+  detail.mockResolvedValue(success({ ...event, id: "unrelated" }));
+  await get("/event-a").expect(503);
+});
+it("returns historical evidence with nullable quality and source versions unchanged", async () => {
+  const response = await get("/event-a/history").query({ limit: "1" }).expect(200);
+  expect(response.body).toEqual({ status: "AVAILABLE", items: [oldEvidence], nextCursor: null });
+  const byId = await get("/event-a/evidence/evidence-a").query(evidenceFilters).expect(200);
+  expect(byId.body).toEqual({ status: "AVAILABLE", ...oldEvidence });
+  expect(evidence).toHaveBeenCalledWith(
+    expect.objectContaining({ binding, eventId: "event-a", reference: oldReference }),
+  );
+  expect(event.currentEvidence.version).toBe("evidence-v2");
+});
+it("forwards history pagination and returns honest empty history", async () => {
+  history.mockResolvedValueOnce(success({ items: [oldEvidence], nextCursor: "history-next" }));
+  await get("/event-a/history").query({ limit: "1" }).expect(200);
+  history.mockResolvedValueOnce(success({ items: [], nextCursor: null }));
+  const response = await get("/event-a/history")
+    .query({ cursor: "history-next", limit: "1" })
+    .expect(200);
+  expect(response.body.status).toBe("EMPTY");
+  expect(history).toHaveBeenLastCalledWith(
+    expect.objectContaining({ eventId: "event-a", cursor: "history-next", limit: 1 }),
+  );
+});
+it.each([
+  ["/event-a", { limit: "1" }],
+  ["/event-a/history", { type: "SYNC_FAILURE" }],
+  ["/event-a/history", { limit: "0" }],
+  ["/event-a/evidence/evidence-a", {}],
+  ["/event-a/evidence/evidence-a", { ...evidenceFilters, binding: "foreign" }],
+  ["/event-a/evidence/evidence-a", { ...evidenceFilters, version: ["v1", "v2"] }],
+  ["/event-a/evidence/%20hidden", evidenceFilters],
+])("rejects invalid historical read %s %j before membership", async (suffix, filters) => {
+  await get(suffix).query(filters).expect(400);
+  expect(membership).not.toHaveBeenCalled();
+});
+it("rejects evidence responses with the wrong immutable reference", async () => {
+  evidence.mockResolvedValue(success({ ...oldEvidence, reference }));
+  await get("/event-a/evidence/evidence-a").query(evidenceFilters).expect(503);
+});
+it("rejects unrelated history evidence and duplicate immutable references", async () => {
+  const unrelated = {
+    ...oldEvidence,
+    reference: { ...oldReference, baselineVersion: "different" },
+    evidence: { ...oldEvidence.evidence, baselineVersion: "different" },
+  };
+  history.mockResolvedValueOnce(success({ items: [unrelated], nextCursor: null }));
+  await get("/event-a/history").expect(503);
+  history.mockResolvedValueOnce(success({ items: [oldEvidence, oldEvidence], nextCursor: null }));
+  await get("/event-a/history").expect(503);
+});
+it("returns 404 for unknown event or immutable evidence references", async () => {
+  detail.mockResolvedValueOnce({ ok: false, error: { code: "NOT_FOUND", evidenceIds: [] } });
+  await get("/missing/history").expect(404);
+  expect(history).not.toHaveBeenCalled();
+  evidence.mockResolvedValueOnce({ ok: false, error: { code: "NOT_FOUND", evidenceIds: [] } });
+  await get("/event-a/evidence/evidence-a").query(evidenceFilters).expect(404);
 });
