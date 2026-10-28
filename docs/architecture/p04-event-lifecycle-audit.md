@@ -7,8 +7,9 @@ commerce execution, proposal, approval or credential capability.
 ## Boundary and transaction
 
 The existing global MerchantScopeGuard supplies the identity (the card calls this
-the AuthGuard boundary). TenantScopeService resolves the strict workspace
-selection and store ownership; mutation bodies independently accept only a safe
+the AuthGuard boundary). TenantScopeService resolves current membership for the
+strict workspace selection. The write unit of work checks store ownership;
+mutation bodies independently accept only a safe
 expectedRevision and the operation's typed reason. The existing read-only
 TenantContextGuard keeps rejecting mutation bodies. The service generates request
 and occurrence identifiers on the server; an injected trusted correlation factory
