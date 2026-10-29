@@ -212,6 +212,7 @@ function factProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReas
       facts.paidCohortOrders === 0
     )
       return "MISSING_DATA";
+    if (facts.paidCohortOrders < rule.minimumSampleSize) return "INSUFFICIENT_SAMPLE";
     const maturity = Math.max(facts.maturityHours, rule.thresholds.maturityHours);
     if (
       (Date.parse(facts.observedThrough) - Date.parse(facts.paymentCohort.periodEnd)) / 3600000 <

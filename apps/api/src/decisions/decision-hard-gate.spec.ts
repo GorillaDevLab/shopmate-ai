@@ -587,3 +587,49 @@ it("cannot bypass the current host cohort maturity requirement through evidence 
     overrideReason: "INSUFFICIENT_EVIDENCE",
   });
 });
+
+function refundCohortEvidence(paidCohortOrders: number): EventEvidenceV1 {
+  const original = refundEvidence();
+  if (original.eventType !== "REFUND_SPIKE") throw new Error("refund fixture expected");
+  return evidenceFixture({
+    ...original,
+    facts: {
+      ...original.facts,
+      paidCohortOrders,
+      refundedOrders: paidCohortOrders,
+      currentRate: rate(paidCohortOrders, paidCohortOrders),
+      affectedSkuShare: rate(0, paidCohortOrders),
+    },
+  });
+}
+
+it.each([1, ruleset.refund.minimumSampleSize - 1])(
+  "blocks DEEP for an actual refund cohort of %i despite sufficient aggregate samples",
+  (paidCohortOrders) => {
+    const context = contextFixture(refundCohortEvidence(paidCohortOrders), "CRITICAL");
+    expect(context.evidence.evidence.sampleSize).toBe(100);
+    expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+      effective: {
+        severity: "CRITICAL",
+        llmEscalation: "NO_LLM_NEEDED",
+        evidenceSufficiency: "INSUFFICIENT_DATA",
+        reasonCodes: ["INSUFFICIENT_SAMPLE"],
+      },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  },
+);
+
+it("allows DEEP at the inclusive actual refund cohort sample minimum", () => {
+  const context = contextFixture(refundCohortEvidence(ruleset.refund.minimumSampleSize));
+  expect(
+    value(gate(context).evaluate(requestFixture(context, { severity: "HIGH" }))),
+  ).toMatchObject({
+    effective: {
+      severity: "HIGH",
+      llmEscalation: "DEEP_REASONING_REQUIRED",
+      evidenceSufficiency: "SUFFICIENT",
+    },
+    overrideReason: null,
+  });
+});
