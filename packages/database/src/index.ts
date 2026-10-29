@@ -2,6 +2,8 @@ export { disconnectPrismaClient, getPrismaClient } from "./client.js";
 export { resolveTenantMembership, type TenantMembershipRecord } from "./tenant-membership.js";
 export { verifyPassword } from "./password-hash.js";
 export { createMetricSnapshotRepository } from "./metric-snapshot.repository.js";
+export { createEventRepository } from "./event.repository.js";
+export type { EventTransactionClient, EventRepositoryOptions } from "./event.repository.js";
 export { createMetricRuntimePool } from "./metric-runtime-pool.js";
 export type { MetricRuntimePool } from "./metric-runtime-pool.js";
 export {
