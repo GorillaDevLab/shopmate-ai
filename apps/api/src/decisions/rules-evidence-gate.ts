@@ -150,6 +150,31 @@ function financialProblem(input: SanitizedDecisionInput, rule: Rule): DecisionRe
   return null;
 }
 
+function explanationProblem(input: SanitizedDecisionInput): DecisionReasonCode | null {
+  switch (input.eventType) {
+    case "UNUSUAL_DISCOUNT":
+      return input.facts.discountMinor === null ||
+        input.facts.grossMerchandiseMinor === null ||
+        input.facts.discountRate.numerator === null ||
+        input.facts.discountRate.denominator === null ||
+        input.facts.discountRate.denominator === 0
+        ? "MISSING_DATA"
+        : null;
+    case "AD_SPEND_SPIKE":
+      return input.facts.spendMinor === null ? "MISSING_DATA" : null;
+    case "ROAS_DROP":
+      return input.facts.spendMinor === null ||
+        input.facts.attributedRevenueMinor === null ||
+        input.facts.roas.numerator === null ||
+        input.facts.roas.denominator === null ||
+        input.facts.roas.denominator === 0
+        ? "MISSING_DATA"
+        : null;
+    default:
+      return null;
+  }
+}
+
 /** Quality gates precede versioned defaults. Special inventory/refund rules own their independent facts. */
 export function rulesEvidenceGate(
   input: SanitizedDecisionInput,
@@ -158,6 +183,9 @@ export function rulesEvidenceGate(
   const rule = policy.rules.find((candidate) => candidate.eventType === input.eventType);
   if (!rule) throw new RangeError("Missing event quality policy");
   const reason =
-    quality(input, rule) ?? baselineProblem(input, rule) ?? financialProblem(input, rule);
+    quality(input, rule) ??
+    baselineProblem(input, rule) ??
+    financialProblem(input, rule) ??
+    explanationProblem(input);
   return reason === null ? null : quiet(reason);
 }

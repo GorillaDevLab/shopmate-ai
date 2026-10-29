@@ -387,7 +387,7 @@ it("composes actual full-evidence hashing, sanitization and rules without adding
   expect(Object.keys(result)).not.toContain("evidenceHash");
 });
 
-it("rejects altered hidden scope/source evidence even when its sanitized projection is identical", async () => {
+it("rejects altered hidden source evidence even when its sanitized projection is identical", async () => {
   let active = trustedContext();
   const input = value(sanitizer.sanitize(active));
   const provider = new RulesDecisionProvider({
@@ -410,6 +410,195 @@ it("rejects altered hidden scope/source evidence even when its sanitized project
     code: "INVALID_RESULT",
   });
 });
+
+function stockEvidence(): EventEvidenceV1 {
+  const input = stock();
+  return EventEvidenceV1Schema.parse({
+    ...trustedEvidence(),
+    eventType: "STOCKOUT_RISK",
+    entity: { kind: "SKU", externalSkuId: "sku-rules" },
+    baseline: null,
+    baselineVersion: null,
+    baselineAlignment: "MISSING",
+    sampleSize: input.sampleSize,
+    dataStatus: input.dataStatus,
+    issues: input.qualityReasons.map((code) => ({
+      code,
+      field: "sales",
+      evidenceIds: ["source-rules"],
+    })),
+    facts: input.facts,
+  });
+}
+
+it("composes the genuine host projection and sold-out leaf without suppressing reliable inventory", async () => {
+  const context = trustedContext(stockEvidence());
+  const input = value(sanitizer.sanitize(context));
+  const provider = new RulesDecisionProvider({
+    ...options(input),
+    assurance: hostAssurance(() => context),
+    specialRules: new PureInventoryRefundRuleEvaluator(),
+  });
+  const before = JSON.stringify(context);
+  expect(await provider.evaluate(input, control())).toMatchObject({
+    labels: {
+      severity: "CRITICAL",
+      llmEscalation: "NO_LLM_NEEDED",
+      reasonCodes: ["CONFIRMED_STOCKOUT"],
+    },
+  });
+  expect(JSON.stringify(context)).toBe(before);
+});
+
+it("rejects changes to hidden tenant scope with a newly valid full-evidence hash", async () => {
+  let active = trustedContext();
+  const input = value(sanitizer.sanitize(active));
+  const provider = new RulesDecisionProvider({
+    ...options(input),
+    assurance: hostAssurance(() => active),
+  });
+  const evidence = trustedEvidence();
+  const scoped = { ...binding, storeId: "store-changed" };
+  const changed = EventEvidenceV1Schema.parse({
+    ...evidence,
+    binding: scoped,
+    sourceReferences: evidence.sourceReferences.map((source) => ({ ...source, binding: scoped })),
+    baseline: {
+      ...evidence.baseline,
+      sourceReferences: evidence.baseline!.sourceReferences.map((source) => ({
+        ...source,
+        binding: scoped,
+      })),
+    },
+  });
+  active = trustedContext(changed);
+  expect(value(sanitizer.sanitize(active))).toEqual(input);
+  expect(value(hasher.hash(changed))).not.toEqual(value(hasher.hash(evidence)));
+  expect(await provider.evaluate(input, control())).toMatchObject({
+    status: "UNAVAILABLE",
+    code: "INVALID_RESULT",
+  });
+});
+
+it("verifies live cancellation and security deadlines after the injected component returns", async () => {
+  const controller = new AbortController();
+  const base = options(stock());
+  const provider = new RulesDecisionProvider({
+    ...base,
+    specialRules: {
+      evaluate: (input, rules) => {
+        controller.abort();
+        return specialRules.evaluate(input, rules);
+      },
+    },
+  });
+  expect(
+    await provider.evaluate(stock(), { ...control(), signal: controller.signal }),
+  ).toMatchObject({ status: "UNAVAILABLE", code: "ABORTED" });
+  expect(Object.isFrozen(controller.signal)).toBe(false);
+  let reads = 0;
+  const timed = new RulesDecisionProvider({
+    ...options(),
+    clock: {
+      timeDomain: "SECURITY_UTC",
+      now: () => (reads++ === 0 ? "2026-10-29T01:00:00Z" : "2026-10-29T01:01:00Z"),
+    },
+  });
+  expect(await timed.evaluate(profit(), control())).toMatchObject({
+    status: "UNAVAILABLE",
+    code: "TIMEOUT",
+  });
+});
+
+it.each(["correlationId", "rulesetVersion"] as const)(
+  "rejects a special-rule result with a changed %s",
+  async (key) => {
+    const provider = new RulesDecisionProvider({
+      ...options(stock()),
+      specialRules: {
+        evaluate: (input, rules) => ({
+          ...specialRules.evaluate(input, rules),
+          [key]: key === "correlationId" ? "199b61fd-4d67-4189-bc45-294ef59beeba" : "rules-v2",
+        }),
+      },
+    });
+    expect(await provider.evaluate(stock(), control())).toMatchObject({
+      status: "UNAVAILABLE",
+      code: "INVALID_RESULT",
+    });
+  },
+);
+
+it("rejects changed ruleset version pins even when the evidence projection is unchanged", async () => {
+  const context = trustedContext();
+  const input = value(sanitizer.sanitize(context));
+  expect(
+    await evaluate(input, {
+      assurance: hostAssurance(() => context),
+      ruleset: { ...DEFAULT_DECISION_RULESET, version: "decision-rules-v2" },
+    }),
+  ).toMatchObject({ status: "UNAVAILABLE", code: "INVALID_RESULT" });
+});
+
+it("keeps attribution gaps at SIMPLE with complete financial facts", async () => {
+  const input = profit();
+  const incomplete = SanitizedDecisionInputSchema.parse({
+    ...input,
+    facts: { ...financialFacts(), contributions: [] },
+  });
+  expect(await evaluate(incomplete)).toMatchObject({
+    labels: { evidenceSufficiency: "SUFFICIENT", llmEscalation: "SIMPLE_EXPLANATION" },
+  });
+});
+
+it("does not ask an explanation model to supply a missing typed discount fact", async () => {
+  const input = SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    eventType: "UNUSUAL_DISCOUNT",
+    baseline: null,
+    facts: {
+      ...financialFacts(),
+      discountMinor: null,
+      discountRate: { numerator: null, denominator: 70000, valueBasisPoints: null, period },
+    },
+  });
+  expect(await evaluate(input)).toMatchObject({
+    labels: {
+      evidenceSufficiency: "INSUFFICIENT_DATA",
+      llmEscalation: "NO_LLM_NEEDED",
+      reasonCodes: ["MISSING_DATA"],
+    },
+  });
+});
+
+it.each(["ROAS_DROP", "AD_SPEND_SPIKE"] as const)(
+  "requires known %s monetary facts",
+  async (eventType) => {
+    const input = SanitizedDecisionInputSchema.parse({
+      ...profit(),
+      eventType,
+      baseline: {
+        ...baseline(),
+        measure: {
+          kind: eventType === "ROAS_DROP" ? "ROAS" : "AD_SPEND",
+          unit: eventType === "ROAS_DROP" ? "basisPoints" : "minorCNY",
+        },
+      },
+      facts: {
+        spendMinor: null,
+        attributedRevenueMinor: null,
+        impressions: 100,
+        clicks: 20,
+        attributedOrders: 10,
+        attributionCoverageBasisPoints: 10000,
+        roas: { numerator: null, denominator: null, valueBasisPoints: null, period },
+      },
+    });
+    expect(await evaluate(input)).toMatchObject({
+      labels: { reasonCodes: ["MISSING_DATA"], llmEscalation: "NO_LLM_NEEDED" },
+    });
+  },
+);
 
 it("fails closed when complete prepared content, correlation or policy pins differ", async () => {
   const input = profit();
