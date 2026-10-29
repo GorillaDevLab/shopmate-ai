@@ -592,3 +592,231 @@ it("uses documented single-reason precedence while applying all constraints", as
   });
   expect(output.overrideReason).toBe("COOLDOWN");
 });
+
+function advancedRequest(patch: Partial<DecisionLabels> = {}): RoutingRequest {
+  const original = changedRequest(patch);
+  return {
+    ...original,
+    context: { ...original.context, event: { ...original.context.event, revision: 2 } },
+  };
+}
+
+it("a fresh higher severity can break cooldown under the same versioned policy", async () => {
+  const request = advancedRequest({ severity: "CRITICAL" });
+  const last = prior();
+  const history = [
+    {
+      ...last,
+      run: { ...last.run, evidence: { ...last.run.evidence, hash: "previous-evidence-hash" } },
+    },
+  ];
+  const output = await routed({ ...snapshotFixture(request), history }, request);
+  expect(output.effective).toMatchObject({
+    severity: "CRITICAL",
+    notificationRoute: "NOTIFY_NOW",
+    llmEscalation: "DEEP_REASONING_REQUIRED",
+  });
+  expect(output.overrideReason).toBe("SEVERITY_FLOOR");
+});
+
+it.each(["disabled", "policy-version", "same-evidence", "same-revision"] as const)(
+  "cannot break upgrade cooldown for %s",
+  async (kind) => {
+    const original = advancedRequest({ severity: "CRITICAL" });
+    const request =
+      kind === "same-revision"
+        ? {
+            ...original,
+            context: { ...original.context, event: { ...original.context.event, revision: 1 } },
+          }
+        : original;
+    const snapshot = snapshotFixture(request);
+    const last = prior();
+    const history = [
+      {
+        ...last,
+        policyVersion: kind === "policy-version" ? "routing-v0" : "routing-v1",
+        run: {
+          ...last.run,
+          evidence: {
+            ...last.run.evidence,
+            hash: kind === "same-evidence" ? last.run.evidence.hash : "old-hash",
+          },
+        },
+      },
+    ];
+    const output = await routed(
+      {
+        ...snapshot,
+        history,
+        policy: { ...snapshot.policy, breakOnSeverityUpgrade: kind !== "disabled" },
+      },
+      request,
+    );
+    expect(output.effective).toMatchObject({
+      notificationRoute: "DAILY_BRIEF",
+      llmEscalation: "NO_LLM_NEEDED",
+    });
+    expect(output.overrideReason).toBe("COOLDOWN");
+  },
+);
+
+it.each(["OPEN", "ACKNOWLEDGED"] as const)(
+  "versioned %s recovery breaks cooldown",
+  async (eventState) => {
+    const original = advancedRequest();
+    const request = {
+      ...original,
+      context: {
+        ...original.context,
+        event: { ...original.context.event, state: "RESOLVED" as const },
+      },
+    };
+    const output = await routed(
+      { ...snapshotFixture(request), history: [{ ...prior(), eventState }] },
+      request,
+    );
+    expect(output.effective?.notificationRoute).toBe("NOTIFY_NOW");
+    expect(output.effective?.llmEscalation).toBe("DEEP_REASONING_REQUIRED");
+  },
+);
+
+it("a version change cannot silently grant a recovery cooldown break", async () => {
+  const original = advancedRequest();
+  const request = {
+    ...original,
+    context: {
+      ...original.context,
+      event: { ...original.context.event, state: "RESOLVED" as const },
+    },
+  };
+  const snapshot = snapshotFixture(request);
+  const output = await routed(
+    { ...snapshot, history: [prior()], policy: { ...snapshot.policy, version: "routing-v2" } },
+    request,
+  );
+  expect(output.overrideReason).toBe("COOLDOWN");
+});
+
+it("at the exact cooldown expiry the route is available again", async () => {
+  const snapshot = snapshotFixture();
+  const request = requestFixture();
+  const control = { ...request.control, deadlineAt: "2026-10-25T01:06:00Z" };
+  const output = value(
+    await service({ ...snapshot, history: [prior()] }, "2026-10-25T01:05:00Z").route({
+      ...request,
+      control,
+    }),
+  );
+  expect(output.effective?.notificationRoute).toBe("NOTIFY_NOW");
+  expect(output.effective?.llmEscalation).toBe("DEEP_REASONING_REQUIRED");
+});
+
+it("changed evidence alone does not bypass unchanged severity cooldown", async () => {
+  const request = advancedRequest();
+  const last = prior();
+  const history = [
+    { ...last, run: { ...last.run, evidence: { ...last.run.evidence, hash: "old-hash" } } },
+  ];
+  const output = await routed({ ...snapshotFixture(request), history }, request);
+  expect(output.overrideReason).toBe("COOLDOWN");
+});
+
+it("a cooldown break does not bypass quiet hours or store cap", async () => {
+  const request = advancedRequest({ severity: "CRITICAL" });
+  const snapshot = snapshotFixture(request);
+  const last = prior();
+  const history = [
+    { ...last, run: { ...last.run, evidence: { ...last.run.evidence, hash: "old-hash" } } },
+  ];
+  const output = await routed(
+    {
+      ...snapshot,
+      history,
+      preferences: quietSnapshot(540, 600).preferences,
+      policy: { ...snapshot.policy, maximumImmediatePerStore: 0 },
+    },
+    request,
+  );
+  expect(output.effective?.notificationRoute).toBe("DAILY_BRIEF");
+  expect(output.overrideReason).toBe("NOTIFICATION_PREFERENCE");
+});
+
+it.each(["SECURITY_POLICY", "INSUFFICIENT_EVIDENCE"] as const)(
+  "preserves upstream %s reason while enforcing budget",
+  async (overrideReason) => {
+    const original = requestFixture();
+    const request = { ...original, run: { ...original.run, overrideReason } };
+    const output = await routed({ ...snapshotFixture(request), budget: null }, request);
+    expect(output.effective?.llmEscalation).toBe("NO_LLM_NEEDED");
+    expect(output.overrideReason).toBe(overrideReason);
+  },
+);
+
+it.each(["storeId", "workspaceId", "organizationId", "connectionId", "externalStoreId"] as const)(
+  "rejects history outside exact %s binding",
+  async (field) => {
+    const snapshot = snapshotFixture();
+    const last = prior();
+    const binding = { ...last.run.evidence.binding, [field]: "unrelated" };
+    const entity = { kind: "CONNECTION" as const, connectionId: binding.connectionId };
+    const history = [
+      { ...last, run: { ...last.run, evidence: { ...last.run.evidence, binding, entity } } },
+    ];
+    expect(await service({ ...snapshot, history }).route(requestFixture())).toEqual({
+      ok: false,
+      code: "INVALID_INPUT",
+    });
+  },
+);
+
+it("rejects duplicate or future history instead of bypassing the cap", async () => {
+  const snapshot = snapshotFixture();
+  expect(
+    await service({ ...snapshot, history: [prior(), prior()] }).route(requestFixture()),
+  ).toEqual({ ok: false, code: "INVALID_INPUT" });
+  const history = [{ ...prior(), routedAt: "2026-10-25T01:00:01Z" }];
+  expect(await service({ ...snapshot, history }).route(requestFixture())).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+});
+
+it("maps state outages to UNAVAILABLE and preserves a valid denied result", async () => {
+  const request = requestFixture();
+  const state: DecisionRoutingState = {
+    load: async () => {
+      throw new Error("state unavailable");
+    },
+  };
+  const clock = { timeDomain: "SECURITY_UTC" as const, now: () => instant };
+  expect(await new DecisionRoutingService(state, clock).route(request)).toEqual({
+    ok: false,
+    code: "UNAVAILABLE",
+  });
+  const denied: DecisionRoutingState = { load: async () => ({ ok: false, code: "FORBIDDEN" }) };
+  expect(await new DecisionRoutingService(denied, clock).route(request)).toEqual({
+    ok: false,
+    code: "FORBIDDEN",
+  });
+});
+
+it("rejects undeclared error fields from a malformed server state result", async () => {
+  const state = {
+    load: async () => ({ ok: false, code: "FORBIDDEN", token: "should-not-escape" }),
+  };
+  const router = new DecisionRoutingService(state as unknown as DecisionRoutingState, {
+    timeDomain: "SECURITY_UTC",
+    now: () => instant,
+  });
+  expect(await router.route(requestFixture())).toEqual({ ok: false, code: "INVALID_INPUT" });
+});
+
+it("refuses future run creation time even when authoritative snapshot matches", async () => {
+  const original = requestFixture();
+  const request = { ...original, run: { ...original.run, createdAt: "2026-10-25T01:00:01Z" } };
+  expect(await service(snapshotFixture(request)).route(request)).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+});

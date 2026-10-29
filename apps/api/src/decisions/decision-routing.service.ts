@@ -84,6 +84,23 @@ const requestSchema = z
     control: DecisionControlSchema,
   })
   .readonly();
+const stateResultSchema = z.discriminatedUnion("ok", [
+  z.strictObject({ ok: z.literal(true), value: snapshotSchema }).readonly(),
+  z
+    .strictObject({
+      ok: z.literal(false),
+      code: z.enum([
+        "INVALID_INPUT",
+        "FORBIDDEN",
+        "SCOPE_MISMATCH",
+        "VERSION_MISMATCH",
+        "HASH_MISMATCH",
+        "CONFLICT",
+        "UNAVAILABLE",
+      ]),
+    })
+    .readonly(),
+]);
 type VerifiedRequest = z.infer<typeof requestSchema>;
 type HistoryEntry = z.infer<typeof historyEntry>;
 const severityRank = { INFO: 0, LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 } as const;
@@ -348,15 +365,15 @@ export class DecisionRoutingService implements RoutingPort {
     }
     const current = this.currentTime(request.control);
     if (!current.ok) return current;
-    if (!loaded.ok) return loaded;
-    const snapshot = snapshotSchema.safeParse(loaded.value);
-    if (!snapshot.success) return failure("INVALID_INPUT");
-    const error = verifyBinding(request, snapshot.data);
+    const parsed = stateResultSchema.safeParse(loaded);
+    if (!parsed.success) return failure("INVALID_INPUT");
+    if (!parsed.data.ok) return parsed.data;
+    const snapshot = parsed.data.value;
+    if (Date.parse(request.run.createdAt) > current.value) return failure("INVALID_INPUT");
+    const error = verifyBinding(request, snapshot);
     if (error !== null) return failure(error);
-    if (!verifyHistory(snapshot.data, current.value)) return failure("INVALID_INPUT");
-    const run = RoutedPrimaryDecisionRunSchema.parse(
-      finalIntent(request, snapshot.data, current.value),
-    );
+    if (!verifyHistory(snapshot, current.value)) return failure("INVALID_INPUT");
+    const run = RoutedPrimaryDecisionRunSchema.parse(finalIntent(request, snapshot, current.value));
     const final = this.currentTime(request.control);
     return final.ok ? Object.freeze({ ok: true, value: run }) : final;
   }
