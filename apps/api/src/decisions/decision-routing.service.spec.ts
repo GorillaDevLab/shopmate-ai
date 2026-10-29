@@ -408,3 +408,187 @@ it("rejects structural fake signals and business clock domains", async () => {
   );
   expect(await router.route(request)).toEqual({ ok: false, code: "INVALID_INPUT" });
 });
+
+it.each([null, { remainingDeepRuns: 0 }])(
+  "unknown/exhausted budget %j disables DEEP",
+  async (budget) => {
+    const output = await routed({ ...snapshotFixture(), budget });
+    expect(output.effective).toMatchObject({
+      notificationRoute: "NOTIFY_NOW",
+      llmEscalation: "NO_LLM_NEEDED",
+    });
+    expect(output.overrideReason).toBe("LLM_BUDGET");
+  },
+);
+
+it("unknown preferences conservatively defer notification and disable DEEP", async () => {
+  const output = await routed({ ...snapshotFixture(), preferences: null });
+  expect(output.effective).toMatchObject({
+    notificationRoute: "DAILY_BRIEF",
+    llmEscalation: "NO_LLM_NEEDED",
+  });
+  expect(output.overrideReason).toBe("NOTIFICATION_PREFERENCE");
+});
+
+it.each(["DAILY_ONLY", "NONE"] as const)(
+  "applies %s without dropping SYNC_FAILURE",
+  async (notifications) => {
+    const snapshot = snapshotFixture();
+    const output = await routed({
+      ...snapshot,
+      preferences: { ...snapshot.preferences!, notifications },
+    });
+    expect(output.effective?.notificationRoute).toBe(
+      notifications === "NONE" ? "IGNORE" : "DAILY_BRIEF",
+    );
+    expect(output.effective?.reasonCodes).toEqual(["SYNC_FAILURE"]);
+    expect(output.result).toEqual(requestFixture().run.result);
+    expect(output.evidence).toEqual(snapshot.context.evidence.reference);
+    expect(output.eventId).toBe("event-a");
+    expect(output.overrideReason).toBe("NOTIFICATION_PREFERENCE");
+  },
+);
+
+it("disabled DEEP preference overrides available budget", async () => {
+  const snapshot = snapshotFixture();
+  const output = await routed({
+    ...snapshot,
+    preferences: { ...snapshot.preferences!, allowDeep: false },
+  });
+  expect(output.effective?.llmEscalation).toBe("NO_LLM_NEEDED");
+  expect(output.overrideReason).toBe("NOTIFICATION_PREFERENCE");
+});
+
+function quietSnapshot(startMinute: number, endMinute: number, timezone = "Asia/Shanghai") {
+  const snapshot = snapshotFixture();
+  return {
+    ...snapshot,
+    preferences: { ...snapshot.preferences!, quietHours: { timezone, startMinute, endMinute } },
+  };
+}
+
+it.each([
+  [540, 600, "DAILY_BRIEF"],
+  [480, 540, "NOTIFY_NOW"],
+  [1380, 600, "DAILY_BRIEF"],
+  [1380, 480, "NOTIFY_NOW"],
+  [540, 540, "NOTIFY_NOW"],
+] as const)("uses quiet start inclusive/end exclusive for %s-%s", async (start, end, expected) => {
+  const output = await routed(quietSnapshot(start, end));
+  expect(output.effective?.notificationRoute).toBe(expected);
+  expect(output.overrideReason).toBe(expected === "DAILY_BRIEF" ? "QUIET_HOURS" : null);
+  expect(output.effective?.llmEscalation).toBe("DEEP_REASONING_REQUIRED");
+});
+
+it("evaluates quiet hours at SECURITY_UTC with the configured DST timezone", async () => {
+  // 01:00 UTC is 14:00 NZDT on this date; evidence business time is not the routing clock.
+  const output = await routed(quietSnapshot(840, 900, "Pacific/Auckland"));
+  expect(output.effective?.notificationRoute).toBe("DAILY_BRIEF");
+  expect(output.overrideReason).toBe("QUIET_HOURS");
+});
+
+it("fails closed on an invalid quiet timezone", async () => {
+  expect(await service(quietSnapshot(0, 1, "Not/AZone")).route(requestFixture())).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+});
+
+function changedRequest(
+  patch: Partial<DecisionLabels>,
+  original = requestFixture(),
+): RoutingRequest {
+  return {
+    ...original,
+    run: { ...original.run, effective: { ...labels, ...patch }, overrideReason: "SEVERITY_FLOOR" },
+  };
+}
+
+it("ESCALATE remains an in-app human intent with no provider or outbox dependency", async () => {
+  const request = changedRequest({ notificationRoute: "ESCALATE" });
+  const snapshot = snapshotFixture(request);
+  const output = await routed(
+    { ...snapshot, budget: null, preferences: { ...snapshot.preferences!, notifications: "NONE" } },
+    request,
+  );
+  expect(output.effective).toMatchObject({
+    notificationRoute: "ESCALATE",
+    llmEscalation: "NO_LLM_NEEDED",
+    severity: "HIGH",
+    attentionPriority: "HIGH_PRIORITY",
+  });
+  expect(output.overrideReason).toBe("LLM_BUDGET");
+  expect(output).not.toHaveProperty("delivery");
+});
+
+it("applies a per-store cap across sequential distinct events", async () => {
+  const history: DecisionRoutingSnapshot["history"][number][] = [];
+  const routes: string[] = [];
+  for (let index = 0; index < 3; index++) {
+    const original = requestFixture();
+    const context = {
+      ...original.context,
+      event: { ...original.context.event, id: `event-${index}` },
+    };
+    const request = {
+      ...original,
+      context,
+      run: {
+        ...original.run,
+        id: `run-${index}`,
+        eventId: context.event.id,
+        decisionKey: `key-${index}`,
+      },
+    };
+    const snapshot = { ...snapshotFixture(request), history: [...history] };
+    const run = value(await service(snapshot).route(request));
+    routes.push(run.effective!.notificationRoute);
+    history.push({ ...prior(request), run: RoutedPrimaryDecisionRunSchema.parse(run) });
+  }
+  expect(routes).toEqual(["NOTIFY_NOW", "NOTIFY_NOW", "DAILY_BRIEF"]);
+});
+
+it("cap applies after a cooldown break and uses NOTIFICATION_PREFERENCE", async () => {
+  const snapshot = snapshotFixture();
+  const output = await routed({
+    ...snapshot,
+    policy: { ...snapshot.policy, maximumImmediatePerStore: 0 },
+  });
+  expect(output.effective?.notificationRoute).toBe("DAILY_BRIEF");
+  expect(output.overrideReason).toBe("NOTIFICATION_PREFERENCE");
+});
+
+it("batch lower time boundary is exclusive", async () => {
+  const snapshot = snapshotFixture();
+  const old = {
+    ...prior(),
+    run: {
+      ...prior().run,
+      eventId: "other",
+      decisionKey: "other",
+      createdAt: "2026-10-25T00:59:00Z",
+    },
+    routedAt: "2026-10-25T00:59:00Z",
+  };
+  const output = await routed({
+    ...snapshot,
+    policy: { ...snapshot.policy, maximumImmediatePerStore: 1 },
+    history: [old],
+  });
+  expect(output.effective?.notificationRoute).toBe("NOTIFY_NOW");
+});
+
+it("uses documented single-reason precedence while applying all constraints", async () => {
+  const snapshot = quietSnapshot(540, 600);
+  const output = await routed({
+    ...snapshot,
+    history: [prior()],
+    budget: null,
+    preferences: { ...snapshot.preferences, notifications: "NONE" },
+  });
+  expect(output.effective).toMatchObject({
+    notificationRoute: "IGNORE",
+    llmEscalation: "NO_LLM_NEEDED",
+  });
+  expect(output.overrideReason).toBe("COOLDOWN");
+});

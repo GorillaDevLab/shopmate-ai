@@ -8,6 +8,8 @@ import {
   RoutedPrimaryDecisionRunSchema,
   SourceVersionSchema,
   type DecisionControl,
+  type DecisionLabels,
+  type DecisionOverrideReason,
   type DecisionPortError,
   type DecisionPortResult,
   type EvaluationContext,
@@ -22,13 +24,21 @@ import { z } from "zod";
 import { CanonicalHostEvidenceHash } from "./decision-input-sanitizer.js";
 
 const quantity = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+function validTimezone(timezone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 const preferences = z
   .strictObject({
     notifications: z.enum(["ALL", "DAILY_ONLY", "NONE"]),
     allowDeep: z.boolean(),
     quietHours: z
       .strictObject({
-        timezone: z.string().min(1).max(100),
+        timezone: z.string().min(1).max(100).refine(validTimezone),
         startMinute: quantity.max(1439),
         endMinute: quantity.max(1439),
       })
@@ -176,11 +186,111 @@ function routeCooldown(request: VerifiedRequest, snapshot: DecisionRoutingSnapsh
     llmEscalation === effective.llmEscalation
   )
     return request.run;
-  return {
-    ...request.run,
-    effective: { ...effective, notificationRoute, llmEscalation },
-    overrideReason: "COOLDOWN" as const,
-  };
+  return override(request.run, { ...effective, notificationRoute, llmEscalation }, "COOLDOWN");
+}
+
+type RoutedRun = z.infer<typeof RoutedPrimaryDecisionRunSchema>;
+/** One stored cause: security > evidence > cooldown > preferences/cap > quiet > budget > floor > fallback.
+ * All restrictions still apply. The cap uses NOTIFICATION_PREFERENCE because the shared enum has no batch cause.
+ */
+const reasonOrder: readonly DecisionOverrideReason[] = [
+  "SECURITY_POLICY",
+  "INSUFFICIENT_EVIDENCE",
+  "COOLDOWN",
+  "NOTIFICATION_PREFERENCE",
+  "QUIET_HOURS",
+  "LLM_BUDGET",
+  "SEVERITY_FLOOR",
+  "PROVIDER_UNAVAILABLE",
+];
+
+function override(
+  run: RoutedRun,
+  effective: DecisionLabels,
+  reason: DecisionOverrideReason,
+): RoutedRun {
+  if (sameValue(run.effective, effective)) return run;
+  const previous = run.overrideReason;
+  const overrideReason =
+    previous !== null && reasonOrder.indexOf(previous) < reasonOrder.indexOf(reason)
+      ? previous
+      : reason;
+  return { ...run, effective, overrideReason };
+}
+
+function routePreferences(run: RoutedRun, snapshot: DecisionRoutingSnapshot): RoutedRun {
+  const prefs = snapshot.preferences;
+  let notificationRoute = run.effective.notificationRoute;
+  // ESCALATE is only an application-local human-attention intent, independent of external preferences.
+  if (notificationRoute !== "ESCALATE" && notificationRoute !== "IGNORE") {
+    if (prefs?.notifications === "NONE") notificationRoute = "IGNORE";
+    else if (prefs?.notifications !== "ALL") notificationRoute = "DAILY_BRIEF";
+  }
+  const llmEscalation =
+    prefs?.allowDeep !== true && run.effective.llmEscalation === "DEEP_REASONING_REQUIRED"
+      ? "NO_LLM_NEEDED"
+      : run.effective.llmEscalation;
+  return override(
+    run,
+    { ...run.effective, notificationRoute, llmEscalation },
+    "NOTIFICATION_PREFERENCE",
+  );
+}
+
+function quietNow(snapshot: DecisionRoutingSnapshot, now: number): boolean {
+  const quiet = snapshot.preferences?.quietHours;
+  if (!quiet || quiet.startMinute === quiet.endMinute) return false;
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: quiet.timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = hour * 60 + Number(parts.find((part) => part.type === "minute")?.value);
+  return quiet.startMinute < quiet.endMinute
+    ? minute >= quiet.startMinute && minute < quiet.endMinute
+    : minute >= quiet.startMinute || minute < quiet.endMinute;
+}
+
+function routeQuietHours(
+  run: RoutedRun,
+  snapshot: DecisionRoutingSnapshot,
+  now: number,
+): RoutedRun {
+  if (run.effective.notificationRoute !== "NOTIFY_NOW" || !quietNow(snapshot, now)) return run;
+  return override(run, { ...run.effective, notificationRoute: "DAILY_BRIEF" }, "QUIET_HOURS");
+}
+
+function routeBatch(run: RoutedRun, snapshot: DecisionRoutingSnapshot, now: number): RoutedRun {
+  if (run.effective.notificationRoute !== "NOTIFY_NOW") return run;
+  const lower = now - snapshot.policy.batchWindowSeconds * 1000;
+  const immediateCount = snapshot.history.filter(
+    (entry) =>
+      entry.run.effective.notificationRoute === "NOTIFY_NOW" && Date.parse(entry.routedAt) > lower,
+  ).length;
+  if (immediateCount < snapshot.policy.maximumImmediatePerStore) return run;
+  return override(
+    run,
+    { ...run.effective, notificationRoute: "DAILY_BRIEF" },
+    "NOTIFICATION_PREFERENCE",
+  );
+}
+
+function routeBudget(run: RoutedRun, snapshot: DecisionRoutingSnapshot): RoutedRun {
+  if (
+    run.effective.llmEscalation !== "DEEP_REASONING_REQUIRED" ||
+    (snapshot.budget !== null && snapshot.budget.remainingDeepRuns > 0)
+  )
+    return run;
+  return override(run, { ...run.effective, llmEscalation: "NO_LLM_NEEDED" }, "LLM_BUDGET");
+}
+
+function finalIntent(request: VerifiedRequest, snapshot: DecisionRoutingSnapshot, now: number) {
+  const cooldown = routeCooldown(request, snapshot, now);
+  const preferred = routePreferences(cooldown, snapshot);
+  const batched = routeBatch(preferred, snapshot, now);
+  return routeBudget(routeQuietHours(batched, snapshot, now), snapshot);
 }
 
 /** Card-local trusted server state; the host must load/serialize it within its routing unit of work. */
@@ -245,7 +355,7 @@ export class DecisionRoutingService implements RoutingPort {
     if (error !== null) return failure(error);
     if (!verifyHistory(snapshot.data, current.value)) return failure("INVALID_INPUT");
     const run = RoutedPrimaryDecisionRunSchema.parse(
-      routeCooldown(request, snapshot.data, current.value),
+      finalIntent(request, snapshot.data, current.value),
     );
     const final = this.currentTime(request.control);
     return final.ok ? Object.freeze({ ok: true, value: run }) : final;
