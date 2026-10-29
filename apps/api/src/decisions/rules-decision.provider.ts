@@ -87,7 +87,8 @@ function composite(input: SanitizedDecisionInput): boolean {
     facts.profitDeltaMinor === null ||
     baseline?.measure.kind !== "CONTRIBUTION" ||
     baseline.median === null ||
-    baseline.median - facts.contributionMinor !== -facts.profitDeltaMinor
+    !Number.isSafeInteger(baseline.median) ||
+    BigInt(baseline.median) - BigInt(facts.contributionMinor) !== -BigInt(facts.profitDeltaMinor)
   )
     return false;
   const rows = facts.contributions;

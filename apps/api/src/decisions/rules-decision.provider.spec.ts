@@ -607,3 +607,22 @@ it("cannot use LLM to fill missing profit cost or contribution facts", async () 
     });
   }
 });
+
+it("keeps fractional profit baselines from falsely reconciling rounded integer attribution", async () => {
+  const facts = financialFacts();
+  const contributions = facts.contributions.map((row) => ({
+    ...row,
+    amountMinor: row.kind === "VOLUME" ? -9007199254740988 : row.kind === "COGS" ? -2 : 0,
+  }));
+  const input = SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    baseline: { ...baseline(), median: -0.5, mad: 0 },
+    facts: {
+      ...facts,
+      contributionMinor: -9007199254740991,
+      profitDeltaMinor: -9007199254740990,
+      contributions,
+    },
+  });
+  expect(await evaluate(input)).toMatchObject({ labels: { llmEscalation: "SIMPLE_EXPLANATION" } });
+});
