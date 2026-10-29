@@ -7,6 +7,100 @@ import {
 } from "@shopmate/contracts";
 
 type Rule = EventRulePolicyV1["rules"][number];
+type Input<K extends SanitizedDecisionInput["eventType"]> = Extract<
+  SanitizedDecisionInput,
+  { eventType: K }
+>;
+type Policy<K extends Rule["eventType"]> = Extract<Rule, { eventType: K }>;
+
+function knownRatio(ratio: {
+  readonly numerator: number | null;
+  readonly denominator: number | null;
+}): boolean {
+  return ratio.numerator !== null && ratio.denominator !== null && ratio.denominator > 0;
+}
+
+function conversionProblem(
+  input: Input<"CONVERSION_DROP">,
+  rule: Policy<"CONVERSION_DROP">,
+): DecisionReasonCode | null {
+  const { facts } = input;
+  if (facts.visitors === null || facts.paidOrders === null || !knownRatio(facts.conversion))
+    return "MISSING_DATA";
+  return facts.visitors < rule.thresholds.minimumVisitors ? "INSUFFICIENT_SAMPLE" : null;
+}
+
+function cancellationProblem(
+  input: Input<"CANCELLED_ORDER_SPIKE">,
+  rule: Policy<"CANCELLED_ORDER_SPIKE">,
+): DecisionReasonCode | null {
+  const facts = input.facts;
+  if (
+    facts.cohortOrders === null ||
+    facts.paidCancelledOrders === null ||
+    facts.pendingCancelledOrders === null ||
+    !knownRatio(facts.currentRate)
+  )
+    return "MISSING_DATA";
+  return facts.cohortOrders < rule.minimumSampleSize ? "INSUFFICIENT_SAMPLE" : null;
+}
+
+function breakoutProblem(
+  input: Input<"PRODUCT_BREAKOUT">,
+  rule: Policy<"PRODUCT_BREAKOUT">,
+): DecisionReasonCode | null {
+  const facts = input.facts;
+  if (
+    facts.salesUnits === null ||
+    facts.salesUnitsPerHour === null ||
+    facts.listedAt === null ||
+    !knownRatio(facts.conversion)
+  )
+    return "MISSING_DATA";
+  return facts.conversion.numerator! < rule.minimumSampleSize ? "INSUFFICIENT_SAMPLE" : null;
+}
+
+function stagnationProblem(
+  input: Input<"INVENTORY_STAGNATION">,
+  rule: Policy<"INVENTORY_STAGNATION">,
+): DecisionReasonCode | null {
+  const facts = input.facts;
+  if (
+    facts.salesUnits === null ||
+    facts.salesUnits === 0 ||
+    facts.availableUnits === null ||
+    facts.holdingDays === null ||
+    facts.demandCoverageDays === null ||
+    facts.listedAt === null
+  )
+    return "MISSING_DATA";
+  const age = Date.parse(input.observedAt) - Date.parse(facts.listedAt);
+  if (
+    facts.salesUnits < rule.minimumSampleSize ||
+    scaled(age) < scaled(rule.thresholds.minimumListingAgeHours) * 3600000n
+  )
+    return "INSUFFICIENT_SAMPLE";
+  return null;
+}
+
+function primaryProblem(input: SanitizedDecisionInput, rule: Rule): DecisionReasonCode | null {
+  if (input.eventType === "CONVERSION_DROP" && rule.eventType === "CONVERSION_DROP")
+    return conversionProblem(input, rule);
+  if (input.eventType === "CANCELLED_ORDER_SPIKE" && rule.eventType === "CANCELLED_ORDER_SPIKE")
+    return cancellationProblem(input, rule);
+  if (input.eventType === "PRODUCT_BREAKOUT" && rule.eventType === "PRODUCT_BREAKOUT")
+    return breakoutProblem(input, rule);
+  if (input.eventType === "INVENTORY_STAGNATION" && rule.eventType === "INVENTORY_STAGNATION")
+    return stagnationProblem(input, rule);
+  if (
+    input.eventType === "ROAS_DROP" &&
+    rule.eventType === "ROAS_DROP" &&
+    input.facts.attributionCoverageBasisPoints <
+      rule.thresholds.minimumAttributionCoverageBasisPoints
+  )
+    return "PARTIAL_COVERAGE";
+  return null;
+}
 
 function quiet(reason: DecisionReasonCode): DecisionLabels {
   return DecisionLabelsSchema.parse({
@@ -185,6 +279,7 @@ export function rulesEvidenceGate(
   const reason =
     quality(input, rule) ??
     baselineProblem(input, rule) ??
+    primaryProblem(input, rule) ??
     financialProblem(input, rule) ??
     explanationProblem(input);
   return reason === null ? null : quiet(reason);

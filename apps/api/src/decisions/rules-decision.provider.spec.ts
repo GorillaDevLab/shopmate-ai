@@ -75,6 +75,230 @@ function baseline() {
     coverageBasisPoints: 10000,
   } as const;
 }
+
+function rate(numerator: number | null, denominator: number | null) {
+  return {
+    numerator,
+    denominator,
+    period,
+    valueBasisPoints:
+      numerator === null || denominator === null || denominator === 0
+        ? null
+        : Math.round((numerator / denominator) * 10000),
+  };
+}
+
+function conversion(
+  paidOrders: number | null = 20,
+  visitors: number | null = 200,
+  median = 3000,
+  mad = 0,
+): SanitizedDecisionInput {
+  return SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    eventType: "CONVERSION_DROP",
+    sampleSize: 200,
+    baseline: {
+      ...baseline(),
+      measure: { kind: "CONVERSION_RATE", unit: "basisPoints" },
+      median,
+      mad,
+    },
+    facts: {
+      visitors,
+      cart: null,
+      checkout: null,
+      paidOrders,
+      conversion: rate(paidOrders, visitors),
+      baselineConversion: null,
+      priceChangeBasisPoints: null,
+      priceEffectiveAt: null,
+      variantAvailabilityBasisPoints: null,
+      relationship: "CORRELATION_ONLY",
+    },
+  });
+}
+
+function marketing(
+  eventType: "ROAS_DROP" | "AD_SPEND_SPIKE",
+  spendMinor: number | null = 10000,
+  attributedRevenueMinor: number | null = 10000,
+  median = 30000,
+  mad = 0,
+): SanitizedDecisionInput {
+  return SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    eventType,
+    sampleSize: 200,
+    baseline: {
+      ...baseline(),
+      measure: {
+        kind: eventType === "ROAS_DROP" ? "ROAS" : "AD_SPEND",
+        unit: eventType === "ROAS_DROP" ? "basisPoints" : "minorCNY",
+      },
+      median,
+      mad,
+    },
+    facts: {
+      spendMinor,
+      attributedRevenueMinor,
+      impressions: null,
+      clicks: null,
+      attributedOrders: null,
+      attributionCoverageBasisPoints: 10000,
+      roas: rate(attributedRevenueMinor, spendMinor),
+    },
+  });
+}
+
+function cancellation(
+  paidCancelledOrders: number | null = 30,
+  pendingCancelledOrders: number | null = 0,
+  cohortOrders: number | null = 200,
+  median = 500,
+  mad = 0,
+): SanitizedDecisionInput {
+  const total =
+    paidCancelledOrders === null || pendingCancelledOrders === null
+      ? null
+      : paidCancelledOrders + pendingCancelledOrders;
+  return SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    eventType: "CANCELLED_ORDER_SPIKE",
+    sampleSize: 200,
+    baseline: {
+      ...baseline(),
+      status: median === 0 ? "ZERO" : "AVAILABLE",
+      measure: { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" },
+      median,
+      mad,
+    },
+    facts: {
+      cohort: period,
+      cohortOrders,
+      paidCancelledOrders,
+      pendingCancelledOrders,
+      currentRate: rate(total, cohortOrders),
+      baselineRate: null,
+      reasonCounts: [],
+    },
+  });
+}
+
+function breakout(
+  salesUnits: number | null = 90,
+  paid: number | null = 30,
+  visitors: number | null = 200,
+  median = 20,
+  mad = 0,
+): SanitizedDecisionInput {
+  return SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    eventType: "PRODUCT_BREAKOUT",
+    sampleSize: 200,
+    baseline: { ...baseline(), measure: { kind: "PAID_UNITS", unit: "units" }, median, mad },
+    facts: {
+      salesUnits,
+      salesWindow: period,
+      salesWindowHours: 1,
+      salesUnitsPerHour: salesUnits,
+      conversion: rate(paid, visitors),
+      grossProfitMinor: null,
+      netRevenueMinor: null,
+      costCoverageBasisPoints: 0,
+      listedAt: "2026-09-24T01:00:00Z",
+    },
+  });
+}
+
+function stagnation(salesUnits: number | null = 100): SanitizedDecisionInput {
+  return SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    eventType: "INVENTORY_STAGNATION",
+    baseline: null,
+    facts: {
+      availableUnits: 300000,
+      salesUnits,
+      salesWindow: period,
+      salesWindowHours: 1,
+      holdingDays: 100,
+      demandCoverageDays: salesUnits === null ? null : 125,
+      listedAt: "2026-01-01T00:00:00Z",
+      inventoryCostMinor: null,
+      costCoverageBasisPoints: 0,
+    },
+  });
+}
+
+function conversionEvidence(input = conversion(null, null)): EventEvidenceV1 {
+  if (input.eventType !== "CONVERSION_DROP" || !input.baseline?.period)
+    throw new Error("Conversion fixture required");
+  const evidence = trustedEvidence();
+  return EventEvidenceV1Schema.parse({
+    ...evidence,
+    eventType: input.eventType,
+    sampleSize: input.sampleSize,
+    baseline: {
+      ...input.baseline,
+      version: "robust-baseline-v1",
+      sourceReferences: evidence.sourceReferences.map((source) => ({
+        ...source,
+        period: input.baseline!.period,
+        measure: input.baseline!.measure,
+      })),
+    },
+    facts: input.facts,
+  });
+}
+
+it("gates legal host-assured null primary conversion facts without fabricating observations", async () => {
+  const context = trustedContext(conversionEvidence());
+  const input = value(sanitizer.sanitize(context));
+  expect(input.dataStatus).toBe("VERIFIED");
+  const before = JSON.stringify(input);
+  expect(await evaluate(input, { assurance: hostAssurance(() => context) })).toMatchObject({
+    labels: {
+      evidenceSufficiency: "INSUFFICIENT_DATA",
+      llmEscalation: "NO_LLM_NEEDED",
+      reasonCodes: ["MISSING_DATA"],
+    },
+  });
+  expect(JSON.stringify(input)).toBe(before);
+});
+
+it.each([
+  ["conversion paid orders", () => conversion(null, 200)],
+  ["conversion visitors", () => conversion(20, null)],
+  ["cancellation count", () => cancellation(null)],
+  ["cancellation cohort", () => cancellation(20, 0, null)],
+  ["breakout sales", () => breakout(null)],
+  ["breakout conversion", () => breakout(90, null)],
+  ["stagnation sales", () => stagnation(null)],
+] as const)("blocks missing primary %s", async (_name, input) => {
+  expect(await evaluate(input())).toMatchObject({
+    labels: {
+      evidenceSufficiency: "INSUFFICIENT_DATA",
+      llmEscalation: "NO_LLM_NEEDED",
+      reasonCodes: ["MISSING_DATA"],
+    },
+  });
+});
+
+it("applies typed visitor, cohort and attribution quality minimums", async () => {
+  const roas = marketing("ROAS_DROP");
+  const partial = SanitizedDecisionInputSchema.parse({
+    ...roas,
+    facts: { ...roas.facts, attributionCoverageBasisPoints: 8999 },
+  });
+  for (const input of [conversion(1, 99), cancellation(5, 0, 19)]) {
+    expect(await evaluate(input)).toMatchObject({
+      labels: { reasonCodes: ["INSUFFICIENT_SAMPLE"], llmEscalation: "NO_LLM_NEEDED" },
+    });
+  }
+  expect(await evaluate(partial)).toMatchObject({
+    labels: { reasonCodes: ["PARTIAL_COVERAGE"], llmEscalation: "NO_LLM_NEEDED" },
+  });
+});
 function financialFacts() {
   return {
     paidRevenueMinor: 60000,
