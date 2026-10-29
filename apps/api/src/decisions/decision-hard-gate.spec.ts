@@ -289,3 +289,301 @@ it("binds immutable reference versions, evidence facts, and server-selected poli
     ),
   ).toEqual({ ok: false, code: "VERSION_MISMATCH" });
 });
+
+function issue(code: string, field = "sales") {
+  return { code, field, evidenceIds: [source.id] };
+}
+const qualityCases = [
+  [{ sampleSize: 0 }, "INSUFFICIENT_SAMPLE", "INSUFFICIENT_DATA"],
+  [
+    { dataStatus: "INSUFFICIENT", issues: [issue("LOW_SAMPLE")] },
+    "INSUFFICIENT_SAMPLE",
+    "INSUFFICIENT_DATA",
+  ],
+  [{ dataStatus: "STALE", issues: [issue("STALE_SOURCE")] }, "STALE_DATA", "INSUFFICIENT_DATA"],
+  [
+    { dataStatus: "INSUFFICIENT", issues: [issue("SOURCE_INCONSISTENT")] },
+    "CONFLICTING_DATA",
+    "AMBIGUOUS",
+  ],
+  [
+    { dataStatus: "INSUFFICIENT", issues: [issue("WINDOW_MISMATCH")] },
+    "CONFLICTING_DATA",
+    "AMBIGUOUS",
+  ],
+  [
+    { dataStatus: "INSUFFICIENT", issues: [issue("VERSION_MISMATCH")] },
+    "CONFLICTING_DATA",
+    "AMBIGUOUS",
+  ],
+  [
+    { dataStatus: "ESTIMATED", coverageBasisPoints: 8000, issues: [issue("PARTIAL_COVERAGE")] },
+    "PARTIAL_COVERAGE",
+    "INSUFFICIENT_DATA",
+  ],
+  [
+    { dataStatus: "UNAVAILABLE", sourceWatermark: null, issues: [issue("NOT_SYNCHRONIZED")] },
+    "MISSING_DATA",
+    "INSUFFICIENT_DATA",
+  ],
+] as const;
+it.each(qualityCases)(
+  "blocks unsupported DEEP for host evidence limitations %#",
+  (patch, reason, sufficiency) => {
+    const context = contextFixture(evidenceFixture(patch));
+    const result = value(gate(context).evaluate(requestFixture(context)));
+    expect(result).toMatchObject({
+      effective: {
+        severity: "HIGH",
+        llmEscalation: "NO_LLM_NEEDED",
+        evidenceSufficiency: sufficiency,
+      },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+    expect(result.effective.reasonCodes).toContain(reason);
+  },
+);
+
+it("measures source freshness against observedAt at the exact millisecond boundary", () => {
+  for (const [observedAt, expected] of [
+    ["2026-10-25T02:00:00Z", "DEEP_REASONING_REQUIRED"],
+    ["2026-10-25T02:00:00.001Z", "NO_LLM_NEEDED"],
+  ] as const) {
+    const context = contextFixture(
+      evidenceFixture({
+        observedAt,
+        facts: { ...facts, inventoryObservedAt: observedAt, inventoryAgeSeconds: 0 },
+      }),
+    );
+    const result = value(gate(context).evaluate(requestFixture(context, { severity: "HIGH" })));
+    expect(result.effective.llmEscalation).toBe(expected);
+  }
+});
+
+it.each(["BLOCKED", "UNKNOWN"] as const)("blocks DEEP when current host budget is %s", (budget) => {
+  const context = contextFixture();
+  expect(value(gate(context, { budget }).evaluate(requestFixture(context)))).toMatchObject({
+    effective: { severity: "HIGH", llmEscalation: "NO_LLM_NEEDED" },
+    overrideReason: "LLM_BUDGET",
+  });
+});
+
+it("applies insufficiency before budget before severity floor while enforcing all constraints", () => {
+  const context = contextFixture(evidenceFixture({ sampleSize: 0 }), "CRITICAL");
+  const result = value(gate(context, { budget: "BLOCKED" }).evaluate(requestFixture(context)));
+  expect(result).toMatchObject({
+    effective: { severity: "CRITICAL", llmEscalation: "NO_LLM_NEEDED" },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+
+it.each(["INSUFFICIENT_DATA", "AMBIGUOUS"] as const)(
+  "blocks model DEEP with declared %s even if host quality passes",
+  (evidenceSufficiency) => {
+    const context = contextFixture();
+    expect(
+      value(gate(context).evaluate(requestFixture(context, { evidenceSufficiency }))),
+    ).toMatchObject({
+      effective: { evidenceSufficiency, llmEscalation: "NO_LLM_NEEDED" },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  },
+);
+
+it("preserves independently reliable fresh sold-out inventory when forecast sales quality is low", () => {
+  const context = contextFixture(
+    evidenceFixture({
+      sampleSize: 0,
+      dataStatus: "INSUFFICIENT",
+      issues: [issue("LOW_SAMPLE")],
+      facts: { ...facts, availableUnits: 0, salesUnits: null, estimatedHoursRemaining: null },
+    }),
+    "LOW",
+  );
+  const result = value(gate(context).evaluate(requestFixture(context)));
+  expect(result).toMatchObject({
+    effective: {
+      severity: "CRITICAL",
+      notificationRoute: "NOTIFY_NOW",
+      attentionPriority: "URGENT",
+      llmEscalation: "NO_LLM_NEEDED",
+    },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+  expect(result.effective.reasonCodes).toContain("CONFIRMED_STOCKOUT");
+});
+
+it("does not manufacture a sold-out fact from missing, stale or conflicting inventory", () => {
+  const candidates = [
+    { facts: { ...facts, availableUnits: null, inventoryStatus: "UNAVAILABLE" } },
+    { facts: { ...facts, availableUnits: 0, inventoryStatus: "STALE" } },
+    {
+      dataStatus: "INSUFFICIENT",
+      issues: [issue("SOURCE_INCONSISTENT")],
+      facts: { ...facts, availableUnits: 0 },
+    },
+  ];
+  for (const patch of candidates) {
+    const context = contextFixture(evidenceFixture(patch), "LOW");
+    const result = value(gate(context).evaluate(requestFixture(context)));
+    expect(result.effective.llmEscalation).toBe("NO_LLM_NEEDED");
+    expect(result.effective.reasonCodes).not.toContain("CONFIRMED_STOCKOUT");
+  }
+});
+
+const baselinePeriod = {
+  ...period,
+  periodStart: "2026-10-18T00:00:00Z",
+  periodEnd: "2026-10-18T01:00:00Z",
+};
+function baselineFixture(patch: object = {}) {
+  const measure = { kind: "REFUND_COHORT_ORDER_RATE", unit: "basisPoints" };
+  return {
+    status: "AVAILABLE",
+    alignment: "ALIGNED",
+    measure,
+    aggregation: "EXACT_MEDIAN",
+    version: eventPolicy.baselineVersion,
+    period: baselinePeriod,
+    median: 1000,
+    mad: 0,
+    sampleSize: 4,
+    coverageBasisPoints: 10000,
+    sourceReferences: [
+      { ...source, period: baselinePeriod, observedAt: baselinePeriod.periodEnd, measure },
+    ],
+    ...patch,
+  };
+}
+function rate(numerator: number, denominator: number) {
+  return { numerator, denominator, valueBasisPoints: (numerator / denominator) * 10000, period };
+}
+function refundEvidence(baseline: object | null = baselineFixture()): EventEvidenceV1 {
+  const observedAt = "2026-10-27T01:00:00Z";
+  return evidenceFixture({
+    eventType: "REFUND_SPIKE",
+    entity: { kind: "STORE" },
+    observedAt,
+    sourceWatermark: observedAt,
+    baselineVersion: baseline === null ? null : eventPolicy.baselineVersion,
+    baselineAlignment: baseline === null ? "MISSING" : "ALIGNED",
+    baseline,
+    facts: {
+      paymentCohort: period,
+      observedThrough: observedAt,
+      maturityHours: 48,
+      paidCohortOrders: 100,
+      refundedOrders: 20,
+      currentRate: rate(20, 100),
+      baselineRate: null,
+      affectedSkuShare: rate(0, 20),
+      reasonCounts: [],
+      skuConcentration: [],
+    },
+  });
+}
+it("allows supported DEEP only with sufficient pinned baseline, fresh evidence and eligible budget", () => {
+  const context = contextFixture(refundEvidence());
+  expect(
+    value(gate(context).evaluate(requestFixture(context, { severity: "HIGH" }))),
+  ).toMatchObject({
+    effective: { llmEscalation: "DEEP_REASONING_REQUIRED" },
+    overrideReason: null,
+  });
+});
+it.each([
+  null,
+  baselineFixture({ sampleSize: 3 }),
+  baselineFixture({ coverageBasisPoints: 8000 }),
+  baselineFixture({ status: "STALE", median: null, mad: null }),
+])(
+  "blocks comparative DEEP for missing, insufficient, partial or stale baseline %#",
+  (baseline) => {
+    const context = contextFixture(refundEvidence(baseline));
+    expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+      effective: {
+        severity: "HIGH",
+        llmEscalation: "NO_LLM_NEEDED",
+        evidenceSufficiency: "INSUFFICIENT_DATA",
+      },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  },
+);
+it("does not accept a baseline with a different metric as refund evidence", () => {
+  const measure = { kind: "PAID_REVENUE", unit: "minorCNY" };
+  const baseline = baselineFixture({
+    measure,
+    sourceReferences: [
+      { ...source, period: baselinePeriod, observedAt: baselinePeriod.periodEnd, measure },
+    ],
+  });
+  const context = contextFixture(refundEvidence(baseline));
+  const result = value(gate(context).evaluate(requestFixture(context)));
+  expect(result.effective).toMatchObject({
+    llmEscalation: "NO_LLM_NEEDED",
+    evidenceSufficiency: "AMBIGUOUS",
+  });
+  expect(result.effective.reasonCodes).toContain("CONFLICTING_DATA");
+});
+
+it.each([
+  "INSUFFICIENT_SAMPLE",
+  "MISSING_DATA",
+  "STALE_DATA",
+  "CONFLICTING_DATA",
+  "PARTIAL_COVERAGE",
+] as const)("blocks contradictory provider DEEP carrying the %s limitation", (reason) => {
+  const context = contextFixture();
+  const result = value(gate(context).evaluate(requestFixture(context, { reasonCodes: [reason] })));
+  expect(result).toMatchObject({
+    effective: { llmEscalation: "NO_LLM_NEEDED" },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+
+it("rejects changed immutable reference identities even with unchanged evidence content", () => {
+  const context = contextFixture();
+  for (const key of ["id", "version"] as const) {
+    const reference = { ...context.evidence.reference, [key]: "replacement" };
+    const current = EvaluationContextSchema.parse({
+      ...context,
+      evidence: { ...context.evidence, reference },
+      event: { ...context.event, currentEvidence: reference },
+    });
+    expect(gate(current).evaluate(requestFixture(context))).toEqual({
+      ok: false,
+      code: "CONFLICT",
+    });
+  }
+});
+
+it("captures detached immutable labels without freezing or mutating the host's objects", () => {
+  const context = structuredClone(contextFixture());
+  const request = structuredClone(requestFixture(context));
+  const before = JSON.stringify(request);
+  const result = value(gate(context).evaluate(request));
+  expect(JSON.stringify(request)).toBe(before);
+  expect(Object.isFrozen(context)).toBe(false);
+  expect(Object.isFrozen(request.suggestion)).toBe(false);
+  expect(Object.isFrozen(result)).toBe(true);
+  expect(Object.isFrozen(result.effective)).toBe(true);
+  expect(Object.isFrozen(result.effective.reasonCodes)).toBe(true);
+});
+
+it("cannot bypass the current host cohort maturity requirement through evidence metadata", () => {
+  const original = refundEvidence();
+  if (original.eventType !== "REFUND_SPIKE") throw new Error("refund fixture expected");
+  const observedAt = "2026-10-25T02:00:00Z";
+  const evidence = evidenceFixture({
+    ...original,
+    observedAt,
+    sourceWatermark: observedAt,
+    facts: { ...original.facts, observedThrough: observedAt, maturityHours: 0 },
+  });
+  const context = contextFixture(evidence);
+  expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+    effective: { llmEscalation: "NO_LLM_NEEDED", reasonCodes: ["INSUFFICIENT_SAMPLE"] },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});

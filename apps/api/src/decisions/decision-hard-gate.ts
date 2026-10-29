@@ -12,7 +12,12 @@ import {
   type DecisionHardGateResult,
   type DecisionPortError,
   type DecisionPortResult,
+  type DecisionLabels,
+  type DecisionReasonCode,
   type EvaluationContext,
+  type EventEvidenceV1,
+  type EventRulePolicyV1,
+  type EventType,
 } from "@shopmate/contracts";
 import { z } from "zod";
 import { CanonicalHostEvidenceHash } from "./decision-input-sanitizer.js";
@@ -134,14 +139,169 @@ function suggestionProblem(request: DecisionHardGateRequest): DecisionPortError 
   if (request.suggestion.status !== "EVALUATED") return "UNAVAILABLE";
   return request.suggestion.rulesetVersion === request.ruleset.version ? null : "VERSION_MISMATCH";
 }
-function effectiveLabels(request: DecisionHardGateRequest): DecisionHardGateResult {
+type QualityRule = EventRulePolicyV1["rules"][number];
+const baselineMeasures: Partial<Readonly<Record<EventType, readonly string[]>>> = {
+  REFUND_SPIKE: ["REFUND_COHORT_ORDER_RATE"],
+  CANCELLED_ORDER_SPIKE: ["CANCELLED_ORDER_RATE"],
+  PROFIT_MARGIN_DROP: ["GROSS_PROFIT", "CONTRIBUTION"],
+  ROAS_DROP: ["ROAS"],
+  AD_SPEND_SPIKE: ["AD_SPEND"],
+  CONVERSION_DROP: ["CONVERSION_RATE"],
+  PRODUCT_BREAKOUT: ["PAID_UNITS"],
+  REVENUE_DROP: ["PAID_REVENUE"],
+};
+function fresh(time: string | null, evidence: EventEvidenceV1, rule: QualityRule): boolean {
+  if (time === null) return false;
+  const age = BigInt(Date.parse(evidence.observedAt)) - BigInt(Date.parse(time));
+  return age >= 0n && age <= BigInt(rule.maximumAgeSeconds) * 1000n;
+}
+function qualityProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReasonCode | null {
+  const codes = evidence.issues.map((issue) => issue.code);
+  if (
+    codes.some((code) =>
+      ["SOURCE_INCONSISTENT", "WINDOW_MISMATCH", "VERSION_MISMATCH"].includes(code),
+    )
+  )
+    return "CONFLICTING_DATA";
+  if (evidence.sourceWatermark === null || evidence.dataStatus === "UNAVAILABLE")
+    return "MISSING_DATA";
+  if (
+    evidence.dataStatus === "STALE" ||
+    codes.includes("STALE_SOURCE") ||
+    !fresh(evidence.sourceWatermark, evidence, rule)
+  )
+    return "STALE_DATA";
+  if (evidence.sampleSize < rule.minimumSampleSize || codes.includes("LOW_SAMPLE"))
+    return "INSUFFICIENT_SAMPLE";
+  if (
+    evidence.coverageBasisPoints < rule.minimumCoverageBasisPoints ||
+    codes.includes("PARTIAL_COVERAGE")
+  )
+    return "PARTIAL_COVERAGE";
+  if (evidence.dataStatus !== "VERIFIED" || codes.length > 0) return "MISSING_DATA";
+  return null;
+}
+function baselineProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReasonCode | null {
+  if (!rule.requireAlignedBaseline) return null;
+  const baseline = evidence.baseline;
+  if (baseline?.status === "STALE") return "STALE_DATA";
+  if (!baseline || baseline.median === null || baseline.alignment !== "ALIGNED")
+    return "MISSING_DATA";
+  const measures = baselineMeasures[evidence.eventType];
+  if (!measures || !measures.includes(baseline.measure.kind)) return "CONFLICTING_DATA";
+  if (baseline.sampleSize < rule.minimumBaselineSamples) return "INSUFFICIENT_SAMPLE";
+  if (baseline.coverageBasisPoints < rule.minimumCoverageBasisPoints) return "PARTIAL_COVERAGE";
+  return null;
+}
+function factProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReasonCode | null {
+  if (evidence.eventType === "STOCKOUT_RISK") {
+    const facts = evidence.facts;
+    if (facts.inventoryStatus === "STALE" || !fresh(facts.inventoryObservedAt, evidence, rule))
+      return "STALE_DATA";
+    if (facts.inventoryStatus !== "VERIFIED" || facts.availableUnits === null)
+      return "MISSING_DATA";
+    if (facts.availableUnits > 0 && (facts.salesUnits === null || facts.salesUnits === 0))
+      return "MISSING_DATA";
+  }
+  if (evidence.eventType === "REFUND_SPIKE" && rule.eventType === "REFUND_SPIKE") {
+    const facts = evidence.facts;
+    if (!fresh(facts.observedThrough, evidence, rule)) return "STALE_DATA";
+    if (
+      facts.paidCohortOrders === null ||
+      facts.refundedOrders === null ||
+      facts.paidCohortOrders === 0
+    )
+      return "MISSING_DATA";
+    const maturity = Math.max(facts.maturityHours, rule.thresholds.maturityHours);
+    if (
+      (Date.parse(facts.observedThrough) - Date.parse(facts.paymentCohort.periodEnd)) / 3600000 <
+      maturity
+    )
+      return "INSUFFICIENT_SAMPLE";
+  }
+  return null;
+}
+function reliableSoldOut(evidence: EventEvidenceV1, rule: QualityRule): boolean {
+  return (
+    evidence.eventType === "STOCKOUT_RISK" &&
+    evidence.facts.availableUnits === 0 &&
+    evidence.facts.inventoryStatus === "VERIFIED" &&
+    fresh(evidence.facts.inventoryObservedAt, evidence, rule) &&
+    !evidence.issues.some((issue) =>
+      ["SOURCE_INCONSISTENT", "WINDOW_MISMATCH", "VERSION_MISMATCH", "INVENTORY_UNKNOWN"].includes(
+        issue.code,
+      ),
+    )
+  );
+}
+function raisedLabels(
+  labels: DecisionLabels,
+  request: DecisionHardGateRequest,
+  soldOut: boolean,
+): DecisionLabels {
+  const floor = soldOut ? "CRITICAL" : request.context.event.severityFloor;
+  const severity =
+    severityOrder.indexOf(labels.severity) < severityOrder.indexOf(floor) ? floor : labels.severity;
+  if (!soldOut) return { ...labels, severity };
+  return {
+    ...labels,
+    severity,
+    notificationRoute: "NOTIFY_NOW",
+    attentionPriority: "URGENT",
+    llmEscalation: "NO_LLM_NEEDED",
+    reasonCodes: ["CONFIRMED_STOCKOUT"],
+  };
+}
+function limitedLabels(
+  labels: DecisionLabels,
+  problem: DecisionReasonCode,
+  soldOut: boolean,
+): DecisionLabels {
+  return {
+    ...labels,
+    llmEscalation: "NO_LLM_NEEDED",
+    evidenceSufficiency: problem === "CONFLICTING_DATA" ? "AMBIGUOUS" : "INSUFFICIENT_DATA",
+    reasonCodes: soldOut ? ["CONFIRMED_STOCKOUT", problem] : [problem],
+  };
+}
+function declaredProblem(labels: DecisionLabels): DecisionReasonCode | null {
+  if (labels.evidenceSufficiency === "AMBIGUOUS" || labels.reasonCodes.includes("CONFLICTING_DATA"))
+    return "CONFLICTING_DATA";
+  const reason = labels.reasonCodes.find((code) =>
+    ["INSUFFICIENT_SAMPLE", "MISSING_DATA", "STALE_DATA", "PARTIAL_COVERAGE"].includes(code),
+  );
+  return reason ?? (labels.evidenceSufficiency === "INSUFFICIENT_DATA" ? "MISSING_DATA" : null);
+}
+/** Rejections produce no route. One override: evidence limitations > budget > deterministic floor. */
+function effectiveLabels(
+  request: DecisionHardGateRequest,
+  current: CurrentDecisionHardGatePolicy,
+): DecisionHardGateResult {
   if (request.suggestion.status !== "EVALUATED") throw new RangeError("Evaluated labels required");
   const labels = request.suggestion.labels;
-  const floor = request.context.event.severityFloor;
-  const raised = severityOrder.indexOf(labels.severity) < severityOrder.indexOf(floor);
+  const evidence = request.context.evidence.evidence;
+  const rule = current.eventPolicy.rules.find((item) => item.eventType === evidence.eventType);
+  const soldOut = rule !== undefined && reliableSoldOut(evidence, rule);
+  const raised = raisedLabels(labels, request, soldOut);
+  const problem =
+    (rule
+      ? (qualityProblem(evidence, rule) ??
+        factProblem(evidence, rule) ??
+        baselineProblem(evidence, rule))
+      : "MISSING_DATA") ?? declaredProblem(labels);
+  if (problem)
+    return outputSchema.parse({
+      effective: limitedLabels(raised, problem, soldOut),
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  if (raised.llmEscalation === "DEEP_REASONING_REQUIRED" && current.budget !== "ELIGIBLE")
+    return outputSchema.parse({
+      effective: { ...raised, llmEscalation: "NO_LLM_NEEDED" },
+      overrideReason: "LLM_BUDGET",
+    });
   return outputSchema.parse({
-    effective: { ...labels, severity: raised ? floor : labels.severity },
-    overrideReason: raised ? "SEVERITY_FLOOR" : null,
+    effective: raised,
+    overrideReason: JSON.stringify(raised) === JSON.stringify(labels) ? null : "SEVERITY_FLOOR",
   });
 }
 /** Component boundary only: labels carry no action approval, executor or price-risk authority. */
@@ -160,7 +320,7 @@ export class DefaultDecisionHardGate implements DecisionHardGate {
         policyProblem(current.value) ??
         suggestionProblem(request);
       if (problem) return failure(problem);
-      return success(effectiveLabels(request));
+      return success(effectiveLabels(request, current.value));
     } catch {
       // Nested arithmetic refinements can throw; malformed requests must never produce labels.
       return failure("INVALID_INPUT");
