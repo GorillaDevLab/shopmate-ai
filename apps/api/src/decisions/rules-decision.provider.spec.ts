@@ -626,3 +626,24 @@ it("keeps fractional profit baselines from falsely reconciling rounded integer a
   });
   expect(await evaluate(input)).toMatchObject({ labels: { llmEscalation: "SIMPLE_EXPLANATION" } });
 });
+
+it.each([
+  ["UNALIGNED", "UNALIGNED", "CONFLICTING_DATA", "AMBIGUOUS"],
+  ["INSUFFICIENT", "ALIGNED", "INSUFFICIENT_SAMPLE", "INSUFFICIENT_DATA"],
+  ["STALE", "ALIGNED", "STALE_DATA", "INSUFFICIENT_DATA"],
+] as const)(
+  "preserves explicit %s baseline limitations",
+  async (status, alignment, reason, sufficiency) => {
+    const input = SanitizedDecisionInputSchema.parse({
+      ...profit(),
+      baseline: { ...baseline(), status, alignment, median: null, mad: null, sampleSize: 0 },
+    });
+    expect(await evaluate(input)).toMatchObject({
+      labels: {
+        evidenceSufficiency: sufficiency,
+        reasonCodes: [reason],
+        llmEscalation: "NO_LLM_NEEDED",
+      },
+    });
+  },
+);

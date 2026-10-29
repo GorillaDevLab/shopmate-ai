@@ -93,6 +93,8 @@ function baselineProblem(input: SanitizedDecisionInput, rule: Rule): DecisionRea
   if (!rule.requireAlignedBaseline) return null;
   const baseline = input.baseline;
   if (baseline?.status === "STALE") return "STALE_DATA";
+  if (baseline?.status === "UNALIGNED") return "CONFLICTING_DATA";
+  if (baseline?.status === "INSUFFICIENT") return "INSUFFICIENT_SAMPLE";
   if (!baseline || baseline.status === "MISSING" || baseline.median === null) return "MISSING_DATA";
   if (baseline.alignment !== "ALIGNED" || !aligned(input) || !measureMatches(input))
     return "CONFLICTING_DATA";
