@@ -820,3 +820,141 @@ it("refuses future run creation time even when authoritative snapshot matches", 
     code: "INVALID_INPUT",
   });
 });
+
+type RouteHistory = DecisionRoutingSnapshot["history"];
+function tiedPrior(
+  revision: number,
+  severity: DecisionLabels["severity"],
+  eventState: RouteHistory[number]["eventState"] = "OPEN",
+  eventId = "event-a",
+): RouteHistory[number] {
+  const previous = prior();
+  const effective = { ...labels, severity };
+  return {
+    ...previous,
+    eventRevision: revision,
+    eventState,
+    run: {
+      ...previous.run,
+      id: `historical-${revision}-${severity}-${eventState}-${eventId}`,
+      eventId,
+      effective,
+      result: { ...previous.run.result, labels: effective },
+      evidence: { ...previous.run.evidence, hash: `historical-${revision}-${severity}` },
+    },
+  };
+}
+
+function thirdRevision(state: "OPEN" | "RESOLVED" = "OPEN"): RoutingRequest {
+  const original = advancedRequest();
+  return {
+    ...original,
+    context: { ...original.context, event: { ...original.context.event, revision: 3, state } },
+  };
+}
+
+async function routeTiedHistory(request: RoutingRequest, history: RouteHistory) {
+  const snapshot = snapshotFixture(request);
+  return routed(
+    { ...snapshot, history, policy: { ...snapshot.policy, maximumImmediatePerStore: 10 } },
+    request,
+  );
+}
+
+it.each([false, true])(
+  "equal-time prior upgrade suppresses unchanged HIGH in reverse=%s",
+  async (reverse) => {
+    const history = [tiedPrior(1, "LOW"), tiedPrior(2, "HIGH")];
+    const output = await routeTiedHistory(thirdRevision(), reverse ? history.reverse() : history);
+    expect(output.effective).toMatchObject({
+      notificationRoute: "DAILY_BRIEF",
+      llmEscalation: "NO_LLM_NEEDED",
+      severity: "HIGH",
+    });
+    expect(output.overrideReason).toBe("COOLDOWN");
+  },
+);
+
+it.each([false, true])("equal-time prior recovery cannot replay in reverse=%s", async (reverse) => {
+  const history = [tiedPrior(1, "HIGH", "OPEN"), tiedPrior(2, "HIGH", "RESOLVED")];
+  const output = await routeTiedHistory(
+    thirdRevision("RESOLVED"),
+    reverse ? history.reverse() : history,
+  );
+  expect(output.effective).toMatchObject({
+    notificationRoute: "DAILY_BRIEF",
+    llmEscalation: "NO_LLM_NEEDED",
+  });
+  expect(output.overrideReason).toBe("COOLDOWN");
+});
+
+it.each([false, true])(
+  "equal-revision severity ambiguity stays conservative in reverse=%s",
+  async (reverse) => {
+    const history = [tiedPrior(2, "LOW"), tiedPrior(2, "HIGH")];
+    const output = await routeTiedHistory(thirdRevision(), reverse ? history.reverse() : history);
+    expect(output.effective).toMatchObject({
+      notificationRoute: "DAILY_BRIEF",
+      llmEscalation: "NO_LLM_NEEDED",
+    });
+    expect(output.overrideReason).toBe("COOLDOWN");
+  },
+);
+
+it.each([false, true])(
+  "equal-revision recovery ambiguity stays conservative in reverse=%s",
+  async (reverse) => {
+    const history = [tiedPrior(2, "HIGH", "OPEN"), tiedPrior(2, "HIGH", "RESOLVED")];
+    const output = await routeTiedHistory(
+      thirdRevision("RESOLVED"),
+      reverse ? history.reverse() : history,
+    );
+    expect(output.effective).toMatchObject({
+      notificationRoute: "DAILY_BRIEF",
+      llmEscalation: "NO_LLM_NEEDED",
+    });
+    expect(output.overrideReason).toBe("COOLDOWN");
+  },
+);
+
+it.each([false, true])(
+  "newer same-event revision still permits a real upgrade in reverse=%s",
+  async (reverse) => {
+    const history = [tiedPrior(1, "CRITICAL"), tiedPrior(2, "LOW")];
+    const output = await routeTiedHistory(thirdRevision(), reverse ? history.reverse() : history);
+    expect(output.effective).toMatchObject({
+      notificationRoute: "NOTIFY_NOW",
+      llmEscalation: "DEEP_REASONING_REQUIRED",
+    });
+    expect(output.overrideReason).toBe("SEVERITY_FLOOR");
+  },
+);
+
+it.each([false, true])(
+  "newer same-event OPEN still permits recovery in reverse=%s",
+  async (reverse) => {
+    const history = [tiedPrior(1, "HIGH", "RESOLVED"), tiedPrior(2, "HIGH", "OPEN")];
+    const output = await routeTiedHistory(
+      thirdRevision("RESOLVED"),
+      reverse ? history.reverse() : history,
+    );
+    expect(output.effective).toMatchObject({
+      notificationRoute: "NOTIFY_NOW",
+      llmEscalation: "DEEP_REASONING_REQUIRED",
+    });
+    expect(output.overrideReason).toBe("SEVERITY_FLOOR");
+  },
+);
+
+it.each([false, true])(
+  "revisions from different events cannot order key ties in reverse=%s",
+  async (reverse) => {
+    const history = [tiedPrior(2, "LOW"), tiedPrior(1, "HIGH", "OPEN", "other-event")];
+    const output = await routeTiedHistory(thirdRevision(), reverse ? history.reverse() : history);
+    expect(output.effective).toMatchObject({
+      notificationRoute: "DAILY_BRIEF",
+      llmEscalation: "NO_LLM_NEEDED",
+    });
+    expect(output.overrideReason).toBe("COOLDOWN");
+  },
+);

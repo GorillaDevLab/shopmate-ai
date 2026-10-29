@@ -154,17 +154,31 @@ function inCooldown(request: VerifiedRequest, snapshot: DecisionRoutingSnapshot,
       entry.run.decisionKey === request.run.decisionKey ||
       entry.run.eventId === request.run.eventId,
   );
-  const latest = entries.reduce<HistoryEntry | null>(
-    (found, entry) =>
-      found === null || Date.parse(entry.routedAt) > Date.parse(found.routedAt) ? entry : found,
-    null,
+  if (entries.length === 0) return false;
+  const latest = authoritativeLatest(entries);
+  if (now - latest.timestamp >= snapshot.policy.cooldownSeconds * 1000) return false;
+  return !latest.candidates.every((entry) => breakCooldown(request, snapshot, entry));
+}
+
+function authoritativeLatest(entries: readonly HistoryEntry[]) {
+  const timestamp = entries.reduce(
+    (latest, entry) => Math.max(latest, Date.parse(entry.routedAt)),
+    -Infinity,
   );
-  if (
-    latest === null ||
-    now - Date.parse(latest.routedAt) >= snapshot.policy.cooldownSeconds * 1000
-  )
-    return false;
-  return !breakCooldown(request, snapshot, latest);
+  const tied = entries.filter((entry) => Date.parse(entry.routedAt) === timestamp);
+  const revisions = new Map<string, number>();
+  // Revisions establish order only within one event; opaque IDs/versions cannot order other ties.
+  for (const entry of tied) {
+    revisions.set(
+      entry.run.eventId,
+      Math.max(revisions.get(entry.run.eventId) ?? 0, entry.eventRevision),
+    );
+  }
+  const candidates = tied.filter(
+    (entry) => entry.eventRevision === revisions.get(entry.run.eventId),
+  );
+  // Unresolved peers all need to justify a break, rather than whichever was first in the array.
+  return { timestamp, candidates };
 }
 
 function breakCooldown(
