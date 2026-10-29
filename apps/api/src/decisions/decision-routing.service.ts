@@ -187,6 +187,7 @@ function breakCooldown(
   last: HistoryEntry,
 ) {
   if (
+    last.run.eventId !== request.run.eventId ||
     last.policyVersion !== snapshot.policy.version ||
     request.context.event.revision <= last.eventRevision
   )

@@ -958,3 +958,16 @@ it.each([false, true])(
     expect(output.overrideReason).toBe("COOLDOWN");
   },
 );
+
+it.each([false, true])(
+  "another event cannot prove an upgrade revision in reverse=%s",
+  async (reverse) => {
+    const history = [tiedPrior(2, "LOW"), tiedPrior(1, "LOW", "OPEN", "other-event")];
+    const output = await routeTiedHistory(thirdRevision(), reverse ? history.reverse() : history);
+    expect(output.effective).toMatchObject({
+      notificationRoute: "DAILY_BRIEF",
+      llmEscalation: "NO_LLM_NEEDED",
+    });
+    expect(output.overrideReason).toBe("COOLDOWN");
+  },
+);
