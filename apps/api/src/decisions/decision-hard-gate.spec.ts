@@ -633,3 +633,94 @@ it("allows DEEP at the inclusive actual refund cohort sample minimum", () => {
     overrideReason: null,
   });
 });
+
+function nullableRate(numerator: number | null, denominator: number | null) {
+  return {
+    numerator,
+    denominator,
+    period,
+    valueBasisPoints:
+      numerator === null || denominator === null || denominator === 0
+        ? null
+        : Math.round((numerator / denominator) * 10000),
+  };
+}
+function cancellationEvidence(
+  cohortOrders: number | null,
+  paid: number | null = 1,
+  pending: number | null = 0,
+  sampleSize = 100,
+): EventEvidenceV1 {
+  const measure = { kind: "CANCELLED_ORDER_RATE", unit: "basisPoints" };
+  const baseline = baselineFixture({
+    measure,
+    sourceReferences: [
+      { ...source, period: baselinePeriod, observedAt: baselinePeriod.periodEnd, measure },
+    ],
+  });
+  const total = paid === null || pending === null ? null : paid + pending;
+  return evidenceFixture({
+    eventType: "CANCELLED_ORDER_SPIKE",
+    entity: { kind: "STORE" },
+    sampleSize,
+    baseline,
+    baselineAlignment: "ALIGNED",
+    baselineVersion: eventPolicy.baselineVersion,
+    sourceReferences: [{ ...source, measure }],
+    facts: {
+      cohort: period,
+      cohortOrders,
+      paidCancelledOrders: paid,
+      pendingCancelledOrders: pending,
+      currentRate: nullableRate(total, cohortOrders),
+      baselineRate: null,
+      reasonCounts: [],
+    },
+  });
+}
+it.each([
+  [null, 1, 0],
+  [100, null, 0],
+  [100, 0, null],
+] as const)(
+  "blocks cancellation DEEP when an actual cohort/count fact is missing %#",
+  (cohort, paid, pending) => {
+    const context = contextFixture(cancellationEvidence(cohort, paid, pending), "CRITICAL");
+    expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+      effective: {
+        severity: "CRITICAL",
+        llmEscalation: "NO_LLM_NEEDED",
+        evidenceSufficiency: "INSUFFICIENT_DATA",
+        reasonCodes: ["MISSING_DATA"],
+      },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  },
+);
+it.each([1, 19, 20])("blocks cancellation aggregate/actual cohort disagreement at %i", (cohort) => {
+  const context = contextFixture(cancellationEvidence(cohort));
+  expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+    effective: {
+      llmEscalation: "NO_LLM_NEEDED",
+      evidenceSufficiency: "AMBIGUOUS",
+      reasonCodes: ["CONFLICTING_DATA"],
+    },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+it.each([1, 19])("blocks a coherent actual cancellation cohort below minimum at %i", (cohort) => {
+  const context = contextFixture(cancellationEvidence(cohort, 1, 0, cohort));
+  expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+    effective: { llmEscalation: "NO_LLM_NEEDED", reasonCodes: ["INSUFFICIENT_SAMPLE"] },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+it("preserves DEEP for a coherent cancellation cohort exactly at its current sample minimum", () => {
+  const context = contextFixture(cancellationEvidence(20, 1, 0, 20));
+  expect(
+    value(gate(context).evaluate(requestFixture(context, { severity: "HIGH" }))),
+  ).toMatchObject({
+    effective: { llmEscalation: "DEEP_REASONING_REQUIRED", evidenceSufficiency: "SUFFICIENT" },
+    overrideReason: null,
+  });
+});

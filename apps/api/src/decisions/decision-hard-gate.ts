@@ -193,7 +193,19 @@ function baselineProblem(evidence: EventEvidenceV1, rule: QualityRule): Decision
   if (baseline.coverageBasisPoints < rule.minimumCoverageBasisPoints) return "PARTIAL_COVERAGE";
   return null;
 }
+function cancellationProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "CANCELLED_ORDER_SPIKE" }>,
+  rule: QualityRule,
+): DecisionReasonCode | null {
+  const { cohortOrders, paidCancelledOrders, pendingCancelledOrders } = evidence.facts;
+  if (cohortOrders === null || paidCancelledOrders === null || pendingCancelledOrders === null)
+    return "MISSING_DATA";
+  if (evidence.sampleSize !== cohortOrders) return "CONFLICTING_DATA";
+  if (cohortOrders === 0 || cohortOrders < rule.minimumSampleSize) return "INSUFFICIENT_SAMPLE";
+  return null;
+}
 function factProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReasonCode | null {
+  if (evidence.eventType === "CANCELLED_ORDER_SPIKE") return cancellationProblem(evidence, rule);
   if (evidence.eventType === "STOCKOUT_RISK") {
     const facts = evidence.facts;
     if (facts.inventoryStatus === "STALE" || !fresh(facts.inventoryObservedAt, evidence, rule))
