@@ -803,7 +803,7 @@ it("maps state outages to UNAVAILABLE and preserves a valid denied result", asyn
 
 it("rejects undeclared error fields from a malformed server state result", async () => {
   const state = {
-    load: async () => ({ ok: false, code: "FORBIDDEN", token: "should-not-escape" }),
+    load: async () => ({ ok: false, code: "FORBIDDEN", unexpected: "must-not-escape" }),
   };
   const router = new DecisionRoutingService(state as unknown as DecisionRoutingState, {
     timeDomain: "SECURITY_UTC",
