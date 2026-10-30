@@ -1369,6 +1369,7 @@ model EventEvidenceRow {
   event               EventRow                 @relation("EventEvidenceHistory", fields: [eventId, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint], onDelete: Restrict, onUpdate: NoAction, map: "event_evidence_event_fkey")
   currentFor          EventRow[]               @relation("CurrentEventEvidence")
   metrics             EventEvidenceMetricRow[]
+  decisionClaims      DecisionClaimRow[]
 
   @@unique([eventId, evidenceRevision], map: "event_evidence_event_revision_key")
   @@unique([id, organizationId, workspaceId, storeId, connectionId, externalStoreId], map: "event_evidence_scope_key")
@@ -1390,5 +1391,131 @@ model EventEvidenceMetricRow {
 
   @@id([evidenceId, metricSnapshotId])
   @@map("event_evidence_metrics")
+  @@schema("public")
+}
+
+model DecisionClaimRow {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  connectionId    String
+  externalStoreId String
+  eventId         String
+  eventRevision   BigInt
+  fingerprint     String
+  evidenceId      String
+  evidenceVersion String
+  evidenceHash    String
+  decisionKey     String
+  claimToken      String
+  createdAt       DateTime         @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  expiresAt       DateTime         @db.Timestamptz(3)
+  winnerRunId     String?
+  winnerMode      String           @default("PRIMARY")
+  winnerStatus    String           @default("EVALUATED")
+  evidence        EventEvidenceRow @relation(fields: [evidenceId, eventId, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint, evidenceVersion, evidenceHash], references: [id, eventId, organizationId, workspaceId, storeId, connectionId, externalStoreId, fingerprint, version, hash], onDelete: Restrict, onUpdate: NoAction, map: "decision_claims_evidence_fkey")
+  runs            DecisionRunRow[] @relation("ClaimRuns")
+  winner          DecisionRunRow?  @relation("ClaimWinner", fields: [winnerRunId, id, winnerMode, winnerStatus], references: [id, claimId, mode, resultStatus], onDelete: Restrict, onUpdate: NoAction, map: "decision_claims_winner_fkey")
+
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, evidenceId, evidenceVersion, evidenceHash, decisionKey], map: "decision_claims_key")
+  @@unique([id, claimToken, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey], map: "decision_claims_reference_key")
+  @@map("decision_claims")
+  @@schema("public")
+}
+
+model DecisionRunRow {
+  id                     String                  @id
+  organizationId         String
+  workspaceId            String
+  storeId                String
+  connectionId           String
+  externalStoreId        String
+  claimId                String                  @db.Uuid
+  claimToken             String
+  eventId                String
+  fingerprint            String
+  evidenceId             String
+  evidenceVersion        String
+  evidenceHash           String
+  decisionKey            String
+  schemaVersion          Int
+  requestId              String
+  correlationId          String                  @db.Uuid
+  providerKey            String
+  providerVersion        String
+  supportedInputVersions Json
+  rulesetVersion         String
+  mode                   String
+  fallbackOf             String?
+  fallbackMode           String?
+  fallbackStatus         String?
+  resultStatus           String
+  result                 Json
+  effective              Json?
+  overrideReason         String?
+  latencyMs              BigInt
+  createdAt              DateTime                @db.Timestamptz(3)
+  claim                  DecisionClaimRow        @relation("ClaimRuns", fields: [claimId, claimToken, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey], references: [id, claimToken, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey], onDelete: Restrict, onUpdate: NoAction, map: "decision_runs_claim_fkey")
+  winnerFor              DecisionClaimRow[]      @relation("ClaimWinner")
+  fallback               DecisionRunRow?         @relation("RunFallback", fields: [fallbackOf, claimId, correlationId, fallbackMode, fallbackStatus], references: [id, claimId, correlationId, mode, resultStatus], onDelete: Restrict, onUpdate: NoAction, map: "decision_runs_fallback_fkey")
+  fallbackFor            DecisionRunRow[]        @relation("RunFallback")
+  records                DecisionRecordRow[]
+  primaryComparisons     DecisionComparisonRow[] @relation("ComparisonPrimary")
+  shadowComparisons      DecisionComparisonRow[] @relation("ComparisonShadow")
+
+  @@unique([id, organizationId, workspaceId, storeId, connectionId, externalStoreId], map: "decision_runs_scope_key")
+  @@unique([id, claimId, mode, resultStatus], map: "decision_runs_winner_key")
+  @@unique([id, claimId, correlationId, mode, resultStatus], map: "decision_runs_fallback_key")
+  @@unique([id, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey, correlationId, mode, resultStatus], map: "decision_runs_comparison_key")
+  @@index([organizationId, workspaceId, storeId, eventId, createdAt, id], map: "decision_runs_history_idx")
+  @@map("decision_runs")
+  @@schema("public")
+}
+
+model DecisionRecordRow {
+  runId           String
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  connectionId    String
+  externalStoreId String
+  decisionType    String
+  suggested       Json
+  effective       Json?
+  run             DecisionRunRow @relation(fields: [runId, organizationId, workspaceId, storeId, connectionId, externalStoreId], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "decision_records_run_fkey")
+
+  @@id([runId, decisionType])
+  @@map("decision_records")
+  @@schema("public")
+}
+
+model DecisionComparisonRow {
+  id                String         @id
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  connectionId      String
+  externalStoreId   String
+  schemaVersion     Int
+  eventId           String
+  fingerprint       String
+  evidenceId        String
+  evidenceVersion   String
+  evidenceHash      String
+  decisionKey       String
+  correlationId     String         @db.Uuid
+  primaryRunId      String
+  primaryMode       String
+  shadowRunId       String
+  shadowMode        String
+  resultStatus      String
+  evaluationVersion String
+  differences       Json
+  primary           DecisionRunRow @relation("ComparisonPrimary", fields: [primaryRunId, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey, correlationId, primaryMode, resultStatus], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey, correlationId, mode, resultStatus], onDelete: Restrict, onUpdate: NoAction, map: "decision_comparisons_primary_fkey")
+  shadow            DecisionRunRow @relation("ComparisonShadow", fields: [shadowRunId, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey, correlationId, shadowMode, resultStatus], references: [id, organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, fingerprint, evidenceId, evidenceVersion, evidenceHash, decisionKey, correlationId, mode, resultStatus], onDelete: Restrict, onUpdate: NoAction, map: "decision_comparisons_shadow_fkey")
+
+  @@unique([primaryRunId, shadowRunId, evaluationVersion], map: "decision_comparisons_pair_key")
+  @@map("decision_comparisons")
   @@schema("public")
 }
