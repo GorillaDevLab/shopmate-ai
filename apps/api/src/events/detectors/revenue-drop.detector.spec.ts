@@ -354,6 +354,50 @@ it("preserves payment uncertainty while suppressing a deterministic decline", ()
     quality: { dataStatus: "INSUFFICIENT", issues: expect.arrayContaining([limitation]) },
   });
 });
+function paymentIssues(count: number): DataQualityIssueV1[] {
+  return Array.from({ length: count }, (_, index) =>
+    issue("PAYMENT_UNKNOWN", `paymentFacts.${index}`),
+  );
+}
+it.each([99, 100])("preserves %i source reasons at the shared quality capacity", (count) => {
+  const issues = paymentIssues(count);
+  const input = request(evidence({ dataStatus: "INSUFFICIENT", issues, sampleSize: 9 }));
+  const original = JSON.stringify(input);
+  const outcome = detect(input);
+  expect(outcome).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    reason: "INSUFFICIENT_EVIDENCE",
+    quality: { dataStatus: "INSUFFICIENT", sampleSize: 9 },
+  });
+  expect(outcome.quality.issues).toHaveLength(100);
+  expect(outcome.quality.issues.slice(0, count)).toEqual(issues);
+  const result = new RevenueDropDetector().explain(input);
+  expect(result).toMatchObject({
+    ok: true,
+    value: { comparison: null, qualityIssues: [...issues, issue("LOW_SAMPLE", "sampleSize")] },
+  });
+  if (!result.ok) throw new Error(result.error.code);
+  expect(Object.isFrozen(result.value.qualityIssues)).toBe(true);
+  expect(Object.isFrozen(result.value.qualityIssues[0])).toBe(true);
+  expect(Object.isFrozen(result.value.qualityIssues[0]?.evidenceIds)).toBe(true);
+  expect(JSON.stringify(input)).toBe(original);
+});
+it.each([
+  [9, "NO_CANDIDATE", "INSUFFICIENT"],
+  [30, "CANDIDATE", "ESTIMATED"],
+] as const)(
+  "evaluates all guards with a full unrelated issue list at sample %i",
+  (sampleSize, disposition, dataStatus) => {
+    const issues = Array.from({ length: 100 }, (_, index) =>
+      issue("COST_MISSING", `costCoverage.${index}`),
+    );
+    const input = request(evidence({ dataStatus: "ESTIMATED", issues, sampleSize }));
+    expect(detect(input)).toMatchObject({
+      disposition,
+      quality: { dataStatus, sampleSize, issues },
+    });
+  },
+);
 it("retains unrelated cost quality without hiding an observed paid revenue decline", () => {
   const limitation = issue("COST_MISSING", "costCoverageBasisPoints");
   const value = evidence({ dataStatus: "INSUFFICIENT", issues: [limitation] });
@@ -391,6 +435,48 @@ function observed(row: MetricSnapshotV1, value = evidence()): EventDetectionRequ
     evidence: { ...value, sourceReferences: [ref] },
   });
 }
+it("retains full snapshot reasons while bounding the shared quality projection", () => {
+  const issues = paymentIssues(101);
+  const input = observed(snapshot({ status: "INSUFFICIENT", issues }));
+  const outcome = detect(input);
+  expect(outcome).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    reason: "INSUFFICIENT_EVIDENCE",
+    quality: { dataStatus: "INSUFFICIENT", issues: issues.slice(0, 100) },
+  });
+  expect(new RevenueDropDetector().explain(input)).toMatchObject({
+    ok: true,
+    value: {
+      comparison: null,
+      qualityIssues: [...issues, issue("PARTIAL_COVERAGE", "snapshots.PAID_REVENUE")],
+    },
+  });
+});
+it("uses omitted snapshot limitations for conflict suppression and stale quality", () => {
+  const issues = paymentIssues(100);
+  const row = snapshot({
+    status: "ESTIMATED",
+    metric: { kind: "PAID_REVENUE", unit: "minorCNY", value: 7001 },
+    issues: [issue("STALE_SOURCE", "snapshot.watermark")],
+  });
+  const input = observed(row, evidence({ dataStatus: "INSUFFICIENT", issues }));
+  expect(detect(input)).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    reason: "SOURCE_CONFLICT",
+    quality: { dataStatus: "STALE", issues },
+  });
+  expect(new RevenueDropDetector().explain(input)).toMatchObject({
+    ok: true,
+    value: {
+      comparison: null,
+      qualityIssues: expect.arrayContaining([
+        ...issues,
+        issue("STALE_SOURCE", "snapshot.watermark"),
+        issue("SOURCE_INCONSISTENT", "snapshots.PAID_REVENUE"),
+      ]),
+    },
+  });
+});
 it("withholds contradictory revenue snapshots with a source conflict", () => {
   const row = snapshot({ metric: { kind: "PAID_REVENUE", unit: "minorCNY", value: 7001 } });
   expect(detect(observed(row))).toMatchObject({

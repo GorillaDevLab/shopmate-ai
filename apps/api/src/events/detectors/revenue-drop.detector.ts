@@ -40,6 +40,8 @@ export type RevenueDropComparison = Readonly<{
 export type RevenueDropExplanation = Readonly<{
   outcome: EventDetectionOutcome;
   comparison: RevenueDropComparison | null;
+  /** Complete diagnostics; shared outcome quality projects at most 100 of these issues. */
+  qualityIssues: readonly Issue[];
 }>;
 
 function failure(): EventResult<never> {
@@ -141,13 +143,22 @@ function snapshotIssues(
     issues.push(issue(frame, "PARTIAL_COVERAGE", field));
   return [...issues, ...freshness(frame, row.sourceWatermark, field)];
 }
-function quality(frame: Frame, extra: readonly Issue[]): Quality {
+function qualityIssues(frame: Frame, extra: readonly Issue[]): readonly Issue[] {
   const unique = new Map<string, Issue>();
-  for (const row of [...frame.evidence.issues, ...extra]) {
-    const item = { ...row, evidenceIds: [...new Set(row.evidenceIds)].sort() };
+  const original = [
+    ...frame.evidence.issues,
+    ...matchingSnapshots(frame).flatMap((row) => row.issues),
+  ];
+  for (const row of [...original, ...extra]) {
+    const item = Object.freeze({
+      ...row,
+      evidenceIds: Object.freeze([...new Set(row.evidenceIds)].sort()),
+    });
     unique.set(JSON.stringify(item), item);
   }
-  const issues = [...unique.values()];
+  return Object.freeze([...unique.values()]);
+}
+function quality(frame: Frame, extra: readonly Issue[], issues: readonly Issue[]): Quality {
   const snapshots = matchingSnapshots(frame);
   const statuses: Quality["dataStatus"][] = [
     frame.evidence.dataStatus,
@@ -162,7 +173,9 @@ function quality(frame: Frame, extra: readonly Issue[]): Quality {
       frame.evidence.coverageBasisPoints,
       ...snapshots.map((row) => row.coverageBasisPoints),
     ),
-    issues,
+    // Preserve evidence originals first, snapshot originals next, then derived diagnostics.
+    // Complete reasons remain in explain().qualityIssues and determine status before projection.
+    issues: issues.slice(0, 100),
   };
 }
 function noCandidate(
@@ -170,12 +183,14 @@ function noCandidate(
   issues: readonly Issue[],
   reason: Reason,
 ): RevenueDropExplanation {
+  const diagnostics = qualityIssues(frame, issues);
   return {
     comparison: null,
+    qualityIssues: diagnostics,
     outcome: {
       disposition: "NO_CANDIDATE",
       reason,
-      quality: quality(frame, issues),
+      quality: quality(frame, issues, diagnostics),
       blockedResources: [],
     },
   };
@@ -261,13 +276,15 @@ function evaluate(frame: Frame): RevenueDropExplanation {
   if (current.length > 0 || compared === null) return noCandidate(frame, issues, reason(current));
   if (!qualifies(compared))
     return {
+      ...noCandidate(frame, issues, "NORMAL_SEASONALITY"),
       comparison: compared,
-      outcome: { ...noCandidate(frame, issues, "NORMAL_SEASONALITY").outcome },
     };
-  const evaluated = quality(frame, issues);
+  const diagnostics = qualityIssues(frame, issues);
+  const evaluated = quality(frame, issues, diagnostics);
   const evidence = { ...frame.evidence, ...evaluated };
   return {
     comparison: compared,
+    qualityIssues: diagnostics,
     outcome: {
       disposition: "CANDIDATE",
       quality: evaluated,
