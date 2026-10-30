@@ -1073,3 +1073,44 @@ it("preserves independent sold-out urgency while a conflicting forecast diagnost
     overrideReason: "INSUFFICIENT_EVIDENCE",
   });
 });
+
+it.each([
+  ["2026-10-25T00:30:00Z", instant],
+  [period.periodStart, "2026-10-25T00:30:00Z"],
+  ["2026-10-25T00:15:00Z", "2026-10-25T00:45:00Z"],
+] as const)(
+  "blocks discount DEEP when promotion %s–%s covers only part of the observed window",
+  (periodStart, periodEnd) => {
+    const context = primaryContext("UNUSUAL_DISCOUNT", {
+      promotionPeriod: { ...period, periodStart, periodEnd },
+    });
+    expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+      effective: {
+        severity: "CRITICAL",
+        llmEscalation: "NO_LLM_NEEDED",
+        evidenceSufficiency: "AMBIGUOUS",
+        reasonCodes: ["CONFLICTING_DATA"],
+      },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  },
+);
+it.each([
+  [period.periodStart, instant],
+  ["2026-10-24T23:30:00Z", instant],
+  [period.periodStart, "2026-10-25T01:30:00Z"],
+  ["2026-10-24T23:30:00Z", "2026-10-25T01:30:00Z"],
+] as const)(
+  "retains discount DEEP when promotion %s–%s fully covers the observed window",
+  (periodStart, periodEnd) => {
+    const context = primaryContext("UNUSUAL_DISCOUNT", {
+      promotionPeriod: { ...period, periodStart, periodEnd },
+    });
+    expect(
+      value(gate(context).evaluate(requestFixture(context, { severity: "CRITICAL" }))),
+    ).toMatchObject({
+      effective: { llmEscalation: "DEEP_REASONING_REQUIRED", evidenceSufficiency: "SUFFICIENT" },
+      overrideReason: null,
+    });
+  },
+);

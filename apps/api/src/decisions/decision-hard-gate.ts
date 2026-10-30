@@ -266,6 +266,16 @@ function stagnationProblem(
     return "INSUFFICIENT_SAMPLE";
   return stagnationCoverageProblem(evidence);
 }
+function promotionProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "UNUSUAL_DISCOUNT" }>,
+): DecisionReasonCode | null {
+  const promotion = evidence.facts.promotionPeriod;
+  if (promotion === null) return "MISSING_DATA";
+  return Date.parse(promotion.periodStart) <= Date.parse(evidence.periodStart) &&
+    Date.parse(promotion.periodEnd) >= Date.parse(evidence.periodEnd)
+    ? null
+    : "CONFLICTING_DATA";
+}
 function financialProblem(
   evidence: Extract<
     EventEvidenceV1,
@@ -277,13 +287,8 @@ function financialProblem(
   if (evidence.eventType === "REVENUE_DROP")
     return facts.paidRevenueMinor === null ? "MISSING_DATA" : null;
   if (evidence.eventType === "UNUSUAL_DISCOUNT") {
-    if (
-      facts.discountMinor === null ||
-      !facts.grossMerchandiseMinor ||
-      facts.promotionPeriod === null
-    )
-      return "MISSING_DATA";
-    return null;
+    if (facts.discountMinor === null || !facts.grossMerchandiseMinor) return "MISSING_DATA";
+    return promotionProblem(evidence);
   }
   // The pinned baseline selects the primary profit measure; attribution remains optional context.
   const contribution = evidence.baseline?.measure.kind === "CONTRIBUTION";
