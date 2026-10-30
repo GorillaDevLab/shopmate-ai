@@ -108,10 +108,16 @@ function currentIssues(frame: Frame, compared: RevenueDropComparison | null): Is
 }
 function freshness(frame: Frame, watermark: string | null, field: string): Issue[] {
   if (watermark === null) return [issue(frame, "SOURCE_TIME_MISSING", field)];
-  return BigInt(Date.parse(frame.evidence.observedAt)) - BigInt(Date.parse(watermark)) >
+  const issues: Issue[] = [];
+  if (
+    BigInt(Date.parse(frame.evidence.observedAt)) - BigInt(Date.parse(watermark)) >
     BigInt(frame.rule.maximumAgeSeconds) * 1000n
-    ? [issue(frame, "STALE_SOURCE", field)]
-    : [];
+  )
+    issues.push(issue(frame, "STALE_SOURCE", field));
+  // A recently observed partial interval still cannot stand in for a completed matched window.
+  if (Date.parse(watermark) < Date.parse(frame.evidence.periodEnd))
+    issues.push(issue(frame, "PARTIAL_COVERAGE", field));
+  return issues;
 }
 function matchingSnapshots(frame: Frame): readonly MetricSnapshotV1[] {
   return frame.request.snapshots.filter(

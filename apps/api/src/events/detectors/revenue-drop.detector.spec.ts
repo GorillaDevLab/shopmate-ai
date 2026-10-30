@@ -12,6 +12,7 @@ import {
   type RobustBaselineV1,
 } from "@shopmate/contracts";
 import { RevenueDropDetector } from "./revenue-drop.detector.js";
+import { createRobustBaseline } from "../robust-baseline.js";
 
 type Evidence = Extract<EventEvidenceV1, { eventType: "REVENUE_DROP" }>;
 type Kind = "PAID_REVENUE" | "NET_REVENUE_SETTLEMENT";
@@ -502,4 +503,213 @@ it("does not turn an unrelated cost snapshot limitation into revenue authority",
   expect(
     detect(EventDetectionRequestSchema.parse({ ...request(value), snapshots: [row] })).disposition,
   ).toBe("CANDIDATE");
+});
+
+it("withholds a fresh but incomplete current window even when another field caused estimation", () => {
+  const value = evidence({
+    sourceWatermark: "2026-10-24T03:59:59Z",
+    dataStatus: "ESTIMATED",
+    issues: [issue("COST_MISSING", "costCoverageBasisPoints")],
+  });
+  expect(detect(request(value))).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    quality: {
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: "PARTIAL_COVERAGE", field: "sourceWatermark" }),
+      ]),
+    },
+  });
+});
+it.each(["paidRevenueMinor", "netRevenueMinor"] as const)(
+  "withholds null %s instead of guessing zero",
+  (field) => {
+    const value = field === "paidRevenueMinor" ? evidence() : net(7000);
+    expect(detect(request({ ...value, facts: { ...value.facts, [field]: null } }))).toMatchObject({
+      disposition: "NO_CANDIDATE",
+      reason: "INSUFFICIENT_EVIDENCE",
+      quality: {
+        issues: expect.arrayContaining([expect.objectContaining({ code: "NOT_SYNCHRONIZED" })]),
+      },
+    });
+  },
+);
+it("requires a typed current revenue reference even for paid revenue", () => {
+  const value = evidence({ sourceReferences: [{ ...reference, measure: null }] });
+  expect(detect(request(value))).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    reason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+it.each([
+  [-12000, "CANDIDATE"],
+  [-11999, "NO_CANDIDATE"],
+  [-9000, "NO_CANDIDATE"],
+] as const)(
+  "uses signed deterioration against a negative net baseline at %i",
+  (current, disposition) => {
+    expect(detect(netObserved(current, -10000)).disposition).toBe(disposition);
+  },
+);
+it("requires absolute-only policy before using a zero baseline", () => {
+  expect(detect(netObserved(-1000, 0))).toMatchObject({
+    disposition: "NO_CANDIDATE",
+    reason: "BASELINE_UNAVAILABLE",
+    quality: {
+      issues: expect.arrayContaining([expect.objectContaining({ code: "ZERO_DENOMINATOR" })]),
+    },
+  });
+  const input = netObserved(-1000, 0);
+  const thresholds = { relativeDropBasisPoints: 0, minimumDropMinor: 1000 };
+  expect(
+    detect({ ...input, policy: { ...policy, rules: [{ ...policy.rules[0], thresholds }] } })
+      .disposition,
+  ).toBe("CANDIDATE");
+});
+it("keeps the exact represented median rather than its shortened decimal rendering", () => {
+  const input = changed(0, 1e-7);
+  const result = new RevenueDropDetector().explain(input);
+  expect(result).toMatchObject({
+    ok: true,
+    value: {
+      comparison: {
+        signedDeltaMinor: { numerator: "-944473296573929", denominator: "9444732965739290427392" },
+      },
+    },
+  });
+});
+const elapsedPeriod = {
+  ...period,
+  periodStart: "2026-10-23T16:00:00Z",
+  periodEnd: "2026-10-23T20:00:00Z",
+};
+function historicalRow(value: number, index: number): MetricSnapshotV1 {
+  const shift = (index + 1) * 7 * 86400000;
+  const periodStart = new Date(Date.parse(elapsedPeriod.periodStart) - shift).toISOString();
+  const periodEnd = new Date(Date.parse(elapsedPeriod.periodEnd) - shift).toISOString();
+  return snapshot({
+    periodStart,
+    periodEnd,
+    sourceWatermark: periodEnd,
+    visibleAt: periodEnd,
+    computedAt: periodEnd,
+    inputRevision: `historical-${index}`,
+    metric: { kind: "PAID_REVENUE", unit: "minorCNY", value },
+  });
+}
+function realBaseline(): RobustBaselineV1 {
+  const candidates = [9000, 10000, 10001, 20000].map(historicalRow);
+  const sourceReferences = candidates.map((row, index) => ({
+    ...reference,
+    kind: "METRIC_SNAPSHOT" as const,
+    id: `historical-${index}`,
+    version: row.inputRevision,
+    period: { ...previous, periodStart: row.periodStart, periodEnd: row.periodEnd },
+    observedAt: row.periodEnd,
+  }));
+  const port = createRobustBaseline({
+    version: "baseline-v1",
+    minimumSamples: 4,
+    lookbackWeeks: 4,
+    maximumAgeSeconds: 35 * 86400,
+  });
+  const result = port.evaluate({
+    binding,
+    eventType: "REVENUE_DROP",
+    entity: { kind: "STORE" },
+    period: elapsedPeriod,
+    observedAt: elapsedPeriod.periodEnd,
+    definitionVersion: "metrics-v1",
+    baselineVersion: "baseline-v1",
+    measure: reference.measure,
+    candidates,
+    sourceReferences,
+  });
+  if (!result.ok) throw new Error(result.error.code);
+  return result.value;
+}
+function elapsedEvidence(before: RobustBaselineV1, current: number): Evidence {
+  return {
+    ...historical(before),
+    ...elapsedPeriod,
+    observedAt: elapsedPeriod.periodEnd,
+    sourceWatermark: elapsedPeriod.periodEnd,
+    sourceReferences: [
+      { ...reference, period: elapsedPeriod, observedAt: elapsedPeriod.periodEnd },
+    ],
+    facts: facts({
+      paidRevenueMinor: current,
+      discountRate: {
+        numerator: 0,
+        denominator: 10000,
+        valueBasisPoints: 0,
+        period: elapsedPeriod,
+      },
+    }),
+  };
+}
+it("consumes the actual baseline port median for positive and seasonal negative controls", () => {
+  const before = realBaseline();
+  expect(before).toMatchObject({ status: "AVAILABLE", median: 10000.5, sampleSize: 4 });
+  expect(detect(request(elapsedEvidence(before, 8000))).disposition).toBe("CANDIDATE");
+  expect(detect(request(elapsedEvidence(before, 10000))).disposition).toBe("NO_CANDIDATE");
+});
+function rejects(input: unknown): void {
+  const detector = new RevenueDropDetector();
+  const expected = { ok: false, error: { code: "INVALID_INPUT", evidenceIds: [] } };
+  expect(detector.detect(input as EventDetectionRequest)).toEqual(expected);
+  expect(detector.explain(input as EventDetectionRequest)).toEqual(expected);
+}
+it.each(["wrong-definition", "future", "different-hour", "different-duration"] as const)(
+  "rejects %s historical context at the shared contract boundary",
+  (change) => {
+    const before = baseline();
+    const sourceReferences = before.sourceReferences.map((ref) => ({
+      ...ref,
+      ...(change === "wrong-definition" ? { definitionVersion: "metrics-old" } : {}),
+      ...(change === "future" ? { observedAt: "2026-10-24T04:00:01Z" } : {}),
+    }));
+    const shifted = change === "different-hour" || change === "different-duration";
+    const oldPeriod = {
+      ...previous,
+      periodStart: "2026-10-17T01:00:00Z",
+      periodEnd: change === "different-hour" ? "2026-10-17T05:00:00Z" : previous.periodEnd,
+    };
+    const value = historical({
+      ...before,
+      sourceReferences,
+      ...(shifted ? { period: oldPeriod } : {}),
+    });
+    rejects({ evidence: value, snapshots: [], baseline: value.baseline, policy });
+  },
+);
+it.each(["binding", "version", "future", "extra", "unsafe-integer"] as const)(
+  "rejects %s request boundary mismatches",
+  (change) => {
+    const input = request();
+    if (change === "binding")
+      rejects({
+        ...input,
+        evidence: { ...input.evidence, binding: { ...binding, storeId: "other-store" } },
+      });
+    if (change === "version")
+      rejects({ ...input, policy: { ...policy, baselineVersion: "baseline-old" } });
+    if (change === "future")
+      rejects({
+        ...input,
+        evidence: { ...input.evidence, sourceWatermark: "2026-10-24T04:00:01Z" },
+      });
+    if (change === "extra") rejects({ ...input, rawVendorPayload: {} });
+    if (change === "unsafe-integer")
+      rejects({
+        ...input,
+        evidence: {
+          ...evidence(),
+          facts: facts({ paidRevenueMinor: Number.MAX_SAFE_INTEGER + 1 }),
+        },
+      });
+  },
+);
+it("rejects a missing policy rule or wrong event type", () => {
+  rejects({ ...request(), policy: { ...policy, rules: [] } });
+  rejects({ ...request(), evidence: { ...evidence(), eventType: "UNUSUAL_DISCOUNT" } });
 });
