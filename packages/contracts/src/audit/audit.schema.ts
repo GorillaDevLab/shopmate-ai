@@ -1,9 +1,16 @@
 import { z } from "zod";
 import {
   ConnectorTimestampSchema,
+  ExternalIdSchema,
   MinorAmountSchema,
 } from "../commerce/connector-common.schema.js";
 import { TenantIdSchema, TenantRoleSchema } from "../tenant/tenant.schema.js";
+import {
+  EventEvidenceReferenceSchema,
+  EventStateSchema,
+  EventTransitionReasonSchema,
+} from "../events/event.schema.js";
+import { EventTimestampSchema } from "../events/event-evidence.schema.js";
 
 const id = TenantIdSchema;
 const timestamp = ConnectorTimestampSchema;
@@ -31,6 +38,7 @@ export const AuditEventTypeSchema = z.enum([
   "NOTIFICATION_READ",
   "NOTIFICATION_PREFERENCE",
   "BRIEF",
+  "EVENT_STATE_CHANGE",
 ]);
 
 export const AuditResultSchema = z.enum(["SUCCESS", "REJECTED", "FAILED", "UNKNOWN"]);
@@ -148,19 +156,50 @@ const notificationDetail = z.strictObject({
   }),
 });
 
+const lifecycleMetadata = z.strictObject({
+  fromState: EventStateSchema,
+  toState: EventStateSchema,
+  reason: EventTransitionReasonSchema,
+  expectedRevision: positiveSequence,
+  revision: positiveSequence,
+  evidenceReference: EventEvidenceReferenceSchema,
+});
+function validLifecycle(value: z.infer<typeof lifecycleMetadata>): boolean {
+  if (value.revision !== value.expectedRevision + 1) return false;
+  if (value.fromState === "RESOLVED" || value.fromState === "SUPPRESSED") return false;
+  if (value.toState === "ACKNOWLEDGED")
+    return value.fromState === "OPEN" && value.reason === "ACKNOWLEDGED_BY_OPERATOR";
+  if (value.toState === "RESOLVED")
+    return value.reason === "CONDITION_CLEARED" || value.reason === "MANUALLY_RESOLVED";
+  return (
+    value.toState === "SUPPRESSED" &&
+    ["FALSE_POSITIVE", "DUPLICATE", "MAINTENANCE"].includes(value.reason)
+  );
+}
+const lifecycleDetail = z.strictObject({
+  eventType: z.literal("EVENT_STATE_CHANGE"),
+  redactedMetadata: lifecycleMetadata.refine(
+    validLifecycle,
+    "Invalid lifecycle transition/revision",
+  ),
+});
 export const AuditEventDetailSchema = z.discriminatedUnion("eventType", [
   securityDetail,
   roleDetail,
   actionDetail,
   runDetail,
   notificationDetail,
+  lifecycleDetail,
 ]);
+
+// Only tenant envelopes gain EVENT/ExternalId; legacy AuditResourceSchema stays an object.
+const eventResource = z.strictObject({ type: z.literal("EVENT"), id: ExternalIdSchema });
 
 const tenantFields = {
   scopeKind: z.literal("TENANT"),
   scope: AuditTenantScopeSchema,
   actor: AuditActorSchema,
-  resource: AuditResourceSchema.nullable(),
+  resource: z.union([AuditResourceSchema, eventResource]).nullable(),
   result: AuditResultSchema,
   occurredAt: timestamp,
   sourceOccurredAt: timestamp.nullable(),
@@ -168,7 +207,30 @@ const tenantFields = {
   event: AuditEventDetailSchema,
 };
 
-export const TenantAuditEventSchema = z.strictObject(tenantFields).readonly();
+function validTenantLifecycle(value: z.infer<z.ZodObject<typeof tenantFields>>): boolean {
+  if (value.event.eventType !== "EVENT_STATE_CHANGE") return value.resource?.type !== "EVENT";
+  const binding = value.event.redactedMetadata.evidenceReference.binding;
+  return (
+    value.resource?.type === "EVENT" &&
+    value.result === "SUCCESS" &&
+    value.actor.actorKind === "USER" &&
+    value.sourceOccurredAt === null &&
+    EventTimestampSchema.safeParse(value.occurredAt).success &&
+    value.scope.organizationId === binding.organizationId &&
+    value.scope.workspaceId === binding.workspaceId &&
+    value.scope.storeId === binding.storeId &&
+    value.links.runId === null &&
+    value.links.evidenceId === null &&
+    value.links.actionId === null &&
+    value.links.revisionId === null &&
+    value.links.approvalId === null &&
+    value.links.executionId === null
+  );
+}
+export const TenantAuditEventSchema = z
+  .strictObject(tenantFields)
+  .refine(validTenantLifecycle, "Invalid lifecycle audit envelope")
+  .readonly();
 
 const anonymousFields = {
   scopeKind: z.literal("ANONYMOUS_AUTH_SECURITY"),
@@ -206,6 +268,7 @@ export const TenantAuditEntrySchema = z
     prevHash: hash.nullable(),
     entryHash: hash,
   })
+  .refine(validTenantLifecycle, "Invalid lifecycle audit envelope")
   .readonly();
 
 export const AnonymousAuthSecurityEntrySchema = z
@@ -235,7 +298,7 @@ export const AuditQuerySchema = z
     cursor: AuditCursorSchema.nullable(),
     eventTypes: z
       .array(AuditEventTypeSchema)
-      .max(20)
+      .max(AuditEventTypeSchema.options.length)
       .refine((values) => new Set(values).size === values.length)
       .readonly(),
     actorId: id.nullable(),
@@ -257,7 +320,7 @@ export const AuditQueryAccessManifestSchema = z
     decision: z.enum(["ALLOW", "DENY"]),
     permittedEventTypes: z
       .array(AuditEventTypeSchema)
-      .max(20)
+      .max(AuditEventTypeSchema.options.length)
       .refine((values) => new Set(values).size === values.length)
       .readonly(),
     evaluatedAt: timestamp,
