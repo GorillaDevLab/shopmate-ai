@@ -724,3 +724,270 @@ it("preserves DEEP for a coherent cancellation cohort exactly at its current sam
     overrideReason: null,
   });
 });
+
+const primaryFinancialFacts = {
+  paidRevenueMinor: 10000,
+  netRevenueMinor: null,
+  grossMerchandiseMinor: 10000,
+  grossProfitMinor: null,
+  contributionMinor: 500,
+  discountMinor: 1000,
+  spendMinor: null,
+  costCoverageBasisPoints: 10000,
+  feeCoverageBasisPoints: 10000,
+  profitDeltaMinor: null,
+  attributionVersion: null,
+  contributions: [],
+  skuContributions: [],
+  discountRate: nullableRate(1000, 10000),
+  promotionPeriod: period,
+};
+const prerequisiteFacts = {
+  INVENTORY_STAGNATION: {
+    availableUnits: 100,
+    salesUnits: 100,
+    salesWindow: period,
+    salesWindowHours: 1,
+    holdingDays: 90,
+    demandCoverageDays: 1 / 24,
+    listedAt: "2026-07-01T00:00:00Z",
+    inventoryCostMinor: null,
+    costCoverageBasisPoints: 0,
+  },
+  PROFIT_MARGIN_DROP: primaryFinancialFacts,
+  UNUSUAL_DISCOUNT: {
+    ...primaryFinancialFacts,
+    grossProfitMinor: null,
+    contributionMinor: null,
+    costCoverageBasisPoints: 0,
+    feeCoverageBasisPoints: 0,
+  },
+  REVENUE_DROP: {
+    ...primaryFinancialFacts,
+    grossProfitMinor: null,
+    contributionMinor: null,
+    costCoverageBasisPoints: 0,
+    feeCoverageBasisPoints: 0,
+  },
+  ROAS_DROP: {
+    spendMinor: 1000,
+    attributedRevenueMinor: 2000,
+    impressions: null,
+    clicks: null,
+    attributedOrders: null,
+    attributionCoverageBasisPoints: 10000,
+    roas: nullableRate(2000, 1000),
+  },
+  AD_SPEND_SPIKE: {
+    spendMinor: 1000,
+    attributedRevenueMinor: null,
+    impressions: null,
+    clicks: null,
+    attributedOrders: null,
+    attributionCoverageBasisPoints: 0,
+    roas: nullableRate(null, 1000),
+  },
+  CONVERSION_DROP: {
+    visitors: 100,
+    paidOrders: 10,
+    cart: null,
+    checkout: null,
+    conversion: nullableRate(10, 100),
+    baselineConversion: null,
+    priceChangeBasisPoints: null,
+    priceEffectiveAt: null,
+    variantAvailabilityBasisPoints: null,
+    relationship: "CORRELATION_ONLY",
+  },
+  PRODUCT_BREAKOUT: {
+    salesUnits: 100,
+    salesWindow: period,
+    salesWindowHours: 1,
+    salesUnitsPerHour: 100,
+    conversion: nullableRate(20, 100),
+    grossProfitMinor: null,
+    netRevenueMinor: null,
+    costCoverageBasisPoints: 0,
+    listedAt: "2026-07-01T00:00:00Z",
+  },
+  SYNC_FAILURE: {
+    lastSuccessAt: null,
+    lagSeconds: null,
+    typedErrorCode: "AUTH_EXPIRED",
+    affectedResourceKind: "INVENTORY",
+  },
+} as const;
+type PrerequisiteVariant = keyof typeof prerequisiteFacts;
+const primaryMeasures = {
+  INVENTORY_STAGNATION: null,
+  PROFIT_MARGIN_DROP: { kind: "CONTRIBUTION", unit: "minorCNY" },
+  UNUSUAL_DISCOUNT: null,
+  REVENUE_DROP: { kind: "PAID_REVENUE", unit: "minorCNY" },
+  ROAS_DROP: { kind: "ROAS", unit: "basisPoints" },
+  AD_SPEND_SPIKE: { kind: "AD_SPEND", unit: "minorCNY" },
+  CONVERSION_DROP: { kind: "CONVERSION_RATE", unit: "basisPoints" },
+  PRODUCT_BREAKOUT: { kind: "PAID_UNITS", unit: "units" },
+  SYNC_FAILURE: null,
+} as const;
+function primaryEvidence(eventType: PrerequisiteVariant, patch: object = {}): EventEvidenceV1 {
+  const measure = primaryMeasures[eventType];
+  const baseline =
+    measure === null
+      ? null
+      : baselineFixture({
+          measure,
+          sourceReferences: [
+            { ...source, period: baselinePeriod, observedAt: baselinePeriod.periodEnd, measure },
+          ],
+        });
+  const entity =
+    eventType === "SYNC_FAILURE"
+      ? { kind: "CONNECTION", connectionId: binding.connectionId }
+      : eventType === "ROAS_DROP" || eventType === "AD_SPEND_SPIKE"
+        ? { kind: "CAMPAIGN", externalCampaignId: "campaign-a" }
+        : eventType === "PRODUCT_BREAKOUT" || eventType === "INVENTORY_STAGNATION"
+          ? { kind: "SKU", externalSkuId: "sku-a" }
+          : { kind: "STORE" };
+  return evidenceFixture({
+    eventType,
+    entity,
+    baseline,
+    baselineAlignment: baseline === null ? "MISSING" : "ALIGNED",
+    baselineVersion: baseline === null ? null : eventPolicy.baselineVersion,
+    sourceReferences: [{ ...source, measure }],
+    facts: { ...prerequisiteFacts[eventType], ...patch },
+  });
+}
+function primaryContext(eventType: PrerequisiteVariant, patch: object = {}) {
+  return contextFixture(
+    primaryEvidence(eventType, patch),
+    eventType === "PRODUCT_BREAKOUT" ? "LOW" : "CRITICAL",
+  );
+}
+const missingPrimaryFacts = [
+  ["INVENTORY_STAGNATION", { availableUnits: null }],
+  ["INVENTORY_STAGNATION", { salesUnits: null }],
+  ["INVENTORY_STAGNATION", { holdingDays: null }],
+  ["INVENTORY_STAGNATION", { demandCoverageDays: null }],
+  ["INVENTORY_STAGNATION", { listedAt: null }],
+  ["PROFIT_MARGIN_DROP", { contributionMinor: null }],
+  ["UNUSUAL_DISCOUNT", { discountMinor: null, discountRate: nullableRate(null, 10000) }],
+  ["UNUSUAL_DISCOUNT", { grossMerchandiseMinor: null, discountRate: nullableRate(1000, null) }],
+  ["UNUSUAL_DISCOUNT", { promotionPeriod: null }],
+  ["REVENUE_DROP", { paidRevenueMinor: null }],
+  ["ROAS_DROP", { spendMinor: null, roas: nullableRate(2000, null) }],
+  ["ROAS_DROP", { attributedRevenueMinor: null, roas: nullableRate(null, 1000) }],
+  ["AD_SPEND_SPIKE", { spendMinor: null, roas: nullableRate(null, null) }],
+  ["CONVERSION_DROP", { visitors: null, conversion: nullableRate(10, null) }],
+  ["CONVERSION_DROP", { paidOrders: null, conversion: nullableRate(null, 100) }],
+  ["PRODUCT_BREAKOUT", { salesUnits: null, salesUnitsPerHour: null }],
+  ["PRODUCT_BREAKOUT", { conversion: nullableRate(null, 100) }],
+  ["PRODUCT_BREAKOUT", { conversion: nullableRate(20, null) }],
+  ["PRODUCT_BREAKOUT", { listedAt: null }],
+] as const;
+it.each(missingPrimaryFacts)("blocks DEEP for missing primary %s facts %#", (eventType, patch) => {
+  const context = primaryContext(eventType, patch);
+  expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+    effective: {
+      severity: context.event.severityFloor,
+      llmEscalation: "NO_LLM_NEEDED",
+      evidenceSufficiency: "INSUFFICIENT_DATA",
+      reasonCodes: ["MISSING_DATA"],
+    },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+it.each(Object.keys(prerequisiteFacts) as PrerequisiteVariant[])(
+  "retains supported %s DEEP with primary facts while optional context remains null",
+  (eventType) => {
+    const context = primaryContext(eventType);
+    expect(
+      value(
+        gate(context).evaluate(requestFixture(context, { severity: context.event.severityFloor })),
+      ),
+    ).toMatchObject({
+      effective: { llmEscalation: "DEEP_REASONING_REQUIRED", evidenceSufficiency: "SUFFICIENT" },
+      overrideReason: null,
+    });
+  },
+);
+it.each([
+  ["INVENTORY_STAGNATION", { salesUnits: 19, demandCoverageDays: 100 / 19 / 24 }],
+  ["CONVERSION_DROP", { visitors: 99, conversion: nullableRate(10, 99) }],
+  ["PRODUCT_BREAKOUT", { conversion: nullableRate(19, 100) }],
+] as const)("applies current %s raw primary sample prerequisites %#", (eventType, patch) => {
+  const context = primaryContext(eventType, patch);
+  expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+    effective: { llmEscalation: "NO_LLM_NEEDED", reasonCodes: ["INSUFFICIENT_SAMPLE"] },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+it.each([
+  ["PROFIT_MARGIN_DROP", { costCoverageBasisPoints: 0 }],
+  ["PROFIT_MARGIN_DROP", { feeCoverageBasisPoints: 0 }],
+  ["ROAS_DROP", { attributionCoverageBasisPoints: 0 }],
+] as const)("requires coverage of the selected primary %s observation %#", (eventType, patch) => {
+  const context = primaryContext(eventType, patch);
+  expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+    effective: { llmEscalation: "NO_LLM_NEEDED", reasonCodes: ["PARTIAL_COVERAGE"] },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
+
+it.each([
+  ["INVENTORY_STAGNATION", { salesUnits: 20, demandCoverageDays: 5 / 24 }],
+  ["CONVERSION_DROP", { visitors: 100, paidOrders: 0, conversion: nullableRate(0, 100) }],
+  ["PRODUCT_BREAKOUT", { conversion: nullableRate(20, 100) }],
+  ["REVENUE_DROP", { paidRevenueMinor: 0 }],
+  ["UNUSUAL_DISCOUNT", { discountMinor: 0, discountRate: nullableRate(0, 10000) }],
+  ["ROAS_DROP", { attributedRevenueMinor: 0, roas: nullableRate(0, 1000) }],
+] as const)(
+  "retains known %s primary facts at inclusive eligibility or zero-value boundaries %#",
+  (eventType, patch) => {
+    const context = primaryContext(eventType, patch);
+    expect(
+      value(
+        gate(context).evaluate(requestFixture(context, { severity: context.event.severityFloor })),
+      ),
+    ).toMatchObject({
+      effective: { llmEscalation: "DEEP_REASONING_REQUIRED", evidenceSufficiency: "SUFFICIENT" },
+      overrideReason: null,
+    });
+  },
+);
+
+function grossProfitContext(patch: object = {}) {
+  const original = primaryEvidence("PROFIT_MARGIN_DROP", {
+    grossProfitMinor: 500,
+    contributionMinor: null,
+    feeCoverageBasisPoints: 0,
+    ...patch,
+  });
+  const measure = { kind: "GROSS_PROFIT", unit: "minorCNY" };
+  return contextFixture(
+    evidenceFixture({
+      ...original,
+      baseline: baselineFixture({
+        measure,
+        sourceReferences: [
+          { ...source, period: baselinePeriod, observedAt: baselinePeriod.periodEnd, measure },
+        ],
+      }),
+      sourceReferences: [{ ...source, measure }],
+    }),
+  );
+}
+it.each([
+  [{}, "DEEP_REASONING_REQUIRED", null],
+  [{ grossProfitMinor: null }, "NO_LLM_NEEDED", "MISSING_DATA"],
+  [{ costCoverageBasisPoints: 0 }, "NO_LLM_NEEDED", "PARTIAL_COVERAGE"],
+] as const)(
+  "uses the pinned gross-profit primary measure without requiring contribution/fees %#",
+  (patch, escalation, reason) => {
+    const context = grossProfitContext(patch);
+    const result = value(gate(context).evaluate(requestFixture(context, { severity: "HIGH" })));
+    expect(result.effective.llmEscalation).toBe(escalation);
+    expect(result.overrideReason).toBe(reason === null ? null : "INSUFFICIENT_EVIDENCE");
+    if (reason !== null) expect(result.effective.reasonCodes).toEqual([reason]);
+  },
+);

@@ -204,6 +204,120 @@ function cancellationProblem(
   if (cohortOrders === 0 || cohortOrders < rule.minimumSampleSize) return "INSUFFICIENT_SAMPLE";
   return null;
 }
+function stagnationProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "INVENTORY_STAGNATION" }>,
+  rule: QualityRule,
+): DecisionReasonCode | null {
+  const facts = evidence.facts;
+  if (
+    facts.availableUnits === null ||
+    facts.salesUnits === null ||
+    facts.holdingDays === null ||
+    facts.listedAt === null ||
+    facts.demandCoverageDays === null
+  )
+    return "MISSING_DATA";
+  if (facts.salesUnits === 0 || facts.salesUnits < rule.minimumSampleSize)
+    return "INSUFFICIENT_SAMPLE";
+  return null;
+}
+function financialProblem(
+  evidence: Extract<
+    EventEvidenceV1,
+    { eventType: "PROFIT_MARGIN_DROP" | "UNUSUAL_DISCOUNT" | "REVENUE_DROP" }
+  >,
+  rule: QualityRule,
+): DecisionReasonCode | null {
+  const facts = evidence.facts;
+  if (evidence.eventType === "REVENUE_DROP")
+    return facts.paidRevenueMinor === null ? "MISSING_DATA" : null;
+  if (evidence.eventType === "UNUSUAL_DISCOUNT") {
+    if (
+      facts.discountMinor === null ||
+      !facts.grossMerchandiseMinor ||
+      facts.promotionPeriod === null
+    )
+      return "MISSING_DATA";
+    return null;
+  }
+  // The pinned baseline selects the primary profit measure; attribution remains optional context.
+  const contribution = evidence.baseline?.measure.kind === "CONTRIBUTION";
+  if ((contribution ? facts.contributionMinor : facts.grossProfitMinor) === null)
+    return "MISSING_DATA";
+  if (
+    facts.costCoverageBasisPoints < rule.minimumCoverageBasisPoints ||
+    (contribution && facts.feeCoverageBasisPoints < rule.minimumCoverageBasisPoints)
+  )
+    return "PARTIAL_COVERAGE";
+  return null;
+}
+function marketingProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "ROAS_DROP" | "AD_SPEND_SPIKE" }>,
+  rule: QualityRule,
+): DecisionReasonCode | null {
+  const facts = evidence.facts;
+  if (!facts.spendMinor) return "MISSING_DATA";
+  if (evidence.eventType === "AD_SPEND_SPIKE") return null;
+  if (facts.attributedRevenueMinor === null) return "MISSING_DATA";
+  if (
+    rule.eventType === "ROAS_DROP" &&
+    facts.attributionCoverageBasisPoints < rule.thresholds.minimumAttributionCoverageBasisPoints
+  )
+    return "PARTIAL_COVERAGE";
+  return null;
+}
+function conversionProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "CONVERSION_DROP" }>,
+  rule: QualityRule,
+): DecisionReasonCode | null {
+  const facts = evidence.facts;
+  if (facts.visitors === null || facts.paidOrders === null) return "MISSING_DATA";
+  if (
+    facts.visitors === 0 ||
+    (rule.eventType === "CONVERSION_DROP" && facts.visitors < rule.thresholds.minimumVisitors)
+  )
+    return "INSUFFICIENT_SAMPLE";
+  return null;
+}
+function breakoutProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "PRODUCT_BREAKOUT" }>,
+  rule: QualityRule,
+): DecisionReasonCode | null {
+  const facts = evidence.facts;
+  if (
+    facts.salesUnits === null ||
+    facts.salesUnitsPerHour === null ||
+    facts.listedAt === null ||
+    facts.conversion.numerator === null ||
+    facts.conversion.denominator === null
+  )
+    return "MISSING_DATA";
+  if (facts.conversion.denominator === 0 || facts.conversion.numerator < rule.minimumSampleSize)
+    return "INSUFFICIENT_SAMPLE";
+  return null;
+}
+function primaryFactProblem(
+  evidence: EventEvidenceV1,
+  rule: QualityRule,
+): DecisionReasonCode | null {
+  switch (evidence.eventType) {
+    case "INVENTORY_STAGNATION":
+      return stagnationProblem(evidence, rule);
+    case "PROFIT_MARGIN_DROP":
+    case "UNUSUAL_DISCOUNT":
+    case "REVENUE_DROP":
+      return financialProblem(evidence, rule);
+    case "ROAS_DROP":
+    case "AD_SPEND_SPIKE":
+      return marketingProblem(evidence, rule);
+    case "CONVERSION_DROP":
+      return conversionProblem(evidence, rule);
+    case "PRODUCT_BREAKOUT":
+      return breakoutProblem(evidence, rule);
+    default:
+      return null;
+  }
+}
 function factProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReasonCode | null {
   if (evidence.eventType === "CANCELLED_ORDER_SPIKE") return cancellationProblem(evidence, rule);
   if (evidence.eventType === "STOCKOUT_RISK") {
@@ -232,7 +346,7 @@ function factProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReas
     )
       return "INSUFFICIENT_SAMPLE";
   }
-  return null;
+  return primaryFactProblem(evidence, rule);
 }
 function reliableSoldOut(evidence: EventEvidenceV1, rule: QualityRule): boolean {
   return (
