@@ -204,6 +204,51 @@ function cancellationProblem(
   if (cohortOrders === 0 || cohortOrders < rule.minimumSampleSize) return "INSUFFICIENT_SAMPLE";
   return null;
 }
+type CoverageEvidence = Extract<
+  EventEvidenceV1,
+  { eventType: "STOCKOUT_RISK" | "INVENTORY_STAGNATION" }
+>;
+function inventoryCoverage(
+  evidence: CoverageEvidence,
+  unitMilliseconds: bigint,
+): readonly [bigint, bigint] | null {
+  const { availableUnits, salesUnits, salesWindow } = evidence.facts;
+  if (availableUnits === null || salesUnits === null || salesUnits === 0) return null;
+  const elapsed =
+    BigInt(Date.parse(salesWindow.periodEnd)) - BigInt(Date.parse(salesWindow.periodStart));
+  return [BigInt(availableUnits) * elapsed, BigInt(salesUnits) * unitMilliseconds];
+}
+function stockoutCoverageProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "STOCKOUT_RISK" }>,
+): DecisionReasonCode | null {
+  const supplied = evidence.facts.estimatedHoursRemaining;
+  const coverage = inventoryCoverage(evidence, 3600000n);
+  if (supplied === null || coverage === null) return null;
+  const hours = Number(coverage[0]) / Number(coverage[1]);
+  // Match the detector's diagnostic-only producer tolerance; it never changes alarm thresholds.
+  return Math.abs(supplied - hours) > Number.EPSILON * Math.max(1, hours) * 4
+    ? "CONFLICTING_DATA"
+    : null;
+}
+function stagnationCoverageProblem(
+  evidence: Extract<EventEvidenceV1, { eventType: "INVENTORY_STAGNATION" }>,
+): DecisionReasonCode | null {
+  const coverage = inventoryCoverage(evidence, 86400000n);
+  const facts = evidence.facts;
+  if (coverage === null || facts.demandCoverageDays === null) return null;
+  const [numerator, denominator] = coverage;
+  const rationalDisplay =
+    Number(numerator / denominator) + Number(numerator % denominator) / Number(denominator);
+  // P03 divides units before converting hours to days, with a legitimate alternate IEEE display.
+  const producerDisplay =
+    facts.availableUnits === null || !facts.salesUnits
+      ? null
+      : ((facts.availableUnits / facts.salesUnits) * facts.salesWindowHours) / 24;
+  return facts.demandCoverageDays !== rationalDisplay &&
+    facts.demandCoverageDays !== producerDisplay
+    ? "CONFLICTING_DATA"
+    : null;
+}
 function stagnationProblem(
   evidence: Extract<EventEvidenceV1, { eventType: "INVENTORY_STAGNATION" }>,
   rule: QualityRule,
@@ -219,7 +264,7 @@ function stagnationProblem(
     return "MISSING_DATA";
   if (facts.salesUnits === 0 || facts.salesUnits < rule.minimumSampleSize)
     return "INSUFFICIENT_SAMPLE";
-  return null;
+  return stagnationCoverageProblem(evidence);
 }
 function financialProblem(
   evidence: Extract<
@@ -328,6 +373,7 @@ function factProblem(evidence: EventEvidenceV1, rule: QualityRule): DecisionReas
       return "MISSING_DATA";
     if (facts.availableUnits > 0 && (facts.salesUnits === null || facts.salesUnits === 0))
       return "MISSING_DATA";
+    return stockoutCoverageProblem(evidence);
   }
   if (evidence.eventType === "REFUND_SPIKE" && rule.eventType === "REFUND_SPIKE") {
     const facts = evidence.facts;

@@ -991,3 +991,85 @@ it.each([
     if (reason !== null) expect(result.effective.reasonCodes).toEqual([reason]);
   },
 );
+
+it.each([999, 1 + Number.EPSILON * 5, 1 - Number.EPSILON * 5])(
+  "blocks conflicting stockout coverage diagnostic %s against raw one-hour coverage",
+  (estimatedHoursRemaining) => {
+    const context = contextFixture(
+      evidenceFixture({ facts: { ...facts, estimatedHoursRemaining } }),
+      "CRITICAL",
+    );
+    expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+      effective: {
+        severity: "CRITICAL",
+        llmEscalation: "NO_LLM_NEEDED",
+        evidenceSufficiency: "AMBIGUOUS",
+        reasonCodes: ["CONFLICTING_DATA"],
+      },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  },
+);
+it.each([999, 0, 1 / 24 + Number.EPSILON])(
+  "blocks conflicting stagnation diagnostic %s against raw one-hour coverage",
+  (demandCoverageDays) => {
+    const context = primaryContext("INVENTORY_STAGNATION", { demandCoverageDays });
+    expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+      effective: {
+        severity: "CRITICAL",
+        llmEscalation: "NO_LLM_NEEDED",
+        evidenceSufficiency: "AMBIGUOUS",
+        reasonCodes: ["CONFLICTING_DATA"],
+      },
+      overrideReason: "INSUFFICIENT_EVIDENCE",
+    });
+  },
+);
+it.each([1, 1 + Number.EPSILON * 4, 1 - Number.EPSILON * 4, null])(
+  "accepts supported stockout diagnostic %s including exact detector rounding tolerance and nullable context",
+  (estimatedHoursRemaining) => {
+    const context = contextFixture(
+      evidenceFixture({
+        facts: { ...facts, estimatedHoursRemaining, supplierLeadTimeHours: null },
+      }),
+    );
+    expect(
+      value(gate(context).evaluate(requestFixture(context, { severity: "HIGH" }))),
+    ).toMatchObject({
+      effective: { llmEscalation: "DEEP_REASONING_REQUIRED", evidenceSufficiency: "SUFFICIENT" },
+      overrideReason: null,
+    });
+  },
+);
+it.each([1 / 624, 1 / 26 / 24])(
+  "accepts supported stagnation rational or P03 producer rounding %s",
+  (demandCoverageDays) => {
+    const context = primaryContext("INVENTORY_STAGNATION", {
+      availableUnits: 1,
+      salesUnits: 26,
+      demandCoverageDays,
+    });
+    expect(
+      value(gate(context).evaluate(requestFixture(context, { severity: "CRITICAL" }))),
+    ).toMatchObject({
+      effective: { llmEscalation: "DEEP_REASONING_REQUIRED", evidenceSufficiency: "SUFFICIENT" },
+      overrideReason: null,
+    });
+  },
+);
+it("preserves independent sold-out urgency while a conflicting forecast diagnostic blocks DEEP", () => {
+  const context = contextFixture(
+    evidenceFixture({ facts: { ...facts, availableUnits: 0, estimatedHoursRemaining: 999 } }),
+  );
+  expect(value(gate(context).evaluate(requestFixture(context)))).toMatchObject({
+    effective: {
+      severity: "CRITICAL",
+      notificationRoute: "NOTIFY_NOW",
+      attentionPriority: "URGENT",
+      llmEscalation: "NO_LLM_NEEDED",
+      evidenceSufficiency: "AMBIGUOUS",
+      reasonCodes: ["CONFIRMED_STOCKOUT", "CONFLICTING_DATA"],
+    },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+});
