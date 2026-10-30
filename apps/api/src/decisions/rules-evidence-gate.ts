@@ -12,6 +12,12 @@ type Input<K extends SanitizedDecisionInput["eventType"]> = Extract<
   { eventType: K }
 >;
 type Policy<K extends Rule["eventType"]> = Extract<Rule, { eventType: K }>;
+type Comparison = Readonly<{
+  current: readonly [bigint, bigint];
+  relativeBasisPoints: number;
+  drop: boolean;
+}>;
+const unitScale = 1n << 1074n;
 
 function knownRatio(ratio: {
   readonly numerator: number | null;
@@ -269,6 +275,158 @@ function explanationProblem(input: SanitizedDecisionInput): DecisionReasonCode |
   }
 }
 
+function rateComparison(input: SanitizedDecisionInput, rule: Rule): Comparison | null {
+  if (input.eventType === "CONVERSION_DROP" && rule.eventType === "CONVERSION_DROP")
+    return {
+      current: [BigInt(input.facts.paidOrders!) * 10000n, BigInt(input.facts.visitors!)],
+      relativeBasisPoints: rule.thresholds.relativeDropBasisPoints,
+      drop: true,
+    };
+  if (input.eventType === "ROAS_DROP" && rule.eventType === "ROAS_DROP")
+    return {
+      current: [
+        BigInt(input.facts.attributedRevenueMinor!) * 10000n,
+        BigInt(input.facts.spendMinor!),
+      ],
+      relativeBasisPoints: rule.thresholds.relativeDropBasisPoints,
+      drop: true,
+    };
+  if (input.eventType === "CANCELLED_ORDER_SPIKE" && rule.eventType === "CANCELLED_ORDER_SPIKE")
+    return {
+      current: [
+        (BigInt(input.facts.paidCancelledOrders!) + BigInt(input.facts.pendingCancelledOrders!)) *
+          10000n,
+        BigInt(input.facts.cohortOrders!),
+      ],
+      relativeBasisPoints: rule.thresholds.relativeIncreaseBasisPoints,
+      drop: false,
+    };
+  return null;
+}
+
+function countComparison(input: SanitizedDecisionInput, rule: Rule): Comparison | null {
+  if (input.eventType === "AD_SPEND_SPIKE" && rule.eventType === "AD_SPEND_SPIKE")
+    return {
+      current: [BigInt(input.facts.spendMinor!), 1n],
+      relativeBasisPoints: rule.thresholds.relativeIncreaseBasisPoints,
+      drop: false,
+    };
+  if (input.eventType === "PRODUCT_BREAKOUT" && rule.eventType === "PRODUCT_BREAKOUT")
+    return {
+      current: [BigInt(input.facts.salesUnits!), 1n],
+      relativeBasisPoints: rule.thresholds.relativeGrowthBasisPoints,
+      drop: false,
+    };
+  return null;
+}
+
+function comparativeProblem(input: SanitizedDecisionInput, rule: Rule): DecisionReasonCode | null {
+  const comparison = rateComparison(input, rule) ?? countComparison(input, rule);
+  if (!comparison) return null;
+  const baseline = input.baseline;
+  if (
+    !baseline ||
+    baseline.median === null ||
+    (baseline.median === 0 &&
+      input.eventType !== "CANCELLED_ORDER_SPIKE" &&
+      input.eventType !== "AD_SPEND_SPIKE")
+  )
+    return "MISSING_DATA";
+  const [numerator, denominator] = comparison.current;
+  const before = scaled(baseline.median) * denominator;
+  const now = numerator * unitScale;
+  const delta = comparison.drop ? before - now : now - before;
+  if (delta <= 0n) return "NO_MATERIAL_CHANGE";
+  if (delta <= scaled(baseline.mad ?? 0) * denominator) return "NORMAL_SEASONALITY";
+  const relative =
+    BigInt(comparison.relativeBasisPoints) * BigInt(10000 + rule.toleranceBasisPoints);
+  return delta * 100000000n < scaled(Math.abs(baseline.median)) * denominator * relative
+    ? "NO_MATERIAL_CHANGE"
+    : null;
+}
+
+function minimumProblem(input: SanitizedDecisionInput, rule: Rule): DecisionReasonCode | null {
+  if (
+    (input.eventType === "ROAS_DROP" || input.eventType === "AD_SPEND_SPIKE") &&
+    (rule.eventType === "ROAS_DROP" || rule.eventType === "AD_SPEND_SPIKE")
+  )
+    return input.facts.spendMinor! < rule.thresholds.minimumSpendMinor
+      ? "NO_MATERIAL_CHANGE"
+      : null;
+  if (input.eventType === "CANCELLED_ORDER_SPIKE" && rule.eventType === "CANCELLED_ORDER_SPIKE") {
+    const count =
+      BigInt(input.facts.paidCancelledOrders!) + BigInt(input.facts.pendingCancelledOrders!);
+    return count === 0n || count < BigInt(rule.thresholds.minimumCancelledOrders)
+      ? "NO_MATERIAL_CHANGE"
+      : null;
+  }
+  if (input.eventType === "PRODUCT_BREAKOUT" && rule.eventType === "PRODUCT_BREAKOUT") {
+    const facts = input.facts;
+    return facts.salesUnits! < rule.thresholds.minimumSalesUnits ||
+      BigInt(facts.conversion.numerator!) * 10000n <
+        BigInt(facts.conversion.denominator!) * BigInt(rule.thresholds.minimumConversionBasisPoints)
+      ? "NO_MATERIAL_CHANGE"
+      : null;
+  }
+  return null;
+}
+
+function stagnationMaterial(
+  input: Input<"INVENTORY_STAGNATION">,
+  rule: Policy<"INVENTORY_STAGNATION">,
+): DecisionReasonCode | null {
+  const facts = input.facts;
+  const elapsed =
+    BigInt(Date.parse(facts.salesWindow.periodEnd)) -
+    BigInt(Date.parse(facts.salesWindow.periodStart));
+  const demand = BigInt(facts.availableUnits!) * elapsed * unitScale * 10000n;
+  const threshold =
+    BigInt(facts.salesUnits!) *
+    86400000n *
+    scaled(rule.thresholds.minimumDemandCoverageDays) *
+    BigInt(10000 + rule.toleranceBasisPoints);
+  return demand <= threshold ||
+    scaled(facts.holdingDays!) < scaled(rule.thresholds.minimumHoldingDays)
+    ? "NO_MATERIAL_CHANGE"
+    : null;
+}
+
+function absoluteProblem(input: SanitizedDecisionInput, rule: Rule): DecisionReasonCode | null {
+  if (input.eventType === "UNUSUAL_DISCOUNT" && rule.eventType === "UNUSUAL_DISCOUNT") {
+    const facts = input.facts;
+    const threshold =
+      BigInt(facts.grossMerchandiseMinor!) *
+      BigInt(rule.thresholds.discountBasisPoints) *
+      BigInt(10000 + rule.toleranceBasisPoints);
+    return facts.discountMinor! < rule.thresholds.minimumDiscountMinor ||
+      BigInt(facts.discountMinor!) * 100000000n < threshold
+      ? "NO_MATERIAL_CHANGE"
+      : null;
+  }
+  if (input.eventType === "INVENTORY_STAGNATION" && rule.eventType === "INVENTORY_STAGNATION")
+    return stagnationMaterial(input, rule);
+  if (
+    input.eventType === "SYNC_FAILURE" &&
+    rule.eventType === "SYNC_FAILURE" &&
+    input.facts.typedErrorCode === "NOT_SYNCHRONIZED" &&
+    input.facts.lastSuccessAt !== null
+  ) {
+    const age =
+      BigInt(Date.parse(input.observedAt)) - BigInt(Date.parse(input.facts.lastSuccessAt));
+    return age * 10000n <=
+      BigInt(rule.thresholds.maximumLagSeconds) * 1000n * BigInt(10000 + rule.toleranceBasisPoints)
+      ? "NO_MATERIAL_CHANGE"
+      : null;
+  }
+  return null;
+}
+
+function materialProblem(input: SanitizedDecisionInput, rule: Rule): DecisionReasonCode | null {
+  return (
+    minimumProblem(input, rule) ?? comparativeProblem(input, rule) ?? absoluteProblem(input, rule)
+  );
+}
+
 /** Quality gates precede versioned defaults. Special inventory/refund rules own their independent facts. */
 export function rulesEvidenceGate(
   input: SanitizedDecisionInput,
@@ -281,6 +439,7 @@ export function rulesEvidenceGate(
     baselineProblem(input, rule) ??
     primaryProblem(input, rule) ??
     financialProblem(input, rule) ??
-    explanationProblem(input);
+    explanationProblem(input) ??
+    materialProblem(input, rule);
   return reason === null ? null : quiet(reason);
 }

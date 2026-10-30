@@ -132,6 +132,7 @@ function marketing(
     sampleSize: 200,
     baseline: {
       ...baseline(),
+      status: median === 0 ? "ZERO" : "AVAILABLE",
       measure: {
         kind: eventType === "ROAS_DROP" ? "ROAS" : "AD_SPEND",
         unit: eventType === "ROAS_DROP" ? "basisPoints" : "minorCNY",
@@ -211,24 +212,174 @@ function breakout(
   });
 }
 
-function stagnation(salesUnits: number | null = 100): SanitizedDecisionInput {
+function stagnation(
+  salesUnits: number | null = 100,
+  availableUnits = 300000,
+  holdingDays = 100,
+): SanitizedDecisionInput {
   return SanitizedDecisionInputSchema.parse({
     ...profit(),
     eventType: "INVENTORY_STAGNATION",
     baseline: null,
     facts: {
-      availableUnits: 300000,
+      availableUnits,
       salesUnits,
       salesWindow: period,
       salesWindowHours: 1,
-      holdingDays: 100,
-      demandCoverageDays: salesUnits === null ? null : 125,
+      holdingDays,
+      demandCoverageDays:
+        salesUnits === null || salesUnits === 0 ? null : availableUnits / salesUnits / 24,
       listedAt: "2026-01-01T00:00:00Z",
       inventoryCostMinor: null,
       costCoverageBasisPoints: 0,
     },
   });
 }
+
+function discount(discountMinor = 21000, grossMerchandiseMinor = 70000): SanitizedDecisionInput {
+  return SanitizedDecisionInputSchema.parse({
+    ...profit(),
+    eventType: "UNUSUAL_DISCOUNT",
+    baseline: null,
+    facts: {
+      ...financialFacts(),
+      discountMinor,
+      grossMerchandiseMinor,
+      discountRate: rate(discountMinor, grossMerchandiseMinor),
+    },
+  });
+}
+
+it("quiets a real host-assured improving conversion observation", async () => {
+  const context = trustedContext(conversionEvidence(conversion(100, 200)));
+  const input = value(sanitizer.sanitize(context));
+  expect(await evaluate(input, { assurance: hostAssurance(() => context) })).toMatchObject({
+    labels: {
+      severity: "INFO",
+      notificationRoute: "IGNORE",
+      llmEscalation: "NO_LLM_NEEDED",
+      reasonCodes: ["NO_MATERIAL_CHANGE"],
+    },
+  });
+});
+
+it.each([
+  ["conversion unchanged", () => conversion(60)],
+  ["conversion below drop threshold", () => conversion(50)],
+  ["conversion exact fractional baseline below threshold", () => conversion(13, 200, 999.5)],
+  ["zero ad spend", () => marketing("AD_SPEND_SPIKE", 0, 0, 10000)],
+  ["ad spend unchanged", () => marketing("AD_SPEND_SPIKE", 10000, 10000, 10000)],
+  ["ad spend below growth threshold", () => marketing("AD_SPEND_SPIKE", 29999, 10000, 10000)],
+  ["ad spend below absolute minimum", () => marketing("AD_SPEND_SPIKE", 500, 100, 100)],
+  ["ROAS improves", () => marketing("ROAS_DROP", 10000, 20000, 10000)],
+  ["ROAS unchanged", () => marketing("ROAS_DROP", 10000, 10000, 10000)],
+  ["ROAS below drop threshold", () => marketing("ROAS_DROP", 10000, 8000, 10000)],
+  ["ROAS exact raw ratio below threshold", () => marketing("ROAS_DROP", 20000, 1400, 999.5)],
+  ["cancellation improves", () => cancellation(10, 0, 200, 1000)],
+  ["cancellation unchanged", () => cancellation(20, 0, 200, 1000)],
+  ["cancellation below increase threshold", () => cancellation(30, 0, 200, 1000)],
+  ["cancellation below absolute minimum", () => cancellation(9, 0, 200, 100)],
+  ["cancellation zero count and history", () => cancellation(0, 0, 200, 0)],
+  ["breakout decreases", () => breakout(30, 30, 200, 40)],
+  ["breakout unchanged", () => breakout(30, 30, 200, 30)],
+  ["breakout below growth threshold", () => breakout(59)],
+  ["breakout below conversion minimum", () => breakout(90, 20, 201)],
+  ["discount below rate threshold", () => discount(20999)],
+  ["discount below amount minimum", () => discount(999, 1000)],
+  ["discount zero", () => discount(0)],
+  ["stagnation at exclusive demand boundary", () => stagnation(100, 216000)],
+  ["stagnation below holding minimum", () => stagnation(100, 300000, 89.99)],
+] as const)("quiets known nonanomalous %s", async (_name, input) => {
+  expect(await evaluate(input())).toMatchObject({
+    labels: {
+      severity: "INFO",
+      evidenceSufficiency: "SUFFICIENT",
+      llmEscalation: "NO_LLM_NEEDED",
+      reasonCodes: ["NO_MATERIAL_CHANGE"],
+    },
+  });
+});
+
+it.each([
+  ["conversion", () => conversion(55, 200, 3000, 300)],
+  ["spend", () => marketing("AD_SPEND_SPIKE", 11000, 11000, 10000, 1500)],
+  ["ROAS", () => marketing("ROAS_DROP", 10000, 9500, 10000, 600)],
+  ["cancellation", () => cancellation(22, 0, 200, 1000, 150)],
+  ["breakout", () => breakout(35, 30, 200, 30, 6)],
+] as const)("quiets normal aligned %s variation", async (_name, input) => {
+  expect(await evaluate(input())).toMatchObject({
+    labels: { reasonCodes: ["NORMAL_SEASONALITY"], llmEscalation: "NO_LLM_NEEDED" },
+  });
+});
+
+it.each([
+  ["conversion inclusive drop", () => conversion(39)],
+  ["conversion exact fraction above threshold", () => conversion(13, 201, 999.5)],
+  ["ad spend zero history absolute branch", () => marketing("AD_SPEND_SPIKE", 1000, 10000, 0)],
+  ["ad spend inclusive growth", () => marketing("AD_SPEND_SPIKE", 30000, 10000, 10000)],
+  ["ROAS inclusive drop", () => marketing("ROAS_DROP", 10000, 7000, 10000)],
+  ["ROAS exact raw ratio above threshold", () => marketing("ROAS_DROP", 20000, 1399, 999.5)],
+  ["cancellation inclusive increase", () => cancellation(40, 0, 200, 1000)],
+  ["cancellation zero history absolute branch", () => cancellation(10, 0, 200, 0)],
+  ["breakout inclusive growth", () => breakout(60)],
+  ["discount inclusive rate", () => discount()],
+  ["stagnation over demand boundary", () => stagnation(100, 216001)],
+] as const)("retains versioned material %s", async (_name, input) => {
+  expect(await evaluate(input())).toMatchObject({
+    labels: { evidenceSufficiency: "SUFFICIENT", llmEscalation: "SIMPLE_EXPLANATION" },
+  });
+});
+
+it.each([
+  ["conversion", () => conversion(39)],
+  ["spend", () => marketing("AD_SPEND_SPIKE", 30000, 10000, 10000)],
+  ["ROAS", () => marketing("ROAS_DROP", 10000, 7000, 10000)],
+  ["cancellation", () => cancellation(40, 0, 200, 1000)],
+  ["breakout", () => breakout(60)],
+  ["discount", () => discount()],
+  ["stagnation", () => stagnation(100, 216001)],
+] as const)("honors versioned tolerance for %s", async (_name, fixture) => {
+  const input = fixture();
+  const config = options(input);
+  const policy = {
+    ...config.policy,
+    rules: config.policy.rules.map((row) =>
+      row.eventType === input.eventType ? { ...row, toleranceBasisPoints: 1000 } : row,
+    ),
+  };
+  expect(await evaluate(input, { policy })).toMatchObject({
+    labels: { reasonCodes: ["NO_MATERIAL_CHANGE"], llmEscalation: "NO_LLM_NEEDED" },
+  });
+});
+
+it.each([
+  ["2026-10-24T00:00:00Z", "NOT_SYNCHRONIZED", "NO_LLM_NEEDED"],
+  ["2026-10-23T23:59:59Z", "NOT_SYNCHRONIZED", "SIMPLE_EXPLANATION"],
+  ["2026-10-24T01:00:00Z", "TIMEOUT", "SIMPLE_EXPLANATION"],
+] as const)(
+  "checks sync lag boundary and explicit error %s %s",
+  async (lastSuccessAt, typedErrorCode, llmEscalation) => {
+    const input = SanitizedDecisionInputSchema.parse({
+      ...profit(),
+      eventType: "SYNC_FAILURE",
+      baseline: null,
+      facts: { lastSuccessAt, typedErrorCode, lagSeconds: null, affectedResourceKind: "ORDERS" },
+    });
+    expect(await evaluate(input)).toMatchObject({ labels: { llmEscalation } });
+  },
+);
+
+it("uses authoritative aligned baseline medians instead of optional representative conversion rates", async () => {
+  const input = conversion();
+  if (input.eventType !== "CONVERSION_DROP") throw new Error("Conversion fixture required");
+  const candidate = SanitizedDecisionInputSchema.parse({
+    ...input,
+    facts: { ...input.facts, baselineConversion: { ...rate(1, 200), period: previous } },
+  });
+  expect(await evaluate(candidate)).toMatchObject({
+    labels: { llmEscalation: "SIMPLE_EXPLANATION" },
+  });
+});
 
 function conversionEvidence(input = conversion(null, null)): EventEvidenceV1 {
   if (input.eventType !== "CONVERSION_DROP" || !input.baseline?.period)
@@ -453,7 +604,7 @@ it("caps opportunity labels at INFO/LOW and low priority without granting author
   const input = SanitizedDecisionInputSchema.parse({
     ...profit(),
     eventType: "PRODUCT_BREAKOUT",
-    baseline: { ...baseline(), measure: { kind: "PAID_UNITS", unit: "units" } },
+    baseline: { ...baseline(), measure: { kind: "PAID_UNITS", unit: "units" }, median: 10, mad: 0 },
     facts: {
       salesUnits: 50,
       salesWindow: period,
