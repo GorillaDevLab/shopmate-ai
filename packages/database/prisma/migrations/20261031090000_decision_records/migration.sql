@@ -73,6 +73,7 @@ CREATE TABLE public.decision_records (
 );
 CREATE TABLE public.decision_comparisons (
   id TEXT COLLATE "C" NOT NULL,
+  "claimId" UUID NOT NULL,
   "organizationId" TEXT COLLATE "C" NOT NULL,
   "workspaceId" TEXT COLLATE "C" NOT NULL,
   "storeId" TEXT COLLATE "C" NOT NULL,
@@ -96,15 +97,15 @@ CREATE TABLE public.decision_comparisons (
   CONSTRAINT decision_comparisons_pkey PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX decision_claims_key ON public.decision_claims
-  ("organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId","evidenceId","evidenceVersion","evidenceHash","decisionKey");
+  ("eventId","evidenceId","decisionKey");
 CREATE UNIQUE INDEX decision_claims_reference_key ON public.decision_claims
-  (id,"claimToken","organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey");
+  (id,"claimToken","organizationId","workspaceId","storeId","connectionId","externalStoreId");
 CREATE UNIQUE INDEX decision_runs_scope_key ON public.decision_runs
   (id,"organizationId","workspaceId","storeId","connectionId","externalStoreId");
 CREATE UNIQUE INDEX decision_runs_winner_key ON public.decision_runs (id,"claimId",mode,"resultStatus");
 CREATE UNIQUE INDEX decision_runs_fallback_key ON public.decision_runs (id,"claimId","correlationId",mode,"resultStatus");
-CREATE UNIQUE INDEX decision_runs_comparison_key ON public.decision_runs
-  (id,"organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey","correlationId",mode,"resultStatus");
+CREATE UNIQUE INDEX decision_claims_scope_key ON public.decision_claims
+  (id,"organizationId","workspaceId","storeId","connectionId","externalStoreId");
 CREATE INDEX decision_runs_history_idx ON public.decision_runs ("organizationId","workspaceId","storeId","eventId","createdAt",id);
 CREATE UNIQUE INDEX decision_comparisons_pair_key ON public.decision_comparisons ("primaryRunId","shadowRunId","evaluationVersion");
 ALTER TABLE public.decision_claims
@@ -113,18 +114,20 @@ ALTER TABLE public.decision_claims
   ADD CONSTRAINT decision_claims_winner_fkey FOREIGN KEY ("winnerRunId",id,"winnerMode","winnerStatus")
     REFERENCES public.decision_runs(id,"claimId",mode,"resultStatus") ON DELETE RESTRICT ON UPDATE NO ACTION;
 ALTER TABLE public.decision_runs
-  ADD CONSTRAINT decision_runs_claim_fkey FOREIGN KEY ("claimId","claimToken","organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey")
-    REFERENCES public.decision_claims(id,"claimToken","organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  ADD CONSTRAINT decision_runs_claim_fkey FOREIGN KEY ("claimId","claimToken","organizationId","workspaceId","storeId","connectionId","externalStoreId")
+    REFERENCES public.decision_claims(id,"claimToken","organizationId","workspaceId","storeId","connectionId","externalStoreId") ON DELETE RESTRICT ON UPDATE NO ACTION,
   ADD CONSTRAINT decision_runs_fallback_fkey FOREIGN KEY ("fallbackOf","claimId","correlationId","fallbackMode","fallbackStatus")
     REFERENCES public.decision_runs(id,"claimId","correlationId",mode,"resultStatus") ON DELETE RESTRICT ON UPDATE NO ACTION;
 ALTER TABLE public.decision_records
   ADD CONSTRAINT decision_records_run_fkey FOREIGN KEY ("runId","organizationId","workspaceId","storeId","connectionId","externalStoreId")
     REFERENCES public.decision_runs(id,"organizationId","workspaceId","storeId","connectionId","externalStoreId") ON DELETE RESTRICT ON UPDATE NO ACTION;
 ALTER TABLE public.decision_comparisons
-  ADD CONSTRAINT decision_comparisons_primary_fkey FOREIGN KEY ("primaryRunId","organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey","correlationId","primaryMode","resultStatus")
-    REFERENCES public.decision_runs(id,"organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey","correlationId",mode,"resultStatus") ON DELETE RESTRICT ON UPDATE NO ACTION,
-  ADD CONSTRAINT decision_comparisons_shadow_fkey FOREIGN KEY ("shadowRunId","organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey","correlationId","shadowMode","resultStatus")
-    REFERENCES public.decision_runs(id,"organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey","correlationId",mode,"resultStatus") ON DELETE RESTRICT ON UPDATE NO ACTION;
+  ADD CONSTRAINT decision_comparisons_claim_fkey FOREIGN KEY ("claimId","organizationId","workspaceId","storeId","connectionId","externalStoreId")
+    REFERENCES public.decision_claims(id,"organizationId","workspaceId","storeId","connectionId","externalStoreId") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  ADD CONSTRAINT decision_comparisons_primary_fkey FOREIGN KEY ("primaryRunId","claimId","correlationId","primaryMode","resultStatus")
+    REFERENCES public.decision_runs(id,"claimId","correlationId",mode,"resultStatus") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  ADD CONSTRAINT decision_comparisons_shadow_fkey FOREIGN KEY ("shadowRunId","claimId","correlationId","shadowMode","resultStatus")
+    REFERENCES public.decision_runs(id,"claimId","correlationId",mode,"resultStatus") ON DELETE RESTRICT ON UPDATE NO ACTION;
 
 CREATE FUNCTION public.decision_codes_valid(value_ JSONB, allowed_ TEXT[], minimum_ INTEGER) RETURNS BOOLEAN
 LANGUAGE plpgsql IMMUTABLE SET search_path=pg_catalog AS $$
@@ -235,12 +238,32 @@ BEGIN
   RETURN NEW;
 END
 $$;
+-- Keep variable-width evidence outside redundant B-tree tuples; compare the raw values exactly.
+CREATE FUNCTION public.decision_binding_matches(row_ JSONB, lease_ public.decision_claims) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
+  SELECT (ROW(row_->>'eventId' COLLATE "C",row_->>'fingerprint' COLLATE "C",row_->>'evidenceId' COLLATE "C",row_->>'evidenceVersion' COLLATE "C",row_->>'evidenceHash' COLLATE "C",row_->>'decisionKey' COLLATE "C")
+    =ROW(lease_."eventId",lease_.fingerprint,lease_."evidenceId",lease_."evidenceVersion",lease_."evidenceHash",lease_."decisionKey")) IS TRUE
+$$;
+CREATE FUNCTION public.decision_comparison_binding() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE lease_ public.decision_claims;
+BEGIN
+  SELECT * INTO lease_ FROM public.decision_claims WHERE id=NEW."claimId";
+  IF NOT public.decision_binding_matches(to_jsonb(NEW),lease_) THEN
+    RAISE EXCEPTION 'Decision comparison must match its immutable claim' USING ERRCODE='23503';
+  END IF;
+  RETURN NEW;
+END
+$$;
 CREATE FUNCTION public.decision_run_current() RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE lease_ public.decision_claims; event_ public.events;
 BEGIN
   SELECT * INTO event_ FROM public.events WHERE id=NEW."eventId" FOR UPDATE;
   SELECT * INTO lease_ FROM public.decision_claims WHERE id=NEW."claimId" FOR UPDATE;
+  IF NOT public.decision_binding_matches(to_jsonb(NEW),lease_) THEN
+    RAISE EXCEPTION 'Decision run must match its immutable claim' USING ERRCODE='23503';
+  END IF;
   IF lease_.id IS NOT NULL AND (clock_timestamp()>=lease_."expiresAt"
     OR event_.revision IS DISTINCT FROM lease_."eventRevision"
     OR event_."currentEvidenceId" IS DISTINCT FROM lease_."evidenceId"
@@ -252,6 +275,7 @@ BEGIN
   RETURN NEW;
 END
 $$;
+CREATE TRIGGER decision_comparisons_binding BEFORE INSERT ON public.decision_comparisons FOR EACH ROW EXECUTE FUNCTION public.decision_comparison_binding();
 CREATE TRIGGER decision_records_projection BEFORE INSERT ON public.decision_records FOR EACH ROW EXECUTE FUNCTION public.decision_record_projection();
 CREATE TRIGGER decision_claims_update BEFORE UPDATE ON public.decision_claims FOR EACH ROW EXECUTE FUNCTION public.decision_claim_update();
 CREATE TRIGGER decision_runs_current BEFORE INSERT ON public.decision_runs FOR EACH ROW EXECUTE FUNCTION public.decision_run_current();
@@ -274,7 +298,7 @@ BEGIN
   END IF;
   INSERT INTO public.decision_claims ("organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId","eventRevision",fingerprint,"evidenceId","evidenceVersion","evidenceHash","decisionKey","claimToken","expiresAt")
     VALUES (source_."organizationId",source_."workspaceId",source_."storeId",source_."connectionId",source_."externalStoreId",source_.id,source_.revision,source_.fingerprint,evidence_,version_,hash_,key_,token_,deadline_)
-    ON CONFLICT ("organizationId","workspaceId","storeId","connectionId","externalStoreId","eventId","evidenceId","evidenceVersion","evidenceHash","decisionKey") DO NOTHING;
+    ON CONFLICT ("eventId","evidenceId","decisionKey") DO NOTHING;
   SELECT * INTO lease_ FROM public.decision_claims WHERE "eventId"=event_ AND "evidenceId"=evidence_
     AND "evidenceVersion"=version_ AND "evidenceHash"=hash_ AND "decisionKey"=key_;
   RETURN lease_;
@@ -319,7 +343,8 @@ GRANT SELECT ON public.decision_claims,public.decision_runs,public.decision_reco
 GRANT INSERT ON public.decision_runs,public.decision_records,public.decision_comparisons TO shopmate_decision_writer;
 REVOKE ALL ON FUNCTION public.decision_claim(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ),public.decision_commit(UUID,TEXT,TEXT),
   public.decision_codes_valid(JSONB,TEXT[],INTEGER),public.decision_label_valid(TEXT,JSONB),public.decision_label_key(TEXT),public.decision_labels_valid(JSONB),
-  public.decision_confidence_valid(JSONB),public.decision_result_valid(public.decision_runs),public.decision_record_projection(),public.decision_claim_update(),public.decision_run_current() FROM PUBLIC;
+  public.decision_confidence_valid(JSONB),public.decision_result_valid(public.decision_runs),public.decision_record_projection(),public.decision_claim_update(),public.decision_run_current(),
+  public.decision_binding_matches(JSONB,public.decision_claims),public.decision_comparison_binding() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.event_scope_access(TEXT,TEXT,TEXT,TEXT,TEXT,BOOLEAN) TO shopmate_decision_reader,shopmate_decision_writer;
 GRANT EXECUTE ON FUNCTION public.decision_claim(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ),public.decision_commit(UUID,TEXT,TEXT),
   public.decision_codes_valid(JSONB,TEXT[],INTEGER),public.decision_label_valid(TEXT,JSONB),public.decision_label_key(TEXT),public.decision_labels_valid(JSONB),

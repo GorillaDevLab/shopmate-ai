@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
+import { randomUUID, randomBytes } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import process from "node:process";
 import test from "node:test";
@@ -9,7 +10,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { requireIsolatedDatabaseUrl } from "../helpers/isolated-postgres.mjs";
 import { tenantEnvironment } from "../../../../scripts/test-tenant-database.mjs";
-import { EventEvidenceV1Schema, DecisionResultSchema } from "@shopmate/contracts";
+import { EventEvidenceV1Schema, DecisionResultSchema, ExternalIdSchema } from "@shopmate/contracts";
 
 if (!process.env.TEST_DATABASE_URL)
   throw new Error("Decision storage requires runner TEST_DATABASE_URL");
@@ -234,8 +235,8 @@ function financialFacts(quality) {
     },
   };
 }
-async function appendEvent(client, scope = binding) {
-  const row = event(scope);
+async function appendEvent(client, scope = binding, patch = {}) {
+  const row = { ...event(scope), ...patch };
   await client.query("BEGIN");
   try {
     await insert(client, "events", row);
@@ -266,7 +267,13 @@ async function context(client, user, action, patch = {}) {
       await client.query("SELECT set_config($1,$2,false)", [`app.${key}`, ""]);
   }
 }
-async function claim(client, row, key = randomUUID(), deadline = new Date(Date.now() + 60_000)) {
+async function claim(
+  client,
+  row,
+  key = randomUUID(),
+  deadline = new Date(Date.now() + 60_000),
+  token = randomUUID(),
+) {
   return (
     await client.query("SELECT * FROM public.decision_claim($1,$2,$3,$4,$5,$6,$7)", [
       row.id,
@@ -274,7 +281,7 @@ async function claim(client, row, key = randomUUID(), deadline = new Date(Date.n
       row.currentEvidenceVersion,
       row.currentEvidenceHash,
       key,
-      randomUUID(),
+      token,
       deadline,
     ])
   ).rows[0];
@@ -324,6 +331,7 @@ function run(lease, patch = {}) {
 }
 function comparison(primary, shadow, patch = {}) {
   return {
+    claimId: primary.claimId,
     ...binding,
     id: randomUUID(),
     schemaVersion: 1,
@@ -940,6 +948,195 @@ test("uppercase UUID correlation preserves original result JSON through fallback
     const row = await appendEvent(client);
     await context(client, "decision-OWNER", async () =>
       uppercaseHistory(client, await claim(client, row)),
+    );
+  });
+});
+
+function incompressibleId(length) {
+  const bytes = randomBytes(length * 2);
+  return ExternalIdSchema.parse(
+    Array.from({ length }, (_, index) =>
+      String.fromCharCode(0x4e00 + (bytes.readUInt16BE(index * 2) % 20_000)),
+    ).join(""),
+  );
+}
+async function longHistory(client, row, makeId, scope = binding) {
+  const key = makeId(),
+    token = makeId();
+  const lease = await claim(client, row, key, new Date(Date.now() + 60_000), token);
+  assert.equal((await claim(client, row, key)).id, lease.id);
+  assert.equal(lease.claimToken, token);
+  const failure = run(lease, {
+    ...scope,
+    id: makeId(),
+    resultStatus: "UNAVAILABLE",
+    effective: null,
+    result: { schemaVersion: 1, correlationId, status: "UNAVAILABLE", code: "TIMEOUT" },
+  });
+  const primary = run(lease, {
+    ...scope,
+    id: makeId(),
+    fallbackOf: failure.id,
+    fallbackMode: "PRIMARY",
+    fallbackStatus: "UNAVAILABLE",
+  });
+  const shadow = run(lease, { ...scope, id: makeId(), mode: "SHADOW", effective: null });
+  for (const outcome of [failure, primary, shadow]) await insert(client, "decision_runs", outcome);
+  await longProjections(client, primary, shadow, scope, makeId);
+  await exactBindingCases(client, lease, primary, shadow);
+  assert.equal(await commit(client, lease, primary.id), true);
+}
+async function longProjections(client, primary, shadow, scope, makeId) {
+  await insert(client, "decision_records", {
+    ...scope,
+    runId: primary.id,
+    decisionType: "SEVERITY",
+    suggested: "HIGH",
+    effective: "HIGH",
+  });
+  await insert(
+    client,
+    "decision_comparisons",
+    comparison(primary, shadow, {
+      ...scope,
+      id: makeId(),
+      evaluationVersion: makeId(),
+    }),
+  );
+}
+async function exactBindingCases(client, lease, primary, shadow) {
+  const scope = Object.fromEntries(Object.keys(binding).map((key) => [key, primary[key]]));
+  for (const field of [
+    "eventId",
+    "fingerprint",
+    "evidenceId",
+    "evidenceVersion",
+    "evidenceHash",
+    "decisionKey",
+  ])
+    for (const table of ["decision_runs", "decision_comparisons"]) {
+      const row =
+        table === "decision_runs" ? run(lease, scope) : comparison(primary, shadow, scope);
+      await assert.rejects(insert(client, table, { ...row, [field]: "other" }), { code: "23503" });
+    }
+  for (const field of Object.keys(binding))
+    await assert.rejects(
+      insert(
+        client,
+        "decision_comparisons",
+        comparison(primary, shadow, {
+          ...scope,
+          [field]: "other",
+        }),
+      ),
+      { code: "23503" },
+    );
+}
+function supplementaryId() {
+  const bytes = randomBytes(256);
+  return ExternalIdSchema.parse(
+    Array.from({ length: 128 }, (_, index) =>
+      String.fromCodePoint(0x20000 + (bytes.readUInt16BE(index * 2) % 0x8000)),
+    ).join(""),
+  );
+}
+async function literalSize(client, value, bytes, characters) {
+  assert.equal(value.length, 256);
+  assert.equal(Buffer.byteLength(value), bytes);
+  const stored = await client.query(
+    "SELECT octet_length($1::text) AS bytes, char_length($1::text) AS characters, metric_literal($1) AS valid",
+    [value],
+  );
+  assert.deepEqual(stored.rows[0], { bytes, characters, valid: true });
+  assert.equal(ExternalIdSchema.safeParse(value + "a").success, false);
+  assert.equal(
+    (await client.query("SELECT metric_literal($1) AS valid", [value + "a"])).rows[0].valid,
+    false,
+  );
+}
+for (const [name, makeId, bytes, characters] of [
+  ["CJK", () => incompressibleId(256), 768, 256],
+  ["supplementary", supplementaryId, 512, 128],
+])
+  test(`maximum ${name} references fit decision indexes after event evidence accepts them`, async () => {
+    await withDatabase(async (client) => {
+      await migrate(client);
+      await fixture(client);
+      await literalSize(client, makeId(), bytes, characters);
+      const row = await appendEvent(client, binding, {
+        id: makeId(),
+        currentEvidenceId: makeId(),
+        currentEvidenceVersion: makeId(),
+      });
+      assert.equal((await client.query("SELECT count(*) FROM event_evidence")).rows[0].count, "1");
+      await context(client, "decision-OWNER", () => longHistory(client, row, makeId));
+    });
+  });
+
+async function maximumTenant(client, scope) {
+  await client.query('INSERT INTO "Merchant" (id,name,slug,"updatedAt") VALUES ($1,$1,$1,now())', [
+    "decision-max",
+  ]);
+  await client.query(
+    'UPDATE "Organization" SET "legacyMerchantId"=NULL WHERE "legacyMerchantId"=$1',
+    ["decision-max"],
+  );
+  await client.query(
+    'INSERT INTO "Organization" (id,name,"legacyMerchantId","updatedAt") VALUES ($1,$1,$2,now())',
+    [scope.organizationId, "decision-max"],
+  );
+  await client.query(
+    'INSERT INTO "Workspace" (id,"organizationId",name,slug,"updatedAt") VALUES ($1,$2,$1,$1,now())',
+    [scope.workspaceId, scope.organizationId],
+  );
+}
+async function maximumScopeFixture(client) {
+  const scope = Object.fromEntries(
+    Object.keys(binding).map((key) => [
+      key,
+      key === "externalStoreId"
+        ? incompressibleId(144) + supplementaryId().slice(0, 112)
+        : randomBytes(64).toString("hex"),
+    ]),
+  );
+  await maximumTenant(client, scope);
+  await client.query(
+    'INSERT INTO "Store" (id,"merchantId",name,city,platform,"organizationId","workspaceId") VALUES ($1,$2,$1,$3,$4,$5,$6)',
+    [scope.storeId, "decision-max", "Shanghai", "MOCK", scope.organizationId, scope.workspaceId],
+  );
+  await client.query(
+    'INSERT INTO "PlatformConnection" (id,"organizationId","workspaceId","storeId","externalStoreId") VALUES ($1,$2,$3,$4,$5)',
+    [
+      scope.connectionId,
+      scope.organizationId,
+      scope.workspaceId,
+      scope.storeId,
+      scope.externalStoreId,
+    ],
+  );
+  await client.query(
+    'INSERT INTO "OrganizationMember" (id,"organizationId","userId",role,"updatedAt") VALUES ($1,$2,$1,$3,now())',
+    ["decision-OWNER", scope.organizationId, "OWNER"],
+  );
+  return scope;
+}
+test("maximum tenant scope and CJK token fit scoped decision indexes", async () => {
+  await withDatabase(async (client) => {
+    await migrate(client);
+    const scope = await maximumScopeFixture(client);
+    await literalSize(client, scope.externalStoreId, 656, 200);
+    const row = await appendEvent(client, scope);
+    const settings = Object.fromEntries(
+      Object.entries(scope).map(([key, value]) => [
+        key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`),
+        value,
+      ]),
+    );
+    await context(
+      client,
+      "decision-OWNER",
+      () => longHistory(client, row, () => incompressibleId(256), scope),
+      settings,
     );
   });
 });
