@@ -1014,11 +1014,12 @@ function rejectMetricRuntimeTargets(runner, runtime, member, metrics) {
   );
 }
 const metricMigration = "20261004090000_metric_snapshots";
-// The event evidence FK depends on metric_snapshots, so restore it after metric history too.
+// Event evidence and decision storage depend on metric tables/helpers; restore the full closure.
 const deferredMetricMigrations = [
   metricMigration,
   "20261023090000_metric_snapshot_current_source",
   "20261025090000_events_evidence",
+  "20261031090000_decision_records",
 ];
 const databaseRoot = fileURLToPath(new URL("../../", import.meta.url));
 async function prisma(url, args) {
