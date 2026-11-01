@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { requireIsolatedDatabaseUrl } from "../helpers/isolated-postgres.mjs";
 import { tenantEnvironment } from "../../../../scripts/test-tenant-database.mjs";
-import { EventEvidenceV1Schema } from "@shopmate/contracts";
+import { EventEvidenceV1Schema, DecisionResultSchema } from "@shopmate/contracts";
 
 if (!process.env.TEST_DATABASE_URL)
   throw new Error("Decision storage requires runner TEST_DATABASE_URL");
@@ -875,5 +875,71 @@ test("separate PostgreSQL connections share one stable claim and one primary win
     await migrate(client);
     await fixture(client);
     await concurrentClaims(client, url, await appendEvent(client));
+  });
+});
+async function invalidCorrelations(client, lease) {
+  for (const value of [null, 123, "malformed", randomUUID()])
+    for (const resultStatus of ["EVALUATED", "UNAVAILABLE"]) {
+      const result =
+        resultStatus === "EVALUATED"
+          ? { ...run(lease).result, correlationId: value }
+          : { schemaVersion: 1, status: resultStatus, correlationId: value, code: "TIMEOUT" };
+      await assert.rejects(
+        insert(
+          client,
+          "decision_runs",
+          run(lease, {
+            resultStatus,
+            result,
+            effective: resultStatus === "EVALUATED" ? labels : null,
+          }),
+        ),
+        { code: "23514" },
+      );
+    }
+}
+async function uppercaseHistory(client, lease) {
+  await invalidCorrelations(client, lease);
+  const uppercase = correlationId.toUpperCase();
+  const failure = run(lease, {
+    correlationId: uppercase,
+    resultStatus: "UNAVAILABLE",
+    effective: null,
+    result: { schemaVersion: 1, correlationId: uppercase, status: "UNAVAILABLE", code: "TIMEOUT" },
+  });
+  const primary = run(lease, {
+    correlationId: uppercase,
+    fallbackOf: failure.id,
+    fallbackMode: "PRIMARY",
+    fallbackStatus: "UNAVAILABLE",
+    result: { ...run(lease).result, correlationId: uppercase },
+  });
+  const shadow = run(lease, {
+    correlationId: uppercase,
+    mode: "SHADOW",
+    effective: null,
+    result: { ...run(lease).result, correlationId: uppercase },
+  });
+  for (const outcome of [failure, primary, shadow]) {
+    DecisionResultSchema.parse(outcome.result);
+    const stored = (await insert(client, "decision_runs", outcome)).rows[0];
+    assert.equal(stored.result.correlationId, uppercase);
+    assert.equal(stored.correlationId, correlationId);
+  }
+  await insert(
+    client,
+    "decision_comparisons",
+    comparison(primary, shadow, { correlationId: uppercase }),
+  );
+  assert.equal(await commit(client, lease, primary.id), true);
+}
+test("uppercase UUID correlation preserves original result JSON through fallback and comparison", async () => {
+  await withDatabase(async (client) => {
+    await migrate(client);
+    await fixture(client);
+    const row = await appendEvent(client);
+    await context(client, "decision-OWNER", async () =>
+      uppercaseHistory(client, await claim(client, row)),
+    );
   });
 });

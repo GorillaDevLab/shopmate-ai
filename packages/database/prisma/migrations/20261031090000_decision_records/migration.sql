@@ -172,7 +172,10 @@ LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
 $$;
 CREATE FUNCTION public.decision_result_valid(row_ public.decision_runs) RETURNS BOOLEAN
 LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
-  SELECT (jsonb_typeof(row_.result)='object' AND row_.result @> jsonb_build_object('schemaVersion',1,'status',row_."resultStatus",'correlationId',row_."correlationId"::text)
+  SELECT (jsonb_typeof(row_.result)='object' AND row_.result @> jsonb_build_object('schemaVersion',1,'status',row_."resultStatus")
+    AND CASE WHEN jsonb_typeof(row_.result->'correlationId')='string'
+      AND row_.result->>'correlationId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      THEN (row_.result->>'correlationId')::uuid=row_."correlationId" ELSE false END
     AND CASE row_."resultStatus" WHEN 'EVALUATED' THEN
       row_.result ?& ARRAY['schemaVersion','correlationId','status','rulesetVersion','labels','confidenceMetadata']
       AND row_.result-ARRAY['schemaVersion','correlationId','status','rulesetVersion','labels','confidenceMetadata']='{}'::jsonb
