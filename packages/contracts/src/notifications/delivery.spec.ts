@@ -1,11 +1,28 @@
-import { expect, it } from "vitest";
+import { expect, expectTypeOf, it } from "vitest";
 import {
   createNotificationIntentKey,
   DailyBriefSchema,
   DeliveryReceiptSchema,
   NotificationIntentSchema,
+  NotificationIntentIdentitySchema,
   NotificationPreferencesSchema,
   NotificationRecipientSchema,
+  NotificationEnqueueRequestSchema,
+  NotificationInboxQuerySchema,
+  NotificationInboxPageSchema,
+  NotificationPreferencesQuerySchema,
+  NotificationPreferencesUpdateSchema,
+  NotificationMarkReadRequestSchema,
+  NotificationBriefQuerySchema,
+  createEventFingerprint,
+} from "../index.js";
+import type {
+  DecisionOutboxRequest,
+  SecurityClock,
+  TransactionalEnqueuePort,
+  NotificationReadPort,
+  NotificationPreferencesPort,
+  NotificationEnqueueRequest,
 } from "../index.js";
 
 const binding = {
@@ -331,4 +348,276 @@ it("binds read state to actual delivery time and rejects backdated reads", () =>
   expect(DeliveryReceiptSchema.safeParse({ ...delivered, readState: "UNREAD" }).success).toBe(
     false,
   );
+});
+
+const actor = {
+  userId: "user-a",
+  merchantId: "merchant-a",
+  organizationId: binding.organizationId,
+  workspaceId: binding.workspaceId,
+  role: "VIEWER",
+  permissions: ["tenant:read"],
+};
+const labels = {
+  severity: "LOW",
+  notificationRoute: "DAILY_BRIEF",
+  llmEscalation: "NO_LLM_NEEDED",
+  evidenceSufficiency: "SUFFICIENT",
+  attentionPriority: "NORMAL_PRIORITY",
+  reasonCodes: ["NO_MATERIAL_CHANGE"],
+};
+const result = {
+  schemaVersion: 1,
+  status: "EVALUATED",
+  correlationId: "57a1befc-02cb-4acc-8a1a-6975b2016240",
+  rulesetVersion: "rules-v1",
+  labels,
+  confidenceMetadata: null,
+};
+const run = {
+  schemaVersion: 1,
+  id: "run-a",
+  eventId: "event-a",
+  decisionKey: "decision-a",
+  requestId: "request-a",
+  evidence: reference,
+  provider: { key: "rules", version: "v1", supportedInputVersions: [1] },
+  rulesetVersion: "rules-v1",
+  mode: "PRIMARY",
+  fallbackOf: null,
+  result,
+  latencyMs: 1,
+  createdAt: instant,
+  effective: labels,
+  overrideReason: null,
+};
+function eventFixture() {
+  return {
+    schemaVersion: 1,
+    id: "event-a",
+    binding,
+    eventType: "SYNC_FAILURE",
+    entity: reference.entity,
+    fingerprint: createEventFingerprint(reference),
+    severityFloor: "LOW",
+    rulePolicyVersion: "v1",
+    state: "OPEN",
+    revision: 1,
+    firstSeenAt: instant,
+    lastSeenAt: instant,
+    currentEvidence: reference,
+  };
+}
+const facts = {
+  lastSuccessAt: instant,
+  lagSeconds: 0,
+  typedErrorCode: "TEMPORARY",
+  affectedResourceKind: "INVENTORY",
+};
+function evidenceFixture() {
+  const period = briefFixture().period;
+  return {
+    schemaVersion: 1,
+    binding,
+    ...period,
+    observedAt: instant,
+    sourceWatermark: instant,
+    dataStatus: "VERIFIED",
+    sampleSize: 1,
+    coverageBasisPoints: 10000,
+    issues: [],
+    definitionVersion: "metrics-v1",
+    baselineVersion: null,
+    baselineAlignment: "MISSING",
+    baseline: null,
+    eventType: "SYNC_FAILURE",
+    entity: reference.entity,
+    facts,
+    sourceReferences: [
+      {
+        kind: "NORMALIZED_AGGREGATE",
+        id: "source-a",
+        version: "v1",
+        hash: "source-hash",
+        binding,
+        definitionVersion: "metrics-v1",
+        period,
+        observedAt: instant,
+        measure: null,
+      },
+    ],
+  };
+}
+function enqueueFixture() {
+  return {
+    intent: intentFixture(),
+    decision: {
+      context: {
+        schemaVersion: 1,
+        actor,
+        requestId: "request-a",
+        correlationId: result.correlationId,
+        event: eventFixture(),
+        evidence: { reference, evidence: evidenceFixture() },
+      },
+      run,
+      control: {
+        timeDomain: "SECURITY_UTC",
+        deadlineAt: "2026-10-25T16:01:00Z",
+        signal: new AbortController().signal,
+      },
+    },
+  };
+}
+const query = { actor, recipient, limit: 25, cursor: null };
+
+it("validates existing PRIMARY decision request without granting current authority", () => {
+  const parsed = NotificationEnqueueRequestSchema.parse(enqueueFixture());
+  expect(parsed.decision.run.effective.notificationRoute).toBe("DAILY_BRIEF");
+  expectTypeOf<NotificationEnqueueRequest["decision"]>().toEqualTypeOf<DecisionOutboxRequest>();
+  expect(Object.isFrozen(parsed)).toBe(true);
+});
+
+it.each([
+  { mode: "SHADOW", effective: null },
+  { effective: { ...labels, notificationRoute: "IGNORE" }, overrideReason: "COOLDOWN" },
+  {
+    result: {
+      schemaVersion: 1,
+      status: "UNAVAILABLE",
+      correlationId: result.correlationId,
+      code: "TIMEOUT",
+    },
+    effective: null,
+  },
+  { eventId: "event-b" },
+  { id: "run-b" },
+  { requestId: "request-b" },
+  { evidence: { ...reference, hash: "different" } },
+  { effective: { ...labels, severity: "HIGH" }, overrideReason: "SEVERITY_FLOOR" },
+])("rejects non-authoritative or mismatched routed run %#", (mutation) => {
+  const request = enqueueFixture();
+  expect(
+    NotificationEnqueueRequestSchema.safeParse({
+      ...request,
+      decision: { ...request.decision, run: { ...run, ...mutation } },
+    }).success,
+  ).toBe(false);
+});
+
+it.each([
+  { eventState: "ACKNOWLEDGED" },
+  { eventRevision: 2 },
+  { route: "NOTIFY_NOW" },
+  { recipient: { ...recipient, binding: { ...binding, storeId: "store-b" } } },
+])("rejects intent/current event disagreement %#", (mutation) => {
+  const request = enqueueFixture();
+  const candidate = { ...request.intent, ...mutation };
+  const changedIdentity = NotificationIntentIdentitySchema.parse({
+    recipient: candidate.recipient,
+    eventId: candidate.eventId,
+    eventState: candidate.eventState,
+    eventRevision: candidate.eventRevision,
+    channel: candidate.channel,
+  });
+  const intent = {
+    ...candidate,
+    dedupKey: createNotificationIntentKey(changedIdentity),
+    evidence: { ...candidate.evidence, binding: candidate.recipient.binding },
+  };
+  expect(NotificationIntentSchema.safeParse(intent).success).toBe(true);
+  expect(NotificationEnqueueRequestSchema.safeParse({ ...request, intent }).success).toBe(false);
+});
+
+it("retains source observation independently from true security scheduling", () => {
+  const request = enqueueFixture();
+  const createdAt = "2026-11-03T01:00:00Z";
+  expect(
+    NotificationEnqueueRequestSchema.safeParse({
+      ...request,
+      intent: { ...request.intent, createdAt, notBefore: createdAt },
+    }).success,
+  ).toBe(true);
+  expect(
+    NotificationEnqueueRequestSchema.safeParse({
+      ...request,
+      decision: {
+        ...request.decision,
+        control: { ...request.decision.control, timeDomain: "BUSINESS" },
+      },
+    }).success,
+  ).toBe(false);
+});
+
+it("validates recipient self-read selection and bounded pagination", () => {
+  expect(NotificationInboxQuerySchema.safeParse(query).success).toBe(true);
+  expect(NotificationPreferencesQuerySchema.safeParse({ actor, recipient }).success).toBe(true);
+  expect(
+    NotificationMarkReadRequestSchema.safeParse({ actor, recipient, intentId: "intent-a" }).success,
+  ).toBe(true);
+  expect(
+    NotificationBriefQuerySchema.safeParse({
+      actor,
+      recipient,
+      businessDate: "2026-10-25",
+      timezone: "Asia/Shanghai",
+    }).success,
+  ).toBe(true);
+});
+
+it.each([
+  { limit: 101 },
+  { limit: 0.5 },
+  { cursor: "x".repeat(1025) },
+  { actor: { ...actor, userId: "user-b" } },
+  { actor: { ...actor, organizationId: "org-b" } },
+  { actor: { ...actor, workspaceId: "workspace-b" } },
+  { actor: { ...actor, permissions: [] } },
+  { rawContact: "private" },
+])("rejects unauthorized or invalid read query %#", (mutation) => {
+  expect(NotificationInboxQuerySchema.safeParse({ ...query, ...mutation }).success).toBe(false);
+});
+
+it("requires page receipts to match the selected recipient", () => {
+  const page = { recipient, items: [receiptFixture()], nextCursor: null };
+  expect(NotificationInboxPageSchema.safeParse(page).success).toBe(true);
+  expect(
+    NotificationInboxPageSchema.safeParse({
+      ...page,
+      recipient: { ...recipient, userId: "user-b" },
+    }).success,
+  ).toBe(false);
+});
+
+it("binds preference updates to authorized recipient and compare-and-swap version", () => {
+  const update = { actor, recipient, expectedVersion: null, preferences: preferencesFixture() };
+  expect(NotificationPreferencesUpdateSchema.safeParse(update).success).toBe(true);
+  expect(
+    NotificationPreferencesUpdateSchema.safeParse({ ...update, expectedVersion: 1 }).success,
+  ).toBe(false);
+  expect(
+    NotificationPreferencesUpdateSchema.safeParse({
+      ...update,
+      expectedVersion: 1,
+      preferences: { ...preferencesFixture(), version: 2 },
+    }).success,
+  ).toBe(true);
+  expect(
+    NotificationPreferencesUpdateSchema.safeParse({
+      ...update,
+      preferences: { ...preferencesFixture(), recipient: { ...recipient, userId: "user-b" } },
+    }).success,
+  ).toBe(false);
+});
+
+it("requires caller transaction and SecurityClock for enqueue and mutations", () => {
+  type Tx = Readonly<{ id: string }>;
+  expectTypeOf<Parameters<TransactionalEnqueuePort<Tx>["enqueue"]>[0]>().toEqualTypeOf<Tx>();
+  expectTypeOf<
+    Parameters<TransactionalEnqueuePort<Tx>["enqueue"]>[2]
+  >().toEqualTypeOf<SecurityClock>();
+  expectTypeOf<Parameters<NotificationReadPort["markRead"]>[1]>().toEqualTypeOf<SecurityClock>();
+  expectTypeOf<
+    Parameters<NotificationPreferencesPort["update"]>[1]
+  >().toEqualTypeOf<SecurityClock>();
 });

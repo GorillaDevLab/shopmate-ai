@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ConnectorBindingSchema,
+  CursorSchema,
   ExternalIdSchema,
   QuantitySchema,
 } from "../commerce/connector-common.schema.js";
@@ -17,8 +18,14 @@ import {
   EventStateSchema,
 } from "../events/event.schema.js";
 import { SignedMinorSchema } from "../metrics/metric.schema.js";
-import { sameDecisionEvidence } from "../decisions/decision.schema.js";
-import { TenantIdSchema } from "../tenant/tenant.schema.js";
+import {
+  EvaluationContextSchema,
+  RoutedPrimaryDecisionRunSchema,
+  sameDecisionEvidence,
+} from "../decisions/decision.schema.js";
+import { DecisionControlSchema } from "../decisions/decision-provider.js";
+import type { DecisionOutboxRequest, SecurityClock } from "../decisions/decision-ports.js";
+import { TenantContextSchema, TenantIdSchema } from "../tenant/tenant.schema.js";
 
 const version = QuantitySchema.min(1);
 export const NotificationRecipientSchema = z
@@ -259,3 +266,164 @@ export const DeliveryReceiptSchema = receiptObject
   .refine(validReceiptTimes, "Delivery timestamps precede their scheduling boundary")
   .readonly();
 export type DeliveryReceipt = z.infer<typeof DeliveryReceiptSchema>;
+
+const decisionOutboxRequestSchema = z
+  .strictObject({
+    context: EvaluationContextSchema,
+    run: RoutedPrimaryDecisionRunSchema,
+    control: DecisionControlSchema,
+  })
+  .readonly();
+const enqueueObject = z.strictObject({
+  intent: NotificationIntentSchema,
+  decision: decisionOutboxRequestSchema,
+});
+function consistentEnqueue(value: z.infer<typeof enqueueObject>): boolean {
+  const {
+    intent,
+    decision: { context, run },
+  } = value;
+  // Zod parent refinements may still run after a child refinement rejected its authority.
+  if (run.mode !== "PRIMARY" || run.result.status !== "EVALUATED" || run.effective === null)
+    return false;
+  return (
+    sameEventBinding(intent.recipient.binding, context.event.binding) &&
+    intent.eventId === context.event.id &&
+    intent.eventState === context.event.state &&
+    intent.eventRevision === context.event.revision &&
+    intent.decisionRunId === run.id &&
+    run.eventId === context.event.id &&
+    run.requestId === context.requestId &&
+    run.result.correlationId === context.correlationId &&
+    sameDecisionEvidence(intent.evidence, context.evidence.reference) &&
+    sameDecisionEvidence(run.evidence, intent.evidence) &&
+    intent.route === run.effective.notificationRoute &&
+    intent.summary.severity === run.effective.severity
+  );
+}
+/** Structural agreement only. Repository must recheck current membership and effective winning run. */
+export const NotificationEnqueueRequestSchema = enqueueObject
+  .refine(consistentEnqueue, "Notification does not match the current routed PRIMARY input")
+  .readonly();
+export type NotificationEnqueueRequest = Readonly<{
+  intent: NotificationIntent;
+  decision: DecisionOutboxRequest;
+}>;
+export type NotificationPortError = "INVALID_INPUT" | "FORBIDDEN" | "CONFLICT" | "UNAVAILABLE";
+export type NotificationPortResult<T> = Readonly<
+  { ok: true; value: T } | { ok: false; code: NotificationPortError }
+>;
+export type NotificationEnqueueOutcome = Readonly<{
+  outcome: "ENQUEUED" | "DEDUPLICATED";
+  receipt: DeliveryReceipt;
+}>;
+/** Caller owns transaction lifetime and rollback; errors abort its complete business unit. */
+export interface TransactionalEnqueuePort<TTransaction> {
+  readonly enqueue: (
+    transaction: TTransaction,
+    request: NotificationEnqueueRequest,
+    clock: SecurityClock,
+  ) => Promise<NotificationPortResult<NotificationEnqueueOutcome>>;
+}
+
+const actorSchema = TenantContextSchema.extend({
+  permissions: TenantContextSchema.shape.permissions.readonly(),
+}).readonly();
+const authorizedFields = { actor: actorSchema, recipient: NotificationRecipientSchema };
+type Selection =
+  z.infer<typeof actorSchema> extends infer A
+    ? Readonly<{ actor: A; recipient: NotificationRecipient }>
+    : never;
+function authorizedSelection(value: Selection): boolean {
+  return (
+    value.actor.userId === value.recipient.userId &&
+    value.actor.organizationId === value.recipient.binding.organizationId &&
+    value.actor.workspaceId === value.recipient.binding.workspaceId &&
+    value.actor.permissions.includes("tenant:read")
+  );
+}
+export const NotificationPreferencesQuerySchema = z
+  .strictObject(authorizedFields)
+  .refine(authorizedSelection, "Authenticated recipient scope mismatch")
+  .readonly();
+export const NotificationInboxQuerySchema = z
+  .strictObject({
+    ...authorizedFields,
+    limit: QuantitySchema.min(1).max(100),
+    cursor: CursorSchema.nullable(),
+  })
+  .refine(authorizedSelection, "Authenticated recipient scope mismatch")
+  .readonly();
+export const NotificationMarkReadRequestSchema = z
+  .strictObject({
+    ...authorizedFields,
+    intentId: ExternalIdSchema,
+  })
+  .refine(authorizedSelection, "Authenticated recipient scope mismatch")
+  .readonly();
+export const NotificationBriefQuerySchema = z
+  .strictObject({
+    ...authorizedFields,
+    businessDate: z.iso.date(),
+    timezone: NotificationTimezoneSchema,
+  })
+  .refine(authorizedSelection, "Authenticated recipient scope mismatch")
+  .readonly();
+function sameRecipient(left: NotificationRecipient, right: NotificationRecipient): boolean {
+  return left.userId === right.userId && sameEventBinding(left.binding, right.binding);
+}
+export const NotificationInboxPageSchema = z
+  .strictObject({
+    recipient: NotificationRecipientSchema,
+    items: z.array(DeliveryReceiptSchema).max(100).readonly(),
+    nextCursor: CursorSchema.nullable(),
+  })
+  .refine(
+    (value) => value.items.every((item) => sameRecipient(value.recipient, item.intent.recipient)),
+    "Inbox contains another recipient",
+  )
+  .readonly();
+export const NotificationPreferencesUpdateSchema = z
+  .strictObject({
+    ...authorizedFields,
+    expectedVersion: version.nullable(),
+    preferences: NotificationPreferencesSchema,
+  })
+  .refine(authorizedSelection, "Authenticated recipient scope mismatch")
+  .refine(
+    (value) =>
+      sameRecipient(value.recipient, value.preferences.recipient) &&
+      value.preferences.version ===
+        (value.expectedVersion === null ? 1 : value.expectedVersion + 1),
+    "Preference recipient or revision mismatch",
+  )
+  .readonly();
+
+export type NotificationPreferencesQuery = z.infer<typeof NotificationPreferencesQuerySchema>;
+export type NotificationInboxQuery = z.infer<typeof NotificationInboxQuerySchema>;
+export type NotificationMarkReadRequest = z.infer<typeof NotificationMarkReadRequestSchema>;
+export type NotificationBriefQuery = z.infer<typeof NotificationBriefQuerySchema>;
+export type NotificationInboxPage = z.infer<typeof NotificationInboxPageSchema>;
+export type NotificationPreferencesUpdate = z.infer<typeof NotificationPreferencesUpdateSchema>;
+/** Implementations recheck current recipient membership; failures never become an empty inbox. */
+export interface NotificationReadPort {
+  readonly list: (
+    query: NotificationInboxQuery,
+  ) => Promise<NotificationPortResult<NotificationInboxPage>>;
+  readonly readBrief: (
+    query: NotificationBriefQuery,
+  ) => Promise<NotificationPortResult<DailyBrief | null>>;
+  readonly markRead: (
+    request: NotificationMarkReadRequest,
+    clock: SecurityClock,
+  ) => Promise<NotificationPortResult<DeliveryReceipt>>;
+}
+export interface NotificationPreferencesPort {
+  readonly read: (
+    query: NotificationPreferencesQuery,
+  ) => Promise<NotificationPortResult<NotificationPreferences | null>>;
+  readonly update: (
+    request: NotificationPreferencesUpdate,
+    clock: SecurityClock,
+  ) => Promise<NotificationPortResult<NotificationPreferences>>;
+}
