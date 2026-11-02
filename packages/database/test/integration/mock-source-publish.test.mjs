@@ -335,9 +335,14 @@ for (const [index, [label, sql]] of corruptions.entries())
 test("certificate hash is exactly the DB JSONB recipe in a non-UTC session", async () => {
   const context = await fresh("certificate-hash");
   await seal(worker, context, [eventFor(context)]);
-  const before = Date.now(),
+  // PostgreSQL rounds publishedAt to milliseconds; bound it with the same clock and precision.
+  const before = (
+      await worker.query("SELECT clock_timestamp()::timestamptz(3) AS wall")
+    ).rows[0].wall.getTime(),
     job = (await publish(worker, context)).rows[0],
-    after = Date.now();
+    after = (
+      await worker.query("SELECT clock_timestamp()::timestamptz(3) AS wall")
+    ).rows[0].wall.getTime();
   const certificate = publicationOf(job, context.scope);
   validatePublication({ ...certificate, certificateHash: job.certificateHash });
   const expected = (
