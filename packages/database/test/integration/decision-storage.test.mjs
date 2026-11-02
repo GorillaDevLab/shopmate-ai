@@ -952,6 +952,56 @@ test("uppercase UUID correlation preserves original result JSON through fallback
   });
 });
 
+function correlatedRun(lease, value, resultStatus) {
+  const result =
+    resultStatus === "EVALUATED"
+      ? { ...run(lease).result, correlationId: value }
+      : { schemaVersion: 1, status: resultStatus, correlationId: value, code: "TIMEOUT" };
+  return run(lease, {
+    correlationId: value,
+    resultStatus,
+    result,
+    effective: resultStatus === "EVALUATED" ? labels : null,
+  });
+}
+async function uuidSemantics(t, client, lease) {
+  const invalid = [
+    "00000000-0000-0000-0000-000000000001",
+    "c4c2bd72-d62c-0c26-8ec7-43d90249e36a",
+    "c4c2bd72-d62c-9c26-8ec7-43d90249e36a",
+    "c4c2bd72-d62c-fc26-8ec7-43d90249e36a",
+    ...["0", "7", "c", "f"].map((variant) => `c4c2bd72-d62c-4c26-${variant}ec7-43d90249e36a`),
+    "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
+  ];
+  const valid = ["00000000-0000-0000-0000-000000000000", "ffffffff-ffff-ffff-ffff-ffffffffffff"];
+  for (let version = 1; version <= 8; version++)
+    for (const variant of ["8", "9", "a", "b"])
+      valid.push(`C4C2BD72-D62C-${version}C26-${variant.toUpperCase()}EC7-43D90249E36A`);
+  for (const value of [...invalid, ...valid])
+    for (const status of ["EVALUATED", "UNAVAILABLE"])
+      await t.test(`${status} UUID semantics ${value}`, async () => {
+        const outcome = correlatedRun(lease, value, status);
+        assert.equal(DecisionResultSchema.safeParse(outcome.result).success, valid.includes(value));
+        if (invalid.includes(value))
+          await assert.rejects(insert(client, "decision_runs", outcome), { code: "23514" });
+        else {
+          const stored = (await insert(client, "decision_runs", outcome)).rows[0];
+          assert.equal(stored.result.correlationId, value);
+          assert.equal(stored.correlationId, value.toLowerCase());
+        }
+      });
+}
+test("stored result UUID version and variant semantics match the shared contract", async (t) => {
+  await withDatabase(async (client) => {
+    await migrate(client);
+    await fixture(client);
+    const row = await appendEvent(client);
+    await context(client, "decision-OWNER", async () =>
+      uuidSemantics(t, client, await claim(client, row)),
+    );
+  });
+});
+
 function incompressibleId(length) {
   const bytes = randomBytes(length * 2);
   return ExternalIdSchema.parse(

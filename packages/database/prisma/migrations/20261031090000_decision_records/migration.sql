@@ -177,7 +177,7 @@ CREATE FUNCTION public.decision_result_valid(row_ public.decision_runs) RETURNS 
 LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
   SELECT (jsonb_typeof(row_.result)='object' AND row_.result @> jsonb_build_object('schemaVersion',1,'status',row_."resultStatus")
     AND CASE WHEN jsonb_typeof(row_.result->'correlationId')='string'
-      AND row_.result->>'correlationId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      AND row_.result->>'correlationId' ~ '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$'
       THEN (row_.result->>'correlationId')::uuid=row_."correlationId" ELSE false END
     AND CASE row_."resultStatus" WHEN 'EVALUATED' THEN
       row_.result ?& ARRAY['schemaVersion','correlationId','status','rulesetVersion','labels','confidenceMetadata']
