@@ -4,6 +4,16 @@ export { verifyPassword } from "./password-hash.js";
 export { createMetricSnapshotRepository } from "./metric-snapshot.repository.js";
 export { createEventRepository } from "./event.repository.js";
 export type { EventTransactionClient, EventRepositoryOptions } from "./event.repository.js";
+export { createDecisionRunRepository } from "./decision-run.repository.js";
+export type {
+  DecisionClaim,
+  DecisionClaimRequest,
+  DecisionCommitRequest,
+  DecisionEvaluationAuthority,
+  DecisionReadPort,
+  DecisionReadQuery,
+  DecisionRepositoryOptions,
+} from "./decision-run.repository.js";
 export { createMetricRuntimePool } from "./metric-runtime-pool.js";
 export type { MetricRuntimePool } from "./metric-runtime-pool.js";
 export {
