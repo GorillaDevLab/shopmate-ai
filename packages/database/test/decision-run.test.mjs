@@ -194,7 +194,7 @@ function respond(s, sql, p) {
     return [s.lease];
   }
   if (sql.includes("decision:runs")) return s.runs.filter((r) => p[6] === null || r.id === p[6]);
-  return [];
+  return writeRows(s, sql, p);
 }
 
 test("claim validates exact port shape and trusted stable key before SQL", async () => {
@@ -249,3 +249,167 @@ test("revoked membership and stale revision fail closed", async () => {
     code: "VERSION_MISMATCH",
   });
 });
+
+const labels = {
+  severity: "HIGH",
+  notificationRoute: "DAILY_BRIEF",
+  llmEscalation: "NO_LLM_NEEDED",
+  evidenceSufficiency: "SUFFICIENT",
+  attentionPriority: "HIGH_PRIORITY",
+  reasonCodes: ["SYNC_FAILURE"],
+};
+function runValue(patch = {}) {
+  return {
+    schemaVersion: 1,
+    id: "run-a",
+    eventId: "event-a",
+    decisionKey: "stable-Key",
+    requestId: "request-a",
+    evidence: context().evidence.reference,
+    provider: { key: "rules", version: "Provider-V1", supportedInputVersions: [1] },
+    rulesetVersion: "Rules-V1",
+    fallbackOf: null,
+    result: {
+      schemaVersion: 1,
+      correlationId,
+      status: "EVALUATED",
+      rulesetVersion: "Rules-V1",
+      labels,
+      confidenceMetadata: null,
+    },
+    latencyMs: 4,
+    createdAt: now,
+    mode: "PRIMARY",
+    effective: labels,
+    overrideReason: null,
+    ...patch,
+  };
+}
+function stored(run = runValue(), claim = lease()) {
+  return {
+    id: run.id,
+    ...binding,
+    claimId,
+    claimToken: claim.claimToken,
+    eventId: run.eventId,
+    fingerprint: context().event.fingerprint,
+    evidenceId: run.evidence.id,
+    evidenceVersion: run.evidence.version,
+    evidenceHash: run.evidence.hash,
+    decisionKey: run.decisionKey,
+    schemaVersion: 1,
+    requestId: run.requestId,
+    correlationId: run.result.correlationId.toLowerCase(),
+    providerKey: run.provider.key,
+    providerVersion: run.provider.version,
+    supportedInputVersions: [1],
+    rulesetVersion: run.rulesetVersion,
+    mode: run.mode,
+    fallbackOf: run.fallbackOf,
+    fallbackMode: run.fallbackOf === null ? null : "PRIMARY",
+    fallbackStatus: run.fallbackOf === null ? null : "UNAVAILABLE",
+    resultStatus: run.result.status,
+    result: run.result,
+    effective: run.effective,
+    overrideReason: run.overrideReason,
+    latencyMs: String(run.latencyMs),
+    createdAt: new Date(run.createdAt),
+    evidencePayload: context().evidence.evidence,
+    lease: claim,
+  };
+}
+function readQuery(patch = {}) {
+  return { actor, binding, eventId: "event-a", decisionId: null, ...patch };
+}
+
+test("committed retries reuse the original expired winner and its correlation metadata", async () => {
+  const original = runValue();
+  const claim = lease({ expiresAt: now, winnerRunId: original.id });
+  const { repository } = fixture({ lease: claim, runs: [stored(original, claim)] });
+  const retry = request();
+  retry.context = {
+    ...retry.context,
+    requestId: "retry-request",
+    correlationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  };
+  assert.deepEqual(await repository.claim(retry), {
+    ok: true,
+    value: { status: "COMMITTED", run: original },
+  });
+});
+test("append preserves uppercase UUID JSON, opaque versions and SQL NULL projections", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  const run = runValue({ mode: "SHADOW", effective: null });
+  assert.deepEqual(await repository.append(context(), run), { ok: true, value: run });
+  assert.equal(state.runs.length, 1);
+  assert.equal(state.projections.length, 6);
+  assert.equal(
+    state.projections.every((p) => p.effective === null),
+    true,
+  );
+  assert.equal(state.runs[0].result.confidenceMetadata, null);
+  assert.equal(state.runs[0].result.correlationId, correlationId);
+});
+test("append rejects scope, hash, revision, fallback and effective SHADOW violations", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  assert.deepEqual(
+    await repository.append(
+      context(),
+      runValue({ evidence: { ...context().evidence.reference, hash: "wrong" } }),
+    ),
+    { ok: false, code: "HASH_MISMATCH" },
+  );
+  assert.deepEqual(await repository.append(context(), runValue({ mode: "SHADOW" })), {
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+  assert.deepEqual(await repository.append(context(), runValue({ fallbackOf: "missing" })), {
+    ok: false,
+    code: "VERSION_MISMATCH",
+  });
+  assert.equal(state.runs.length, 0);
+});
+test("history reauthorizes live scope and rejects corrupted stored result envelopes", async () => {
+  const { repository, state } = fixture({ lease: lease(), runs: [stored()] });
+  assert.deepEqual(await repository.read(readQuery()), { ok: true, value: [runValue()] });
+  state.runs[0].result = { ...runValue().result, confidenceMetadata: 0.9 };
+  assert.deepEqual(await repository.read(readQuery()), { ok: false, code: "UNAVAILABLE" });
+  state.allowed = false;
+  assert.deepEqual(await repository.read(readQuery()), { ok: false, code: "FORBIDDEN" });
+});
+function inserted(sql, parameters) {
+  const columns = /\(([^)]+)\)\s*VALUES/u
+    .exec(sql)[1]
+    .split(",")
+    .map((s) => s.trim().replaceAll('"', ""));
+  return Object.fromEntries(
+    columns.map((key, i) => [
+      key,
+      ["result", "effective", "supportedInputVersions", "suggested"].includes(key) &&
+      parameters[i] !== null
+        ? JSON.parse(parameters[i])
+        : parameters[i],
+    ]),
+  );
+}
+function writeRows(s, sql, p) {
+  if (sql.includes("INSERT INTO public.decision_runs")) {
+    const row = inserted(sql, p);
+    const result = {
+      ...row,
+      correlationId: row.correlationId.toLowerCase(),
+      latencyMs: String(row.latencyMs),
+      createdAt: new Date(row.createdAt),
+      evidencePayload: context().evidence.evidence,
+      lease: s.lease,
+    };
+    s.runs.push(result);
+    return [row];
+  }
+  if (sql.includes("INSERT INTO public.decision_records")) {
+    const row = inserted(sql, p);
+    s.projections.push(row);
+    return [row];
+  }
+  return [];
+}
