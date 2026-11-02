@@ -20,6 +20,7 @@ const apiTargets = [
   "test/demo-commerce-database.e2e-spec.ts",
   "test/metrics-database.e2e-spec.ts",
 ];
+const requiredTargetCounts = new Map([["test/integration/audit-storage.test.mjs", 170]]);
 const forbiddenEnvironment =
   /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_|^NODE_TEST_CONTEXT$|^METRIC_CURSOR_SECRET$/iu;
 function metricRuntimeEnvironment(isolatedUrl, metrics) {
@@ -182,6 +183,9 @@ async function run(directory, script, args, environment, apiReportPath) {
       );
   } else {
     const counts = assertTapReport(capture.output);
+    const expected = requiredTargetCounts.get(script);
+    if (expected !== undefined && counts.tests !== expected)
+      throw new Error(`Required tenant target assertion count changed: ${script}`);
     process.stdout.write(
       `tenant-evidence ${directory}/${script}: tests=${counts.tests} pass=${counts.pass} skipped=0 cancelled=0 todo=0\n`,
     );
@@ -372,6 +376,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       TEST_DATABASE_URL: server.url,
     });
     await run("packages/database", "test/integration/metric-source-bundle.test.mjs", [], {
+      TEST_DATABASE_URL: server.url,
+    });
+    await run("packages/database", "test/integration/audit-storage.test.mjs", [], {
       TEST_DATABASE_URL: server.url,
     });
     const runtimeUrl = await prepareTenantApiRuntime(server.url);

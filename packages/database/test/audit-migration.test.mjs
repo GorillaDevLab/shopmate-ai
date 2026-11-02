@@ -18,3 +18,13 @@ test("audit foundation installs scoped immutable tenant and separate anonymous s
   assert.match(sql, /REVOKE ALL ON FUNCTION/u);
   assert.doesNotMatch(sql, /CREATE ROLE[^;]* LOGIN\b/u);
 });
+
+test("required isolated audit proof is explicitly registered without default DB execution", async () => {
+  const runner = await readFile(
+    new URL("../../../scripts/test-tenant-database.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(runner, /test\/integration\/audit-storage\.test\.mjs/u);
+  assert.match(runner, /audit-storage\.test\.mjs[\s\S]*?TEST_DATABASE_URL: server.url/u);
+  assert.match(runner, /\["test\/integration\/audit-storage\.test\.mjs", 170\]/u);
+});
