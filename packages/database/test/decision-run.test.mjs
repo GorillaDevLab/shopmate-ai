@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createEventFingerprint, EvaluationContextSchema } from "@shopmate/contracts";
@@ -197,7 +198,7 @@ function respond(s, sql, p) {
     s.lease ??= lease({ claimToken: p[5], expiresAt: p[6] });
     return [s.lease];
   }
-  if (sql.includes("decision:runs")) return s.runs.filter((r) => p[6] === null || r.id === p[6]);
+  if (sql.includes("decision:runs")) return selectedRuns(s, p);
   if (sql.includes("public.decision_commit(")) {
     const won = s.won !== false;
     if (won) s.lease.winnerRunId = p[2];
@@ -658,3 +659,58 @@ test("claim rejects fabricated facts even when the caller repeats the stored evi
   assert.deepEqual(await repository.claim(input), { ok: false, code: "HASH_MISMATCH" });
   assert.equal(state.lease, null);
 });
+function historyQuery(patch = {}) {
+  return { actor, binding, eventId: "event-a", limit: 1, cursor: null, ...patch };
+}
+test("history uses a stable scoped keyset cursor across equal timestamps", async () => {
+  const a = runValue({ id: "run-a" });
+  const b = runValue({ id: "run-b" });
+  const { repository, state } = fixture({ runs: [stored(a), stored(b)], revision: "2" });
+  const first = await repository.history(historyQuery());
+  assert.equal(first.ok, true);
+  assert.deepEqual(first.value.items, [b]);
+  assert.equal(typeof first.value.nextCursor, "string");
+  const second = await repository.history(historyQuery({ cursor: first.value.nextCursor }));
+  assert.deepEqual(second, { ok: true, value: { items: [a], nextCursor: null } });
+  const call = state.calls.find((c) => c.sql.includes("decision:runs"));
+  assert.match(call.sql, /ORDER BY r\."createdAt" DESC,r\.id COLLATE "C" DESC/u);
+  assert.equal(call.parameters[7], 2);
+  assert.equal(
+    state.calls.some((c) => c.sql.includes("decision:event")),
+    false,
+  );
+});
+test("history rejects malformed or cross-scope cursors before SQL", async () => {
+  const { repository, state } = fixture({ runs: [stored(), stored(runValue({ id: "run-b" }))] });
+  const first = await repository.history(historyQuery());
+  const count = state.calls.length;
+  assert.deepEqual(await repository.history(historyQuery({ cursor: "invalid" })), {
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+  assert.deepEqual(
+    await repository.history(
+      historyQuery({ cursor: first.value.nextCursor, binding: { ...binding, storeId: "other" } }),
+    ),
+    { ok: false, code: "INVALID_INPUT" },
+  );
+  assert.equal(state.calls.length, count);
+});
+
+function selectedRuns(s, p) {
+  return s.runs
+    .filter(
+      (r) =>
+        (p[6] === null || r.id === p[6]) &&
+        (p[8] === null ||
+          Date.parse(r.createdAt) < Date.parse(p[8]) ||
+          (Date.parse(r.createdAt) === Date.parse(p[8]) &&
+            Buffer.compare(Buffer.from(r.id), Buffer.from(p[9])) < 0)),
+    )
+    .sort(
+      (a, b) =>
+        Date.parse(b.createdAt) - Date.parse(a.createdAt) ||
+        Buffer.compare(Buffer.from(b.id), Buffer.from(a.id)),
+    )
+    .slice(0, p[7]);
+}

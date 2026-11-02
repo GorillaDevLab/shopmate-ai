@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -9,6 +10,7 @@ import {
   DecisionRunSchema,
   PrimaryDecisionRunSchema,
   EventDetailQuerySchema,
+  EventHistoryQuerySchema,
   EventEvidenceRecordSchema,
   createEventFingerprint,
   sameDecisionEvidence,
@@ -24,6 +26,8 @@ import type {
   DecisionPortResult,
   DecisionRun,
   EventDetailQuery,
+  EventHistoryQuery,
+  EventPage,
   DecisionRunRepository,
   EvaluationContext,
   PrimaryDecisionRun,
@@ -40,6 +44,7 @@ export interface DecisionReadQuery extends EventDetailQuery {
 }
 export interface DecisionReadPort {
   readonly read: (query: DecisionReadQuery) => Promise<Result<readonly DecisionRun[]>>;
+  readonly history: (query: EventHistoryQuery) => Promise<Result<EventPage<DecisionRun>>>;
 }
 export interface DecisionClaimRequest {
   readonly context: EvaluationContext;
@@ -372,6 +377,7 @@ export function createDecisionRunRepository(
     commit: commitPort(bound, run),
     append: appendPort(bound, run),
     read: readPort(bound, run),
+    history: historyPort(bound, run),
     claim(input: DecisionClaimRequest): Promise<Result<DecisionClaim>> {
       let request: DecisionClaimRequest;
       try {
@@ -452,9 +458,12 @@ function decodeRun(row: Row): DecisionRun {
     throw new TypeError("Corrupt stored decision envelope");
   return run;
 }
-async function runsStored(
+type Anchor = { readonly at: string; readonly id: string };
+async function selectRuns(
   options: Bound,
   query: DecisionReadQuery,
+  limit: number,
+  anchor: Anchor | null,
 ): Promise<readonly DecisionRun[]> {
   const scope = keys.map((key, i) => `r."${key}"=$${i + 1}`).join(" AND ");
   const result = await options.client.query(
@@ -462,27 +471,61 @@ async function runsStored(
     FROM public.decision_runs r JOIN public.event_evidence v ON v.id=r."evidenceId"
     JOIN public.decision_claims c ON c.id=r."claimId"
     WHERE ${scope} /* decision:runs */ AND r."eventId"=$6 AND ($7::text IS NULL OR r.id=$7)
+    AND ($9::timestamptz IS NULL OR (r."createdAt",r.id COLLATE "C")<($9::timestamptz,$10::text COLLATE "C"))
     ORDER BY r."createdAt" DESC,r.id COLLATE "C" DESC LIMIT $8`,
     [
       ...values(query.binding),
       query.eventId,
       query.decisionId,
-      query.decisionId === null ? 101 : 2,
+      limit,
+      anchor?.at ?? null,
+      anchor?.id ?? null,
     ],
   );
-  if (result.rows.length > (query.decisionId === null ? 100 : 1))
-    throw new TypeError("Decision history bound exceeded");
+  if (result.rows.length > limit) throw new TypeError("Unbounded decision history");
   const runs = result.rows.map(decodeRun);
-  if (
-    new Set(runs.map((run) => run.id)).size !== runs.length ||
-    runs.some(
-      (run) =>
-        run.eventId !== query.eventId ||
-        !isDeepStrictEqual(run.evidence.binding, query.binding) ||
-        (query.decisionId !== null && run.id !== query.decisionId),
+  checkRuns(runs, query, anchor);
+  return runs;
+}
+function checkRuns(
+  runs: readonly DecisionRun[],
+  query: DecisionReadQuery,
+  anchor: Anchor | null,
+): void {
+  if (new Set(runs.map((run) => run.id)).size !== runs.length)
+    throw new TypeError("Duplicate decision history");
+  for (const [i, run] of runs.entries()) {
+    if (
+      run.eventId !== query.eventId ||
+      !isDeepStrictEqual(run.evidence.binding, query.binding) ||
+      (query.decisionId !== null && run.id !== query.decisionId) ||
+      (anchor !== null && compareAnchor({ at: run.createdAt, id: run.id }, anchor) >= 0)
     )
-  )
-    throw new TypeError("Unscoped decision history");
+      throw new TypeError("Unscoped decision history");
+    const previous = runs[i - 1];
+    if (
+      previous &&
+      compareAnchor(
+        { at: previous.createdAt, id: previous.id },
+        { at: run.createdAt, id: run.id },
+      ) <= 0
+    )
+      throw new TypeError("Unstable decision history");
+  }
+}
+function compareAnchor(left: Anchor, right: Anchor): number {
+  return (
+    Date.parse(left.at) - Date.parse(right.at) ||
+    Buffer.compare(Buffer.from(left.id), Buffer.from(right.id))
+  );
+}
+async function runsStored(
+  options: Bound,
+  query: DecisionReadQuery,
+): Promise<readonly DecisionRun[]> {
+  const maximum = query.decisionId === null ? 100 : 1;
+  const runs = await selectRuns(options, query, maximum + 1, null);
+  if (runs.length > maximum) throw new TypeError("Decision summary bound exceeded; use history");
   return runs;
 }
 async function committed(
@@ -914,4 +957,57 @@ function currentEvidence(context: EvaluationContext, payload: unknown): Result<v
   return isDeepStrictEqual(evidence.evidence, context.evidence.evidence)
     ? { ok: true, value: undefined }
     : failure("HASH_MISMATCH");
+}
+
+function cursorScope(query: EventDetailQuery): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        query.actor.userId,
+        query.actor.merchantId,
+        ...values(query.binding),
+        query.eventId,
+      ]),
+    )
+    .digest("hex");
+}
+function parseAnchor(query: EventHistoryQuery): Anchor | null {
+  if (query.cursor === null) return null;
+  const row = object(JSON.parse(query.cursor) as unknown, ["version", "scope", "at", "id"]);
+  if (row.version !== 1 || row.scope !== cursorScope(query))
+    throw new TypeError("Invalid cursor scope");
+  return { at: time(row.at), id: ExternalIdSchema.parse(row.id) };
+}
+function historyPort(options: Bound, run: ReturnType<typeof runner>): DecisionReadPort["history"] {
+  return (input) => {
+    let query: EventHistoryQuery;
+    let anchor: Anchor | null;
+    try {
+      query = structuredClone(EventHistoryQuerySchema.parse(input));
+      anchor = parseAnchor(query);
+    } catch {
+      return Promise.resolve(failure("INVALID_INPUT"));
+    }
+    return run(query, false, () => historyStored(options, query, anchor));
+  };
+}
+async function historyStored(
+  options: Bound,
+  query: EventHistoryQuery,
+  anchor: Anchor | null,
+): Promise<Result<EventPage<DecisionRun>>> {
+  const runs = await selectRuns(options, { ...query, decisionId: null }, query.limit + 1, anchor);
+  const items = runs.slice(0, query.limit);
+  const last = items.at(-1);
+  // Raw JSON keeps maximum-width Unicode IDs below the shared 1024-unit cursor bound.
+  const nextCursor =
+    runs.length > query.limit && last
+      ? JSON.stringify({
+          version: 1,
+          scope: cursorScope(query),
+          at: last.createdAt,
+          id: last.id,
+        })
+      : null;
+  return { ok: true, value: { items, nextCursor } };
 }
