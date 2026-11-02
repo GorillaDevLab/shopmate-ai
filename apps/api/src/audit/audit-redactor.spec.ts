@@ -101,7 +101,7 @@ it("preserves valid lifecycle metadata and opaque Unicode identifiers", () => {
 });
 
 const redactor = new AuditRedactor();
-const secret = "synthetic-private-payload-09";
+const secret = "test fixture data (not credentials)";
 function rejects(input: unknown) {
   let caught: unknown;
   try {
