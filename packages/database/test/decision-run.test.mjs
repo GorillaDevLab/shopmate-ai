@@ -157,8 +157,10 @@ function fixture(patch = {}) {
   const client = {
     async query(sql, parameters = []) {
       state.calls.push({ sql, parameters });
-      if (state.fail && sql.includes(state.fail))
+      if (state.fail && sql.includes(state.fail)) {
+        if (state.failOnce) state.fail = null;
         throw Object.assign(new Error("private"), { code: "08006" });
+      }
       const rows = respond(state, sql, parameters);
       if (state.after) await state.after(sql);
       return { rows };
@@ -722,6 +724,56 @@ test("projection exceptions restore the operation and rollback failure escapes t
     })),
     /private/u,
   );
+});
+test("a recovered nested read failure stays typed and allows the outer commit to finish", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  const result = await repository.commit(
+    commitRequest([unavailableRun(), runValue({ fallbackOf: "failure-a" })]),
+    async (run) => {
+      state.allowed = false;
+      assert.deepEqual(await repository.read(readQuery()), { ok: false, code: "FORBIDDEN" });
+      assert.equal(state.saved.length, 1);
+      assert.deepEqual(
+        state.runs.map((attempt) => attempt.id),
+        ["failure-a"],
+      );
+      state.allowed = true;
+      return routed(run);
+    },
+  );
+  assert.deepEqual(result, { ok: true, value: runValue({ fallbackOf: "failure-a" }) });
+  assert.equal(state.runs.length, 2);
+  assert.equal(state.lease.winnerRunId, "run-a");
+  assert.equal(state.saved.length, 0);
+});
+test("caught nested rollback failure rejects commit without recovering the surviving inner savepoint", async () => {
+  const { repository, state } = fixture({ lease: lease(), failOnce: true });
+  let nestedError;
+  const result = repository.commit(
+    commitRequest([unavailableRun(), runValue({ fallbackOf: "failure-a" })]),
+    async (run) => {
+      state.allowed = false;
+      state.fail = "ROLLBACK TO SAVEPOINT";
+      try {
+        await repository.read(readQuery());
+      } catch (error) {
+        nestedError = error;
+      }
+      return routed(run);
+    },
+  );
+  await assert.rejects(result, (error) => error === nestedError && error.message === "private");
+  assert.equal(state.fail, null);
+  assert.deepEqual(
+    state.runs.map((run) => run.id),
+    ["failure-a"],
+  );
+  assert.equal(state.saved.length, 2);
+  assert.deepEqual(
+    state.calls.filter((call) => /^(ROLLBACK TO|RELEASE SAVEPOINT)/u.test(call.sql)),
+    [{ sql: "ROLLBACK TO SAVEPOINT decision_repository_operation", parameters: [] }],
+  );
+  assert.equal(state.lease.winnerRunId, null);
 });
 test("live membership, real deadline and native signal are rechecked after asynchronous work", async () => {
   const revoked = fixture({ lease: lease() });

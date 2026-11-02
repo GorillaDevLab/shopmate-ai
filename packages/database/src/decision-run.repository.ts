@@ -228,6 +228,9 @@ async function execute<T>(
       return result;
     }
   } catch (error) {
+    const scope = options.operations.getStore();
+    // A failed nested rollback leaves its savepoint live; only the owner can safely abort.
+    if (scope && "fatal" in scope) throw scope.fatal;
     result = sqlFailure(error);
   }
   await recover(options.client);
