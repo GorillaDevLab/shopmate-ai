@@ -43,6 +43,7 @@ export interface DecisionReadQuery extends EventDetailQuery {
   readonly decisionId: string | null;
 }
 export interface DecisionReadPort {
+  /** Summary compatibility: at most 100 rows; larger histories use the paginated port. */
   readonly read: (query: DecisionReadQuery) => Promise<Result<readonly DecisionRun[]>>;
   readonly history: (query: EventHistoryQuery) => Promise<Result<EventPage<DecisionRun>>>;
 }
@@ -59,6 +60,7 @@ export type DecisionClaim =
   | Readonly<{ status: "CLAIMED"; commitToken: string }>
   | Readonly<{ status: "COMMITTED"; run: PrimaryDecisionRun }>;
 export interface DecisionEvaluationAuthority {
+  /** Reuses only the persisted claim winner, preserving its original request/correlation metadata. */
   readonly claim: (request: DecisionClaimRequest) => Promise<Result<DecisionClaim>>;
   readonly commit: (
     request: DecisionCommitRequest,
@@ -309,7 +311,8 @@ async function current(options: Bound, request: Identity): Promise<Result<void>>
     integer(row.revision) !== event.revision ||
     row.currentEvidenceId !== event.currentEvidence.id ||
     row.currentEvidenceVersion !== event.currentEvidence.version ||
-    row.fingerprint !== event.fingerprint
+    row.fingerprint !== event.fingerprint ||
+    !currentPolicy(event, row)
   )
     return failure("VERSION_MISMATCH");
   if (row.currentEvidenceHash !== event.currentEvidence.hash) return failure("HASH_MISMATCH");
@@ -360,6 +363,10 @@ async function claimStored(
     return failure("CONFLICT");
   return { ok: true, value: { status: "CLAIMED", commitToken: token } };
 }
+/** Uses one caller-owned transaction. Routing may await same-scope reads on this instance.
+ * Only the claim winner grants authority; arbitrary historical effective labels do not.
+ * The host supplies its stable-key policy and composes actual audit/outbox work in P04-029.
+ */
 export function createDecisionRunRepository(
   options: DecisionRepositoryOptions,
 ): DecisionRunRepository & DecisionReadPort & DecisionEvaluationAuthority {
@@ -1010,4 +1017,30 @@ async function historyStored(
         })
       : null;
   return { ok: true, value: { items, nextCursor } };
+}
+
+function currentPolicy(event: EvaluationContext["event"], row: Row): boolean {
+  const expected: Row = {
+    schemaVersion: event.schemaVersion,
+    eventType: event.eventType,
+    entityKind: event.entity.kind,
+    entityId: eventEntityId(event),
+    severityFloor: event.severityFloor,
+    rulePolicyVersion: event.rulePolicyVersion,
+    state: event.state,
+    baselineVersion: event.currentEvidence.baselineVersion,
+  };
+  return Object.entries(expected).every(([key, value]) => row[key] === value);
+}
+function eventEntityId(event: EvaluationContext["event"]): string {
+  switch (event.entity.kind) {
+    case "SKU":
+      return event.entity.externalSkuId;
+    case "CAMPAIGN":
+      return event.entity.externalCampaignId;
+    case "CONNECTION":
+      return event.entity.connectionId;
+    case "STORE":
+      return event.binding.storeId;
+  }
 }

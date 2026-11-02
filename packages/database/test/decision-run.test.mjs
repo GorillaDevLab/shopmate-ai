@@ -1,7 +1,11 @@
 import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createEventFingerprint, EvaluationContextSchema } from "@shopmate/contracts";
+import {
+  createEventFingerprint,
+  EvaluationContextSchema,
+  DecisionCorrelationIdSchema,
+} from "@shopmate/contracts";
 import { createDecisionRunRepository } from "../src/decision-run.repository.ts";
 
 const binding = {
@@ -180,19 +184,7 @@ function respond(s, sql, p) {
   if (sql.startsWith("ROLLBACK TO")) Object.assign(s, s.saved.at(-1));
   if (sql.startsWith("RELEASE SAVEPOINT")) s.saved.pop();
   if (sql.includes("event_scope_access")) return [{ allowed: s.allowed }];
-  if (sql.includes("decision:event"))
-    return [
-      {
-        ...binding,
-        id: "event-a",
-        revision: s.revision,
-        fingerprint: context().event.fingerprint,
-        currentEvidenceId: "evidence-a",
-        currentEvidenceVersion: "Evidence-V1",
-        currentEvidenceHash: "Hash-A",
-        evidencePayload: context().evidence.evidence,
-      },
-    ];
+  if (sql.includes("decision:event")) return [currentRow(s)];
   if (sql.includes("decision:lease")) return s.lease ? [s.lease] : [];
   if (sql.includes("public.decision_claim(")) {
     s.lease ??= lease({ claimToken: p[5], expiresAt: p[6] });
@@ -713,4 +705,172 @@ function selectedRuns(s, p) {
         Buffer.compare(Buffer.from(b.id), Buffer.from(a.id)),
     )
     .slice(0, p[7]);
+}
+test("projection exceptions restore the operation and rollback failure escapes to the transaction owner", async () => {
+  const broken = fixture({ lease: lease(), fail: "INSERT INTO public.decision_records" });
+  assert.deepEqual(await broken.repository.append(context(), runValue()), {
+    ok: false,
+    code: "UNAVAILABLE",
+  });
+  assert.equal(broken.state.runs.length, 0);
+  assert.equal(broken.state.projections.length, 0);
+  const unrecoverable = fixture({ lease: lease(), fail: "ROLLBACK TO SAVEPOINT" });
+  await assert.rejects(
+    unrecoverable.repository.commit(commitRequest(), async () => ({
+      ok: false,
+      code: "UNAVAILABLE",
+    })),
+    /private/u,
+  );
+});
+test("live membership, real deadline and native signal are rechecked after asynchronous work", async () => {
+  const revoked = fixture({ lease: lease() });
+  assert.deepEqual(
+    await revoked.repository.commit(commitRequest(), async (run) => {
+      revoked.state.allowed = false;
+      return routed(run);
+    }),
+    { ok: false, code: "FORBIDDEN" },
+  );
+  const expired = fixture({ lease: lease() });
+  assert.deepEqual(
+    await expired.repository.commit(commitRequest(), async (run) => {
+      expired.state.clock = deadlineAt;
+      return routed(run);
+    }),
+    { ok: false, code: "CONFLICT" },
+  );
+  const controller = new globalThis.AbortController();
+  const aborted = fixture();
+  aborted.state.after = async (sql) => {
+    if (sql.includes("public.decision_claim(")) controller.abort();
+  };
+  assert.deepEqual(
+    await aborted.repository.claim(
+      request({ control: { ...request().control, signal: controller.signal } }),
+    ),
+    { ok: false, code: "CONFLICT" },
+  );
+  assert.equal(aborted.state.lease, null);
+});
+test("routing cannot change stored provider, result or request identity", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  assert.deepEqual(
+    await repository.commit(commitRequest(), async (run) => ({
+      ok: true,
+      value: { ...run, requestId: "other-request" },
+    })),
+    { ok: false, code: "UNAVAILABLE" },
+  );
+  assert.equal(state.runs.length, 0);
+  const effective = { ...labels, notificationRoute: "IGNORE" };
+  const expected = runValue({ effective, overrideReason: "QUIET_HOURS" });
+  assert.deepEqual(
+    await repository.commit(commitRequest(), async (run) => ({
+      ok: true,
+      value: { ...run, effective, overrideReason: "QUIET_HOURS" },
+    })),
+    { ok: true, value: expected },
+  );
+});
+test("commit retries reuse the expired winner with original request and correlation metadata", async () => {
+  const original = runValue();
+  const claim = lease({ expiresAt: now, winnerRunId: original.id });
+  const { repository } = fixture({ lease: claim, runs: [stored(original, claim)] });
+  const retryContext = {
+    ...context(),
+    requestId: "new-request",
+    correlationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  };
+  const retryRun = runValue({
+    requestId: retryContext.requestId,
+    result: { ...original.result, correlationId: retryContext.correlationId },
+  });
+  assert.deepEqual(
+    await repository.commit(commitRequest([retryRun], { context: retryContext }), () =>
+      assert.fail("winner must not route twice"),
+    ),
+    { ok: true, value: original },
+  );
+});
+test("maximum Unicode run IDs remain usable in bounded history cursors", async () => {
+  const { repository } = fixture({ runs: [stored(runValue({ id: "决".repeat(256) })), stored()] });
+  const first = await repository.history(historyQuery());
+  assert.equal(first.ok, true);
+  assert.equal(first.value.nextCursor.length <= 1024, true);
+  assert.deepEqual(await repository.history(historyQuery({ cursor: first.value.nextCursor })), {
+    ok: true,
+    value: { items: [runValue()], nextCursor: null },
+  });
+});
+
+test("stored correlation IDs retain the installed shared policy for ordinary, nil and max UUIDs", async () => {
+  for (const id of [
+    correlationId,
+    "00000000-0000-0000-0000-000000000000",
+    "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF",
+  ]) {
+    const run = runValue({ result: { ...runValue().result, correlationId: id } });
+    const { repository } = fixture({ runs: [stored(run)] });
+    const expected = DecisionCorrelationIdSchema.safeParse(id).success
+      ? { ok: true, value: [run] }
+      : { ok: false, code: "UNAVAILABLE" };
+    assert.deepEqual(await repository.read(readQuery()), expected);
+  }
+});
+test("stored flattened identities, roles and typed results reject corrupted output", async () => {
+  for (const patch of [
+    { schemaVersion: 2 },
+    { supportedInputVersions: [1, 2] },
+    { resultStatus: "UNAVAILABLE" },
+    { correlationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" },
+    { fallbackStatus: "UNAVAILABLE" },
+    { latencyMs: "1.5" },
+    { claimToken: "wrong" },
+    { evidenceHash: "Hash-B" },
+    { result: { ...runValue().result, extraVendorPayload: {} } },
+  ]) {
+    const { repository } = fixture({ runs: [{ ...stored(), ...patch }] });
+    assert.deepEqual(await repository.read(readQuery()), { ok: false, code: "UNAVAILABLE" });
+  }
+});
+test("a business clock cannot construct the security authority", () => {
+  assert.throws(
+    () =>
+      createDecisionRunRepository({
+        actor,
+        client: { query: async () => ({ rows: [] }) },
+        clock: { timeDomain: "BUSINESS_UTC", now: () => now },
+        decisionKey: () => "stable-Key",
+      }),
+    /security clock/u,
+  );
+});
+test("claim binds the current event policy and state as well as evidence and revision", async () => {
+  for (const patch of [
+    { severityFloor: "LOW" },
+    { rulePolicyVersion: "other-policy" },
+    { state: "RESOLVED" },
+  ]) {
+    const { repository } = fixture();
+    const input = request();
+    input.context = { ...input.context, event: { ...input.context.event, ...patch } };
+    assert.deepEqual(await repository.claim(input), { ok: false, code: "VERSION_MISMATCH" });
+  }
+});
+
+function currentRow(state) {
+  const event = context().event;
+  return {
+    ...event,
+    ...binding,
+    revision: state.revision,
+    entityKind: "CONNECTION",
+    entityId: binding.connectionId,
+    currentEvidenceId: "evidence-a",
+    currentEvidenceVersion: "Evidence-V1",
+    currentEvidenceHash: "Hash-A",
+    baselineVersion: null,
+    evidencePayload: context().evidence.evidence,
+  };
 }
