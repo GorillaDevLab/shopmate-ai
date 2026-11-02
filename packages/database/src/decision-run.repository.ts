@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
 import {
   ConnectorBindingSchema,
+  ConnectorTimestampSchema,
   DecisionControlSchema,
   DecisionCorrelationIdSchema,
   DecisionRunSchema,
+  PrimaryDecisionRunSchema,
   EventDetailQuerySchema,
   EventEvidenceRecordSchema,
   createEventFingerprint,
@@ -50,6 +53,13 @@ export interface DecisionCommitRequest extends DecisionClaimRequest {
 export type DecisionClaim =
   | Readonly<{ status: "CLAIMED"; commitToken: string }>
   | Readonly<{ status: "COMMITTED"; run: PrimaryDecisionRun }>;
+export interface DecisionEvaluationAuthority {
+  readonly claim: (request: DecisionClaimRequest) => Promise<Result<DecisionClaim>>;
+  readonly commit: (
+    request: DecisionCommitRequest,
+    route: (run: PrimaryDecisionRun) => Promise<Result<PrimaryDecisionRun>>,
+  ) => Promise<Result<PrimaryDecisionRun>>;
+}
 export interface DecisionRepositoryOptions {
   readonly actor: TenantContext;
   /** Already-open READ COMMITTED transaction; the host owns commit/rollback. */
@@ -58,7 +68,14 @@ export interface DecisionRepositoryOptions {
   /** Trusted server policy, identical to the evaluation host's stable-key policy. */
   readonly decisionKey: (context: EvaluationContext) => string;
 }
-type Bound = DecisionRepositoryOptions;
+type Operation = {
+  auth: Authorized;
+  reads: Promise<void>;
+  open: boolean;
+  readable: boolean;
+  fatal?: unknown;
+};
+type Bound = DecisionRepositoryOptions & { operations: AsyncLocalStorage<Operation> };
 type Lease = ReturnType<typeof decodeLease>;
 type Identity = Pick<DecisionClaimRequest, "context" | "decisionKey">;
 const keys = [
@@ -100,8 +117,8 @@ function binding(row: Row): ConnectorBinding {
 function decodeLease(row: Row) {
   if (row.winnerMode !== "PRIMARY" || row.winnerStatus !== "EVALUATED")
     throw new TypeError("Invalid claim authority");
-  const createdAt = time(row.createdAt);
-  const expiresAt = time(row.expiresAt);
+  const createdAt = storedTime(row.createdAt);
+  const expiresAt = storedTime(row.expiresAt);
   if (Date.parse(expiresAt) <= Date.parse(createdAt)) throw new TypeError("Invalid lease lifetime");
   return {
     id: DecisionCorrelationIdSchema.parse(row.id),
@@ -196,18 +213,18 @@ async function execute<T>(
   } catch {
     return failure("UNAVAILABLE");
   }
+  let result: Result<T>;
   try {
-    const result = (await authorize(options, auth, write)) ? await work() : failure<T>("FORBIDDEN");
-    if (!result.ok) {
-      await recover(options.client);
+    result = (await authorize(options, auth, write)) ? await work() : failure<T>("FORBIDDEN");
+    if (result.ok) {
+      await options.client.query("RELEASE SAVEPOINT decision_repository_operation");
       return result;
     }
-    await options.client.query("RELEASE SAVEPOINT decision_repository_operation");
-    return result;
   } catch (error) {
-    await recover(options.client);
-    return sqlFailure(error);
+    result = sqlFailure(error);
   }
+  await recover(options.client);
+  return result;
 }
 function runner(options: Bound) {
   let pending = Promise.resolve();
@@ -216,7 +233,18 @@ function runner(options: Bound) {
     write: boolean,
     work: () => Promise<Result<T>>,
   ): Promise<Result<T>> {
-    const result = pending.then(() => execute(options, auth, write, work));
+    const active = options.operations.getStore();
+    if (active) return nestedRead(options, active, auth, write, work);
+    const scope: Operation = { auth, reads: Promise.resolve(), open: true, readable: false };
+    const result = pending.then(() =>
+      options.operations.run(scope, async () => {
+        try {
+          return await execute(options, auth, write, () => drained(options, work));
+        } finally {
+          scope.open = false;
+        }
+      }),
+    );
     pending = result.then(
       () => undefined,
       () => undefined,
@@ -224,10 +252,44 @@ function runner(options: Bound) {
     return result;
   };
 }
+function nestedRead<T>(
+  options: Bound,
+  scope: Operation,
+  auth: Authorized,
+  write: boolean,
+  work: () => Promise<Result<T>>,
+): Promise<Result<T>> {
+  if (
+    !scope.open ||
+    !scope.readable ||
+    write ||
+    !isDeepStrictEqual(scope.auth.actor, auth.actor) ||
+    !isDeepStrictEqual(scope.auth.binding, auth.binding)
+  )
+    return Promise.resolve(failure("CONFLICT"));
+  const result = scope.reads.then(() => execute(options, auth, false, work));
+  scope.reads = result.then(
+    () => undefined,
+    (error: unknown) => {
+      scope.fatal = error;
+    },
+  );
+  return result;
+}
+async function drained<T>(options: Bound, work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } finally {
+    await drainReads(options);
+  }
+}
 async function current(options: Bound, request: Identity): Promise<Result<void>> {
   const { event } = request.context;
   const result = await options.client.query(
-    `SELECT * FROM public.events WHERE ${scoped} /* decision:event */ AND id=$6 FOR UPDATE`,
+    `SELECT e.*,v.payload AS "evidencePayload" FROM public.events e
+    JOIN public.event_evidence v ON v.id=e."currentEvidenceId"
+    WHERE ${keys.map((key, i) => `e."${key}"=$${i + 1}`).join(" AND ")}
+    /* decision:event */ AND e.id=$6 FOR UPDATE OF e`,
     [...values(event.binding), event.id],
   );
   const row = result.rows[0];
@@ -246,7 +308,7 @@ async function current(options: Bound, request: Identity): Promise<Result<void>>
   )
     return failure("VERSION_MISMATCH");
   if (row.currentEvidenceHash !== event.currentEvidence.hash) return failure("HASH_MISMATCH");
-  return { ok: true, value: undefined };
+  return currentEvidence(request.context, row.evidencePayload);
 }
 async function findLease(options: Bound, request: Identity): Promise<Lease | null> {
   const { event, evidence } = request.context;
@@ -293,7 +355,9 @@ async function claimStored(
     return failure("CONFLICT");
   return { ok: true, value: { status: "CLAIMED", commitToken: token } };
 }
-export function createDecisionRunRepository(options: DecisionRepositoryOptions) {
+export function createDecisionRunRepository(
+  options: DecisionRepositoryOptions,
+): DecisionRunRepository & DecisionReadPort & DecisionEvaluationAuthority {
   const actor = structuredClone(TenantContextSchema.parse(options?.actor));
   if (
     typeof options?.client?.query !== "function" ||
@@ -302,9 +366,10 @@ export function createDecisionRunRepository(options: DecisionRepositoryOptions) 
     typeof options.decisionKey !== "function"
   )
     throw new TypeError("Invalid transaction, security clock or stable-key policy");
-  const bound = { ...options, actor };
+  const bound: Bound = { ...options, actor, operations: new AsyncLocalStorage<Operation>() };
   const run = runner(bound);
   return Object.freeze({
+    commit: commitPort(bound, run),
     append: appendPort(bound, run),
     read: readPort(bound, run),
     claim(input: DecisionClaimRequest): Promise<Result<DecisionClaim>> {
@@ -605,7 +670,7 @@ function appendPort(
     let decision: DecisionRun;
     try {
       context = structuredClone(EvaluationContextSchema.parse(input));
-      decision = structuredClone(DecisionRunSchema.parse(value));
+      decision = normalizeRun(structuredClone(DecisionRunSchema.parse(value)));
       if (
         decision.decisionKey !==
         ExternalIdSchema.parse(options.decisionKey(structuredClone(context)))
@@ -631,4 +696,222 @@ function readPort(options: Bound, run: ReturnType<typeof runner>): DecisionReadP
     }
     return run(query, false, async () => ({ ok: true, value: await runsStored(options, query) }));
   };
+}
+
+function parseCommit(options: Bound, input: DecisionCommitRequest): DecisionCommitRequest {
+  const request = parseClaim(options, input, [
+    "context",
+    "decisionKey",
+    "control",
+    "commitToken",
+    "runs",
+  ]);
+  const row = input as unknown as Row;
+  const commitToken = ExternalIdSchema.parse(row.commitToken);
+  if (!Array.isArray(row.runs) || row.runs.length < 1 || row.runs.length > 2)
+    throw new TypeError("Expected bounded primary attempt chain");
+  const runs = row.runs.map((run: unknown) =>
+    normalizeRun(structuredClone(PrimaryDecisionRunSchema.parse(run))),
+  );
+  for (const [i, run] of runs.entries()) {
+    if (
+      runBinding(request.context, run) ||
+      run.decisionKey !== request.decisionKey ||
+      run.fallbackOf !== (i === 0 ? null : runs[i - 1]?.id) ||
+      (i > 0 &&
+        (runs[i - 1]?.result.status !== "UNAVAILABLE" ||
+          run.rulesetVersion !== runs[0]?.rulesetVersion))
+    )
+      throw new TypeError("Invalid primary failure/fallback chain");
+  }
+  if (new Set(runs.map((run) => run.id)).size !== runs.length)
+    throw new TypeError("Duplicate attempt");
+  return { ...request, commitToken, runs };
+}
+function commitPort(
+  options: Bound,
+  run: ReturnType<typeof runner>,
+): DecisionEvaluationAuthority["commit"] {
+  return (input, route) => {
+    let request: DecisionCommitRequest;
+    try {
+      request = parseCommit(options, input);
+      if (typeof route !== "function") throw new TypeError("Routing callback required");
+    } catch {
+      return Promise.resolve(failure("INVALID_INPUT"));
+    }
+    return run({ actor: request.context.actor, binding: request.context.event.binding }, true, () =>
+      commitStored(options, request, route),
+    );
+  };
+}
+async function commitLease(options: Bound, request: DecisionCommitRequest): Promise<Result<Lease>> {
+  if (!live(options, request.control)) return failure("CONFLICT");
+  const result = await current(options, request);
+  if (!result.ok) return result;
+  const lease = await findLease(options, request);
+  if (!lease || !matchesLease(lease, request)) return failure("VERSION_MISMATCH");
+  if (lease.claimToken !== request.commitToken) return failure("CONFLICT");
+  if (
+    !live(options, request.control) ||
+    (lease.winnerRunId === null &&
+      Date.parse(lease.expiresAt) <= Date.parse(time(options.clock.now())))
+  )
+    return failure("CONFLICT");
+  return { ok: true, value: lease };
+}
+function routeOutput(value: unknown, terminal: PrimaryDecisionRun): Result<PrimaryDecisionRun> {
+  if (value === null || typeof value !== "object" || !("ok" in value))
+    return failure("UNAVAILABLE");
+  if (value.ok === false) {
+    const row = object(value, ["ok", "code"]);
+    const codes: readonly unknown[] = [
+      "INVALID_INPUT",
+      "FORBIDDEN",
+      "SCOPE_MISMATCH",
+      "VERSION_MISMATCH",
+      "HASH_MISMATCH",
+      "CONFLICT",
+      "UNAVAILABLE",
+    ];
+    return codes.includes(row.code)
+      ? failure(row.code as DecisionPortError)
+      : failure("UNAVAILABLE");
+  }
+  const row = object(value, ["ok", "value"]);
+  if (row.ok !== true) return failure("UNAVAILABLE");
+  const parsed = PrimaryDecisionRunSchema.safeParse(row.value);
+  if (!parsed.success) return failure("UNAVAILABLE");
+  const expected = {
+    ...terminal,
+    effective: parsed.data.effective,
+    overrideReason: parsed.data.overrideReason,
+  };
+  return isDeepStrictEqual(parsed.data, expected)
+    ? { ok: true, value: parsed.data }
+    : failure("UNAVAILABLE");
+}
+async function appendAttempts(
+  options: Bound,
+  context: EvaluationContext,
+  runs: readonly PrimaryDecisionRun[],
+): Promise<Result<void>> {
+  for (const attempt of runs) {
+    const result = await appendStored(options, context, attempt);
+    if (!result.ok) return result;
+  }
+  return { ok: true, value: undefined };
+}
+async function chooseWinner(
+  options: Bound,
+  request: DecisionCommitRequest,
+  lease: Lease,
+  run: PrimaryDecisionRun,
+): Promise<Result<PrimaryDecisionRun>> {
+  if (!live(options, request.control)) return failure("CONFLICT");
+  const result = await options.client.query("SELECT public.decision_commit($1,$2,$3) AS won", [
+    lease.id,
+    request.commitToken,
+    run.id,
+  ]);
+  if (result.rows.length !== 1 || result.rows[0]?.won !== true || !live(options, request.control))
+    return failure("CONFLICT");
+  return { ok: true, value: run };
+}
+async function commitStored(
+  options: Bound,
+  request: DecisionCommitRequest,
+  route: Parameters<DecisionEvaluationAuthority["commit"]>[1],
+): Promise<Result<PrimaryDecisionRun>> {
+  const found = await commitLease(options, request);
+  if (!found.ok) return found;
+  const lease = found.value;
+  if (lease.winnerRunId !== null) {
+    const prior = await committed(options, request, lease);
+    return prior.ok && prior.value.status === "COMMITTED"
+      ? { ok: true, value: prior.value.run }
+      : failure("CONFLICT");
+  }
+  const terminal = request.runs.at(-1);
+  if (!terminal) return failure("INVALID_INPUT");
+  if (terminal.result.status === "UNAVAILABLE") {
+    const saved = await appendAttempts(options, request.context, request.runs);
+    return saved.ok && live(options, request.control)
+      ? { ok: true, value: terminal }
+      : saved.ok
+        ? failure("CONFLICT")
+        : saved;
+  }
+  return commitEvaluated(options, request, lease, terminal, route);
+}
+async function commitEvaluated(
+  options: Bound,
+  request: DecisionCommitRequest,
+  lease: Lease,
+  terminal: PrimaryDecisionRun,
+  route: Parameters<DecisionEvaluationAuthority["commit"]>[1],
+): Promise<Result<PrimaryDecisionRun>> {
+  const failures = await appendAttempts(options, request.context, request.runs.slice(0, -1));
+  if (!failures.ok) return failures;
+  if (!live(options, request.control)) return failure("CONFLICT");
+  const routed = routeOutput(
+    await routeWithReads(options, () => route(structuredClone(terminal))),
+    terminal,
+  );
+  if (!routed.ok) return routed;
+  if (!live(options, request.control)) return failure("CONFLICT");
+  if (
+    !(await authorize(
+      options,
+      { actor: request.context.actor, binding: request.context.event.binding },
+      true,
+    ))
+  )
+    return failure("FORBIDDEN");
+  const saved = await appendStored(options, request.context, routed.value);
+  if (!saved.ok) return saved;
+  return chooseWinner(options, request, lease, routed.value);
+}
+
+function normalizeRun<T extends DecisionRun>(run: T): T {
+  return { ...run, createdAt: new Date(run.createdAt).toISOString() };
+}
+
+async function drainReads(options: Bound): Promise<void> {
+  const scope = options.operations.getStore();
+  if (!scope) return;
+  let observed: Promise<void>;
+  do {
+    observed = scope.reads;
+    await observed;
+  } while (observed !== scope.reads);
+  if ("fatal" in scope) throw scope.fatal;
+}
+async function routeWithReads<T>(options: Bound, work: () => Promise<T>): Promise<T> {
+  const scope = options.operations.getStore();
+  if (!scope) throw new TypeError("Missing transaction operation");
+  scope.readable = true;
+  try {
+    return await drained(options, work);
+  } finally {
+    scope.readable = false;
+  }
+}
+
+function storedTime(value: unknown): string {
+  if (value instanceof Date) return time(value);
+  const timestamp = ConnectorTimestampSchema.parse(value);
+  // PostgreSQL to_jsonb(timestamptz) uses an explicit offset rather than the DTO's UTC spelling.
+  time(timestamp.replace(/(?:Z|[+-]\d{2}:\d{2})$/u, "Z"));
+  return new Date(timestamp).toISOString();
+}
+
+function currentEvidence(context: EvaluationContext, payload: unknown): Result<void> {
+  const evidence = EventEvidenceRecordSchema.parse({
+    reference: context.evidence.reference,
+    evidence: payload,
+  });
+  return isDeepStrictEqual(evidence.evidence, context.evidence.evidence)
+    ? { ok: true, value: undefined }
+    : failure("HASH_MISMATCH");
 }

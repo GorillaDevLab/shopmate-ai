@@ -146,7 +146,7 @@ function fixture(patch = {}) {
     clock: now,
     fail: null,
     after: null,
-    saved: null,
+    saved: [],
     ...patch,
   };
   const client = {
@@ -169,12 +169,15 @@ function fixture(patch = {}) {
 }
 function respond(s, sql, p) {
   if (sql.startsWith("SAVEPOINT"))
-    s.saved = globalThis.structuredClone({
-      lease: s.lease,
-      runs: s.runs,
-      projections: s.projections,
-    });
-  if (sql.startsWith("ROLLBACK TO")) Object.assign(s, s.saved);
+    s.saved.push(
+      globalThis.structuredClone({
+        lease: s.lease,
+        runs: s.runs,
+        projections: s.projections,
+      }),
+    );
+  if (sql.startsWith("ROLLBACK TO")) Object.assign(s, s.saved.at(-1));
+  if (sql.startsWith("RELEASE SAVEPOINT")) s.saved.pop();
   if (sql.includes("event_scope_access")) return [{ allowed: s.allowed }];
   if (sql.includes("decision:event"))
     return [
@@ -186,6 +189,7 @@ function respond(s, sql, p) {
         currentEvidenceId: "evidence-a",
         currentEvidenceVersion: "Evidence-V1",
         currentEvidenceHash: "Hash-A",
+        evidencePayload: context().evidence.evidence,
       },
     ];
   if (sql.includes("decision:lease")) return s.lease ? [s.lease] : [];
@@ -194,6 +198,11 @@ function respond(s, sql, p) {
     return [s.lease];
   }
   if (sql.includes("decision:runs")) return s.runs.filter((r) => p[6] === null || r.id === p[6]);
+  if (sql.includes("public.decision_commit(")) {
+    const won = s.won !== false;
+    if (won) s.lease.winnerRunId = p[2];
+    return [{ won }];
+  }
   return writeRows(s, sql, p);
 }
 
@@ -413,3 +422,239 @@ function writeRows(s, sql, p) {
   }
   return [];
 }
+function commitRequest(runs = [runValue()], patch = {}) {
+  return { ...request(), commitToken: "persisted-token", runs, ...patch };
+}
+function unavailableRun(id = "failure-a", fallbackOf = null) {
+  return runValue({
+    id,
+    fallbackOf,
+    effective: null,
+    result: { schemaVersion: 1, correlationId, status: "UNAVAILABLE", code: "TIMEOUT" },
+  });
+}
+const routed = async (run) => ({ ok: true, value: run });
+
+test("commit routes one evaluated terminal and commits only the database winner", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  let calls = 0;
+  const result = await repository.commit(commitRequest(), async (run) => {
+    calls++;
+    return routed(run);
+  });
+  assert.deepEqual(result, { ok: true, value: runValue() });
+  assert.equal(calls, 1);
+  assert.equal(state.lease.winnerRunId, "run-a");
+  assert.equal(state.runs.length, 1);
+  assert.equal(state.projections.length, 6);
+  const retry = await repository.commit(commitRequest(), async () => {
+    calls++;
+    return { ok: false, code: "UNAVAILABLE" };
+  });
+  assert.deepEqual(retry, result);
+  assert.equal(calls, 1);
+});
+test("commit retains the immutable failure and linked Rules fallback", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  const fallback = runValue({ fallbackOf: "failure-a" });
+  assert.deepEqual(await repository.commit(commitRequest([unavailableRun(), fallback]), routed), {
+    ok: true,
+    value: fallback,
+  });
+  assert.equal(state.runs.length, 2);
+  assert.equal(state.runs[0].resultStatus, "UNAVAILABLE");
+  assert.equal(state.runs[1].fallbackOf, "failure-a");
+  assert.equal(state.lease.winnerRunId, "run-a");
+});
+test("an all-unavailable chain remains history and never invokes routing or winner SQL", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  const terminal = unavailableRun("failure-b", "failure-a");
+  assert.deepEqual(
+    await repository.commit(commitRequest([unavailableRun(), terminal]), () =>
+      assert.fail("must not route"),
+    ),
+    { ok: true, value: terminal },
+  );
+  assert.equal(state.runs.length, 2);
+  assert.equal(state.lease.winnerRunId, null);
+  assert.equal(
+    state.calls.some((c) => c.sql.includes("public.decision_commit(")),
+    false,
+  );
+});
+test("typed routing failure rolls back prior failure history and every projection", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  const result = await repository.commit(
+    commitRequest([unavailableRun(), runValue({ fallbackOf: "failure-a" })]),
+    async () => ({ ok: false, code: "UNAVAILABLE" }),
+  );
+  assert.deepEqual(result, { ok: false, code: "UNAVAILABLE" });
+  assert.equal(state.runs.length, 0);
+  assert.equal(state.projections.length, 0);
+  assert.equal(state.lease.winnerRunId, null);
+  assert.equal(
+    state.calls.some((c) => c.sql.startsWith("ROLLBACK TO")),
+    true,
+  );
+});
+test("wrong token, expired control, aborted signal and SHADOW cannot route", async () => {
+  for (const patch of [
+    { commitToken: "wrong" },
+    { runs: [runValue({ mode: "SHADOW", effective: null })] },
+    { control: { ...request().control, deadlineAt: now } },
+  ]) {
+    const { repository, state } = fixture({ lease: lease() });
+    assert.equal(
+      (
+        await repository.commit(commitRequest(undefined, patch), () =>
+          assert.fail("must not route"),
+        )
+      ).ok,
+      false,
+    );
+    assert.equal(state.runs.length, 0);
+  }
+  const controller = new globalThis.AbortController();
+  controller.abort();
+  const { repository } = fixture({ lease: lease() });
+  assert.deepEqual(
+    await repository.commit(
+      commitRequest(undefined, { control: { ...request().control, signal: controller.signal } }),
+      routed,
+    ),
+    { ok: false, code: "CONFLICT" },
+  );
+});
+test("aborting during route or losing the native commit rolls the complete operation back", async () => {
+  for (const abort of [true, false]) {
+    const controller = new globalThis.AbortController();
+    const { repository, state } = fixture({ lease: lease(), won: !abort });
+    const result = await repository.commit(
+      commitRequest(undefined, { control: { ...request().control, signal: controller.signal } }),
+      async (run) => {
+        if (abort) controller.abort();
+        else state.won = false;
+        return routed(run);
+      },
+    );
+    assert.deepEqual(result, { ok: false, code: "CONFLICT" });
+    assert.equal(state.runs.length, 0);
+    assert.equal(state.lease.winnerRunId, null);
+  }
+});
+test("routing can await a read on the same repository without deadlocking its transaction", async () => {
+  const { repository } = fixture({ lease: lease() });
+  const result = await Promise.race([
+    repository.commit(commitRequest(), async (run) => {
+      assert.deepEqual(await repository.read(readQuery()), { ok: true, value: [] });
+      return routed(run);
+    }),
+    new Promise((resolve) =>
+      globalThis.setTimeout(() => resolve({ ok: false, code: "DEADLOCK" }), 150),
+    ),
+  ]);
+  assert.equal(result.ok, true);
+});
+test("append accepts equivalent timestamp spellings and preserves idempotent immutable identity", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  const input = runValue({ createdAt: "2026-10-02T00:00:00Z" });
+  assert.deepEqual(await repository.append(context(), input), { ok: true, value: runValue() });
+  assert.deepEqual(await repository.append(context(), input), { ok: true, value: runValue() });
+  assert.equal(state.runs.length, 1);
+  assert.deepEqual(await repository.append(context(), { ...input, latencyMs: 5 }), {
+    ok: false,
+    code: "CONFLICT",
+  });
+});
+test("commit drains a read started by routing before performing winner writes", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  let finished = false;
+  let started;
+  state.after = async (sql) => {
+    if (sql.includes("decision:runs") && !finished) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 15));
+      finished = true;
+    }
+  };
+  const result = await repository.commit(commitRequest(), async (run) => {
+    started = repository.read(readQuery());
+    return routed(run);
+  });
+  assert.equal(result.ok, true);
+  assert.equal((await started).ok, true);
+  assert.equal(finished, true);
+  assert.equal(state.saved.length, 0);
+  const inserts = state.calls.findIndex((c) => c.sql.includes("INSERT INTO public.decision_runs"));
+  const release = state.calls.findIndex((c) => c.sql.startsWith("RELEASE SAVEPOINT"));
+  assert.equal(release < inserts, true);
+});
+test("a closed inherited routing context cannot start more repository work", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  let resume;
+  const gate = new Promise((resolve) => {
+    resume = resolve;
+  });
+  let stale;
+  assert.equal(
+    (
+      await repository.commit(commitRequest(), async (run) => {
+        stale = gate.then(() => repository.read(readQuery()));
+        return routed(run);
+      })
+    ).ok,
+    true,
+  );
+  const count = state.calls.length;
+  resume();
+  assert.deepEqual(await stale, { ok: false, code: "CONFLICT" });
+  assert.equal(state.calls.length, count);
+});
+test("routing cannot enqueue nested writes or scope switches", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  const result = await repository.commit(commitRequest(), async (run) => {
+    assert.deepEqual(await repository.append(context(), run), { ok: false, code: "CONFLICT" });
+    assert.deepEqual(
+      await repository.read(readQuery({ binding: { ...binding, storeId: "store-b" } })),
+      { ok: false, code: "CONFLICT" },
+    );
+    return routed(run);
+  });
+  assert.equal(result.ok, true);
+  assert.equal(state.runs.length, 1);
+});
+test("detached routing work cannot start a read while the outer operation is finalizing", async () => {
+  const { repository, state } = fixture({ lease: lease() });
+  let resume;
+  let delayed;
+  const gate = new Promise((resolve) => {
+    resume = resolve;
+  });
+  state.after = async (sql) => {
+    if (sql.includes("INSERT INTO public.decision_runs")) {
+      resume();
+      await delayed;
+    }
+  };
+  const result = await repository.commit(commitRequest(), async (run) => {
+    delayed = gate.then(() => repository.read(readQuery()));
+    return routed(run);
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(await delayed, { ok: false, code: "CONFLICT" });
+});
+test("history decodes PostgreSQL JSON claim timestamps with explicit UTC offsets", async () => {
+  const claim = lease({
+    createdAt: "2026-10-01T23:59:00+00:00",
+    expiresAt: "2026-10-02T00:01:00+00:00",
+  });
+  const { repository } = fixture({ runs: [stored(runValue(), claim)] });
+  assert.deepEqual(await repository.read(readQuery()), { ok: true, value: [runValue()] });
+});
+test("claim rejects fabricated facts even when the caller repeats the stored evidence hash", async () => {
+  const { repository, state } = fixture();
+  const input = request();
+  input.context = globalThis.structuredClone(input.context);
+  input.context.evidence.evidence.facts.typedErrorCode = "RATE_LIMIT";
+  assert.deepEqual(await repository.claim(input), { ok: false, code: "HASH_MISMATCH" });
+  assert.equal(state.lease, null);
+});
