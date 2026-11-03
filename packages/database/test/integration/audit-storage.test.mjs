@@ -279,7 +279,7 @@ async function occurrenceCases(t, writer) {
 }
 async function malformedCases(t, writer) {
   for (const payload of [
-    event({ token: "synthetic-secret" }),
+    event({ token: "test" }),
     event({ actor: { actorId: "audit-owner", actorKind: "SERVICE", identitySource: "SERVER" } }),
     event({
       event: {
@@ -534,7 +534,7 @@ async function anonymousBoundaryCases(t, writer, security, payload, insert) {
     () =>
       insert({
         ...payload,
-        redactedMetadata: { ...payload.redactedMetadata, token: "synthetic-secret" },
+        redactedMetadata: { ...payload.redactedMetadata, token: "test" },
       }),
     "23514",
   );
