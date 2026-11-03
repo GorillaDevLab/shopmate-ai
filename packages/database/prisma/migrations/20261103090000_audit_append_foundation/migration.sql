@@ -17,6 +17,13 @@ CREATE FUNCTION public.audit_id(value_ TEXT) RETURNS BOOLEAN LANGUAGE SQL IMMUTA
   SELECT value_ ~ '^[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$'
 $$;
 
+-- Audit accepts opaque ExternalId values even when metric migrations are intentionally pending.
+CREATE FUNCTION public.audit_literal(value_ TEXT) RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT length(value_)+length(regexp_replace(value_,U&'[\0001-\FFFF]','','g')) BETWEEN 1 AND 256
+    AND value_=btrim(value_,U&'\0009\000A\000B\000C\000D\0020\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000\FEFF')
+    AND value_ !~ U&'[\0001-\001F\007F-\009F\200B-\200F\202A-\202E\2066-\2069]'
+$$;
+
 CREATE FUNCTION public.audit_keys(value_ JSONB, keys_ TEXT[]) RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
   SELECT (jsonb_typeof(value_)='object' AND value_ ?& keys_ AND value_-keys_='{}'::jsonb) IS TRUE
 $$;
@@ -48,8 +55,8 @@ CREATE FUNCTION public.audit_entity_valid(ref_ JSONB) RETURNS BOOLEAN LANGUAGE S
   SELECT (public.audit_enum(ref_->'eventType',ARRAY['REVENUE_DROP','REFUND_SPIKE','CANCELLED_ORDER_SPIKE','PROFIT_MARGIN_DROP','UNUSUAL_DISCOUNT','CONVERSION_DROP','STOCKOUT_RISK','INVENTORY_STAGNATION','PRODUCT_BREAKOUT','ROAS_DROP','AD_SPEND_SPIKE','SYNC_FAILURE'])
     AND CASE ref_->'entity'->>'kind'
       WHEN 'STORE' THEN public.audit_keys(ref_->'entity',ARRAY['kind']) AND ref_->>'eventType' NOT IN ('STOCKOUT_RISK','INVENTORY_STAGNATION','PRODUCT_BREAKOUT','ROAS_DROP','AD_SPEND_SPIKE','SYNC_FAILURE')
-      WHEN 'SKU' THEN public.audit_keys(ref_->'entity',ARRAY['kind','externalSkuId']) AND jsonb_typeof(ref_->'entity'->'externalSkuId')='string' AND public.metric_literal(ref_->'entity'->>'externalSkuId') AND ref_->>'eventType' NOT IN ('ROAS_DROP','AD_SPEND_SPIKE','SYNC_FAILURE')
-      WHEN 'CAMPAIGN' THEN public.audit_keys(ref_->'entity',ARRAY['kind','externalCampaignId']) AND jsonb_typeof(ref_->'entity'->'externalCampaignId')='string' AND public.metric_literal(ref_->'entity'->>'externalCampaignId') AND ref_->>'eventType' IN ('ROAS_DROP','AD_SPEND_SPIKE')
+      WHEN 'SKU' THEN public.audit_keys(ref_->'entity',ARRAY['kind','externalSkuId']) AND jsonb_typeof(ref_->'entity'->'externalSkuId')='string' AND public.audit_literal(ref_->'entity'->>'externalSkuId') AND ref_->>'eventType' NOT IN ('ROAS_DROP','AD_SPEND_SPIKE','SYNC_FAILURE')
+      WHEN 'CAMPAIGN' THEN public.audit_keys(ref_->'entity',ARRAY['kind','externalCampaignId']) AND jsonb_typeof(ref_->'entity'->'externalCampaignId')='string' AND public.audit_literal(ref_->'entity'->>'externalCampaignId') AND ref_->>'eventType' IN ('ROAS_DROP','AD_SPEND_SPIKE')
       WHEN 'CONNECTION' THEN public.audit_keys(ref_->'entity',ARRAY['kind','connectionId']) AND ref_->'entity'->'connectionId'=ref_->'binding'->'connectionId' AND ref_->>'eventType'='SYNC_FAILURE'
       ELSE false END) IS TRUE
 $$;
@@ -57,11 +64,11 @@ $$;
 CREATE FUNCTION public.audit_reference_valid(ref_ JSONB) RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
   SELECT (public.audit_keys(ref_,ARRAY['schemaVersion','id','version','hash','binding','eventType','entity','definitionVersion','baselineVersion'])
     AND ref_->'schemaVersion'='1'::jsonb
-    AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY['id','version','hash','definitionVersion']) k WHERE jsonb_typeof(ref_->k)<>'string' OR NOT public.metric_literal(ref_->>k))
-    AND (ref_->'baselineVersion'='null'::jsonb OR (jsonb_typeof(ref_->'baselineVersion')='string' AND public.metric_literal(ref_->>'baselineVersion')))
+    AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY['id','version','hash','definitionVersion']) k WHERE jsonb_typeof(ref_->k)<>'string' OR NOT public.audit_literal(ref_->>k))
+    AND (ref_->'baselineVersion'='null'::jsonb OR (jsonb_typeof(ref_->'baselineVersion')='string' AND public.audit_literal(ref_->>'baselineVersion')))
     AND public.audit_keys(ref_->'binding',ARRAY['organizationId','workspaceId','storeId','connectionId','externalStoreId'])
     AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY['organizationId','workspaceId','storeId','connectionId']) k WHERE jsonb_typeof(ref_->'binding'->k)<>'string' OR NOT public.audit_id(ref_->'binding'->>k))
-    AND jsonb_typeof(ref_->'binding'->'externalStoreId')='string' AND public.metric_literal(ref_->'binding'->>'externalStoreId')
+    AND jsonb_typeof(ref_->'binding'->'externalStoreId')='string' AND public.audit_literal(ref_->'binding'->>'externalStoreId')
     AND public.audit_entity_valid(ref_)) IS TRUE
 $$;
 
@@ -154,7 +161,7 @@ CREATE TABLE public.auth_security_events (
 CREATE FUNCTION public.audit_resource_valid(payload_ JSONB) RETURNS BOOLEAN LANGUAGE SQL IMMUTABLE SET search_path=pg_catalog AS $$
   SELECT (CASE WHEN payload_->'event'->>'eventType'='EVENT_STATE_CHANGE' THEN
     public.audit_keys(payload_->'resource',ARRAY['type','id']) AND payload_->'resource'->>'type'='EVENT'
-    AND jsonb_typeof(payload_->'resource'->'id')='string' AND public.metric_literal(payload_->'resource'->>'id')
+    AND jsonb_typeof(payload_->'resource'->'id')='string' AND public.audit_literal(payload_->'resource'->>'id')
     AND payload_->>'occurredAt' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{0,3}0*)?Z$'
     AND payload_->'actor'->>'actorKind'='USER' AND payload_->>'result'='SUCCESS' AND payload_->'sourceOccurredAt'='null'::jsonb
     AND ((payload_->'event'->'redactedMetadata'->'evidenceReference'->'binding')-ARRAY['connectionId','externalStoreId'])=payload_->'scope'
@@ -297,5 +304,5 @@ GRANT EXECUTE ON FUNCTION public.audit_id(TEXT),public.audit_keys(JSONB,TEXT[]),
   public.audit_entity_valid(JSONB),public.audit_reference_valid(JSONB),public.audit_lifecycle_valid(JSONB),public.audit_detail_valid(JSONB),public.audit_resource_valid(JSONB),public.audit_payload_valid(public.audit_logs),public.audit_actor_access(public.audit_logs) TO shopmate_audit_writer,shopmate_audit_service_writer;
 GRANT EXECUTE ON FUNCTION public.audit_scope_access(TEXT,TEXT,TEXT,BOOLEAN) TO shopmate_audit_reader,shopmate_audit_writer,shopmate_audit_service_writer;
 GRANT EXECUTE ON FUNCTION public.audit_chain_head(TEXT,TEXT,TEXT) TO shopmate_audit_writer,shopmate_audit_service_writer;
-GRANT EXECUTE ON FUNCTION public.metric_literal(TEXT) TO shopmate_audit_writer,shopmate_audit_service_writer;
+GRANT EXECUTE ON FUNCTION public.audit_literal(TEXT) TO shopmate_audit_writer,shopmate_audit_service_writer;
 COMMIT;

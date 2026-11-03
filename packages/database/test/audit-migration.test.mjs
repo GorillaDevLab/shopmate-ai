@@ -17,6 +17,7 @@ test("audit foundation installs scoped immutable tenant and separate anonymous s
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/u);
   assert.match(sql, /REVOKE ALL ON FUNCTION/u);
   assert.doesNotMatch(sql, /CREATE ROLE[^;]* LOGIN\b/u);
+  assert.doesNotMatch(sql, /public\.metric_literal/u);
 });
 
 test("required isolated audit proof is explicitly registered without default DB execution", async () => {
