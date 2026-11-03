@@ -199,6 +199,13 @@ $$;
 ALTER TABLE public.audit_logs ADD CONSTRAINT audit_logs_payload_check CHECK (public.audit_payload_valid(audit_logs));
 ALTER TABLE public.auth_security_events ADD CONSTRAINT auth_security_payload_check CHECK (public.audit_anonymous_valid(payload));
 
+-- Private to the chain role. The login and complete current binding select at most one provisioned authorizer.
+CREATE FUNCTION public.audit_service_authorizer() RETURNS TEXT LANGUAGE SQL STABLE SET search_path=pg_catalog AS $$
+  SELECT g."authorizedByUserId" FROM public.audit_service_grants g
+    WHERE pg_has_role(session_user,'shopmate_audit_service_writer','MEMBER') AND g."loginRole"=session_user
+      AND g."organizationId"=current_setting('app.organization_id',true) AND g."workspaceId"=current_setting('app.workspace_id',true)
+      AND g."storeId"=current_setting('app.store_id',true)
+$$;
 CREATE FUNCTION public.audit_member_access(org_ TEXT, workspace_ TEXT, store_ TEXT, user_ TEXT) RETURNS BOOLEAN
 LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
   SELECT EXISTS (SELECT 1 FROM public."Store" s JOIN public."Organization" o ON o.id=s."organizationId"
@@ -212,10 +219,9 @@ CREATE FUNCTION public.audit_scope_access(org_ TEXT, workspace_ TEXT, store_ TEX
 LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
   SELECT (current_setting('transaction_isolation')='read committed'
     AND org_=current_setting('app.organization_id',true) AND workspace_=current_setting('app.workspace_id',true) AND store_=current_setting('app.store_id',true)
-    AND CASE WHEN service_ THEN pg_has_role(session_user,'shopmate_audit_service_writer','MEMBER') AND EXISTS (
-      SELECT 1 FROM public.audit_service_grants g WHERE g."loginRole"=session_user AND g."organizationId"=org_ AND g."workspaceId"=workspace_ AND g."storeId"=store_
-        AND public.audit_member_access(org_,workspace_,store_,g."authorizedByUserId"))
-    ELSE public.audit_member_access(org_,workspace_,store_,nullif(current_setting('app.user_id',true),'')) END) IS TRUE
+    AND CASE WHEN service_ THEN public.audit_member_access(org_,workspace_,store_,public.audit_service_authorizer())
+    ELSE (pg_has_role(session_user,'shopmate_audit_reader','MEMBER') OR pg_has_role(session_user,'shopmate_audit_writer','MEMBER'))
+      AND public.audit_member_access(org_,workspace_,store_,nullif(current_setting('app.user_id',true),'')) END) IS TRUE
 $$;
 CREATE FUNCTION public.audit_actor_access(row_ public.audit_logs) RETURNS BOOLEAN
 LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
@@ -276,7 +282,24 @@ GRANT SELECT ON public.audit_logs,public.audit_checkpoints TO shopmate_audit_rea
 GRANT INSERT ON public.audit_logs,public.audit_checkpoints TO shopmate_audit_writer,shopmate_audit_service_writer;
 GRANT INSERT ON public.auth_security_events TO shopmate_auth_security_writer;
 GRANT SELECT ("organizationId",sequence,"entryHash") ON public.audit_logs TO shopmate_audit_chain;
-GRANT SELECT ON public."Organization",public."Workspace",public."Store",public."OrganizationMember",public."WorkspaceMember",public.audit_service_grants TO shopmate_audit_chain;
+GRANT SELECT (id,status) ON public."Organization" TO shopmate_audit_chain;
+GRANT SELECT (id,"organizationId",status) ON public."Workspace" TO shopmate_audit_chain;
+GRANT SELECT (id,"organizationId","workspaceId") ON public."Store" TO shopmate_audit_chain;
+GRANT SELECT ("organizationId","userId",status,role) ON public."OrganizationMember" TO shopmate_audit_chain;
+GRANT SELECT ("organizationId","workspaceId","userId",status) ON public."WorkspaceMember" TO shopmate_audit_chain;
+GRANT SELECT ON public.audit_service_grants TO shopmate_audit_chain;
+-- Forced tenant RLS normally follows the bound human. Only this NOLOGIN role can resolve
+-- active rows for the mapped authorizer, while the service keeps its own principal binding.
+CREATE POLICY audit_service_org ON public."Organization" FOR SELECT TO shopmate_audit_chain
+  USING (status='ACTIVE' AND id=current_setting('app.organization_id',true) AND public.audit_service_authorizer() IS NOT NULL);
+CREATE POLICY audit_service_workspace ON public."Workspace" FOR SELECT TO shopmate_audit_chain
+  USING (status='ACTIVE' AND "organizationId"=current_setting('app.organization_id',true)
+    AND id=current_setting('app.workspace_id',true) AND public.audit_service_authorizer() IS NOT NULL);
+CREATE POLICY audit_service_member ON public."OrganizationMember" FOR SELECT TO shopmate_audit_chain
+  USING (status='ACTIVE' AND "organizationId"=current_setting('app.organization_id',true) AND "userId"=public.audit_service_authorizer());
+CREATE POLICY audit_service_workspace_member ON public."WorkspaceMember" FOR SELECT TO shopmate_audit_chain
+  USING (status='ACTIVE' AND "organizationId"=current_setting('app.organization_id',true)
+    AND "workspaceId"=current_setting('app.workspace_id',true) AND "userId"=public.audit_service_authorizer());
 CREATE POLICY audit_chain_internal ON public.audit_logs FOR SELECT TO shopmate_audit_chain USING (true);
 DO $$
 DECLARE table_ TEXT;
@@ -290,6 +313,7 @@ BEGIN
 END $$;
 CREATE POLICY auth_security_append ON public.auth_security_events FOR INSERT TO shopmate_auth_security_writer WITH CHECK (true);
 -- No LOGIN or membership in internal owner role is provisioned by this migration.
+ALTER FUNCTION public.audit_service_authorizer() OWNER TO shopmate_audit_chain;
 ALTER FUNCTION public.audit_member_access(TEXT,TEXT,TEXT,TEXT) OWNER TO shopmate_audit_chain;
 ALTER FUNCTION public.audit_scope_access(TEXT,TEXT,TEXT,BOOLEAN) OWNER TO shopmate_audit_chain;
 ALTER FUNCTION public.audit_actor_access(public.audit_logs) OWNER TO shopmate_audit_chain;

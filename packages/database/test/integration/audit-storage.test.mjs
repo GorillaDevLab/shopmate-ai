@@ -501,7 +501,7 @@ async function anonymousBoundaryCases(t, writer, security, payload, insert) {
   );
 }
 async function serviceCases(t, client, service, writer) {
-  await context(service);
+  await context(service, "audit-service");
   const identity = (await service.query("SELECT session_user AS name")).rows[0].name;
   const input = event({
     actor: { actorId: "audit-service", actorKind: "SERVICE", identitySource: "SERVER" },
@@ -509,7 +509,7 @@ async function serviceCases(t, client, service, writer) {
   await denied(t, "unprovisioned SERVICE cannot use tenant chain", () => head(service));
   await client.query(
     'INSERT INTO audit_service_grants ("loginRole","organizationId","workspaceId","storeId","actorId","actorKind","authorizedByUserId") VALUES ($1,$2,$3,$4,$5,$6,$7)',
-    [identity, ...Object.values(scope), "audit-service", "SERVICE", "audit-owner"],
+    [identity, ...Object.values(scope), "audit-service", "SERVICE", "audit-viewer"],
   );
   await t.test("provisioned SERVICE appends without fake human actor FK", () =>
     transaction(service, () => append(service, input)),
@@ -526,15 +526,25 @@ async function serviceCases(t, client, service, writer) {
   await denied(t, "service cannot provision grants", () =>
     service.query("DELETE FROM audit_service_grants"),
   );
-  await client.query('UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2', [
-    "INACTIVE",
-    "audit-owner",
-  ]);
-  await denied(t, "revoked authorizer denies SERVICE head", () => head(service));
-  await client.query('UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2', [
-    "ACTIVE",
-    "audit-owner",
-  ]);
+  await serviceRevocationCases(t, client, service);
+}
+async function serviceRevocationCases(t, client, service) {
+  // Even an active human owner in the GUC must not rescue a revoked mapped viewer.
+  await context(service, "audit-owner");
+  for (const table of ['"OrganizationMember"', '"WorkspaceMember"']) {
+    const update = `UPDATE ${table} SET status=$1 WHERE "userId"=$2 AND "organizationId"=$3`;
+    await client.query(update, ["INACTIVE", "audit-viewer", scope.organizationId]);
+    try {
+      await denied(t, `revoked authorizer in ${table} denies SERVICE head`, () => head(service));
+    } finally {
+      await client.query(update, ["ACTIVE", "audit-viewer", scope.organizationId]);
+    }
+  }
+  await context(service, "audit-owner", otherStore);
+  await denied(t, "service cannot redirect its mapped authorizer to another store", () =>
+    head(service, otherStore),
+  );
+  await context(service, "");
 }
 async function privilegeCases(t, client, writer, service) {
   await denied(t, "ordinary writer cannot SET ROLE to service capability", () =>
@@ -542,6 +552,9 @@ async function privilegeCases(t, client, writer, service) {
   );
   await denied(t, "service cannot SET ROLE to internal chain owner", () =>
     service.query("SET ROLE shopmate_audit_chain"),
+  );
+  await denied(t, "service cannot SET ROLE to human writer", () =>
+    service.query("SET ROLE shopmate_audit_writer"),
   );
   await t.test("internal chain helper owner has no payload or mutation access", async () => {
     const privileges = await client.query(
@@ -571,6 +584,31 @@ async function privilegeCases(t, client, writer, service) {
     }
   });
 }
+async function serviceIsolationCases(t, service, stranger) {
+  await context(stranger, "audit-viewer");
+  await denied(t, "another service login cannot reuse a mapped human GUC", () => head(stranger));
+  await denied(t, "service cannot directly inspect private authorizer or mappings", () =>
+    service.query('SELECT "authorizedByUserId" FROM audit_service_grants'),
+  );
+  await denied(t, "service cannot read the mapped authorizer through its private helper", () =>
+    service.query("SELECT public.audit_service_authorizer()"),
+  );
+  await denied(t, "service cannot probe membership with arbitrary user IDs", () =>
+    service.query("SELECT public.audit_member_access($1,$2,$3,$4)", [
+      ...Object.values(scope),
+      "audit-viewer",
+    ]),
+  );
+  await t.test("service cannot use human scope probe with forged viewer GUC", async () => {
+    await context(service, "audit-viewer");
+    const probe = await service.query(
+      "SELECT public.audit_scope_access($1,$2,$3,false) AS valid",
+      Object.values(scope),
+    );
+    assert.equal(probe.rows[0].valid, false);
+  });
+  await context(service, "");
+}
 async function waitingForChain(client, second) {
   const pid = (await second.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
   return async () => {
@@ -586,6 +624,7 @@ async function waitingForChain(client, second) {
   };
 }
 async function waitingServiceCases(t, client, writer, service) {
+  await context(service, "former-actor");
   const waitForLock = await waitingForChain(client, service);
   const loginRole = (await service.query("SELECT session_user AS name")).rows[0].name;
   for (const change of ["rotate", "revoke"]) {
@@ -683,15 +722,17 @@ async function proof(t, client, url, names) {
       "shopmate_auth_security_writer",
       "shopmate_audit_service_writer",
       "shopmate_audit_writer",
+      "shopmate_audit_service_writer",
     ])
       connections.push(await login(client, url, names, capability));
-    const [writer, reader, security, service, second] = connections;
+    const [writer, reader, security, service, second, stranger] = connections;
     await isolationCases(t, client, writer, reader);
     await constraintCases(t, client, writer);
     await dtoCases(t, writer);
     await immutableCases(t, client, writer);
     await anonymousCases(t, writer, security);
     await serviceCases(t, client, service, writer);
+    await serviceIsolationCases(t, service, stranger);
     await privilegeCases(t, client, writer, service);
     await waitingServiceCases(t, client, writer, service);
     await concurrencyCases(t, client, writer, second);
