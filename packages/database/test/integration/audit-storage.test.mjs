@@ -142,7 +142,9 @@ async function head(client, binding = scope) {
   ).rows[0];
 }
 async function append(client, input = event(), patch = {}) {
-  const tail = await head(client, input.scope);
+  return insertAtTail(client, input, await head(client, input.scope), patch);
+}
+async function insertAtTail(client, input, tail, patch = {}) {
   const row = {
     auditId: randomUUID(),
     ...input.scope,
@@ -583,6 +585,43 @@ async function waitingForChain(client, second) {
     assert.fail("Second session did not wait for organization advisory lock");
   };
 }
+async function waitingServiceCases(t, client, writer, service) {
+  const waitForLock = await waitingForChain(client, service);
+  const loginRole = (await service.query("SELECT session_user AS name")).rows[0].name;
+  for (const change of ["rotate", "revoke"]) {
+    await t.test(`waiting direct SERVICE insert denies former grant after ${change}`, async () => {
+      const actor = { actorKind: "SERVICE", actorId: "former-actor", identitySource: "SERVER" };
+      await client.query(
+        'INSERT INTO audit_service_grants ("loginRole","organizationId","workspaceId","storeId","actorId","actorKind","authorizedByUserId") VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [loginRole, ...Object.values(scope), actor.actorId, actor.actorKind, "audit-owner"],
+      );
+      const tail = await head(writer);
+      await writer.query("BEGIN");
+      await head(writer);
+      const insertion = insertAtTail(service, event({ actor }), tail);
+      const outcome = insertion.then(
+        () => "accepted",
+        (error) => error.code,
+      );
+      try {
+        await waitForLock();
+        if (change === "rotate")
+          await client.query('UPDATE audit_service_grants SET "actorId"=$1 WHERE "loginRole"=$2', [
+            "next-actor",
+            loginRole,
+          ]);
+        else
+          await client.query('DELETE FROM audit_service_grants WHERE "loginRole"=$1', [loginRole]);
+      } finally {
+        await writer.query("ROLLBACK");
+        await outcome;
+        await client.query('DELETE FROM audit_service_grants WHERE "loginRole"=$1', [loginRole]);
+      }
+      assert.equal(await outcome, "42501");
+      assert.deepEqual(await head(writer), tail);
+    });
+  }
+}
 async function concurrencyCases(t, client, writer, second) {
   await context(writer);
   await context(second, "audit-owner", otherStore);
@@ -654,6 +693,7 @@ async function proof(t, client, url, names) {
     await anonymousCases(t, writer, security);
     await serviceCases(t, client, service, writer);
     await privilegeCases(t, client, writer, service);
+    await waitingServiceCases(t, client, writer, service);
     await concurrencyCases(t, client, writer, second);
     await waitingAuthorizationCase(t, client, writer, second);
   } finally {

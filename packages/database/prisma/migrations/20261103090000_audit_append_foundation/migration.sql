@@ -247,6 +247,8 @@ DECLARE tail_ RECORD;
 BEGIN
   IF NOT public.audit_actor_access(NEW) THEN RAISE EXCEPTION 'Audit actor denied' USING ERRCODE='42501'; END IF;
   SELECT * INTO tail_ FROM public.audit_chain_head(NEW."organizationId",NEW."workspaceId",NEW."storeId");
+  -- A grant can rotate actors without revoking scope while the head waits for the lock.
+  IF NOT public.audit_actor_access(NEW) THEN RAISE EXCEPTION 'Audit actor denied' USING ERRCODE='42501'; END IF;
   IF NEW.sequence IS DISTINCT FROM tail_.sequence+1 OR NEW."prevHash" IS DISTINCT FROM tail_."entryHash" THEN
     RAISE EXCEPTION 'Audit chain position invalid' USING ERRCODE='23514';
   END IF;
