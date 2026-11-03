@@ -1,10 +1,13 @@
 name: Deploy Tencent Cloud
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,8 +21,9 @@ concurrency:
 jobs:
   deploy:
     name: Deploy Production
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
-
     steps:
       - name: Deploy to Tencent Cloud
         uses: appleboy/ssh-action@v1.2.0
@@ -34,9 +38,22 @@ jobs:
 
             cd ~/shopmate-ai
 
-            git fetch origin
+            # 只部署本次成功 CI 验证的提交。
+            expected_sha="${{ github.event.workflow_run.head_sha }}"
+            git fetch origin main
+
+            if [ "$(git rev-parse origin/main)" != "$expected_sha" ]; then
+              echo "Skip stale deployment: main has moved"
+              exit 0
+            fi
+
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "STOP: production worktree has local changes" >&2
+              exit 1
+            fi
+
             git checkout main
-            git reset --hard origin/main
+            git reset --hard "$expected_sha"
 
             pnpm install --frozen-lockfile
 
