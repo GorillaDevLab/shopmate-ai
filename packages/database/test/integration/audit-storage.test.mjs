@@ -25,7 +25,6 @@ const scope = {
   storeId: "audit-store-a",
 };
 const otherStore = { ...scope, storeId: "audit-store-c" };
-const hash = "a".repeat(64);
 const instant = "2026-11-03T00:00:00.000Z";
 
 async function database(action) {
@@ -159,7 +158,7 @@ async function insertAtTail(client, input, tail, patch = {}) {
     occurrenceId: input.links.occurrenceId,
     sequence: Number(tail.sequence) + 1,
     prevHash: tail.entryHash,
-    entryHash: hash,
+    entryHash: randomBytes(32).toString("hex"),
     hashVersion: 1,
     redactionVersion: 1,
     payload: input,
@@ -474,7 +473,7 @@ async function immutableCases(t, client, writer) {
     () =>
       writer.query(
         'INSERT INTO audit_checkpoints ("organizationId","workspaceId","storeId",sequence,"entryHash","hashVersion") VALUES ($1,$2,$3,999,$4,1)',
-        [...Object.values(scope), hash],
+        [...Object.values(scope), "a".repeat(64)],
       ),
     "23503",
   );
@@ -723,12 +722,21 @@ async function concurrencyCases(t, client, writer, second) {
       await waitForLock();
       assert.equal(settled, false);
       await writer.query("ROLLBACK");
-      assert.equal((await waiting).sequence, before.sequence);
+      assert.deepEqual(await waiting, before);
       const row = (await append(second, event({}, otherStore))).rows[0];
       assert.equal(Number(row.sequence), Number(before.sequence) + 1);
       await second.query("COMMIT");
-      await transaction(writer, () => append(writer));
-      assert.equal(Number((await head(writer)).sequence), Number(before.sequence) + 2);
+      const hidden = await writer.query('SELECT "auditId" FROM audit_logs WHERE "auditId"=$1', [
+        row.auditId,
+      ]);
+      assert.equal(hidden.rowCount, 0);
+      assert.notEqual(row.entryHash, before.entryHash);
+      assert.equal(row.prevHash, before.entryHash);
+      assert.deepEqual(await head(writer), { sequence: row.sequence, entryHash: row.entryHash });
+      const next = (await transaction(writer, () => append(writer))).rows[0];
+      assert.equal(next.prevHash, row.entryHash);
+      assert.notEqual(next.entryHash, row.entryHash);
+      assert.equal(Number(next.sequence), Number(before.sequence) + 2);
     },
   );
 }
@@ -756,6 +764,32 @@ async function waitingAuthorizationCase(t, client, writer, second) {
     },
   );
 }
+async function independentOrganizationCase(t, client, writer, second) {
+  const otherOrg = {
+    organizationId: "legacy-org-audit-b",
+    workspaceId: "legacy-workspace-audit-b",
+    storeId: "audit-store-b",
+  };
+  await t.test("a held organization lock allows a different organization to append", async () => {
+    await client.query(
+      'INSERT INTO "OrganizationMember" (id,"organizationId","userId",role,"updatedAt") VALUES ($1,$2,$3,$4,now())',
+      [randomUUID(), otherOrg.organizationId, "audit-owner", "OWNER"],
+    );
+    await context(second, "audit-owner", otherOrg);
+    await writer.query("BEGIN");
+    try {
+      await head(writer);
+      const result = await transaction(second, async () => {
+        await second.query("SET LOCAL lock_timeout='2s'");
+        return append(second, event({}, otherOrg));
+      });
+      assert.equal(result.rows[0].sequence, "1");
+      assert.equal(result.rows[0].prevHash, null);
+    } finally {
+      await writer.query("ROLLBACK");
+    }
+  });
+}
 async function proof(t, client, url, names) {
   const connections = [];
   try {
@@ -780,6 +814,7 @@ async function proof(t, client, url, names) {
     await waitingServiceCases(t, client, writer, service);
     await concurrencyCases(t, client, writer, second);
     await waitingAuthorizationCase(t, client, writer, second);
+    await independentOrganizationCase(t, client, writer, second);
   } finally {
     for (const connection of connections) await connection.end();
   }

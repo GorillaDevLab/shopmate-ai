@@ -20,7 +20,7 @@ const apiTargets = [
   "test/demo-commerce-database.e2e-spec.ts",
   "test/metrics-database.e2e-spec.ts",
 ];
-const requiredTargetCounts = new Map([["test/integration/audit-storage.test.mjs", 196]]);
+const requiredTargetCounts = new Map([["test/integration/audit-storage.test.mjs", 198]]);
 const forbiddenEnvironment =
   /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_|^NODE_TEST_CONTEXT$|^METRIC_CURSOR_SECRET$/iu;
 function metricRuntimeEnvironment(isolatedUrl, metrics) {
