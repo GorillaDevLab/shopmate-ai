@@ -6,7 +6,12 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { URL } from "node:url";
 import pg from "pg";
-import { TenantAuditEventSchema, AuditEventTypeSchema } from "@shopmate/contracts";
+import {
+  AnonymousAuthSecurityEventSchema,
+  AuditEventTypeSchema,
+  EventTimestampSchema,
+  TenantAuditEventSchema,
+} from "@shopmate/contracts";
 import { requireIsolatedDatabaseUrl } from "../helpers/isolated-postgres.mjs";
 
 if (!process.env.TEST_DATABASE_URL)
@@ -394,21 +399,50 @@ async function dtoCases(t, writer) {
       "23514",
     );
 }
+const timestampSamples = [
+  instant,
+  "2026-11-03T00:00Z",
+  "2026-11-03T00:00+23:59",
+  "2026-11-03T00:00-23:59",
+  "2026-11-03T00:00:01Z",
+  "2026-11-03T00:00:01.123000Z",
+  "2026-11-03T00:00:01.123001Z",
+  "2026-11-03T00:00:00+23:59",
+  "2026-11-03T24:00Z",
+  "2026-11-03T24:00:00Z",
+  "2026-02-30T00:00Z",
+  "2024-02-29T23:59:59.001Z",
+  "0000-02-29T00:00:00Z",
+  "2026-11-03T00:00.1Z",
+  "2026-11-03T00:00:00.Z",
+  "2026-11-03T00:00+24:00",
+];
+async function checkTimestampStorage(input, schema, insert, timestamp) {
+  if (schema.safeParse(input).success) assert.equal((await insert(input)).rowCount, 1, timestamp);
+  else await assert.rejects(insert(input), { code: "23514" }, timestamp);
+}
 async function timestampCase(t, writer) {
-  await t.test("timestamp boundary matches DTO calendar and offset rules", async () => {
-    for (const occurredAt of [
-      instant,
-      "2026-11-03T24:00:00Z",
-      "2026-02-30T00:00:00Z",
-      "2024-02-29T23:59:59.001Z",
-      "0000-02-29T00:00:00Z",
-      "2026-11-03T00:00:00+23:59",
-    ]) {
-      const expected = TenantAuditEventSchema.safeParse(event({ occurredAt })).success;
-      const result = await writer.query("SELECT public.audit_timestamp($1::jsonb) AS valid", [
-        JSON.stringify(occurredAt),
-      ]);
-      assert.equal(result.rows[0].valid, expected, occurredAt);
+  const insert = (input) => transaction(writer, () => append(writer, input));
+  for (const field of ["occurredAt", "sourceOccurredAt"]) {
+    await t.test(`tenant ${field} storage matches pinned connector DTO`, async () => {
+      for (const timestamp of timestampSamples)
+        await checkTimestampStorage(
+          event({ [field]: timestamp }),
+          TenantAuditEventSchema,
+          insert,
+          timestamp,
+        );
+    });
+  }
+  await t.test("lifecycle storage matches UTC millisecond event DTO", async () => {
+    for (const timestamp of timestampSamples) {
+      const input = { ...lifecycleEvent(), occurredAt: timestamp };
+      assert.equal(
+        TenantAuditEventSchema.safeParse(input).success,
+        EventTimestampSchema.safeParse(timestamp).success,
+        timestamp,
+      );
+      await checkTimestampStorage(input, TenantAuditEventSchema, insert, timestamp);
     }
   });
 }
@@ -461,6 +495,15 @@ async function anonymousCases(t, writer, security) {
       randomUUID(),
       input,
     ]);
+  await t.test("anonymous timestamp storage matches pinned security DTO", async () => {
+    for (const timestamp of timestampSamples)
+      await checkTimestampStorage(
+        { ...payload, occurredAt: timestamp },
+        AnonymousAuthSecurityEventSchema,
+        insert,
+        timestamp,
+      );
+  });
   await anonymousBoundaryCases(t, writer, security, payload, insert);
 }
 async function anonymousBoundaryCases(t, writer, security, payload, insert) {

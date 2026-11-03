@@ -40,7 +40,7 @@ $$;
 CREATE FUNCTION public.audit_timestamp(value_ JSONB) RETURNS BOOLEAN LANGUAGE plpgsql IMMUTABLE SET search_path=pg_catalog AS $$
 DECLARE text_ TEXT:=value_#>>'{}'; year_ INTEGER; month_ INTEGER; day_ INTEGER; days_ INTEGER[];
 BEGIN
-  IF jsonb_typeof(value_) IS DISTINCT FROM 'string' OR text_ !~ '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d+)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)$' THEN RETURN false; END IF;
+  IF jsonb_typeof(value_) IS DISTINCT FROM 'string' OR text_ !~ '^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)$' THEN RETURN false; END IF;
   year_:=substring(text_,1,4)::integer; month_:=substring(text_,6,2)::integer; day_:=substring(text_,9,2)::integer;
   -- Validate the DTO's proleptic Gregorian calendar without PostgreSQL's timezone/year restrictions.
   days_:=ARRAY[31,CASE WHEN year_%4=0 AND (year_%100<>0 OR year_%400=0) THEN 29 ELSE 28 END,31,30,31,30,31,31,30,31,30,31];
@@ -162,7 +162,7 @@ CREATE FUNCTION public.audit_resource_valid(payload_ JSONB) RETURNS BOOLEAN LANG
   SELECT (CASE WHEN payload_->'event'->>'eventType'='EVENT_STATE_CHANGE' THEN
     public.audit_keys(payload_->'resource',ARRAY['type','id']) AND payload_->'resource'->>'type'='EVENT'
     AND jsonb_typeof(payload_->'resource'->'id')='string' AND public.audit_literal(payload_->'resource'->>'id')
-    AND payload_->>'occurredAt' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{0,3}0*)?Z$'
+    AND payload_->>'occurredAt' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3}0*)?)?Z$'
     AND payload_->'actor'->>'actorKind'='USER' AND payload_->>'result'='SUCCESS' AND payload_->'sourceOccurredAt'='null'::jsonb
     AND ((payload_->'event'->'redactedMetadata'->'evidenceReference'->'binding')-ARRAY['connectionId','externalStoreId'])=payload_->'scope'
     AND (payload_->'links')-ARRAY['requestId','occurrenceId']=jsonb_build_object('runId',null,'evidenceId',null,'actionId',null,'revisionId',null,'approvalId',null,'executionId',null)
