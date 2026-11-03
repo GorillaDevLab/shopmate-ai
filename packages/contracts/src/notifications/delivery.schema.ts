@@ -180,6 +180,12 @@ function validBriefWindow(value: BriefObject): boolean {
   );
 }
 function validBriefQuality(value: BriefObject): boolean {
+  // Missing cost inputs keep profit unknown regardless of aggregate status or field alias.
+  if (
+    value.profitMinor !== null &&
+    value.quality.issues.some((issue) => issue.code === "COST_MISSING")
+  )
+    return false;
   const status = value.quality.dataStatus;
   if (status === "UNAVAILABLE" || status === "INSUFFICIENT") return value.profitMinor === null;
   if (status !== "VERIFIED") return true;

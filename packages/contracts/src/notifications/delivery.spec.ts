@@ -230,6 +230,62 @@ it("keeps unknown profit null with explicit quality and observed source time", (
   expect(Object.isFrozen(parsed.events)).toBe(true);
 });
 
+const missingCostQualities = ["ESTIMATED", "STALE"].flatMap((dataStatus) =>
+  ["profit", "frozenCosts"].map((field) => ({
+    ...briefFixture().quality,
+    dataStatus,
+    issues: [{ ...briefFixture().quality.issues[0], field }],
+  })),
+);
+
+it.each(
+  missingCostQualities.flatMap((quality) =>
+    [0, 150, -150].map((profitMinor) => ({ quality, profitMinor })),
+  ),
+)("rejects numeric profit with explicit missing costs %#", (mutation) => {
+  expect(DailyBriefSchema.safeParse({ ...briefFixture(), ...mutation }).success).toBe(false);
+});
+
+it.each(missingCostQualities)("retains null profit with explicit missing costs %#", (quality) => {
+  const parsed = DailyBriefSchema.parse({ ...briefFixture(), quality });
+  expect(parsed.profitMinor).toBeNull();
+  expect(parsed.quality).toEqual(quality);
+  expect(parsed.sourceWatermark).toBeNull();
+});
+
+it.each(missingCostQualities)("requires listed missing-cost evidence %#", (quality) => {
+  const issues = [{ ...quality.issues[0], evidenceIds: ["unlisted-evidence"] }];
+  expect(
+    DailyBriefSchema.safeParse({ ...briefFixture(), quality: { ...quality, issues } }).success,
+  ).toBe(false);
+});
+
+const knownProfitQualities = [
+  { dataStatus: "ESTIMATED", code: "COST_ESTIMATED", field: "frozenCosts" },
+  { dataStatus: "STALE", code: "STALE_SOURCE", field: "profit" },
+  { dataStatus: "ESTIMATED", code: "INVENTORY_UNKNOWN", field: "inventory" },
+  { dataStatus: "STALE", code: "INVENTORY_UNKNOWN", field: "inventory" },
+].map(({ dataStatus, code, field }) => ({
+  dataStatus,
+  sampleSize: 1,
+  coverageBasisPoints: 10000,
+  issues: [{ code, field, evidenceIds: ["evidence-a"] }],
+}));
+
+it.each(
+  knownProfitQualities.flatMap((quality) =>
+    [0, 150, -150].map((profitMinor) => ({ quality, profitMinor })),
+  ),
+)("preserves known estimated, stale or unrelated-quality profit %#", (mutation) => {
+  const parsed = DailyBriefSchema.parse({
+    ...briefFixture(),
+    ...mutation,
+    sourceWatermark: instant,
+  });
+  expect(parsed.profitMinor).toBe(mutation.profitMinor);
+  expect(parsed.quality).toEqual(mutation.quality);
+});
+
 it.each([
   { profitMinor: 0 },
   { profitMinor: 0.5 },
@@ -268,12 +324,12 @@ it("requires exact business-day window, same-scope references and listed event e
   ).toBe(false);
 });
 
-it("allows signed known profit when measured quality permits it", () => {
+it.each([-150, 0, 150])("allows measured signed or zero profit %s", (profitMinor) => {
   const quality = { dataStatus: "VERIFIED", sampleSize: 1, coverageBasisPoints: 10000, issues: [] };
   expect(
     DailyBriefSchema.safeParse({
       ...briefFixture(),
-      profitMinor: -150,
+      profitMinor,
       quality,
       sourceWatermark: instant,
     }).success,
