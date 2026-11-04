@@ -1,11 +1,18 @@
 import { expect, it } from "vitest";
-import { TenantAuditEventSchema, type TenantAuditEntry } from "@shopmate/contracts";
+import {
+  AnonymousAuthSecurityEventSchema,
+  TenantAuditEventSchema,
+  type AnonymousAuthSecurityEvent,
+  type TenantAuditEvent,
+  type TenantAuditEntry,
+} from "@shopmate/contracts";
 import { hashAuditEntry } from "./audit-hash.js";
 import {
   AuditAppendError,
   AuditAppendRepository,
   type AuditTransactionClient,
   type BoundTenantTransaction,
+  type BoundAuthSecuritySink,
 } from "./audit-append.repository.js";
 
 const scope = { organizationId: "org-a", workspaceId: "workspace-a", storeId: "store-a" };
@@ -41,8 +48,8 @@ function event() {
     },
   });
 }
-function entry(sequence = 1, prevHash: string | null = null): TenantAuditEntry {
-  const unsigned = { ...event(), auditId: "audit-a", sequence, prevHash, hashVersion: 1 as const };
+function entry(sequence = 1, prevHash: string | null = null, input = event()): TenantAuditEntry {
+  const unsigned = { ...input, auditId: "audit-a", sequence, prevHash, hashVersion: 1 as const };
   return { ...unsigned, entryHash: hashAuditEntry(unsigned) };
 }
 function row(value = entry()): Record<string, unknown> {
@@ -227,4 +234,85 @@ it.each(["", "bad id", "x".repeat(129)])("validates generated audit ID %s", asyn
     new AuditAppendRepository(() => auditId).appendTenant(transaction(client), event()),
   ).rejects.toBeInstanceOf(AuditAppendError);
   expect(client.calls.some(({ sql }) => sql.startsWith("INSERT"))).toBe(false);
+});
+
+function anonymous(): AnonymousAuthSecurityEvent {
+  return AnonymousAuthSecurityEventSchema.parse({
+    scopeKind: "ANONYMOUS_AUTH_SECURITY",
+    scope: null,
+    actor: null,
+    requestId: "request-a",
+    occurredAt: "2026-11-03T08:00:00Z",
+    result: "REJECTED",
+    reason: "UNKNOWN_IDENTITY",
+    redactedMetadata: { attemptClass: "LOGIN", rateLimited: false },
+  });
+}
+function sink(client: AuditTransactionClient): BoundAuthSecuritySink {
+  return { kind: "ANONYMOUS_AUTH_SECURITY", client, isActive: () => true };
+}
+it("appends unknown login with explicit null identity using INSERT-only anonymous privileges", async () => {
+  const client = new ScriptClient([result([], 1)]);
+  expect(await repository.appendAnonymousSecurity(sink(client), anonymous())).toEqual({
+    ...anonymous(),
+    auditId: "audit-a",
+  });
+  expect(client.calls).toEqual([
+    {
+      sql: 'INSERT INTO public.auth_security_events ("auditId",payload) VALUES ($1,$2::jsonb)',
+      parameters: ["audit-a", JSON.stringify(anonymous())],
+    },
+  ]);
+  expect(client.calls[0]?.sql).not.toMatch(/SELECT|RETURNING|audit_logs|BEGIN|COMMIT/iu);
+});
+it.each([null, 0, 2])("rejects anonymous affected-row count %s", async (rowCount) => {
+  const client = new ScriptClient([{ rows: [], rowCount }]);
+  await expect(repository.appendAnonymousSecurity(sink(client), anonymous())).rejects.toMatchObject(
+    { code: "INVALID_STORAGE" },
+  );
+});
+it("rejects tenant input on the explicit anonymous method before any SQL", async () => {
+  const client = new ScriptClient([]);
+  await expect(
+    repository.appendAnonymousSecurity(
+      sink(client),
+      event() as unknown as AnonymousAuthSecurityEvent,
+    ),
+  ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  expect(client.calls).toHaveLength(0);
+});
+it("rejects anonymous input on the explicit tenant method before any SQL", async () => {
+  const client = new ScriptClient([]);
+  await expect(
+    repository.appendTenant(transaction(client), anonymous() as unknown as TenantAuditEvent),
+  ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  expect(client.calls).toHaveLength(0);
+});
+it.each(["inactive", "domain"])("rejects %s anonymous owner handle before SQL", async (kind) => {
+  const client = new ScriptClient([]);
+  const handle = {
+    ...sink(client),
+    isActive: () => kind !== "inactive",
+    kind: kind === "domain" ? "TENANT" : "ANONYMOUS_AUTH_SECURITY",
+  } as BoundAuthSecuritySink;
+  await expect(repository.appendAnonymousSecurity(handle, anonymous())).rejects.toMatchObject({
+    code: "INVALID_HANDLE",
+  });
+  expect(client.calls).toHaveLength(0);
+});
+it("validates anonymous generated IDs before insertion", async () => {
+  const client = new ScriptClient([]);
+  await expect(
+    new AuditAppendRepository(() => "bad id").appendAnonymousSecurity(sink(client), anonymous()),
+  ).rejects.toMatchObject({ code: "INVALID_ID" });
+  expect(client.calls).toHaveLength(0);
+});
+it("propagates a bounded anonymous storage failure without a sensitive cause", async () => {
+  const client = new ScriptClient([new Error("raw email password cookie secret")]);
+  const pending = repository.appendAnonymousSecurity(sink(client), anonymous());
+  await expect(pending).rejects.toMatchObject({
+    code: "STORAGE_FAILED",
+    message: "Audit append failed",
+  });
+  await expect(pending).rejects.not.toHaveProperty("cause");
 });

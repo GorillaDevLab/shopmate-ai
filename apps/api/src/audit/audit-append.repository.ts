@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import {
+  AnonymousAuthSecurityEntrySchema,
   AuditActorSchema,
   AuditTenantScopeSchema,
   TenantAuditEntrySchema,
   TenantIdSchema,
+  type AnonymousAuthSecurityEvent,
+  type AnonymousAuthSecurityEntry,
+  type AuditAppendPort,
   type TenantAuditEntry,
   type TenantAuditEvent,
 } from "@shopmate/contracts";
@@ -117,6 +121,22 @@ function tenantInput(input: unknown): TenantAuditEvent {
     return event.scopeKind === "TENANT" ? event : fail("INVALID_INPUT");
   } catch {
     return fail("INVALID_INPUT");
+  }
+}
+function anonymousInput(input: unknown): AnonymousAuthSecurityEvent {
+  try {
+    const event = new AuditRedactor().redact(input).event;
+    return event.scopeKind === "ANONYMOUS_AUTH_SECURITY" ? event : fail("INVALID_INPUT");
+  } catch {
+    return fail("INVALID_INPUT");
+  }
+}
+function anonymousBinding(handle: BoundAuthSecuritySink): ClientBinding {
+  try {
+    if (handle?.kind !== "ANONYMOUS_AUTH_SECURITY") fail("INVALID_HANDLE");
+    return bind(handle);
+  } catch {
+    return fail("INVALID_HANDLE");
   }
 }
 async function query(binding: ClientBinding, sql: string, parameters: unknown[]) {
@@ -242,7 +262,9 @@ async function insert(binding: ClientBinding, intended: TenantAuditEntry) {
 }
 
 /** Never opens/commits a transaction. Any rejection requires owner rollback of the entire unit. */
-export class AuditAppendRepository {
+export class AuditAppendRepository
+  implements AuditAppendPort<BoundTenantTransaction, BoundAuthSecuritySink>
+{
   constructor(private readonly auditId: () => string = randomUUID) {}
 
   async appendTenant(
@@ -256,6 +278,31 @@ export class AuditAppendRepository {
       const existing = await replay(binding, event, head);
       if (existing) return existing;
       return await insert(binding, newEntry(event, head, this.auditId));
+    } catch (error) {
+      if (error instanceof AuditAppendError) throw error;
+      return fail("STORAGE_FAILED");
+    }
+  }
+
+  async appendAnonymousSecurity(
+    securitySink: BoundAuthSecuritySink,
+    input: AnonymousAuthSecurityEvent,
+  ): Promise<AnonymousAuthSecurityEntry> {
+    try {
+      const event = anonymousInput(input);
+      const binding = anonymousBinding(securitySink);
+      const entry = AnonymousAuthSecurityEntrySchema.parse({
+        ...event,
+        auditId: generateId(this.auditId),
+      });
+      // This role has INSERT only; RETURNING would require SELECT privileges.
+      const result = await query(
+        binding,
+        'INSERT INTO public.auth_security_events ("auditId",payload) VALUES ($1,$2::jsonb)',
+        [entry.auditId, JSON.stringify(event)],
+      );
+      if (result.rowCount !== 1 || result.rows.length !== 0) fail("INVALID_STORAGE");
+      return entry;
     } catch (error) {
       if (error instanceof AuditAppendError) throw error;
       return fail("STORAGE_FAILED");
