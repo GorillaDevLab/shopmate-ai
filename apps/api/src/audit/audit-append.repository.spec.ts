@@ -721,3 +721,192 @@ it("still rejects real price changes against a JSON-persisted occurrence", async
     code: "OCCURRENCE_CONFLICT",
   });
 });
+
+function barrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+class ChainClient implements AuditTransactionClient {
+  readonly calls: string[] = [];
+  readonly rows: Record<string, unknown>[] = [];
+  readonly headEntered = barrier();
+  holdHead: ReturnType<typeof barrier> | undefined;
+  failInsert = false;
+  onInsertFailure: (() => void) | undefined;
+  async query(sql: string, parameters: unknown[] = []): Promise<Reply> {
+    this.calls.push(sql);
+    if (sql.includes("audit_chain_head")) return this.readHead();
+    if (sql.startsWith("SELECT")) return result([]);
+    if (this.failInsert) {
+      this.onInsertFailure?.();
+      throw new Error("synthetic insert failure");
+    }
+    const latest = this.rows.at(-1);
+    if (parameters[8] !== this.rows.length + 1 || parameters[9] !== (latest?.entryHash ?? null))
+      throw new Error("synthetic tail guard rejection");
+    const stored = insertedRow(parameters);
+    this.rows.push(stored);
+    return result([stored]);
+  }
+  private async readHead(): Promise<Reply> {
+    const latest = this.rows.at(-1);
+    const snapshot = result([
+      { sequence: String(this.rows.length), entryHash: latest?.entryHash ?? null },
+    ]);
+    const hold = this.holdHead;
+    this.holdHead = undefined;
+    this.headEntered.resolve();
+    if (hold) await hold.promise;
+    return snapshot;
+  }
+}
+function occurrence(id: string): TenantAuditEvent {
+  return TenantAuditEventSchema.parse({ ...event(), links: { ...links, occurrenceId: id } });
+}
+async function finishPair(first: Promise<TenantAuditEntry>, second: Promise<TenantAuditEntry>) {
+  const outcomes = await Promise.allSettled([first, second]);
+  expect(outcomes.map((outcome) => outcome.status)).toEqual(["fulfilled", "fulfilled"]);
+  const values = outcomes.flatMap((outcome) =>
+    outcome.status === "fulfilled" ? [outcome.value] : [],
+  );
+  expect(values.map((value) => value.sequence)).toEqual([1, 2]);
+  expect(values[1]?.prevHash).toBe(values[0]?.entryHash);
+}
+it("serializes overlapping protocols across repository instances on the same client", async () => {
+  const client = new ChainClient();
+  const hold = barrier();
+  client.holdHead = hold;
+  const first = repository.appendTenant(transaction(client), occurrence("first"));
+  await client.headEntered.promise;
+  const second = new AuditAppendRepository(() => "audit-b").appendTenant(
+    transaction(client),
+    occurrence("second"),
+  );
+  const finished = finishPair(first, second);
+  hold.resolve();
+  await finished;
+  expect(client.calls.map((sql) => sql.split(" ")[0])).toEqual([
+    "SELECT",
+    "SELECT",
+    "INSERT",
+    "SELECT",
+    "SELECT",
+    "INSERT",
+  ]);
+});
+it("allows an independent client to finish while another client is blocked", async () => {
+  const blocked = new ChainClient();
+  const hold = barrier();
+  blocked.holdHead = hold;
+  const waiting = repository.appendTenant(transaction(blocked), occurrence("blocked"));
+  await blocked.headEntered.promise;
+  try {
+    const independent = new ChainClient();
+    expect(
+      (await repository.appendTenant(transaction(independent), occurrence("free"))).sequence,
+    ).toBe(1);
+    expect(blocked.rows).toHaveLength(0);
+  } finally {
+    hold.resolve();
+    await waiting;
+  }
+});
+it("snapshots queued input and bound metadata before waiting for the client", async () => {
+  const client = new ChainClient();
+  const hold = barrier();
+  client.holdHead = hold;
+  const first = repository.appendTenant(transaction(client), occurrence("first"));
+  await client.headEntered.promise;
+  const input = occurrence("second");
+  const metadata = { ...scope };
+  const handle = { ...transaction(client), scope: metadata };
+  const second = repository.appendTenant(handle, input);
+  input.links.occurrenceId = "mutated";
+  input.scope.storeId = "mutated";
+  metadata.storeId = "mutated";
+  const finished = finishPair(first, second);
+  hold.resolve();
+  await finished;
+  expect(client.rows[1]?.occurrenceId).toBe("second");
+});
+it("checks queued lifetime before SQL and permits the reused client in a new transaction", async () => {
+  const client = new ChainClient();
+  const hold = barrier();
+  client.holdHead = hold;
+  const first = repository.appendTenant(transaction(client), occurrence("first"));
+  await client.headEntered.promise;
+  let active = true;
+  const queued = repository.appendTenant(
+    { ...transaction(client), isActive: () => active },
+    occurrence("expired"),
+  );
+  const rejected = expect(queued).rejects.toMatchObject({ code: "INVALID_HANDLE" });
+  active = false;
+  hold.resolve();
+  await Promise.all([first, rejected]);
+  expect(client.calls).toHaveLength(3);
+  client.rows.length = 0;
+  expect(
+    (await repository.appendTenant(transaction(client), occurrence("next-transaction"))).sequence,
+  ).toBe(1);
+});
+it("releases failed and expired queued work without poisoning a reused client", async () => {
+  const client = new ChainClient();
+  const hold = barrier();
+  client.holdHead = hold;
+  client.failInsert = true;
+  let active = true;
+  const handle = { ...transaction(client), isActive: () => active };
+  const first = repository.appendTenant(handle, occurrence("failed"));
+  await client.headEntered.promise;
+  const second = repository.appendTenant(handle, occurrence("queued"));
+  const outcomes = Promise.allSettled([first, second]);
+  active = false;
+  hold.resolve();
+  expect((await outcomes).map((outcome) => outcome.status)).toEqual(["rejected", "rejected"]);
+  expect(client.calls).toHaveLength(1);
+  client.failInsert = false;
+  expect((await repository.appendTenant(transaction(client), occurrence("reused"))).sequence).toBe(
+    1,
+  );
+});
+it("releases an INSERT failure before a later transaction reuses the client", async () => {
+  const client = new ChainClient();
+  client.failInsert = true;
+  await expect(
+    repository.appendTenant(transaction(client), occurrence("failed")),
+  ).rejects.toMatchObject({ code: "STORAGE_FAILED" });
+  client.failInsert = false;
+  expect((await repository.appendTenant(transaction(client), occurrence("reused"))).sequence).toBe(
+    1,
+  );
+});
+
+it("drains queued work after a SQL rejection and honors a new lifetime on the same client", async () => {
+  const client = new ChainClient();
+  const hold = barrier();
+  client.holdHead = hold;
+  client.failInsert = true;
+  let active = true;
+  client.onInsertFailure = () => {
+    active = false;
+  };
+  const handle = { ...transaction(client), isActive: () => active };
+  const first = repository.appendTenant(handle, occurrence("failed"));
+  await client.headEntered.promise;
+  const second = repository.appendTenant(handle, occurrence("queued"));
+  const outcomes = Promise.allSettled([first, second]);
+  hold.resolve();
+  expect(await outcomes).toMatchObject([
+    { status: "rejected", reason: { code: "STORAGE_FAILED" } },
+    { status: "rejected", reason: { code: "INVALID_HANDLE" } },
+  ]);
+  expect(client.calls).toHaveLength(3);
+  client.failInsert = false;
+  expect(
+    (await repository.appendTenant(transaction(client), occurrence("new-lifetime"))).sequence,
+  ).toBe(1);
+});

@@ -56,6 +56,30 @@ export class AuditAppendError extends Error {
   }
 }
 type ClientBinding = Pick<BoundTenantTransaction, "client" | "isActive">;
+// Coordinate complete protocols even when separate repositories share one transaction client.
+// Gate promises only resolve: an append rejection cannot leak or poison the next transaction.
+const appendTails = new WeakMap<AuditTransactionClient, Promise<void>>();
+
+async function serializeTenant(
+  binding: ClientBinding,
+  operation: () => Promise<TenantAuditEntry>,
+): Promise<TenantAuditEntry> {
+  const previous = appendTails.get(binding.client);
+  let release!: () => void;
+  const tail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  appendTails.set(binding.client, tail);
+  try {
+    if (previous) await previous;
+    active(binding);
+    return await operation();
+  } finally {
+    release();
+    if (appendTails.get(binding.client) === tail) appendTails.delete(binding.client);
+  }
+}
+
 type Head = Readonly<{ sequence: number; entryHash: string | null }>;
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 const headSchema = z.strictObject({ sequence: z.unknown(), entryHash: hash.nullable() });
@@ -286,10 +310,12 @@ export class AuditAppendRepository
     try {
       const event = tenantInput(input);
       const binding = tenantBinding(transaction, event);
-      const head = await lockHead(binding, event);
-      const existing = await replay(binding, event, head);
-      if (existing) return existing;
-      return await insert(binding, newEntry(event, head, this.auditId));
+      return await serializeTenant(binding, async () => {
+        const head = await lockHead(binding, event);
+        const existing = await replay(binding, event, head);
+        if (existing) return existing;
+        return insert(binding, newEntry(event, head, this.auditId));
+      });
     } catch (error) {
       if (error instanceof AuditAppendError) throw error;
       return fail("STORAGE_FAILED");
