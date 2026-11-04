@@ -27,5 +27,5 @@ test("required isolated audit proof is explicitly registered without default DB 
   );
   assert.match(runner, /test\/integration\/audit-storage\.test\.mjs/u);
   assert.match(runner, /audit-storage\.test\.mjs[\s\S]*?TEST_DATABASE_URL: server.url/u);
-  assert.match(runner, /\["test\/integration\/audit-storage\.test\.mjs", 198\]/u);
+  assert.match(runner, /\["test\/integration\/audit-storage\.test\.mjs", 206\]/u);
 });

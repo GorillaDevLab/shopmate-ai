@@ -665,43 +665,114 @@ async function waitingForChain(client, second) {
     assert.fail("Second session did not wait for organization advisory lock");
   };
 }
+function observeWaiting(state, promise) {
+  // Observe rejection immediately even while the holder still owns the lock.
+  const pending = {
+    consumed: false,
+    result: promise.then(
+      (value) => ({ value }),
+      (error) => ({ error }),
+    ),
+  };
+  state.pending.push(pending);
+  return pending;
+}
+async function waitingValue(pending) {
+  pending.consumed = true;
+  const result = await pending.result;
+  if (result.error) throw result.error;
+  return result.value;
+}
+async function cleanupStep(errors, action) {
+  try {
+    await action();
+  } catch (error) {
+    errors.push(error);
+  }
+}
+async function rollbackSession(connection, errors) {
+  try {
+    await connection.query("ROLLBACK");
+  } catch (error) {
+    errors.push(error);
+    // A broken holder must close before a blocked query can finish.
+    await cleanupStep(errors, () => connection.end());
+  }
+}
+async function cleanupConcurrentScope(holder, waiter, state, restore) {
+  const errors = [];
+  // Draining first would deadlock when the action failed before holder rollback.
+  await rollbackSession(holder, errors);
+  for (const pending of state.pending) {
+    const result = await pending.result;
+    if (result.error && !pending.consumed) errors.push(result.error);
+  }
+  await rollbackSession(waiter, errors);
+  await cleanupStep(errors, restore);
+  return errors;
+}
+async function concurrentScope(holder, waiter, action, restore = async () => {}) {
+  const state = { pending: [] };
+  let value;
+  let failure;
+  try {
+    value = await action(state);
+  } catch (error) {
+    failure = error;
+  }
+  const errors = await cleanupConcurrentScope(holder, waiter, state, restore);
+  if (errors.length)
+    throw new AggregateError(
+      failure ? [failure, ...errors] : errors,
+      "Concurrent fixture cleanup failed",
+      { cause: failure },
+    );
+  if (failure) throw failure;
+  return value;
+}
 async function waitingServiceCases(t, client, writer, service) {
   await context(service, "former-actor");
   const waitForLock = await waitingForChain(client, service);
   const loginRole = (await service.query("SELECT session_user AS name")).rows[0].name;
-  for (const change of ["rotate", "revoke"]) {
-    await t.test(`waiting direct SERVICE insert denies former grant after ${change}`, async () => {
-      const actor = { actorKind: "SERVICE", actorId: "former-actor", identitySource: "SERVER" };
-      await client.query(
-        'INSERT INTO audit_service_grants ("loginRole","organizationId","workspaceId","storeId","actorId","actorKind","authorizedByUserId") VALUES ($1,$2,$3,$4,$5,$6,$7)',
-        [loginRole, ...Object.values(scope), actor.actorId, actor.actorKind, "audit-owner"],
-      );
-      const tail = await head(writer);
-      await writer.query("BEGIN");
-      await head(writer);
-      const insertion = insertAtTail(service, event({ actor }), tail);
-      const outcome = insertion.then(
-        () => "accepted",
-        (error) => error.code,
-      );
-      try {
-        await waitForLock();
-        if (change === "rotate")
-          await client.query('UPDATE audit_service_grants SET "actorId"=$1 WHERE "loginRole"=$2', [
-            "next-actor",
-            loginRole,
-          ]);
-        else
-          await client.query('DELETE FROM audit_service_grants WHERE "loginRole"=$1', [loginRole]);
-      } finally {
-        await writer.query("ROLLBACK");
-        await outcome;
-        await client.query('DELETE FROM audit_service_grants WHERE "loginRole"=$1', [loginRole]);
-      }
-      assert.equal(await outcome, "42501");
-      assert.deepEqual(await head(writer), tail);
-    });
-  }
+  for (const change of ["rotate", "revoke"])
+    await t.test(`waiting direct SERVICE insert denies former grant after ${change}`, () =>
+      concurrentScope(
+        writer,
+        service,
+        (state) =>
+          waitingServiceInsert(client, writer, service, { state, waitForLock, loginRole, change }),
+        () => client.query('DELETE FROM audit_service_grants WHERE "loginRole"=$1', [loginRole]),
+      ),
+    );
+}
+async function waitingServiceInsert(
+  client,
+  writer,
+  service,
+  { state, waitForLock, loginRole, change },
+) {
+  const actor = { actorKind: "SERVICE", actorId: "former-actor", identitySource: "SERVER" };
+  await client.query(
+    'INSERT INTO audit_service_grants ("loginRole","organizationId","workspaceId","storeId","actorId","actorKind","authorizedByUserId") VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [loginRole, ...Object.values(scope), actor.actorId, actor.actorKind, "audit-owner"],
+  );
+  const tail = await head(writer);
+  await writer.query("BEGIN");
+  await head(writer);
+  const insertion = observeWaiting(
+    state,
+    assert.rejects(insertAtTail(service, event({ actor }), tail), { code: "42501" }),
+  );
+  await waitForLock();
+  if (change === "rotate")
+    await client.query('UPDATE audit_service_grants SET "actorId"=$1 WHERE "loginRole"=$2', [
+      "next-actor",
+      loginRole,
+    ]);
+  else await client.query('DELETE FROM audit_service_grants WHERE "loginRole"=$1', [loginRole]);
+  await writer.query("ROLLBACK");
+  await waitingValue(insertion);
+  assert.deepEqual(await head(writer), tail);
 }
 async function concurrencyCases(t, client, writer, second) {
   await context(writer);
@@ -709,59 +780,213 @@ async function concurrencyCases(t, client, writer, second) {
   const waitForLock = await waitingForChain(client, second);
   await t.test(
     "two sessions serialize same-org different-store heads and rollback allocates nothing",
-    async () => {
-      const before = await head(writer);
-      await writer.query("BEGIN");
-      await append(writer);
-      await second.query("BEGIN");
-      let settled = false;
-      const waiting = head(second, otherStore).then((value) => {
-        settled = true;
-        return value;
-      });
-      await waitForLock();
-      assert.equal(settled, false);
-      await writer.query("ROLLBACK");
-      assert.deepEqual(await waiting, before);
-      const row = (await append(second, event({}, otherStore))).rows[0];
-      assert.equal(Number(row.sequence), Number(before.sequence) + 1);
-      await second.query("COMMIT");
-      const hidden = await writer.query('SELECT "auditId" FROM audit_logs WHERE "auditId"=$1', [
-        row.auditId,
-      ]);
-      assert.equal(hidden.rowCount, 0);
-      assert.notEqual(row.entryHash, before.entryHash);
-      assert.equal(row.prevHash, before.entryHash);
-      assert.deepEqual(await head(writer), { sequence: row.sequence, entryHash: row.entryHash });
-      const next = (await transaction(writer, () => append(writer))).rows[0];
-      assert.equal(next.prevHash, row.entryHash);
-      assert.notEqual(next.entryHash, row.entryHash);
-      assert.equal(Number(next.sequence), Number(before.sequence) + 2);
+    () =>
+      concurrentScope(writer, second, (state) =>
+        serializedHeads(writer, second, waitForLock, state),
+      ),
+  );
+}
+async function serializedHeads(writer, second, waitForLock, state) {
+  const before = await head(writer);
+  await writer.query("BEGIN");
+  await append(writer);
+  await second.query("BEGIN");
+  let settled = false;
+  const waiting = observeWaiting(
+    state,
+    head(second, otherStore).then((value) => {
+      settled = true;
+      return value;
+    }),
+  );
+  await waitForLock();
+  assert.equal(settled, false);
+  await writer.query("ROLLBACK");
+  assert.deepEqual(await waitingValue(waiting), before);
+  const row = (await append(second, event({}, otherStore))).rows[0];
+  assert.equal(Number(row.sequence), Number(before.sequence) + 1);
+  await second.query("COMMIT");
+  const hidden = await writer.query('SELECT "auditId" FROM audit_logs WHERE "auditId"=$1', [
+    row.auditId,
+  ]);
+  assert.equal(hidden.rowCount, 0);
+  assert.notEqual(row.entryHash, before.entryHash);
+  assert.equal(row.prevHash, before.entryHash);
+  assert.deepEqual(await head(writer), { sequence: row.sequence, entryHash: row.entryHash });
+  const next = (await transaction(writer, () => append(writer))).rows[0];
+  assert.equal(next.prevHash, row.entryHash);
+  assert.notEqual(next.entryHash, row.entryHash);
+  assert.equal(Number(next.sequence), Number(before.sequence) + 2);
+}
+function wrongHeadClient(second) {
+  let inject = true;
+  return {
+    query: async (...args) => {
+      const result = await second.query(...args);
+      if (inject && args[0].startsWith("SELECT * FROM public.audit_chain_head")) {
+        inject = false;
+        return { ...result, rows: [{ ...result.rows[0], sequence: "-1" }] };
+      }
+      return result;
     },
+    end: () => second.end(),
+  };
+}
+async function assertConcurrentSessionsReleased(client, writer, second) {
+  const pids = [];
+  for (const connection of [writer, second])
+    pids.push((await connection.query("SELECT pg_backend_pid() AS pid")).rows[0].pid);
+  const locks = await client.query(
+    "SELECT pid FROM pg_locks WHERE pid=ANY($1::int[]) AND locktype='advisory'",
+    [pids],
+  );
+  assert.equal(locks.rowCount, 0, "failed fixture must release all organization locks");
+  const sessions = await client.query(
+    "SELECT state FROM pg_stat_activity WHERE pid=ANY($1::int[])",
+    [pids],
+  );
+  assert.deepEqual(
+    sessions.rows.map((row) => row.state),
+    ["idle", "idle"],
+  );
+  const membership = await client.query(
+    'SELECT status FROM "OrganizationMember" WHERE "userId"=$1 AND "organizationId"=$2',
+    ["audit-owner", scope.organizationId],
+  );
+  assert.equal(membership.rows[0].status, "ACTIVE");
+  await context(writer);
+  assert.equal((await transaction(writer, () => append(writer))).rowCount, 1);
+}
+function failureClient(connection, sql, failure, before = false) {
+  let inject = true;
+  return {
+    query: async (...args) => {
+      const fail = inject && args[0].startsWith(sql);
+      if (fail) inject = false;
+      if (fail && before) throw failure;
+      const result = await connection.query(...args);
+      if (fail) throw failure;
+      return result;
+    },
+    end: () => connection.end(),
+  };
+}
+async function restoreProbeTimeouts(connections, timeouts) {
+  const errors = [];
+  for (const [index, connection] of connections.entries())
+    if (timeouts[index] !== undefined)
+      await cleanupStep(errors, () =>
+        connection.query("SELECT set_config('statement_timeout',$1,false)", [timeouts[index]]),
+      );
+  if (errors.length) throw new AggregateError(errors, "Fault probe timeout restoration failed");
+}
+async function boundedFailureProbe(writer, second, action) {
+  const connections = [writer, second];
+  const timeouts = [];
+  await concurrentScope(
+    writer,
+    second,
+    async () => {
+      for (const connection of connections) {
+        timeouts.push((await connection.query("SHOW statement_timeout")).rows[0].statement_timeout);
+        await connection.query("SET statement_timeout='900ms'");
+      }
+      await action();
+    },
+    () => restoreProbeTimeouts(connections, timeouts),
+  );
+  for (const [index, connection] of connections.entries())
+    assert.equal(
+      (await connection.query("SHOW statement_timeout")).rows[0].statement_timeout,
+      timeouts[index],
+    );
+}
+async function concurrencyFailureCases(t, client, writer, second, service) {
+  const direct = { test: (_name, action) => action() };
+  await t.test("wrong post-wait head propagates assertion and releases actual PG locks", () =>
+    boundedFailureProbe(writer, second, async () => {
+      await assert.rejects(
+        concurrencyCases(direct, client, writer, wrongHeadClient(second)),
+        (error) => {
+          assert.equal(error.code, "ERR_ASSERTION");
+          assert.equal(error.actual.sequence, "-1");
+          return true;
+        },
+      );
+      await assertConcurrentSessionsReleased(client, writer, second);
+    }),
+  );
+  await t.test("failure before holder rollback drains waiter after releasing holder", () =>
+    boundedFailureProbe(writer, second, async () => {
+      const failure = new Error("injected before holder rollback");
+      await assert.rejects(
+        concurrencyCases(direct, client, failureClient(writer, "ROLLBACK", failure, true), second),
+        (error) => error === failure,
+      );
+      await assertConcurrentSessionsReleased(client, writer, second);
+    }),
+  );
+  await authorityFailureCases(t, direct, client, writer, second, service);
+}
+async function authorityFailureCases(t, direct, client, writer, second, service) {
+  await t.test("failure after membership revocation restores authority and sessions", () =>
+    boundedFailureProbe(writer, second, async () => {
+      const failure = new Error("injected after membership revocation");
+      const faultyAdmin = failureClient(client, 'UPDATE "OrganizationMember" SET status', failure);
+      await assert.rejects(
+        waitingAuthorizationCase(direct, faultyAdmin, writer, second),
+        (error) => error === failure,
+      );
+      await assertConcurrentSessionsReleased(client, writer, second);
+    }),
+  );
+  await t.test("failure after service grant rotation removes mapping and releases sessions", () =>
+    boundedFailureProbe(writer, service, async () => {
+      const failure = new Error("injected after service grant rotation");
+      const faultyAdmin = failureClient(
+        client,
+        'UPDATE audit_service_grants SET "actorId"',
+        failure,
+      );
+      await assert.rejects(
+        waitingServiceCases(direct, faultyAdmin, writer, service),
+        (error) => error === failure,
+      );
+      assert.equal((await client.query("SELECT * FROM audit_service_grants")).rowCount, 0);
+      await assertConcurrentSessionsReleased(client, writer, service);
+    }),
+  );
+}
+async function restoreOwner(client) {
+  await client.query(
+    'UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2 AND "organizationId"=$3',
+    ["ACTIVE", "audit-owner", scope.organizationId],
   );
 }
 async function waitingAuthorizationCase(t, client, writer, second) {
   const waitForLock = await waitingForChain(client, second);
-  await t.test(
-    "waiting same-org session rechecks revoked membership before returning head",
-    async () => {
-      await writer.query("BEGIN");
-      await head(writer);
-      await second.query("BEGIN");
-      const waiting = assert.rejects(head(second, otherStore), { code: "42501" });
-      await waitForLock();
-      await client.query('UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2', [
-        "INACTIVE",
-        "audit-owner",
-      ]);
-      await writer.query("ROLLBACK");
-      await waiting;
-      await second.query("ROLLBACK");
-      await client.query('UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2', [
-        "ACTIVE",
-        "audit-owner",
-      ]);
-    },
+  await t.test("waiting same-org session rechecks revoked membership before returning head", () =>
+    concurrentScope(
+      writer,
+      second,
+      async (state) => {
+        await writer.query("BEGIN");
+        await head(writer);
+        await second.query("BEGIN");
+        const waiting = observeWaiting(
+          state,
+          assert.rejects(head(second, otherStore), { code: "42501" }),
+        );
+        await waitForLock();
+        await client.query(
+          'UPDATE "OrganizationMember" SET status=$1 WHERE "userId"=$2 AND "organizationId"=$3',
+          ["INACTIVE", "audit-owner", scope.organizationId],
+        );
+        await writer.query("ROLLBACK");
+        await waitingValue(waiting);
+      },
+      () => restoreOwner(client),
+    ),
   );
 }
 async function independentOrganizationCase(t, client, writer, second) {
@@ -770,25 +995,34 @@ async function independentOrganizationCase(t, client, writer, second) {
     workspaceId: "legacy-workspace-audit-b",
     storeId: "audit-store-b",
   };
-  await t.test("a held organization lock allows a different organization to append", async () => {
-    await client.query(
-      'INSERT INTO "OrganizationMember" (id,"organizationId","userId",role,"updatedAt") VALUES ($1,$2,$3,$4,now())',
-      [randomUUID(), otherOrg.organizationId, "audit-owner", "OWNER"],
-    );
-    await context(second, "audit-owner", otherOrg);
-    await writer.query("BEGIN");
-    try {
-      await head(writer);
-      const result = await transaction(second, async () => {
-        await second.query("SET LOCAL lock_timeout='2s'");
-        return append(second, event({}, otherOrg));
-      });
-      assert.equal(result.rows[0].sequence, "1");
-      assert.equal(result.rows[0].prevHash, null);
-    } finally {
-      await writer.query("ROLLBACK");
-    }
-  });
+  await t.test("a held organization lock allows a different organization to append", () =>
+    concurrentScope(
+      writer,
+      second,
+      async () => {
+        await client.query(
+          'INSERT INTO "OrganizationMember" (id,"organizationId","userId",role,"updatedAt") VALUES ($1,$2,$3,$4,now())',
+          [randomUUID(), otherOrg.organizationId, "audit-owner", "OWNER"],
+        );
+        await context(second, "audit-owner", otherOrg);
+        await writer.query("BEGIN");
+        await head(writer);
+        const result = await transaction(second, async () => {
+          await second.query("SET LOCAL lock_timeout='2s'");
+          return append(second, event({}, otherOrg));
+        });
+        assert.equal(result.rows[0].sequence, "1");
+        assert.equal(result.rows[0].prevHash, null);
+      },
+      async () => {
+        await client.query(
+          'DELETE FROM "OrganizationMember" WHERE "organizationId"=$1 AND "userId"=$2',
+          [otherOrg.organizationId, "audit-owner"],
+        );
+        await context(second, "audit-owner", otherStore);
+      },
+    ),
+  );
 }
 async function proof(t, client, url, names) {
   const connections = [];
@@ -813,6 +1047,7 @@ async function proof(t, client, url, names) {
     await privilegeCases(t, client, writer, service);
     await waitingServiceCases(t, client, writer, service);
     await concurrencyCases(t, client, writer, second);
+    await concurrencyFailureCases(t, client, writer, second, service);
     await waitingAuthorizationCase(t, client, writer, second);
     await independentOrganizationCase(t, client, writer, second);
   } finally {
