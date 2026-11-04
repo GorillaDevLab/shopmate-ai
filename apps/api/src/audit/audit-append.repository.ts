@@ -141,7 +141,12 @@ function anonymousBinding(handle: BoundAuthSecuritySink): ClientBinding {
 }
 async function query(binding: ClientBinding, sql: string, parameters: unknown[]) {
   active(binding);
-  const result = await binding.client.query(sql, parameters);
+  let result;
+  try {
+    result = await binding.client.query(sql, parameters);
+  } catch {
+    return fail("STORAGE_FAILED");
+  }
   active(binding);
   return result;
 }

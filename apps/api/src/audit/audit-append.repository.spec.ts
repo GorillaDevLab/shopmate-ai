@@ -316,3 +316,17 @@ it("propagates a bounded anonymous storage failure without a sensitive cause", a
   });
   await expect(pending).rejects.not.toHaveProperty("cause");
 });
+
+it("does not trust even domain-shaped errors supplied by the client", async () => {
+  const untrusted = Object.assign(new AuditAppendError("INVALID_INPUT"), {
+    message: "private database detail",
+    cause: "raw cookie",
+  });
+  const client = new ScriptClient([untrusted]);
+  const pending = repository.appendTenant(transaction(client), event());
+  await expect(pending).rejects.toMatchObject({
+    code: "STORAGE_FAILED",
+    message: "Audit append failed",
+  });
+  await expect(pending).rejects.not.toHaveProperty("cause");
+});
