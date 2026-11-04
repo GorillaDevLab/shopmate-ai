@@ -69,6 +69,9 @@ function row(value = entry()): Record<string, unknown> {
     payload,
   };
 }
+function replayRow(value = entry()): Record<string, unknown> {
+  return { ...row(value), actorAllowed: true };
+}
 type Reply = Awaited<ReturnType<AuditTransactionClient["query"]>>;
 function result(rows: readonly Record<string, unknown>[], rowCount = rows.length): Reply {
   return { rows, rowCount };
@@ -120,7 +123,7 @@ it("returns an unchanged occurrence after locking without inserting or generatin
   const existing = entry();
   const client = new ScriptClient([
     result([{ sequence: "1", entryHash: existing.entryHash }]),
-    result([row()]),
+    result([replayRow()]),
   ]);
   const reordered = {
     ...event(),
@@ -136,7 +139,7 @@ it("returns an unchanged occurrence after locking without inserting or generatin
 it("rejects changed semantics on the same occurrence rather than updating history", async () => {
   const client = new ScriptClient([
     result([{ sequence: "1", entryHash: entry().entryHash }]),
-    result([row()]),
+    result([replayRow()]),
   ]);
   const changed = TenantAuditEventSchema.parse({ ...event(), result: "FAILED" });
   await expect(repository.appendTenant(transaction(client), changed)).rejects.toMatchObject({
@@ -178,7 +181,7 @@ it.each(["9007199254740991", "9007199254740992", "1.5", "-1", "01"])(
 it.each(["entryHash", "actorId", "redactionVersion", "sequence"])(
   "rejects corrupt persisted %s",
   async (field) => {
-    const corrupt = { ...row(), [field]: field === "redactionVersion" ? 2 : "corrupt" };
+    const corrupt = { ...replayRow(), [field]: field === "redactionVersion" ? 2 : "corrupt" };
     const client = new ScriptClient([
       result([{ sequence: "1", entryHash: entry().entryHash }]),
       result([corrupt]),
@@ -456,7 +459,7 @@ it("treats a changed bound actor on an existing occurrence as a semantic conflic
   const input = TenantAuditEventSchema.parse({ ...event(), actor: boundActor });
   const client = new ScriptClient([
     result([{ sequence: "1", entryHash: entry().entryHash }]),
-    result([row()]),
+    result([replayRow()]),
   ]);
   await expect(
     repository.appendTenant({ ...transaction(client), actor: boundActor }, input),
@@ -482,7 +485,7 @@ it.each([
 it("verifies a syntactically valid but incorrect persisted hash", async () => {
   const client = new ScriptClient([
     result([{ sequence: "1", entryHash: entry().entryHash }]),
-    result([{ ...row(), entryHash: "a".repeat(64) }]),
+    result([{ ...replayRow(), entryHash: "a".repeat(64) }]),
   ]);
   await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
     code: "INVALID_STORAGE",
@@ -493,7 +496,7 @@ it.each(["organizationId", "workspaceId", "storeId", "requestId", "occurrenceId"
   async (field) => {
     const client = new ScriptClient([
       result([{ sequence: "1", entryHash: entry().entryHash }]),
-      result([{ ...row(), [field]: "other" }]),
+      result([{ ...replayRow(), [field]: "other" }]),
     ]);
     await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
       code: "INVALID_STORAGE",
@@ -501,7 +504,10 @@ it.each(["organizationId", "workspaceId", "storeId", "requestId", "occurrenceId"
   },
 );
 it("rejects persisted occurrence beyond the locked head", async () => {
-  const client = new ScriptClient([result([{ sequence: "0", entryHash: null }]), result([row()])]);
+  const client = new ScriptClient([
+    result([{ sequence: "0", entryHash: null }]),
+    result([replayRow()]),
+  ]);
   await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
     code: "INVALID_STORAGE",
   });
@@ -509,7 +515,7 @@ it("rejects persisted occurrence beyond the locked head", async () => {
 it("replays a historical occurrence using the current head without creating a new entry", async () => {
   const client = new ScriptClient([
     result([{ sequence: "20", entryHash: "a".repeat(64) }]),
-    result([row()]),
+    result([replayRow()]),
   ]);
   const noNewId = new AuditAppendRepository(() => {
     throw new Error("Should not generate ID for replay");
@@ -613,4 +619,37 @@ it("rejects anonymous response rows because its INSERT grants no read privileges
   await expect(repository.appendAnonymousSecurity(sink(client), anonymous())).rejects.toMatchObject(
     { code: "INVALID_STORAGE" },
   );
+});
+it.each([false, null, undefined, "true"])(
+  "rejects a rotated or unverifiable service actor on replay (%s)",
+  async (actorAllowed) => {
+    const service = { ...actor, actorKind: "SERVICE" as const, actorId: "service-a" };
+    const input = TenantAuditEventSchema.parse({ ...event(), actor: service });
+    const persisted = entry(1, null, input);
+    const client = new ScriptClient([
+      result([{ sequence: "1", entryHash: persisted.entryHash }]),
+      result([actorAllowed === undefined ? row(persisted) : { ...row(persisted), actorAllowed }]),
+    ]);
+    await expect(
+      repository.appendTenant({ ...transaction(client), actor: service }, input),
+    ).rejects.toMatchObject({ code: "INVALID_HANDLE" });
+    expect(client.calls[1]?.sql).toContain(
+      'public.audit_actor_access(audit_row) AS "actorAllowed"',
+    );
+    expect(client.calls).toHaveLength(2);
+  },
+);
+it("replays a service occurrence only after the current database actor check succeeds", async () => {
+  const service = { ...actor, actorKind: "SERVICE" as const, actorId: "service-a" };
+  const input = TenantAuditEventSchema.parse({ ...event(), actor: service });
+  const persisted = entry(1, null, input);
+  const client = new ScriptClient([
+    result([{ sequence: "1", entryHash: persisted.entryHash }]),
+    result([replayRow(persisted)]),
+  ]);
+  expect(await repository.appendTenant({ ...transaction(client), actor: service }, input)).toEqual(
+    persisted,
+  );
+  expect(client.calls[1]?.sql).toContain('public.audit_actor_access(audit_row) AS "actorAllowed"');
+  expect(client.calls).toHaveLength(2);
 });

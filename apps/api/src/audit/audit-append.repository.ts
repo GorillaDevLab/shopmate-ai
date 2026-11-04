@@ -76,7 +76,8 @@ const rowSchema = z.strictObject({
 });
 const columns = `"auditId","organizationId","workspaceId","storeId","actorId","actorKind",
   "requestId","occurrenceId",sequence,"prevHash","entryHash","hashVersion","redactionVersion",payload`;
-const lookupSql = `SELECT ${columns} FROM public.audit_logs
+const lookupSql = `SELECT ${columns}, public.audit_actor_access(audit_row) AS "actorAllowed"
+  FROM public.audit_logs AS audit_row
   WHERE "organizationId"=$1 AND "workspaceId"=$2 AND "storeId"=$3
   AND "requestId"=$4 AND "occurrenceId"=$5`;
 const insertSql = `INSERT INTO public.audit_logs (${columns})
@@ -141,7 +142,7 @@ function anonymousBinding(handle: BoundAuthSecuritySink): ClientBinding {
 }
 async function query(binding: ClientBinding, sql: string, parameters: unknown[]) {
   active(binding);
-  let result;
+  let result: Awaited<ReturnType<AuditTransactionClient["query"]>>;
   try {
     result = await binding.client.query(sql, parameters);
   } catch {
@@ -212,7 +213,10 @@ async function replay(binding: ClientBinding, event: TenantAuditEvent, head: Hea
   const result = await query(binding, lookupSql, parameters);
   if (result.rowCount !== result.rows.length || result.rows.length > 1) fail("INVALID_STORAGE");
   if (!result.rows.length) return null;
-  const entry = decodeRow(result.rows[0]);
+  const { actorAllowed, ...persistedRow } = result.rows[0]!;
+  // Scope access alone does not prove a service actor's grant survived rotation.
+  if (actorAllowed !== true) fail("INVALID_HANDLE");
+  const entry = decodeRow(persistedRow);
   if (
     entry.sequence > head.sequence ||
     (entry.sequence === head.sequence && entry.entryHash !== head.entryHash)
