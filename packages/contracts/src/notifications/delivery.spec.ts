@@ -10,6 +10,8 @@ import {
   NotificationEnqueueRequestSchema,
   NotificationInboxQuerySchema,
   NotificationInboxPageSchema,
+  NotificationInboxItemSchema,
+  NotificationReadConfirmationSchema,
   NotificationPreferencesQuerySchema,
   NotificationPreferencesUpdateSchema,
   NotificationMarkReadRequestSchema,
@@ -23,6 +25,10 @@ import type {
   NotificationReadPort,
   NotificationPreferencesPort,
   NotificationEnqueueRequest,
+  NotificationInboxItem,
+  NotificationReadConfirmation,
+  NotificationEnqueueOutcome,
+  DeliveryReceipt,
 } from "../index.js";
 
 const binding = {
@@ -116,6 +122,16 @@ function receiptFixture() {
     leaseToken: null,
     leaseUntil: null,
     deliveredAt: null,
+    readAt: null,
+    readState: "UNREAD",
+  };
+}
+function inboxItemFixture() {
+  return {
+    schemaVersion: 1,
+    status: "DELIVERED",
+    intent: intentFixture(),
+    deliveredAt: instant,
     readAt: null,
     readState: "UNREAD",
   };
@@ -634,14 +650,111 @@ it.each([
   expect(NotificationInboxQuerySchema.safeParse({ ...query, ...mutation }).success).toBe(false);
 });
 
-it("requires page receipts to match the selected recipient", () => {
-  const page = { recipient, items: [receiptFixture()], nextCursor: null };
+it.each([
+  {},
+  {
+    status: "LEASED",
+    attempt: 1,
+    nextAttemptAt: null,
+    leaseToken: "worker-token",
+    leaseUntil: "2026-10-25T16:01:00Z",
+  },
+  { status: "UNKNOWN", attempt: 1, nextAttemptAt: null, readState: "UNKNOWN" },
+  { status: "DELIVERED", attempt: 1, nextAttemptAt: null, deliveredAt: instant },
+])("rejects internal outbox receipts in public pages %#", (mutation) => {
+  const item = { ...receiptFixture(), ...mutation };
+  expect(DeliveryReceiptSchema.safeParse(item).success).toBe(true);
+  expect(
+    NotificationInboxPageSchema.safeParse({ recipient, items: [item], nextCursor: null }).success,
+  ).toBe(false);
+});
+
+it.each([
+  { readState: "UNREAD", readAt: null },
+  { readState: "READ", readAt: "2026-10-25T16:01:00Z" },
+])("accepts actual delivered recipient projections %#", (mutation) => {
+  const item = { ...inboxItemFixture(), ...mutation };
+  const parsed = NotificationInboxPageSchema.parse({ recipient, items: [item], nextCursor: null });
+  expect(parsed.items[0]).toEqual(item);
+  expect(Object.isFrozen(parsed.items[0])).toBe(true);
+  expect(Object.isFrozen(parsed.items)).toBe(true);
+});
+
+it.each([
+  { leaseToken: null },
+  { leaseUntil: null },
+  { attempt: 1 },
+  { nextAttemptAt: null },
+  { status: "PENDING" },
+  { status: "LEASED" },
+  { status: "UNKNOWN" },
+  { deliveredAt: null },
+  { deliveredAt: "2026-10-25T15:59:00Z" },
+  { readState: "UNKNOWN" },
+  { readAt: instant },
+  { readState: "READ" },
+  { readState: "READ", readAt: "2026-10-25T15:59:00Z" },
+  { deliveredAt: "2026-10-25T16:01:00Z", readState: "READ", readAt: instant },
+])("rejects private fields or invalid public delivery/read state %#", (mutation) => {
+  const item = { ...inboxItemFixture(), ...mutation };
+  expect(
+    NotificationInboxPageSchema.safeParse({ recipient, items: [item], nextCursor: null }).success,
+  ).toBe(false);
+});
+
+it("requires public inbox items to match the selected recipient", () => {
+  const page = { recipient, items: [inboxItemFixture()], nextCursor: null };
   expect(NotificationInboxPageSchema.safeParse(page).success).toBe(true);
   expect(
     NotificationInboxPageSchema.safeParse({
       ...page,
       recipient: { ...recipient, userId: "user-b" },
     }).success,
+  ).toBe(false);
+});
+
+it.each(["organizationId", "workspaceId", "storeId", "connectionId", "externalStoreId"] as const)(
+  "rejects public inbox items from another recipient %s",
+  (field) => {
+    const selected = { ...recipient, binding: { ...binding, [field]: "different" } };
+    expect(
+      NotificationInboxPageSchema.safeParse({
+        recipient: selected,
+        items: [inboxItemFixture()],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+  },
+);
+
+it("returns a strict confirmed read projection from the public markRead port", () => {
+  const item = { ...inboxItemFixture(), readState: "READ", readAt: instant };
+  const parsed = NotificationReadConfirmationSchema.parse(item);
+  expect(parsed).toEqual(item);
+  expect(Object.isFrozen(parsed)).toBe(true);
+  expect(NotificationInboxItemSchema.safeParse(parsed).success).toBe(true);
+  type MarkedRead = Extract<Awaited<ReturnType<NotificationReadPort["markRead"]>>, { ok: true }>;
+  expectTypeOf<MarkedRead["value"]>().toEqualTypeOf<NotificationReadConfirmation>();
+  expectTypeOf<NotificationReadConfirmation["readState"]>().toEqualTypeOf<"READ">();
+  expectTypeOf<NotificationReadConfirmation["readAt"]>().toEqualTypeOf<string>();
+  expectTypeOf<NotificationInboxItem["status"]>().toEqualTypeOf<"DELIVERED">();
+  type PrivateFields = "leaseToken" | "leaseUntil" | "attempt" | "nextAttemptAt";
+  expectTypeOf<Extract<keyof NotificationInboxItem, PrivateFields>>().toEqualTypeOf<never>();
+  expectTypeOf<Extract<keyof NotificationReadConfirmation, PrivateFields>>().toEqualTypeOf<never>();
+  expectTypeOf<NotificationEnqueueOutcome["receipt"]>().toEqualTypeOf<DeliveryReceipt>();
+});
+
+it.each([
+  {},
+  { readState: "UNKNOWN" },
+  { readState: "READ" },
+  { readState: "READ", readAt: "2026-10-25T15:59:00Z" },
+  { deliveredAt: "2026-10-25T16:01:00Z", readState: "READ", readAt: instant },
+  { readState: "READ", readAt: instant, leaseToken: "worker-token" },
+  { status: "UNKNOWN", readState: "READ", readAt: instant },
+])("rejects unread, unconfirmed or private markRead results %#", (mutation) => {
+  expect(
+    NotificationReadConfirmationSchema.safeParse({ ...inboxItemFixture(), ...mutation }).success,
   ).toBe(false);
 });
 

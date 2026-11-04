@@ -273,6 +273,34 @@ export const DeliveryReceiptSchema = receiptObject
   .readonly();
 export type DeliveryReceipt = z.infer<typeof DeliveryReceiptSchema>;
 
+const inboxItemObject = z.strictObject({
+  schemaVersion: z.literal(1),
+  status: z.literal("DELIVERED"),
+  intent: NotificationIntentSchema,
+  deliveredAt: EventTimestampSchema,
+  readAt: EventTimestampSchema.nullable(),
+  readState: z.enum(["UNREAD", "READ"]),
+});
+function validInboxItem(value: z.infer<typeof inboxItemObject>): boolean {
+  return (
+    Date.parse(value.deliveredAt) >= Date.parse(value.intent.notBefore) &&
+    (value.readState === "UNREAD"
+      ? value.readAt === null
+      : value.readAt !== null && Date.parse(value.readAt) >= Date.parse(value.deliveredAt))
+  );
+}
+const deliveredInboxItem = inboxItemObject.refine(
+  validInboxItem,
+  "Inbox delivery or confirmed read timestamp mismatch",
+);
+/** Recipient projection intentionally excludes all internal worker scheduling and lease fields. */
+export const NotificationInboxItemSchema = deliveredInboxItem.readonly();
+export type NotificationInboxItem = z.infer<typeof NotificationInboxItemSchema>;
+export const NotificationReadConfirmationSchema = deliveredInboxItem
+  .safeExtend({ readState: z.literal("READ"), readAt: EventTimestampSchema })
+  .readonly();
+export type NotificationReadConfirmation = z.infer<typeof NotificationReadConfirmationSchema>;
+
 const decisionOutboxRequestSchema = z
   .strictObject({
     context: EvaluationContextSchema,
@@ -381,7 +409,7 @@ function sameRecipient(left: NotificationRecipient, right: NotificationRecipient
 export const NotificationInboxPageSchema = z
   .strictObject({
     recipient: NotificationRecipientSchema,
-    items: z.array(DeliveryReceiptSchema).max(100).readonly(),
+    items: z.array(NotificationInboxItemSchema).max(100).readonly(),
     nextCursor: CursorSchema.nullable(),
   })
   .refine(
@@ -422,7 +450,7 @@ export interface NotificationReadPort {
   readonly markRead: (
     request: NotificationMarkReadRequest,
     clock: SecurityClock,
-  ) => Promise<NotificationPortResult<DeliveryReceipt>>;
+  ) => Promise<NotificationPortResult<NotificationReadConfirmation>>;
 }
 export interface NotificationPreferencesPort {
   readonly read: (
