@@ -39,6 +39,17 @@ test("states use total predicates, safe integer and finite millisecond timestamp
   assert.match(source, /notification_outbox_immutable/u);
   assert.match(source, /recipient_inbox_immutable/u);
 });
+test("capabilities and private guard force RLS and revoke public execution", async () => {
+  const source = await sql();
+  for (const role of ["enqueuer", "worker", "recipient", "guard"])
+    assert.ok(source.includes(`shopmate_notification_${role}`));
+  assert.match(source, /NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION/u);
+  assert.equal((source.match(/FORCE ROW LEVEL SECURITY/gu) ?? []).length, 3);
+  assert.match(source, /SESSION_USER/u);
+  assert.match(source, /current_setting\('transaction_isolation'\)/u);
+  assert.match(source, /REVOKE ALL ON FUNCTION/u);
+  assert.match(source, /SECURITY DEFINER SET search_path=pg_catalog/u);
+});
 test("Prisma maps physical outbox inbox and worker binding tables", async () => {
   const schema = await readFile(new URL("prisma/schema.prisma", root), "utf8");
   for (const model of ["NotificationOutboxRow", "RecipientInboxRow", "NotificationWorkerGrantRow"])

@@ -238,9 +238,119 @@ ALTER TABLE public.notification_worker_grants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notification_worker_grants FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON public.notification_outbox,public.recipient_inbox,public.notification_worker_grants FROM PUBLIC;
 
+CREATE FUNCTION public.notification_member_access(org_ TEXT, workspace_ TEXT, user_ TEXT, writer_ BOOLEAN) RETURNS BOOLEAN
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+  SELECT EXISTS (SELECT 1 FROM public."OrganizationMember" m
+    WHERE m."organizationId"=org_ AND m."userId"=user_ AND m.status='ACTIVE'
+      AND (NOT writer_ OR m.role IN ('OWNER','ADMIN','OPERATOR'))
+      AND (m.role IN ('OWNER','ADMIN') OR EXISTS (SELECT 1 FROM public."WorkspaceMember" wm
+        WHERE wm."organizationId"=org_ AND wm."workspaceId"=workspace_ AND wm."userId"=user_ AND wm.status='ACTIVE')))
+$$;
+CREATE FUNCTION public.notification_connection_access(org_ TEXT, workspace_ TEXT, store_ TEXT, connection_ TEXT, external_ TEXT, generation_ INTEGER) RETURNS BOOLEAN
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+  SELECT EXISTS (SELECT 1 FROM public."PlatformConnection" c JOIN public."Store" s
+    ON (s.id,s."organizationId",s."workspaceId")=(c."storeId",c."organizationId",c."workspaceId")
+    JOIN public."Organization" o ON o.id=s."organizationId" AND o."legacyMerchantId"=s."merchantId"
+    JOIN public."Workspace" w ON w.id=s."workspaceId" AND w."organizationId"=o.id
+    JOIN public."Merchant" m ON m.id=s."merchantId"
+    WHERE (c.id,c."organizationId",c."workspaceId",c."storeId",c."externalStoreId")=(connection_,org_,workspace_,store_,external_)
+      AND c.status='ACTIVE' AND o.status='ACTIVE' AND w.status='ACTIVE' AND m.status='ACTIVE'
+      AND (generation_ IS NULL OR c.generation=generation_))
+$$;
+CREATE FUNCTION public.notification_scope_access(org_ TEXT, workspace_ TEXT, store_ TEXT, connection_ TEXT, external_ TEXT, recipient_ TEXT, generation_ INTEGER, mode_ TEXT) RETURNS BOOLEAN
+LANGUAGE SQL STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+  SELECT (current_setting('transaction_isolation')='read committed'
+    AND org_=nullif(current_setting('app.organization_id',true),'') AND workspace_=nullif(current_setting('app.workspace_id',true),'')
+    AND store_=nullif(current_setting('app.store_id',true),'') AND connection_=nullif(current_setting('app.connection_id',true),'')
+    AND external_=nullif(current_setting('app.external_store_id',true),'')
+    AND public.notification_connection_access(org_,workspace_,store_,connection_,external_,generation_)
+    AND public.notification_member_access(org_,workspace_,recipient_,false)
+    AND CASE mode_
+      WHEN 'ENQUEUE' THEN generation_ IS NOT NULL AND pg_has_role(SESSION_USER,'shopmate_notification_enqueuer','MEMBER')
+        AND public.notification_member_access(org_,workspace_,nullif(current_setting('app.user_id',true),''),true)
+      WHEN 'RECIPIENT' THEN generation_ IS NULL AND pg_has_role(SESSION_USER,'shopmate_notification_recipient','MEMBER')
+        AND recipient_=nullif(current_setting('app.user_id',true),'')
+      WHEN 'WORKER' THEN generation_ IS NOT NULL AND pg_has_role(SESSION_USER,'shopmate_notification_worker','MEMBER')
+        AND EXISTS (SELECT 1 FROM public.notification_worker_grants g WHERE g."databaseRole"=SESSION_USER
+          AND g.active AND (g."organizationId",g."workspaceId",g."storeId",g."connectionId",g."externalStoreId",g."connectionGeneration")
+            =(org_,workspace_,store_,connection_,external_,generation_)
+          AND g."principalUserId"=nullif(current_setting('app.user_id',true),'')
+          AND public.notification_member_access(org_,workspace_,g."principalUserId",true))
+      ELSE false END) IS TRUE
+$$;
+CREATE FUNCTION public.notification_project_delivery() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+  IF NEW.status='DELIVERED' AND OLD.status='LEASED' THEN
+    INSERT INTO public.recipient_inbox ("outboxId","intentId","organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId","eventId","eventState","eventRevision","channel","decisionRunId","route","eventType","severity","createdAt","notBefore","evidenceId","evidenceVersion","evidenceHash","entityKind","entityId","definitionVersion","baselineVersion","deliveredAt")
+      VALUES (NEW."rowId",NEW."intentId",NEW."organizationId",NEW."workspaceId",NEW."storeId",NEW."connectionId",NEW."externalStoreId",NEW."recipientUserId",NEW."eventId",NEW."eventState",NEW."eventRevision",NEW."channel",NEW."decisionRunId",NEW."route",NEW."eventType",NEW."severity",NEW."createdAt",NEW."notBefore",NEW."evidenceId",NEW."evidenceVersion",NEW."evidenceHash",NEW."entityKind",NEW."entityId",NEW."definitionVersion",NEW."baselineVersion",NEW."deliveredAt")
+      ON CONFLICT ("outboxId") DO NOTHING;
+    IF NOT EXISTS (SELECT 1 FROM public.recipient_inbox i WHERE i."outboxId"=NEW."rowId"
+      AND ROW(i."intentId",i."organizationId",i."workspaceId",i."storeId",i."connectionId",i."externalStoreId",i."recipientUserId",i."eventId",i."eventState",i."eventRevision",i."channel",i."decisionRunId",i."route",i."eventType",i."severity",i."createdAt",i."notBefore",i."evidenceId",i."evidenceVersion",i."evidenceHash",i."entityKind",i."entityId",i."definitionVersion",i."baselineVersion",i."deliveredAt")
+        IS NOT DISTINCT FROM ROW(NEW."intentId",NEW."organizationId",NEW."workspaceId",NEW."storeId",NEW."connectionId",NEW."externalStoreId",NEW."recipientUserId",NEW."eventId",NEW."eventState",NEW."eventRevision",NEW."channel",NEW."decisionRunId",NEW."route",NEW."eventType",NEW."severity",NEW."createdAt",NEW."notBefore",NEW."evidenceId",NEW."evidenceVersion",NEW."evidenceHash",NEW."entityKind",NEW."entityId",NEW."definitionVersion",NEW."baselineVersion",NEW."deliveredAt")) THEN
+      RAISE EXCEPTION 'Conflicting notification projection' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE TRIGGER notification_project_delivery AFTER UPDATE ON public.notification_outbox FOR EACH ROW EXECUTE FUNCTION public.notification_project_delivery();
+
+GRANT USAGE ON SCHEMA public TO shopmate_notification_enqueuer,shopmate_notification_worker,shopmate_notification_recipient,shopmate_notification_guard;
+GRANT SELECT ON public.notification_outbox,public.recipient_inbox TO shopmate_notification_enqueuer,shopmate_notification_worker;
+GRANT INSERT ("intentId","organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId","eventId","eventState","eventRevision","channel","decisionRunId","route","eventType","severity","createdAt","notBefore","evidenceId","evidenceVersion","evidenceHash","entityKind","entityId","definitionVersion","baselineVersion","connectionGeneration","nextAttemptAt") ON public.notification_outbox TO shopmate_notification_enqueuer;
+GRANT UPDATE (status,attempt,"nextAttemptAt","leaseToken","leaseUntil","deliveredAt") ON public.notification_outbox TO shopmate_notification_worker;
+GRANT SELECT ON public.recipient_inbox TO shopmate_notification_recipient;
+GRANT UPDATE ("readAt") ON public.recipient_inbox TO shopmate_notification_recipient;
+GRANT SELECT,INSERT ON public.recipient_inbox TO shopmate_notification_guard;
+GRANT SELECT ON public.notification_worker_grants TO shopmate_notification_guard;
+GRANT SELECT (id,status,"legacyMerchantId") ON public."Organization" TO shopmate_notification_guard;
+GRANT SELECT (id,status,"organizationId") ON public."Workspace" TO shopmate_notification_guard;
+GRANT SELECT (id,"organizationId","workspaceId","merchantId") ON public."Store" TO shopmate_notification_guard;
+GRANT SELECT (id,status) ON public."Merchant" TO shopmate_notification_guard;
+GRANT SELECT (id,"organizationId","workspaceId","storeId","externalStoreId",status,generation) ON public."PlatformConnection" TO shopmate_notification_guard;
+GRANT SELECT ("organizationId","userId",status,role) ON public."OrganizationMember" TO shopmate_notification_guard;
+GRANT SELECT ("organizationId","workspaceId","userId",status) ON public."WorkspaceMember" TO shopmate_notification_guard;
+CREATE POLICY notification_guard_read ON public."Organization" FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_read ON public."Workspace" FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_read ON public."Store" FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_read ON public."Merchant" FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_read ON public."PlatformConnection" FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_read ON public."OrganizationMember" FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_read ON public."WorkspaceMember" FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_grants ON public.notification_worker_grants FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_inbox_read ON public.recipient_inbox FOR SELECT TO shopmate_notification_guard USING (true);
+CREATE POLICY notification_guard_inbox_insert ON public.recipient_inbox FOR INSERT TO shopmate_notification_guard WITH CHECK (true);
+CREATE POLICY notification_enqueuer_read ON public.notification_outbox FOR SELECT TO shopmate_notification_enqueuer USING (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId","connectionGeneration",'ENQUEUE'));
+CREATE POLICY notification_enqueuer_inbox ON public.recipient_inbox FOR SELECT TO shopmate_notification_enqueuer USING (EXISTS (SELECT 1 FROM public.notification_outbox o WHERE o."rowId"="outboxId"));
+CREATE POLICY notification_worker_read ON public.notification_outbox FOR SELECT TO shopmate_notification_worker USING (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId","connectionGeneration",'WORKER'));
+CREATE POLICY notification_worker_inbox ON public.recipient_inbox FOR SELECT TO shopmate_notification_worker USING (EXISTS (SELECT 1 FROM public.notification_outbox o WHERE o."rowId"="outboxId"));
+CREATE POLICY notification_enqueue ON public.notification_outbox FOR INSERT TO shopmate_notification_enqueuer
+  WITH CHECK (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId","connectionGeneration",'ENQUEUE')
+    AND status='PENDING' AND attempt=0 AND "nextAttemptAt" IS NOT DISTINCT FROM "notBefore"
+    AND "leaseToken" IS NULL AND "leaseUntil" IS NULL AND "deliveredAt" IS NULL);
+CREATE POLICY notification_work ON public.notification_outbox FOR UPDATE TO shopmate_notification_worker
+  USING (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId","connectionGeneration",'WORKER'))
+  WITH CHECK (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId","connectionGeneration",'WORKER'));
+CREATE POLICY notification_recipient_read ON public.recipient_inbox FOR SELECT TO shopmate_notification_recipient
+  USING (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId",NULL,'RECIPIENT'));
+CREATE POLICY notification_recipient_mark ON public.recipient_inbox FOR UPDATE TO shopmate_notification_recipient
+  USING (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId",NULL,'RECIPIENT'))
+  WITH CHECK (public.notification_scope_access("organizationId","workspaceId","storeId","connectionId","externalStoreId","recipientUserId",NULL,'RECIPIENT'));
 REVOKE ALL ON FUNCTION public.notification_id(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.notification_literal(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.notification_time(TIMESTAMPTZ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.notification_outbox_immutable() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.recipient_inbox_immutable() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.notification_member_access(TEXT,TEXT,TEXT,BOOLEAN) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.notification_connection_access(TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.notification_scope_access(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.notification_project_delivery() FROM PUBLIC;
+ALTER FUNCTION public.notification_member_access(TEXT,TEXT,TEXT,BOOLEAN) OWNER TO shopmate_notification_guard;
+ALTER FUNCTION public.notification_connection_access(TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER) OWNER TO shopmate_notification_guard;
+ALTER FUNCTION public.notification_scope_access(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) OWNER TO shopmate_notification_guard;
+ALTER FUNCTION public.notification_project_delivery() OWNER TO shopmate_notification_guard;
+GRANT EXECUTE ON FUNCTION public.notification_id(TEXT) TO shopmate_notification_enqueuer,shopmate_notification_worker,shopmate_notification_recipient,shopmate_notification_guard;
+GRANT EXECUTE ON FUNCTION public.notification_literal(TEXT) TO shopmate_notification_enqueuer,shopmate_notification_worker,shopmate_notification_recipient,shopmate_notification_guard;
+GRANT EXECUTE ON FUNCTION public.notification_time(TIMESTAMPTZ) TO shopmate_notification_enqueuer,shopmate_notification_worker,shopmate_notification_recipient,shopmate_notification_guard;
+GRANT EXECUTE ON FUNCTION public.notification_scope_access(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT,INTEGER,TEXT) TO shopmate_notification_enqueuer,shopmate_notification_worker,shopmate_notification_recipient,shopmate_notification_guard;
 COMMIT;
