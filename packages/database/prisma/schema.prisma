@@ -3,6 +3,108 @@ generator client {
   output   = "../generated/prisma"
 }
 
+model NotificationOutboxRow {
+  rowId                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  intentId             String
+  organizationId       String
+  workspaceId          String
+  storeId              String
+  connectionId         String
+  externalStoreId      String
+  recipientUserId      String
+  eventId              String
+  eventState           String
+  eventRevision        BigInt
+  channel              String
+  decisionRunId        String
+  route                String
+  eventType            String
+  severity             String
+  createdAt            DateTime           @db.Timestamptz(3)
+  notBefore            DateTime           @db.Timestamptz(3)
+  evidenceId           String
+  evidenceVersion      String
+  evidenceHash         String
+  entityKind           String
+  entityId             String?
+  definitionVersion    String
+  baselineVersion      String?
+  connectionGeneration Int
+  status               String             @default("PENDING")
+  attempt              BigInt             @default(0)
+  nextAttemptAt        DateTime?          @db.Timestamptz(3)
+  leaseToken           String?
+  leaseUntil           DateTime?          @db.Timestamptz(3)
+  deliveredAt          DateTime?          @db.Timestamptz(3)
+  connection           PlatformConnection @relation("NotificationOutboxConnection", fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "notification_outbox_connection_fkey")
+  recipient            OrganizationMember @relation("NotificationOutboxRecipient", fields: [organizationId, recipientUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction, map: "notification_outbox_recipient_fkey")
+  inbox                RecipientInboxRow?
+
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, eventState, eventRevision, recipientUserId, channel], map: "notification_outbox_natural_key")
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, recipientUserId, intentId], map: "notification_outbox_intent_key")
+  @@index([connectionId, status, nextAttemptAt, rowId], map: "notification_outbox_due_idx")
+  @@index([connectionId, status, leaseUntil, rowId], map: "notification_outbox_lease_idx")
+  @@map("notification_outbox")
+  @@schema("public")
+}
+
+model RecipientInboxRow {
+  outboxId          String                @id @db.Uuid
+  intentId          String
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  connectionId      String
+  externalStoreId   String
+  recipientUserId   String
+  eventId           String
+  eventState        String
+  eventRevision     BigInt
+  channel           String
+  decisionRunId     String
+  route             String
+  eventType         String
+  severity          String
+  createdAt         DateTime              @db.Timestamptz(3)
+  notBefore         DateTime              @db.Timestamptz(3)
+  evidenceId        String
+  evidenceVersion   String
+  evidenceHash      String
+  entityKind        String
+  entityId          String?
+  definitionVersion String
+  baselineVersion   String?
+  deliveredAt       DateTime              @db.Timestamptz(3)
+  readAt            DateTime?             @db.Timestamptz(3)
+  outbox            NotificationOutboxRow @relation(fields: [outboxId], references: [rowId], onDelete: Restrict, onUpdate: NoAction, map: "recipient_inbox_outbox_fkey")
+  connection        PlatformConnection    @relation("NotificationInboxConnection", fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "recipient_inbox_connection_fkey")
+  recipient         OrganizationMember    @relation("NotificationInboxRecipient", fields: [organizationId, recipientUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction, map: "recipient_inbox_recipient_fkey")
+
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, eventId, eventState, eventRevision, recipientUserId, channel], map: "recipient_inbox_natural_key")
+  @@unique([organizationId, workspaceId, storeId, connectionId, externalStoreId, recipientUserId, intentId], map: "recipient_inbox_intent_key")
+  @@index([connectionId, recipientUserId, deliveredAt, outboxId], map: "recipient_inbox_page_idx")
+  @@map("recipient_inbox")
+  @@schema("public")
+}
+
+model NotificationWorkerGrantRow {
+  databaseRole         String
+  connectionId         String
+  organizationId       String
+  workspaceId          String
+  storeId              String
+  externalStoreId      String
+  principalUserId      String
+  connectionGeneration Int
+  active               Boolean            @default(true)
+  connection           PlatformConnection @relation("NotificationWorkerConnection", fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "notification_worker_grants_connection_fkey")
+  principal            OrganizationMember @relation("NotificationWorkerPrincipal", fields: [organizationId, principalUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction, map: "notification_worker_grants_principal_fkey")
+
+  @@id([databaseRole, connectionId], map: "notification_worker_grants_pkey")
+  @@map("notification_worker_grants")
+  @@schema("public")
+}
+
 model DemoTenant {
   organizationId String       @id
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -11,21 +113,24 @@ model DemoTenant {
 }
 
 model PlatformConnection {
-  id                String                @id
-  organizationId    String
-  workspaceId       String
-  storeId           String
-  externalStoreId   String
-  provider          String                @default("MOCK")
-  status            String                @default("ACTIVE")
-  generation        Int                   @default(0)
-  store             Store                 @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
-  sessions          DemoCommerceSession[]
-  syncGrants        SyncWorkerGrant[]
-  commerceScopes    CommerceSourceScope[]
-  metricDefinitions MetricDefinitionRow[]
-  metricSnapshots   MetricSnapshotRow[]
-  events            EventRow[]
+  notificationOutbox       NotificationOutboxRow[]      @relation("NotificationOutboxConnection")
+  notificationInbox        RecipientInboxRow[]          @relation("NotificationInboxConnection")
+  notificationWorkerGrants NotificationWorkerGrantRow[] @relation("NotificationWorkerConnection")
+  id                       String                       @id
+  organizationId           String
+  workspaceId              String
+  storeId                  String
+  externalStoreId          String
+  provider                 String                       @default("MOCK")
+  status                   String                       @default("ACTIVE")
+  generation               Int                          @default(0)
+  store                    Store                        @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
+  sessions                 DemoCommerceSession[]
+  syncGrants               SyncWorkerGrant[]
+  commerceScopes           CommerceSourceScope[]
+  metricDefinitions        MetricDefinitionRow[]
+  metricSnapshots          MetricSnapshotRow[]
+  events                   EventRow[]
 
   @@unique([storeId, provider])
   @@unique([id, organizationId, workspaceId, storeId, externalStoreId])
@@ -707,18 +812,21 @@ model Organization {
 }
 
 model OrganizationMember {
-  id                 String              @id @default(cuid())
-  organizationId     String
-  userId             String
-  role               TenantRole
-  status             MembershipStatus    @default(ACTIVE)
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  workspaces         WorkspaceMember[]
-  auditServiceGrants AuditServiceGrant[]
-  mockGrants         MockWorkerGrant[]   @relation("WorkerMembership")
-  syncGrants         SyncWorkerGrant[]
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
+  notificationOutbox       NotificationOutboxRow[]      @relation("NotificationOutboxRecipient")
+  notificationInbox        RecipientInboxRow[]          @relation("NotificationInboxRecipient")
+  notificationWorkerGrants NotificationWorkerGrantRow[] @relation("NotificationWorkerPrincipal")
+  id                       String                       @id @default(cuid())
+  organizationId           String
+  userId                   String
+  role                     TenantRole
+  status                   MembershipStatus             @default(ACTIVE)
+  organization             Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  workspaces               WorkspaceMember[]
+  auditServiceGrants       AuditServiceGrant[]
+  mockGrants               MockWorkerGrant[]            @relation("WorkerMembership")
+  syncGrants               SyncWorkerGrant[]
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
 
   @@unique([organizationId, userId])
   @@index([userId, status])
