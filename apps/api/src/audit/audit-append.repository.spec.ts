@@ -330,3 +330,287 @@ it("does not trust even domain-shaped errors supplied by the client", async () =
   });
   await expect(pending).rejects.not.toHaveProperty("cause");
 });
+
+function evidenceReference() {
+  return {
+    schemaVersion: 1,
+    id: "evidence/alpha.1",
+    version: "version/1",
+    hash: "hash/1",
+    binding: { ...scope, connectionId: "connection-a", externalStoreId: "external/a" },
+    eventType: "SYNC_FAILURE",
+    entity: { kind: "CONNECTION", connectionId: "connection-a" },
+    definitionVersion: "definition/1",
+    baselineVersion: null,
+  };
+}
+function lifecycle(): TenantAuditEvent {
+  return TenantAuditEventSchema.parse({
+    ...event(),
+    sourceOccurredAt: null,
+    resource: { type: "EVENT", id: "事件/'; DROP TABLE audit_logs;--" },
+    event: {
+      eventType: "EVENT_STATE_CHANGE",
+      redactedMetadata: {
+        fromState: "OPEN",
+        toState: "ACKNOWLEDGED",
+        reason: "ACKNOWLEDGED_BY_OPERATOR",
+        expectedRevision: 1,
+        revision: 2,
+        evidenceReference: evidenceReference(),
+      },
+    },
+  });
+}
+const security = [
+  "AUTH_LOGIN",
+  "AUTH_LOGOUT",
+  "AUTHORIZATION",
+  "CREDENTIAL_CHANGE",
+  "EXPORT",
+  "DISCONNECT",
+  "DELETE",
+] as const;
+const actions = [
+  "PROPOSAL",
+  "APPROVAL",
+  "REJECTION",
+  "EXECUTION",
+  "VERIFICATION",
+  "COMPENSATION",
+] as const;
+const notifications = [
+  "NOTIFICATION_INTENT",
+  "NOTIFICATION_DELIVERY",
+  "NOTIFICATION_READ",
+  "NOTIFICATION_PREFERENCE",
+  "BRIEF",
+] as const;
+function familyDetails(): TenantAuditEvent["event"][] {
+  return [
+    ...security.map((eventType) => ({ eventType, redactedMetadata: { reasonCode: null } })),
+    ...actions.map((eventType) => ({
+      eventType,
+      redactedMetadata: {
+        actionKind: "PRICE" as const,
+        oldPriceMinor: null,
+        newPriceMinor: Number.MAX_SAFE_INTEGER,
+        reasonCode: null,
+      },
+    })),
+    ...notifications.map((eventType) => ({
+      eventType,
+      redactedMetadata: { channel: "IN_APP" as const, deliveryStatus: "DELIVERED" as const },
+    })),
+    { eventType: "ROLE_CHANGE", redactedMetadata: { previousRole: null, nextRole: "OPERATOR" } },
+    { eventType: "AGENT_RUN", redactedMetadata: { runStatus: "COMPLETED" } },
+  ];
+}
+it.each(familyDetails())(
+  "preserves the strict $eventType family without widening metadata",
+  async (detail) => {
+    const input = TenantAuditEventSchema.parse({ ...event(), event: detail });
+    const expected = entry(1, null, input);
+    expect(await repository.appendTenant(transaction(fresh(expected)), input)).toEqual(expected);
+  },
+);
+it("preserves lifecycle evidence and SQL-looking opaque IDs exclusively in parameter values", async () => {
+  const input = lifecycle();
+  const expected = entry(1, null, input);
+  const client = fresh(expected);
+  expect(await repository.appendTenant(transaction(client), input)).toEqual(expected);
+  expect(client.calls[2]?.parameters).toContain(JSON.stringify(input));
+  expect(client.calls.every(({ sql }) => !sql.includes("DROP TABLE"))).toBe(true);
+  expect(input.event.eventType).toBe("EVENT_STATE_CHANGE");
+});
+it("preserves every populated audit link", async () => {
+  const populated = {
+    requestId: "request-a",
+    occurrenceId: "occurrence-a",
+    runId: "run-a",
+    evidenceId: "evidence-a",
+    actionId: "action-a",
+    revisionId: "revision-a",
+    approvalId: "approval-a",
+    executionId: "execution-a",
+  };
+  const input = TenantAuditEventSchema.parse({ ...event(), links: populated });
+  const expected = entry(1, null, input);
+  expect(await repository.appendTenant(transaction(fresh(expected)), input)).toEqual(expected);
+});
+it.each(["SERVICE", "SYSTEM"] as const)(
+  "binds %s actor to the server grant identity",
+  async (actorKind) => {
+    const boundActor = { ...actor, actorKind, actorId: "service-grant-a" };
+    const input = TenantAuditEventSchema.parse({ ...event(), actor: boundActor });
+    const expected = entry(1, null, input);
+    const client = fresh(expected);
+    expect(
+      await repository.appendTenant({ ...transaction(client), actor: boundActor }, input),
+    ).toEqual(expected);
+    expect(client.calls[2]?.parameters.slice(4, 6)).toEqual(["service-grant-a", actorKind]);
+  },
+);
+it("treats a changed bound actor on an existing occurrence as a semantic conflict", async () => {
+  const boundActor = { ...actor, actorId: "user-b" };
+  const input = TenantAuditEventSchema.parse({ ...event(), actor: boundActor });
+  const client = new ScriptClient([
+    result([{ sequence: "1", entryHash: entry().entryHash }]),
+    result([row()]),
+  ]);
+  await expect(
+    repository.appendTenant({ ...transaction(client), actor: boundActor }, input),
+  ).rejects.toMatchObject({ code: "OCCURRENCE_CONFLICT" });
+  expect(client.calls).toHaveLength(2);
+});
+it.each([0, 0n])("decodes supported native PostgreSQL bigint parser head %s", async (sequence) => {
+  const client = fresh();
+  client.replies[0] = result([{ sequence, entryHash: null }]);
+  expect(await repository.appendTenant(transaction(client), event())).toEqual(entry());
+});
+it.each([
+  { sequence: "0", entryHash: "a".repeat(64) },
+  { sequence: "1", entryHash: null },
+  { sequence: "0", entryHash: null, unexpected: true },
+])("rejects malformed or inconsistent head %#", async (head) => {
+  const client = new ScriptClient([result([head])]);
+  await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
+    code: "INVALID_STORAGE",
+  });
+  expect(client.calls).toHaveLength(1);
+});
+it("verifies a syntactically valid but incorrect persisted hash", async () => {
+  const client = new ScriptClient([
+    result([{ sequence: "1", entryHash: entry().entryHash }]),
+    result([{ ...row(), entryHash: "a".repeat(64) }]),
+  ]);
+  await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
+    code: "INVALID_STORAGE",
+  });
+});
+it.each(["organizationId", "workspaceId", "storeId", "requestId", "occurrenceId"])(
+  "verifies persisted %s header against payload",
+  async (field) => {
+    const client = new ScriptClient([
+      result([{ sequence: "1", entryHash: entry().entryHash }]),
+      result([{ ...row(), [field]: "other" }]),
+    ]);
+    await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
+      code: "INVALID_STORAGE",
+    });
+  },
+);
+it("rejects persisted occurrence beyond the locked head", async () => {
+  const client = new ScriptClient([result([{ sequence: "0", entryHash: null }]), result([row()])]);
+  await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
+    code: "INVALID_STORAGE",
+  });
+});
+it("replays a historical occurrence using the current head without creating a new entry", async () => {
+  const client = new ScriptClient([
+    result([{ sequence: "20", entryHash: "a".repeat(64) }]),
+    result([row()]),
+  ]);
+  const noNewId = new AuditAppendRepository(() => {
+    throw new Error("Should not generate ID for replay");
+  });
+  expect(await noNewId.appendTenant(transaction(client), event())).toEqual(entry());
+});
+it("maps a hidden cross-store unique collision without reading or echoing its payload", async () => {
+  const client = fresh();
+  client.replies[2] = Object.assign(new Error("private scope and payload"), {
+    code: "23505",
+    detail: "other-store",
+  });
+  const pending = repository.appendTenant(transaction(client), event());
+  await expect(pending).rejects.toMatchObject({
+    code: "STORAGE_FAILED",
+    message: "Audit append failed",
+  });
+  await expect(pending).rejects.not.toHaveProperty("detail");
+  expect(client.calls[1]?.parameters.slice(0, 3)).toEqual(Object.values(scope));
+});
+it("propagates audit failure after the owner's business mutation on that exact client", async () => {
+  const client = new ScriptClient([result([], 1), new Error("audit unavailable")]);
+  let ownerReachedCommit = false;
+  const owner = async () => {
+    await client.query("UPDATE business_entity SET value=$1 WHERE id=$2", [1, "business-a"]);
+    await repository.appendTenant(transaction(client), event());
+    ownerReachedCommit = true;
+  };
+  await expect(owner()).rejects.toMatchObject({ code: "STORAGE_FAILED" });
+  expect(ownerReachedCommit).toBe(false);
+  expect(client.calls).toHaveLength(2);
+});
+it.each(["tenant", "anonymous"])(
+  "rejects sensitive extra fields in %s input without echo or SQL",
+  async (domain) => {
+    const client = new ScriptClient([]);
+    const sensitiveTenant = { ...event(), password: "private" };
+    const sensitiveAnonymous = { ...anonymous(), cookie: "private" };
+    const pending =
+      domain === "tenant"
+        ? repository.appendTenant(transaction(client), sensitiveTenant)
+        : repository.appendAnonymousSecurity(sink(client), sensitiveAnonymous);
+    await expect(pending).rejects.toMatchObject({
+      code: "INVALID_INPUT",
+      message: "Audit append failed",
+    });
+    await expect(pending).rejects.not.toHaveProperty("cause");
+    expect(client.calls).toHaveLength(0);
+  },
+);
+it("bounds oversized input and does not expose parser issues", async () => {
+  const client = new ScriptClient([]);
+  const input = { ...event(), raw: "x".repeat(40_000) };
+  const pending = repository.appendTenant(transaction(client), input);
+  await expect(pending).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  await expect(pending).rejects.not.toHaveProperty("issues");
+  expect(client.calls).toHaveLength(0);
+});
+it("never evaluates untrusted audit accessors", async () => {
+  let accessed = false;
+  const input = Object.defineProperty({ ...event() }, "cookie", {
+    enumerable: true,
+    get: () => {
+      accessed = true;
+      throw new Error("private");
+    },
+  });
+  const client = new ScriptClient([]);
+  await expect(repository.appendTenant(transaction(client), input)).rejects.toMatchObject({
+    code: "INVALID_INPUT",
+  });
+  expect(accessed).toBe(false);
+  expect(client.calls).toHaveLength(0);
+});
+it("snapshots anonymous input before awaiting insertion", async () => {
+  const input = anonymous();
+  const client = new ScriptClient([
+    () => {
+      input.redactedMetadata.rateLimited = true;
+      return result([], 1);
+    },
+  ]);
+  const saved = await repository.appendAnonymousSecurity(sink(client), input);
+  expect(saved.redactedMetadata.rateLimited).toBe(false);
+  expect(client.calls[0]?.parameters[1]).toBe(JSON.stringify(anonymous()));
+});
+it("checks anonymous owner lifetime after insertion", async () => {
+  let active = true;
+  const client = new ScriptClient([
+    () => {
+      active = false;
+      return result([], 1);
+    },
+  ]);
+  await expect(
+    repository.appendAnonymousSecurity({ ...sink(client), isActive: () => active }, anonymous()),
+  ).rejects.toMatchObject({ code: "INVALID_HANDLE" });
+});
+it("rejects anonymous response rows because its INSERT grants no read privileges", async () => {
+  const client = new ScriptClient([result([{ private: "unexpected" }], 1)]);
+  await expect(repository.appendAnonymousSecurity(sink(client), anonymous())).rejects.toMatchObject(
+    { code: "INVALID_STORAGE" },
+  );
+});
