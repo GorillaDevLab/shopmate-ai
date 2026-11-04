@@ -1,0 +1,230 @@
+import { expect, it } from "vitest";
+import { TenantAuditEventSchema, type TenantAuditEntry } from "@shopmate/contracts";
+import { hashAuditEntry } from "./audit-hash.js";
+import {
+  AuditAppendError,
+  AuditAppendRepository,
+  type AuditTransactionClient,
+  type BoundTenantTransaction,
+} from "./audit-append.repository.js";
+
+const scope = { organizationId: "org-a", workspaceId: "workspace-a", storeId: "store-a" };
+const actor = { actorId: "user-a", actorKind: "USER", identitySource: "SERVER" } as const;
+const links = {
+  requestId: "request-a",
+  occurrenceId: "occurrence-a",
+  runId: null,
+  evidenceId: null,
+  actionId: null,
+  revisionId: null,
+  approvalId: null,
+  executionId: null,
+};
+function event() {
+  return TenantAuditEventSchema.parse({
+    scopeKind: "TENANT",
+    scope: { ...scope },
+    actor: { ...actor },
+    resource: null,
+    result: "SUCCESS",
+    occurredAt: "2026-11-03T08:00:00.000Z",
+    sourceOccurredAt: "2026-11-02T08:00:00Z",
+    links: { ...links },
+    event: {
+      eventType: "EXECUTION",
+      redactedMetadata: {
+        actionKind: "PRICE",
+        oldPriceMinor: 0,
+        newPriceMinor: 1100,
+        reasonCode: "COMPLETED",
+      },
+    },
+  });
+}
+function entry(sequence = 1, prevHash: string | null = null): TenantAuditEntry {
+  const unsigned = { ...event(), auditId: "audit-a", sequence, prevHash, hashVersion: 1 as const };
+  return { ...unsigned, entryHash: hashAuditEntry(unsigned) };
+}
+function row(value = entry()): Record<string, unknown> {
+  const { auditId, sequence, prevHash, entryHash, hashVersion, ...payload } = value;
+  return {
+    auditId,
+    ...payload.scope,
+    actorId: payload.actor.actorId,
+    actorKind: payload.actor.actorKind,
+    requestId: payload.links.requestId,
+    occurrenceId: payload.links.occurrenceId,
+    sequence: String(sequence),
+    prevHash,
+    entryHash,
+    hashVersion,
+    redactionVersion: 1,
+    payload,
+  };
+}
+type Reply = Awaited<ReturnType<AuditTransactionClient["query"]>>;
+function result(rows: readonly Record<string, unknown>[], rowCount = rows.length): Reply {
+  return { rows, rowCount };
+}
+class ScriptClient implements AuditTransactionClient {
+  readonly calls: { sql: string; parameters: unknown[] }[] = [];
+  constructor(readonly replies: (Reply | Error | (() => Reply))[]) {}
+  async query(sql: string, parameters: unknown[] = []): Promise<Reply> {
+    this.calls.push({ sql, parameters });
+    const reply = this.replies.shift();
+    if (reply instanceof Error) throw reply;
+    if (!reply) throw new Error("Unexpected query");
+    return typeof reply === "function" ? reply() : reply;
+  }
+}
+function transaction(client: AuditTransactionClient): BoundTenantTransaction {
+  return { kind: "TENANT", client, scope: { ...scope }, actor: { ...actor }, isActive: () => true };
+}
+function fresh(value = entry(), head = { sequence: "0", entryHash: null as string | null }) {
+  return new ScriptClient([result([head]), result([]), result([row(value)])]);
+}
+const repository = new AuditAppendRepository(() => "audit-a");
+
+it("appends the exact validated event using only the caller client after locking its org head", async () => {
+  const client = fresh();
+  expect(await repository.appendTenant(transaction(client), event())).toEqual(entry());
+  expect(client.calls).toHaveLength(3);
+  expect(client.calls[0]).toEqual({
+    sql: "SELECT * FROM public.audit_chain_head($1,$2,$3)",
+    parameters: Object.values(scope),
+  });
+  expect(client.calls[1]?.sql).toMatch(/FROM public\.audit_logs/u);
+  expect(client.calls[1]?.parameters).toEqual([
+    ...Object.values(scope),
+    "request-a",
+    "occurrence-a",
+  ]);
+  expect(client.calls[2]?.sql).toMatch(/INSERT INTO public\.audit_logs/u);
+  expect(client.calls.map(({ sql }) => sql).join(" ")).not.toMatch(/BEGIN|COMMIT|UPDATE|DELETE/u);
+  expect(client.calls[2]?.parameters).toContain(JSON.stringify(event()));
+});
+it("uses the current organization head and preserves all nullable links and timestamp text", async () => {
+  const previous = "a".repeat(64);
+  const expected = entry(19, previous);
+  const client = fresh(expected, { sequence: "18", entryHash: previous });
+  expect(await repository.appendTenant(transaction(client), event())).toEqual(expected);
+});
+it("returns an unchanged occurrence after locking without inserting or generating another ID", async () => {
+  const existing = entry();
+  const client = new ScriptClient([
+    result([{ sequence: "1", entryHash: existing.entryHash }]),
+    result([row()]),
+  ]);
+  const reordered = {
+    ...event(),
+    scope: {
+      storeId: scope.storeId,
+      workspaceId: scope.workspaceId,
+      organizationId: scope.organizationId,
+    },
+  };
+  expect(await repository.appendTenant(transaction(client), reordered)).toEqual(existing);
+  expect(client.calls).toHaveLength(2);
+});
+it("rejects changed semantics on the same occurrence rather than updating history", async () => {
+  const client = new ScriptClient([
+    result([{ sequence: "1", entryHash: entry().entryHash }]),
+    result([row()]),
+  ]);
+  const changed = TenantAuditEventSchema.parse({ ...event(), result: "FAILED" });
+  await expect(repository.appendTenant(transaction(client), changed)).rejects.toMatchObject({
+    code: "OCCURRENCE_CONFLICT",
+  });
+  expect(client.calls).toHaveLength(2);
+});
+it.each(["scope", "actor", "inactive", "domain"])(
+  "rejects %s handle mismatch before SQL",
+  async (mismatch) => {
+    const client = fresh();
+    const handle = transaction(client);
+    const invalid = {
+      ...handle,
+      scope: mismatch === "scope" ? { ...scope, storeId: "other" } : handle.scope,
+      actor: mismatch === "actor" ? { ...actor, actorId: "other" } : handle.actor,
+      isActive: () => mismatch !== "inactive",
+      kind: mismatch === "domain" ? "ANONYMOUS_AUTH_SECURITY" : "TENANT",
+    } as BoundTenantTransaction;
+    await expect(repository.appendTenant(invalid, event())).rejects.toBeInstanceOf(
+      AuditAppendError,
+    );
+    expect(client.calls).toHaveLength(0);
+  },
+);
+it.each(["9007199254740991", "9007199254740992", "1.5", "-1", "01"])(
+  "fails closed on unusable head %s",
+  async (sequence) => {
+    const client = new ScriptClient([
+      result([{ sequence, entryHash: "a".repeat(64) }]),
+      result([]),
+    ]);
+    await expect(repository.appendTenant(transaction(client), event())).rejects.toBeInstanceOf(
+      AuditAppendError,
+    );
+    expect(client.calls.some(({ sql }) => sql.startsWith("INSERT"))).toBe(false);
+  },
+);
+it.each(["entryHash", "actorId", "redactionVersion", "sequence"])(
+  "rejects corrupt persisted %s",
+  async (field) => {
+    const corrupt = { ...row(), [field]: field === "redactionVersion" ? 2 : "corrupt" };
+    const client = new ScriptClient([
+      result([{ sequence: "1", entryHash: entry().entryHash }]),
+      result([corrupt]),
+    ]);
+    await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
+      code: "INVALID_STORAGE",
+    });
+  },
+);
+it("rejects a mismatched INSERT result", async () => {
+  const client = fresh({ ...entry(), auditId: "other" });
+  await expect(repository.appendTenant(transaction(client), event())).rejects.toMatchObject({
+    code: "INVALID_STORAGE",
+  });
+});
+it("snapshots parsed input and bound metadata before waiting for the organization lock", async () => {
+  const input = event();
+  const metadata = { ...scope };
+  const handle = { ...transaction(fresh()), scope: metadata };
+  const client = fresh();
+  client.replies[0] = () => {
+    input.scope.storeId = "mutated";
+    metadata.storeId = "mutated";
+    return result([{ sequence: "0", entryHash: null }]);
+  };
+  expect(await repository.appendTenant({ ...handle, client }, input)).toEqual(entry());
+});
+it("rejects expired lifetime after a query and propagates a safe failure to the business owner", async () => {
+  let active = true;
+  const client = fresh();
+  client.replies[0] = () => {
+    active = false;
+    return result([{ sequence: "0", entryHash: null }]);
+  };
+  const handle = { ...transaction(client), isActive: () => active };
+  await expect(repository.appendTenant(handle, event())).rejects.toMatchObject({
+    code: "INVALID_HANDLE",
+  });
+  expect(client.calls).toHaveLength(1);
+});
+it("replaces database errors with bounded payload-free domain errors", async () => {
+  const client = new ScriptClient([new Error("password=secret arbitrary SQL detail")]);
+  const failed = repository.appendTenant(transaction(client), event());
+  await expect(failed).rejects.toMatchObject({
+    code: "STORAGE_FAILED",
+    message: "Audit append failed",
+  });
+  await expect(failed).rejects.not.toHaveProperty("cause");
+});
+it.each(["", "bad id", "x".repeat(129)])("validates generated audit ID %s", async (auditId) => {
+  const client = fresh();
+  await expect(
+    new AuditAppendRepository(() => auditId).appendTenant(transaction(client), event()),
+  ).rejects.toBeInstanceOf(AuditAppendError);
+  expect(client.calls.some(({ sql }) => sql.startsWith("INSERT"))).toBe(false);
+});
