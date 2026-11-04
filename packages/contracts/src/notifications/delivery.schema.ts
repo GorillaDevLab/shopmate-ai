@@ -92,7 +92,7 @@ export type NotificationDeliveryRoute = z.infer<typeof NotificationDeliveryRoute
 
 function validTimezone(value: string): boolean {
   // Fixed offsets are not IANA zones and cannot express daylight-saving transitions.
-  if (!/^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*$/u.test(value)) return false;
+  if (!/^[A-Za-z_][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/u.test(value)) return false;
   try {
     new Intl.DateTimeFormat("en", { timeZone: value }).format(0);
     return true;

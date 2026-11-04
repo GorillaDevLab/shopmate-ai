@@ -12,6 +12,7 @@ import {
   NotificationInboxPageSchema,
   NotificationInboxItemSchema,
   NotificationReadConfirmationSchema,
+  NotificationTimezoneSchema,
   NotificationPreferencesQuerySchema,
   NotificationPreferencesUpdateSchema,
   NotificationMarkReadRequestSchema,
@@ -221,6 +222,42 @@ it.each([
     NotificationPreferencesSchema.safeParse({
       ...prefs,
       quietHours: { ...prefs.quietHours, ...mutation },
+    }).success,
+  ).toBe(false);
+});
+
+it.each(["EST5EDT", "CST6CDT", "MST7MDT", "PST8PDT", "GMT0", "UTC", "US/Eastern", "Etc/GMT+12"])(
+  "accepts supported named timezone %s without rewriting it",
+  (timezone) => {
+    expect(NotificationTimezoneSchema.parse(timezone)).toBe(timezone);
+    const prefs = preferencesFixture();
+    const quietHours = { ...prefs.quietHours, timezone };
+    expect(NotificationPreferencesSchema.parse({ ...prefs, quietHours }).quietHours).toEqual(
+      quietHours,
+    );
+  },
+);
+
+it.each([
+  "+12:00",
+  "-08:00",
+  "+1200",
+  "1200",
+  "Not/AZone",
+  "",
+  "x".repeat(129),
+  " UTC",
+  "UTC ",
+  "America/New York",
+  "UTC\n",
+  "UTC\u0000",
+])("rejects raw offsets, invalid or unbounded timezone %#", (timezone) => {
+  expect(NotificationTimezoneSchema.safeParse(timezone).success).toBe(false);
+  const prefs = preferencesFixture();
+  expect(
+    NotificationPreferencesSchema.safeParse({
+      ...prefs,
+      quietHours: { ...prefs.quietHours, timezone },
     }).success,
   ).toBe(false);
 });
