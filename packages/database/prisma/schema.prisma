@@ -707,17 +707,18 @@ model Organization {
 }
 
 model OrganizationMember {
-  id             String            @id @default(cuid())
-  organizationId String
-  userId         String
-  role           TenantRole
-  status         MembershipStatus  @default(ACTIVE)
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  workspaces     WorkspaceMember[]
-  mockGrants     MockWorkerGrant[] @relation("WorkerMembership")
-  syncGrants     SyncWorkerGrant[]
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  id                 String              @id @default(cuid())
+  organizationId     String
+  userId             String
+  role               TenantRole
+  status             MembershipStatus    @default(ACTIVE)
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  workspaces         WorkspaceMember[]
+  auditServiceGrants AuditServiceGrant[]
+  mockGrants         MockWorkerGrant[]   @relation("WorkerMembership")
+  syncGrants         SyncWorkerGrant[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@unique([organizationId, userId])
   @@index([userId, status])
@@ -862,21 +863,23 @@ model Sku {
 }
 
 model Store {
-  id                String                @id
-  merchantId        String
-  name              String
-  city              String
-  platform          String
-  organizationId    String                @default("")
-  workspaceId       String                @default("")
-  organization      Organization          @relation(fields: [merchantId, organizationId], references: [legacyMerchantId, id], onDelete: Restrict, onUpdate: NoAction)
-  workspace         Workspace             @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  merchant          Merchant              @relation(fields: [merchantId], references: [id], onDelete: Cascade)
-  orders            Order[]
-  connections       PlatformConnection[]
-  metricDefinitions MetricDefinitionRow[]
-  metricSnapshots   MetricSnapshotRow[]
-  events            EventRow[]
+  id                 String                @id
+  merchantId         String
+  name               String
+  city               String
+  platform           String
+  organizationId     String                @default("")
+  workspaceId        String                @default("")
+  organization       Organization          @relation(fields: [merchantId, organizationId], references: [legacyMerchantId, id], onDelete: Restrict, onUpdate: NoAction)
+  workspace          Workspace             @relation(fields: [organizationId, workspaceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  merchant           Merchant              @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  orders             Order[]
+  connections        PlatformConnection[]
+  metricDefinitions  MetricDefinitionRow[]
+  metricSnapshots    MetricSnapshotRow[]
+  events             EventRow[]
+  auditLogs          AuditLogRow[]
+  auditServiceGrants AuditServiceGrant[]
 
   @@unique([merchantId, id])
   @@unique([organizationId, workspaceId, id])
@@ -1520,5 +1523,70 @@ model DecisionComparisonRow {
 
   @@unique([primaryRunId, shadowRunId, evaluationVersion], map: "decision_comparisons_pair_key")
   @@map("decision_comparisons")
+  @@schema("public")
+}
+
+model AuditLogRow {
+  auditId          String               @id
+  organizationId   String
+  workspaceId      String
+  storeId          String
+  actorId          String
+  actorKind        String
+  requestId        String
+  occurrenceId     String
+  sequence         BigInt
+  prevHash         String?
+  entryHash        String
+  hashVersion      Int
+  redactionVersion Int
+  payload          Json
+  store            Store                @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "audit_logs_store_fkey")
+  checkpoints      AuditCheckpointRow[]
+
+  @@unique([organizationId, sequence], map: "audit_logs_org_sequence_key")
+  @@unique([organizationId, requestId, occurrenceId], map: "audit_logs_occurrence_key")
+  @@unique([organizationId, workspaceId, storeId, sequence, entryHash, hashVersion], map: "audit_logs_anchor_key")
+  @@index([organizationId, workspaceId, storeId, sequence], map: "audit_logs_scope_history_idx")
+  @@map("audit_logs")
+  @@schema("public")
+}
+
+model AuditCheckpointRow {
+  organizationId    String
+  workspaceId       String
+  storeId           String
+  sequence          BigInt
+  entryHash         String
+  hashVersion       Int
+  checkpointVersion Int         @default(1)
+  entry             AuditLogRow @relation(fields: [organizationId, workspaceId, storeId, sequence, entryHash, hashVersion], references: [organizationId, workspaceId, storeId, sequence, entryHash, hashVersion], onDelete: Restrict, onUpdate: NoAction, map: "audit_checkpoints_anchor_fkey")
+
+  @@id([organizationId, sequence])
+  @@map("audit_checkpoints")
+  @@schema("public")
+}
+
+model AuditServiceGrant {
+  loginRole          String
+  organizationId     String
+  workspaceId        String
+  storeId            String
+  actorId            String
+  actorKind          String
+  authorizedByUserId String
+  store              Store              @relation(fields: [organizationId, workspaceId, storeId], references: [organizationId, workspaceId, id], onDelete: Restrict, onUpdate: NoAction)
+  authorizer         OrganizationMember @relation(fields: [organizationId, authorizedByUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([loginRole, organizationId, workspaceId, storeId])
+  @@map("audit_service_grants")
+  @@schema("public")
+}
+
+model AuthSecurityEventRow {
+  auditId String @id
+  payload Json
+
+  @@map("auth_security_events")
   @@schema("public")
 }
