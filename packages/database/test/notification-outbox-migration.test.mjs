@@ -57,3 +57,12 @@ test("Prisma maps physical outbox inbox and worker binding tables", async () => 
   for (const table of ["notification_outbox", "recipient_inbox", "notification_worker_grants"])
     assert.ok(schema.includes(`@@map("${table}")`));
 });
+test("tenant runner explicitly registers sixteen notification tests and preserves audit proof", async () => {
+  const runner = await readFile(new URL("../../scripts/test-tenant-database.mjs", root), "utf8");
+  assert.match(runner, /\["test\/integration\/notification-outbox-storage.test.mjs", 16\]/u);
+  assert.match(runner, /\["test\/integration\/audit-storage.test.mjs", 206\]/u);
+  assert.match(
+    runner,
+    /await run\("packages\/database", "test\/integration\/notification-outbox-storage.test.mjs"/u,
+  );
+});
