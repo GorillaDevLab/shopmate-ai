@@ -78,13 +78,13 @@ function result(rows: readonly Record<string, unknown>[], rowCount = rows.length
 }
 class ScriptClient implements AuditTransactionClient {
   readonly calls: { sql: string; parameters: unknown[] }[] = [];
-  constructor(readonly replies: (Reply | Error | (() => Reply))[]) {}
+  constructor(readonly replies: (Reply | Error | ((parameters: unknown[]) => Reply))[]) {}
   async query(sql: string, parameters: unknown[] = []): Promise<Reply> {
     this.calls.push({ sql, parameters });
     const reply = this.replies.shift();
     if (reply instanceof Error) throw reply;
     if (!reply) throw new Error("Unexpected query");
-    return typeof reply === "function" ? reply() : reply;
+    return typeof reply === "function" ? reply(parameters) : reply;
   }
 }
 function transaction(client: AuditTransactionClient): BoundTenantTransaction {
@@ -652,4 +652,72 @@ it("replays a service occurrence only after the current database actor check suc
   );
   expect(client.calls[1]?.sql).toContain('public.audit_actor_access(audit_row) AS "actorAllowed"');
   expect(client.calls).toHaveLength(2);
+});
+
+function insertedRow(parameters: unknown[]): Record<string, unknown> {
+  const names = [
+    "auditId",
+    "organizationId",
+    "workspaceId",
+    "storeId",
+    "actorId",
+    "actorKind",
+    "requestId",
+    "occurrenceId",
+    "sequence",
+    "prevHash",
+    "entryHash",
+    "hashVersion",
+    "redactionVersion",
+  ];
+  return {
+    ...Object.fromEntries(names.map((name, index) => [name, parameters[index]])),
+    payload: JSON.parse(String(parameters[13])) as unknown,
+  };
+}
+function priceEvent(oldPriceMinor: number, newPriceMinor: number): TenantAuditEvent {
+  return TenantAuditEventSchema.parse({
+    ...event(),
+    event: {
+      eventType: "EXECUTION",
+      redactedMetadata: {
+        actionKind: "PRICE",
+        oldPriceMinor,
+        newPriceMinor,
+        reasonCode: "COMPLETED",
+      },
+    },
+  });
+}
+it("accepts signed-zero prices after the real INSERT JSON parameter round trip", async () => {
+  const input = priceEvent(JSON.parse("-0") as number, JSON.parse("-0") as number);
+  const client = new ScriptClient([
+    result([{ sequence: "0", entryHash: null }]),
+    result([]),
+    (parameters) => result([insertedRow(parameters)]),
+  ]);
+  const stored = await repository.appendTenant(transaction(client), input);
+  expect(stored).toEqual(entry(1, null, priceEvent(0, 0)));
+  expect(stored.entryHash).toBe(entry(1, null, input).entryHash);
+});
+it("replays persisted positive-zero prices for an identical signed-zero request", async () => {
+  const persisted = entry(1, null, priceEvent(0, 0));
+  const client = new ScriptClient([
+    result([{ sequence: "1", entryHash: persisted.entryHash }]),
+    result([JSON.parse(JSON.stringify(replayRow(persisted))) as Record<string, unknown>]),
+  ]);
+  expect(await repository.appendTenant(transaction(client), priceEvent(-0, -0))).toEqual(persisted);
+  expect(client.calls).toHaveLength(2);
+});
+it("still rejects real price changes against a JSON-persisted occurrence", async () => {
+  const persisted = entry(1, null, priceEvent(0, 1));
+  const client = new ScriptClient([
+    result([{ sequence: "1", entryHash: persisted.entryHash }]),
+    result([JSON.parse(JSON.stringify(replayRow(persisted))) as Record<string, unknown>]),
+  ]);
+  await expect(
+    repository.appendTenant(transaction(client), priceEvent(-0, 2)),
+  ).rejects.toMatchObject({
+    code: "OCCURRENCE_CONFLICT",
+  });
 });

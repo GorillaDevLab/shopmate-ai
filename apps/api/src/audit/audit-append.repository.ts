@@ -6,6 +6,7 @@ import {
   AuditActorSchema,
   AuditTenantScopeSchema,
   TenantAuditEntrySchema,
+  TenantAuditEventSchema,
   TenantIdSchema,
   type AnonymousAuthSecurityEvent,
   type AnonymousAuthSecurityEntry,
@@ -119,7 +120,9 @@ function tenantBinding(handle: BoundTenantTransaction, event: TenantAuditEvent):
 function tenantInput(input: unknown): TenantAuditEvent {
   try {
     const event = new AuditRedactor().redact(input).event;
-    return event.scopeKind === "TENANT" ? event : fail("INVALID_INPUT");
+    if (event.scopeKind !== "TENANT") return fail("INVALID_INPUT");
+    // Normalize only validated plain JSON to the same numeric representation as jsonb and v1 hash.
+    return TenantAuditEventSchema.parse(JSON.parse(JSON.stringify(event)));
   } catch {
     return fail("INVALID_INPUT");
   }
