@@ -1,5 +1,7 @@
 # P10-002 · notification outbox and recipient inbox · #384
 
+Preflight corrected2026-11-05: actual existing PlatformConnection_externalStoreId_check (migration20261003040000) limits externalStoreId to200 PostgreSQLcharacters. Do not alter that existing boundary in thiscard. Use a largestvalid200-character storeidentifier in full-FK fixtures, and independent256-UTF16 eventId/intentId values across both notification indexes. New notification scalarchecks retain256; the upstream binding limit remains an explicit preexisting limitation, not a claim of256-store support.
+
 Preflight only. Source main dfe3a9974574b8faf8f84fa0f58ca1ca0004ac58 includes #542. Read the merged notifications/delivery.schema.ts, its commerce/tenant/event dependencies, Prisma models and tenant policies, historical metric fixture, P10-001 implementation/final-fix reports, P10-002 card, architecture preflight and foundation wave plan. P09-003 audit branch was inspected only for migration/runner conventions. P10-001 is the sole card hard dependency. The schema + tenant-runner lock is still held by P09-003. Coordinator must release/reassign it, refresh main and card state, and record the new base before implementation. Audit helpers, audit tables and P09-004 are not prerequisites for this migration.
 
 ## Four-hour delivery boundary
@@ -46,7 +48,7 @@ P10-001 permits a retry time for FAILED and UNKNOWN. Do not coerce uncertainty i
    2. Prior history excluding only the new migration, preexisting tenant rows, apply new migration, old data/checksums survive.
    3. Capability catalog, exact column privileges, no PUBLIC execute/direct helper role or grant-table rights; basic enqueue→PENDING round-trip.
    4. Natural-key dedup race on two connections (one blocks, one durable original), retry stable despite mutable summary, distinct revised state, separate recipient/channel-literal rejection.
-   5. Wide 128-ASCII and 256-unit high-entropy BMP/CJK opaque identifiers across both indexes; 128 astral pass, 129 astral/257 BMP fail; whitespace, control, punctuation/embedded spaces, distinct composed/decomposed and >32-bit valid revision.
+   5. Wide128-ASCII scope and existing-valid200-character externalStoreId with256-unit high-entropy BMP/CJK eventId andintentId across bothindexes; 128 astral pass, 129 astral/257 BMP fail; whitespace, control, punctuation/embedded spaces, distinct composed/decomposed and >32-bit valid revision.
    6. Storage FK failures for stitched parent scope and absent org recipient, verified with privileged synthetic inserts; inactive/missing workspace recipient and inactive org/connection denied separately by RLS.
    7. Active OWNER/ADMIN without explicit assignment, assigned operator and distinct active recipient positives; read-only/revoked actor cannot enqueue.
    8. Wrong org/workspace/store/connection/external/user, missing/empty settings and stronger isolation deny; same workspace different store and same store different recipient checked.
