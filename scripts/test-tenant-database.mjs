@@ -20,7 +20,10 @@ const apiTargets = [
   "test/demo-commerce-database.e2e-spec.ts",
   "test/metrics-database.e2e-spec.ts",
 ];
-const requiredTargetCounts = new Map([["test/integration/audit-storage.test.mjs", 206]]);
+const requiredTargetCounts = new Map([
+  ["test/integration/audit-storage.test.mjs", 206],
+  ["test/integration/notification-outbox-storage.test.mjs", 16],
+]);
 const forbiddenEnvironment =
   /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_|^NODE_TEST_CONTEXT$|^METRIC_CURSOR_SECRET$/iu;
 function metricRuntimeEnvironment(isolatedUrl, metrics) {
@@ -379,6 +382,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       TEST_DATABASE_URL: server.url,
     });
     await run("packages/database", "test/integration/audit-storage.test.mjs", [], {
+      TEST_DATABASE_URL: server.url,
+    });
+    await run("packages/database", "test/integration/notification-outbox-storage.test.mjs", [], {
       TEST_DATABASE_URL: server.url,
     });
     const runtimeUrl = await prepareTenantApiRuntime(server.url);
