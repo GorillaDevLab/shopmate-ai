@@ -5,6 +5,7 @@ import {
   createNotificationIntentKey,
   NotificationEnqueueRequestSchema,
   type NotificationEnqueueRequest,
+  type EventEntity,
   type SecurityClock,
 } from "@shopmate/contracts";
 import {
@@ -302,14 +303,14 @@ function physicalEvent(request = requestFixture()): Row {
     id: event.id,
     schemaVersion: 1,
     eventType: event.eventType,
-    entityKind: entity.kind,
-    entityId: entity.connectionId,
+    entityKind: event.entity.kind,
+    entityId: event.entity.kind === "STORE" ? binding.storeId : fixtureEntityId(event.entity),
     baselineVersion: null,
     fingerprint: event.fingerprint,
     severityFloor: event.severityFloor,
     rulePolicyVersion: event.rulePolicyVersion,
     state: event.state,
-    revision: "1",
+    revision: String(event.revision),
     firstSeenAtMs: String(Date.parse(instant)),
     lastSeenAtMs: String(Date.parse(instant)),
     currentEvidenceId: ref.id,
@@ -391,7 +392,7 @@ function physicalClaim(request: NotificationEnqueueRequest) {
   };
   return {
     ...common,
-    eventRevision: "1",
+    eventRevision: String(request.decision.context.event.revision),
     winnerRunId: run.id,
     winnerMode: "PRIMARY",
     winnerStatus: "EVALUATED",
@@ -1107,5 +1108,304 @@ it("rejects a replay whose stored event identity contradicts the current event",
   });
   await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
     name: "NotificationEnqueueError",
+  });
+});
+function fixtureEntityId(entity: EventEntity): string | null {
+  switch (entity.kind) {
+    case "STORE":
+      return null;
+    case "SKU":
+      return entity.externalSkuId;
+    case "CAMPAIGN":
+      return entity.externalCampaignId;
+    case "CONNECTION":
+      return entity.connectionId;
+  }
+}
+function financialFactsFixture() {
+  return {
+    paidRevenueMinor: 1,
+    netRevenueMinor: 1,
+    grossMerchandiseMinor: 1,
+    grossProfitMinor: 0,
+    contributionMinor: 0,
+    discountMinor: 0,
+    spendMinor: 0,
+    costCoverageBasisPoints: 10000,
+    feeCoverageBasisPoints: 10000,
+    profitDeltaMinor: 0,
+    attributionVersion: null,
+    contributions: [],
+    skuContributions: [],
+    discountRate: { numerator: 0, denominator: 1, valueBasisPoints: 0, period },
+    promotionPeriod: null,
+  };
+}
+function marketingFactsFixture() {
+  return {
+    spendMinor: 1,
+    attributedRevenueMinor: 1,
+    impressions: 1,
+    clicks: 1,
+    attributedOrders: 1,
+    attributionCoverageBasisPoints: 10000,
+    roas: { numerator: 1, denominator: 1, valueBasisPoints: 10000, period },
+  };
+}
+function variantRequest(kind: "STORE" | "SKU" | "CAMPAIGN"): NotificationEnqueueRequest {
+  const entity: EventEntity =
+    kind === "STORE"
+      ? { kind }
+      : kind === "SKU"
+        ? { kind, externalSkuId: "sku/a .1" }
+        : { kind, externalCampaignId: "campaign/a .1" };
+  const eventType = kind === "CAMPAIGN" ? "ROAS_DROP" : "REVENUE_DROP";
+  const ref = { ...reference, eventType, entity } as const;
+  const evidence = {
+    ...evidenceFixture(),
+    eventType,
+    entity,
+    facts: kind === "CAMPAIGN" ? marketingFactsFixture() : financialFactsFixture(),
+  };
+  const original = requestFixture();
+  return NotificationEnqueueRequestSchema.parse({
+    ...original,
+    intent: { ...original.intent, evidence: ref, summary: { eventType, severity: "LOW" } },
+    decision: {
+      ...original.decision,
+      run: { ...original.decision.run, evidence: ref },
+      context: {
+        ...original.decision.context,
+        event: {
+          ...original.decision.context.event,
+          eventType,
+          entity,
+          fingerprint: createEventFingerprint(ref),
+          currentEvidence: ref,
+        },
+        evidence: { reference: ref, evidence },
+      },
+    },
+  });
+}
+function useRequest(f: ReturnType<typeof auditFixture>, request: NotificationEnqueueRequest): void {
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("FROM public.events")) return { rows: [physicalEvent(request)], rowCount: 1 };
+    if (sql.includes("FROM public.decision_runs"))
+      return { rows: [physicalRun(request)], rowCount: 1 };
+    return previous(sql, parameters);
+  });
+}
+it.each(["STORE", "SKU", "CAMPAIGN"] as const)(
+  "maps %s event and outbox identities using their actual representations",
+  async (kind) => {
+    const f = auditFixture();
+    const request = variantRequest(kind);
+    useRequest(f, request);
+    expect(await f.repository.enqueue(f.transaction, request, clock)).toMatchObject({
+      ok: true,
+      value: { receipt: { intent: { evidence: { entity: request.intent.evidence.entity } } } },
+    });
+    const parameters = f.query.mock.calls.find(([sql]) =>
+      sql.includes("INSERT INTO public.notification_outbox"),
+    )![1]!;
+    expect(parameters[20]).toBe(kind);
+    expect(parameters[21]).toBe(fixtureEntityId(request.intent.evidence.entity));
+  },
+);
+it("permits a new natural key for a newly routed event revision", async () => {
+  const f = auditFixture();
+  const context = {
+    ...f.request.decision.context,
+    event: { ...f.request.decision.context.event, revision: 2 },
+  };
+  const intent = { ...f.request.intent, eventRevision: 2 };
+  const identity = {
+    recipient: intent.recipient,
+    eventId: intent.eventId,
+    eventState: intent.eventState,
+    eventRevision: intent.eventRevision,
+    channel: intent.channel,
+  };
+  const request = NotificationEnqueueRequestSchema.parse({
+    intent: { ...intent, dedupKey: createNotificationIntentKey(identity) },
+    decision: { ...f.request.decision, context },
+  });
+  useRequest(f, request);
+  expect(await f.repository.enqueue(f.transaction, request, clock)).toMatchObject({
+    ok: true,
+    value: { receipt: { intent: { eventRevision: 2 } } },
+  });
+  const parameters = f.query.mock.calls.find(([sql]) =>
+    sql.includes("INSERT INTO public.notification_outbox"),
+  )![1]!;
+  expect(parameters[9]).toBe(2);
+});
+it.each(Object.keys(binding) as (keyof typeof binding)[])(
+  "rejects mismatched trusted binding %s before SQL",
+  async (key) => {
+    const f = fixture();
+    const handle = { ...f.transaction, binding: { ...binding, [key]: "other" } };
+    expect(await f.repository.enqueue(handle, f.request, clock)).toEqual({
+      ok: false,
+      code: "FORBIDDEN",
+    });
+    expect(f.query).not.toHaveBeenCalled();
+  },
+);
+it("requires the actual session human principal even when the helper allows scope", async () => {
+  const f = fixture();
+  f.query.mockResolvedValueOnce({
+    rows: [{ allowed: true, currentUser: "different-user" }],
+    rowCount: 1,
+  });
+  expect(await f.repository.enqueue(f.transaction, f.request, clock)).toEqual({
+    ok: false,
+    code: "FORBIDDEN",
+  });
+  expect(f.query).toHaveBeenCalledTimes(1);
+});
+it("rejects an invalid trusted audit request ID without coercing the logical request ID", async () => {
+  const f = fixture();
+  expect(
+    await f.repository.enqueue(
+      { ...f.transaction, auditRequestId: f.request.decision.context.requestId },
+      f.request,
+      clock,
+    ),
+  ).toEqual({ ok: false, code: "INVALID_INPUT" });
+  expect(f.query).not.toHaveBeenCalled();
+});
+it("snapshots caller values before the first await", async () => {
+  const f = auditFixture();
+  const request = {
+    ...f.request,
+    intent: { ...f.request.intent },
+    decision: {
+      ...f.request.decision,
+      context: { ...f.request.decision.context, event: { ...f.request.decision.context.event } },
+    },
+  };
+  const handle = {
+    ...f.transaction,
+    binding: { ...f.transaction.binding },
+    actor: { ...f.transaction.actor },
+  };
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("current_setting")) {
+      request.intent.id = "mutated-intent";
+      request.decision.context.event.revision = 999;
+      handle.binding.externalStoreId = "mutated-store";
+      handle.actor.actorId = "mutated-user";
+      handle.connectionGeneration = 99;
+      handle.auditRequestId = "mutated-audit-request";
+    }
+    return previous(sql, parameters);
+  });
+  expect(await f.repository.enqueue(handle, request, clock)).toMatchObject({
+    ok: true,
+    value: { receipt: { intent: f.request.intent } },
+  });
+  const payload = f.query.mock.calls.find(([sql]) =>
+    sql.includes("INSERT INTO public.audit_logs"),
+  )![1]![13];
+  expect(JSON.parse(String(payload))).toMatchObject({
+    actor: f.transaction.actor,
+    links: { requestId: "audit-request-a" },
+  });
+});
+it("bounds a first-query storage failure and requires owner rollback", async () => {
+  const f = fixture();
+  f.query.mockRejectedValueOnce(new Error("private SQL payload"));
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+    code: "UNAVAILABLE",
+    message: "Notification enqueue failed",
+  });
+  expect(f.query).toHaveBeenCalledTimes(1);
+});
+it("rejects a clock from the wrong time domain before SQL", async () => {
+  const f = fixture();
+  const invalidClock = { ...clock, timeDomain: "REPLAY_UTC" } as unknown as SecurityClock;
+  expect(await f.repository.enqueue(f.transaction, f.request, invalidClock)).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+  expect(f.query).not.toHaveBeenCalled();
+});
+it("observes the original AbortSignal after an authorization await", async () => {
+  const f = authorityFixture();
+  const controller = new AbortController();
+  const request = {
+    ...f.request,
+    decision: {
+      ...f.request.decision,
+      control: { ...f.request.decision.control, signal: controller.signal },
+    },
+  };
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    controller.abort();
+    return previous(sql, parameters);
+  });
+  await expect(f.repository.enqueue(f.transaction, request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+    code: "CONFLICT",
+  });
+  expect(f.query).toHaveBeenCalledTimes(1);
+});
+it.each([
+  { claimWinnerRunId: null },
+  { mode: "SHADOW" },
+  { providerVersion: "another-version" },
+  { supportedInputVersions: "[1]" },
+  { fallbackStatus: "EVALUATED" },
+  { latencyMs: true },
+  { effective: { ...labels, notificationRoute: "NOTIFY_NOW" } },
+])("denies uncommitted, shadow or changed persisted decision authority %j", async (change) => {
+  const f = winnerFixture({ ...physicalRun(), ...change });
+  expect(await f.repository.enqueue(f.transaction, f.request, clock)).toEqual({
+    ok: false,
+    code: "CONFLICT",
+  });
+  expect(f.query).toHaveBeenCalledTimes(3);
+});
+it("requires the complete persisted evidence payload", async () => {
+  const payload = {
+    ...evidenceFixture(),
+    facts: { ...evidenceFixture().facts, typedErrorCode: "PERMISSION_DENIED" },
+  };
+  const f = authorityFixture({ ...physicalEvent(), evidencePayload: payload });
+  expect(await f.repository.enqueue(f.transaction, f.request, clock)).toEqual({
+    ok: false,
+    code: "CONFLICT",
+  });
+  expect(f.query).toHaveBeenCalledTimes(2);
+});
+it("decodes genuine bigint fields without changing their values", async () => {
+  const f = storageFixture({ ...pendingRow(), eventRevision: 1n, attempt: 0n });
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) =>
+    sql.includes("FROM public.decision_runs")
+      ? { rows: [{ ...physicalRun(), latencyMs: 1n, claimEventRevision: 1n }], rowCount: 1 }
+      : previous(sql, parameters),
+  );
+  expect(await f.repository.enqueue(f.transaction, f.request, clock)).toMatchObject({
+    ok: true,
+    value: { receipt: { attempt: 0, intent: { eventRevision: 1 } } },
+  });
+});
+it("accepts the maximum safe persisted delivery attempt", async () => {
+  const f = storageFixture({
+    ...pendingRow(),
+    status: "FAILED",
+    attempt: "9007199254740991",
+    nextAttemptAtMs: null,
+  });
+  expect(await f.repository.enqueue(f.transaction, f.request, clock)).toMatchObject({
+    ok: true,
+    value: { receipt: { attempt: Number.MAX_SAFE_INTEGER, status: "FAILED" } },
   });
 });
