@@ -1098,3 +1098,14 @@ it.each([null, 0, 2])("rejects incoherent INSERT rowCount %s", async (rowCount) 
   });
   expect(f.query.mock.calls.some(([sql]) => sql.includes("audit_"))).toBe(false);
 });
+it("rejects a replay whose stored event identity contradicts the current event", async () => {
+  const f = storageFixture({
+    ...pendingRow(),
+    eventType: "REVENUE_DROP",
+    entityKind: "STORE",
+    entityId: null,
+  });
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+  });
+});

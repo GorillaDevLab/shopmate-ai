@@ -646,6 +646,15 @@ function projectionReadAt(row: Row, intent: NotificationIntent): string | null {
   } else if (inboxPresent) fail("UNAVAILABLE");
   return row.status === "DELIVERED" ? nullableTime(row.inboxReadAtMs) : null;
 }
+function boundIntent(row: Row, operation: Operation): NotificationIntent {
+  const intent = toIntent(row);
+  if (
+    intent.dedupKey !== operation.request.intent.dedupKey ||
+    createEventFingerprint(intent.evidence) !== operation.request.decision.context.event.fingerprint
+  )
+    fail("CONFLICT");
+  return intent;
+}
 function toReceipt(row: Row, operation: Operation, inserted = false) {
   DecisionCorrelationIdSchema.parse(row.rowId);
   if (typeof row.leaseToken === "string") literal(row.leaseToken);
@@ -653,9 +662,8 @@ function toReceipt(row: Row, operation: Operation, inserted = false) {
     integer(row.connectionGeneration, 0, 2147483647) !== operation.transaction.connectionGeneration
   )
     fail("CONFLICT");
-  const intent = toIntent(row);
+  const intent = boundIntent(row, operation);
   if (!inserted && row.inboxOutboxId === undefined) fail("UNAVAILABLE");
-  if (intent.dedupKey !== operation.request.intent.dedupKey) fail("CONFLICT");
   const readAt = projectionReadAt(row, intent);
   const receipt = DeliveryReceiptSchema.parse({
     schemaVersion: 1,
