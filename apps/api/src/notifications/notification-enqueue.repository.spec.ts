@@ -517,14 +517,23 @@ function pendingRow(parameters?: unknown[]): Row {
     status: "PENDING",
     attempt: "0",
     leaseToken: null,
-    createdAtMs: String(Date.parse(instant)),
-    notBeforeMs: String(Date.parse(instant)),
-    nextAttemptAtMs: String(Date.parse(instant)),
+    eventRevision: String(row.eventRevision),
+    createdAtMs: parameterMillis(parameters?.[15]),
+    notBeforeMs: parameterMillis(parameters?.[16]),
+    nextAttemptAtMs: parameterMillis(parameters?.[25]),
     leaseUntilMs: null,
     deliveredAtMs: null,
     inboxOutboxId: null,
     inboxReadAtMs: null,
   };
+}
+function parameterMillis(value: unknown): string {
+  if (value === undefined) return String(Date.parse(instant));
+  if (typeof value !== "string") throw new Error("Invalid synthetic timestamp parameter");
+  const iso = value.endsWith("+00 BC")
+    ? value.replace(/^0001/u, "0000").replace(" ", "T").replace("+00 BC", "Z")
+    : value;
+  return String(Date.parse(iso));
 }
 function storageFixture(existing: Row | null = pendingRow()) {
   const f = winnerFixture();
@@ -942,4 +951,150 @@ it("rejects exotic arrays before accepting a JSON request", async () => {
     ),
   ).toEqual({ ok: false, code: "INVALID_INPUT" });
   expect(f.query).not.toHaveBeenCalled();
+});
+it.each(["0000-01-01T00:00:00.000Z", "9999-12-31T23:59:59.999Z", "2026-11-03T00:00:00.000000Z"])(
+  "round-trips supported timestamp %s through submitted physical columns",
+  async (at) => {
+    const f = auditFixture();
+    const request = { ...f.request, intent: { ...f.request.intent, createdAt: at, notBefore: at } };
+    const result = await f.repository.enqueue(f.transaction, request, clock);
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        receipt: {
+          intent: {
+            createdAt: new Date(Date.parse(at)).toISOString(),
+            notBefore: new Date(Date.parse(at)).toISOString(),
+          },
+        },
+      },
+    });
+    const call = f.query.mock.calls.find(([sql]) =>
+      sql.includes("INSERT INTO public.notification_outbox"),
+    )!;
+    expect(call[1]![15]).toBe(
+      at.startsWith("0000")
+        ? "0001-01-01 00:00:00.000+00 BC"
+        : new Date(Date.parse(at)).toISOString(),
+    );
+    expect(call[0]).toContain(')::bigint::text AS "createdAtMs"');
+  },
+);
+it.each(["2026-11-03T00:00:00.0001Z", "2026-11-03T00:00:00.1230001Z", "2026-11-03T08:00:00+08:00"])(
+  "rejects unsupported timestamp %s before SQL",
+  async (at) => {
+    const f = fixture();
+    const request = { ...f.request, intent: { ...f.request.intent, createdAt: at, notBefore: at } };
+    expect(await f.repository.enqueue(f.transaction, request, clock)).toEqual({
+      ok: false,
+      code: "INVALID_INPUT",
+    });
+    expect(f.query).not.toHaveBeenCalled();
+  },
+);
+it.each(["-62167219200001", "253402300800000", "1793664000000.000000", true, "", "1.1"])(
+  "rejects a nonintegral or out-of-range epoch alias %s",
+  async (createdAtMs) => {
+    const f = storageFixture({ ...pendingRow(), createdAtMs });
+    await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+      name: "NotificationEnqueueError",
+    });
+  },
+);
+it.each(["通知/🚀 .1", "e\u0301/order", "é/order", "\u0800".repeat(256)])(
+  "preserves opaque Unicode %s",
+  async (id) => {
+    const f = auditFixture();
+    const request = { ...f.request, intent: { ...f.request.intent, id } };
+    expect(await f.repository.enqueue(f.transaction, request, clock)).toMatchObject({
+      ok: true,
+      value: { receipt: { intent: { id } } },
+    });
+  },
+);
+it.each(["bad\ud800", "bad\udfff", "bad\0", " leading", "trailing ", "\u0800".repeat(257)])(
+  "rejects invalid literal input before SQL (%s)",
+  async (id) => {
+    const f = fixture();
+    const request = { ...f.request, intent: { ...f.request.intent, id } };
+    expect(await f.repository.enqueue(f.transaction, request, clock)).toEqual({
+      ok: false,
+      code: "INVALID_INPUT",
+    });
+    expect(f.query).not.toHaveBeenCalled();
+  },
+);
+function withLag(value: unknown): NotificationEnqueueRequest {
+  const request = requestFixture();
+  const evidence = {
+    ...evidenceFixture(),
+    facts: { ...evidenceFixture().facts, lagSeconds: value },
+  };
+  return {
+    ...request,
+    decision: {
+      ...request.decision,
+      context: { ...request.decision.context, evidence: { reference, evidence } },
+    },
+  } as unknown as NotificationEnqueueRequest;
+}
+it.each([Number.NaN, Number.POSITIVE_INFINITY, undefined, 1n, new Date(instant), () => 0])(
+  "rejects unsupported JSON without silently erasing it (%s)",
+  async (value) => {
+    const f = fixture();
+    expect(await f.repository.enqueue(f.transaction, withLag(value), clock)).toEqual({
+      ok: false,
+      code: "INVALID_INPUT",
+    });
+    expect(f.query).not.toHaveBeenCalled();
+  },
+);
+it("normalizes genuine finite JSON negative zero like jsonb", async () => {
+  const f = storageFixture();
+  expect(await f.repository.enqueue(f.transaction, withLag(-0), clock)).toMatchObject({ ok: true });
+});
+it("rejects cyclic JSON without starting SQL", async () => {
+  const f = fixture();
+  const value: Row = {};
+  value.self = value;
+  expect(await f.repository.enqueue(f.transaction, withLag(value), clock)).toEqual({
+    ok: false,
+    code: "INVALID_INPUT",
+  });
+  expect(f.query).not.toHaveBeenCalled();
+});
+it("rejects a JSON-looking string stored in a winning result", async () => {
+  const f = winnerFixture({ ...physicalRun(), result: JSON.stringify(physicalRun().result) });
+  expect(await f.repository.enqueue(f.transaction, f.request, clock)).toEqual({
+    ok: false,
+    code: "CONFLICT",
+  });
+  expect(f.query).toHaveBeenCalledTimes(3);
+});
+it("rejects a missing concurrent winner after INSERT attempted", async () => {
+  const f = storageFixture(null);
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) =>
+    sql.includes("INSERT INTO public.notification_outbox")
+      ? { rows: [], rowCount: 0 }
+      : previous(sql, parameters),
+  );
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+    code: "CONFLICT",
+  });
+  expect(f.query).toHaveBeenCalledTimes(6);
+});
+it.each([null, 0, 2])("rejects incoherent INSERT rowCount %s", async (rowCount) => {
+  const f = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) =>
+    sql.includes("INSERT INTO public.notification_outbox")
+      ? { rows: [pendingRow(parameters)], rowCount }
+      : previous(sql, parameters),
+  );
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+  });
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("audit_"))).toBe(false);
 });
