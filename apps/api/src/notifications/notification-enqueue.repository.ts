@@ -24,6 +24,7 @@ import {
   type NotificationIntent,
   type NotificationEnqueueOutcome,
   type EventEntity,
+  type TenantAuditEvent,
   type NotificationPortError,
   type SecurityClock,
   type TransactionalEnqueuePort,
@@ -209,7 +210,13 @@ function prepare(
 async function query(operation: Operation, sql: string, parameters: unknown[]) {
   live(operation);
   operation.sqlStarted = true;
-  const result = await operation.transaction.client.query(sql, parameters);
+  const result = await operation.transaction.client
+    .query(sql, parameters)
+    .catch((error: unknown) => {
+      if (error !== null && typeof error === "object" && "code" in error && error.code === "23505")
+        fail("CONFLICT");
+      return fail("UNAVAILABLE");
+    });
   live(operation);
   if (result.rowCount !== result.rows.length || result.rows.length > 1) fail("UNAVAILABLE");
   return result.rows[0];
@@ -643,6 +650,7 @@ function toReceipt(row: Row, operation: Operation, inserted = false) {
   )
     fail("CONFLICT");
   const intent = toIntent(row);
+  if (!inserted && row.inboxOutboxId === undefined) fail("UNAVAILABLE");
   if (intent.dedupKey !== operation.request.intent.dedupKey) fail("CONFLICT");
   const readAt = projectionReadAt(row, intent);
   const receipt = DeliveryReceiptSchema.parse({
@@ -666,6 +674,17 @@ function toReceipt(row: Row, operation: Operation, inserted = false) {
     fail("UNAVAILABLE");
   return receipt;
 }
+function insertedIntentMatches(intent: NotificationIntent, operation: Operation): void {
+  const expected = operation.request.intent;
+  if (
+    !isDeepStrictEqual(intent, {
+      ...expected,
+      createdAt: preciseTime(expected.createdAt),
+      notBefore: preciseTime(expected.notBefore),
+    })
+  )
+    fail("UNAVAILABLE");
+}
 async function lookup(operation: Operation) {
   const intent = operation.request.intent;
   return query(operation, lookupSql, [
@@ -678,7 +697,36 @@ async function lookup(operation: Operation) {
     operation.transaction.connectionGeneration,
   ]);
 }
-async function store(operation: Operation): Promise<NotificationEnqueueOutcome> {
+function auditEvent(operation: Operation, rowId: string): TenantAuditEvent {
+  const transaction = operation.transaction;
+  return {
+    scopeKind: "TENANT",
+    scope: transaction.scope,
+    actor: transaction.actor,
+    resource: { type: "NOTIFICATION", id: rowId },
+    result: "SUCCESS",
+    occurredAt: live(operation),
+    sourceOccurredAt: null,
+    links: {
+      requestId: transaction.auditRequestId,
+      occurrenceId: rowId,
+      runId: null,
+      evidenceId: null,
+      actionId: null,
+      revisionId: null,
+      approvalId: null,
+      executionId: null,
+    },
+    event: {
+      eventType: "NOTIFICATION_INTENT",
+      redactedMetadata: { channel: "IN_APP", deliveryStatus: "PENDING" },
+    },
+  };
+}
+async function store(
+  operation: Operation,
+  audit: AuditAppendRepository,
+): Promise<NotificationEnqueueOutcome> {
   const existing = await lookup(operation);
   if (existing) return { outcome: "DEDUPLICATED", receipt: toReceipt(existing, operation) };
   const row = await query(
@@ -691,15 +739,29 @@ async function store(operation: Operation): Promise<NotificationEnqueueOutcome> 
     if (!winner) fail("CONFLICT");
     return { outcome: "DEDUPLICATED", receipt: toReceipt(winner, operation) };
   }
-  toReceipt(row, operation, true);
-  return fail("UNAVAILABLE");
+  const receipt = toReceipt(row, operation, true);
+  insertedIntentMatches(receipt.intent, operation);
+  // Audit retains the same client/queue while its own query guards also enforce request lifetime.
+  const auditHandle = {
+    ...operation.transaction,
+    isActive: () => {
+      live(operation);
+      return true;
+    },
+  };
+  await audit.appendTenant(auditHandle, auditEvent(operation, TenantIdSchema.parse(row.rowId)));
+  live(operation);
+  return { outcome: "ENQUEUED", receipt };
 }
 
 /** Never owns transaction boundaries. The owner must roll back typed denials and rejections. */
 export class NotificationEnqueueRepository
   implements TransactionalEnqueuePort<BoundNotificationTransaction>
 {
-  constructor(private readonly options: NotificationEnqueueOptions) {}
+  private readonly audit: AuditAppendRepository;
+  constructor(private readonly options: NotificationEnqueueOptions) {
+    this.audit = options.audit ?? new AuditAppendRepository();
+  }
 
   readonly enqueue: TransactionalEnqueuePort<BoundNotificationTransaction>["enqueue"] = async (
     handle,
@@ -712,7 +774,7 @@ export class NotificationEnqueueRepository
       if (!(await authorize(operation))) return { ok: false, code: "FORBIDDEN" };
       if (!(await currentEvent(operation)) || !(await currentWinner(operation)))
         return { ok: false, code: "CONFLICT" };
-      return { ok: true, value: await store(operation) };
+      return { ok: true, value: await store(operation, this.audit) };
     } catch (error) {
       const code = error instanceof NotificationEnqueueError ? error.code : "INVALID_INPUT";
       if (operation?.sqlStarted)

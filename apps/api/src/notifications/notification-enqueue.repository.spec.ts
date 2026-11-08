@@ -334,15 +334,12 @@ function physicalEvent(request = requestFixture()): Row {
 }
 function authorityFixture(event: Row | undefined = physicalEvent()) {
   const f = fixture();
-  let count = 0;
-  f.query.mockImplementation(async () => {
-    count++;
-    const rows =
-      count === 1
-        ? [{ allowed: true, currentUser: actor.userId }]
-        : count === 2 && event
-          ? [event]
-          : [];
+  f.query.mockImplementation(async (sql) => {
+    const rows = sql.includes("notification_scope_access")
+      ? [{ allowed: true, currentUser: actor.userId }]
+      : sql.includes("FROM public.events") && event
+        ? [event]
+        : [];
     return { rows, rowCount: rows.length };
   });
   return f;
@@ -438,10 +435,8 @@ function physicalRun(request = requestFixture()): Row {
 function winnerFixture(run: Row = physicalRun()) {
   const f = authorityFixture();
   const previous = f.query.getMockImplementation()!;
-  let count = 0;
   f.query.mockImplementation(async (sql, parameters) => {
-    count++;
-    if (count === 3) return { rows: [run], rowCount: 1 };
+    if (sql.includes("FROM public.decision_runs")) return { rows: [run], rowCount: 1 };
     return previous(sql, parameters);
   });
   return f;
@@ -605,4 +600,283 @@ it("binds only permitted pending columns and uses the private UUID default", asy
     0,
     instant,
   ]);
+});
+function auditRow(parameters: unknown[]): Row {
+  const names = [
+    "auditId",
+    "organizationId",
+    "workspaceId",
+    "storeId",
+    "actorId",
+    "actorKind",
+    "requestId",
+    "occurrenceId",
+    "sequence",
+    "prevHash",
+    "entryHash",
+    "hashVersion",
+    "redactionVersion",
+    "payload",
+  ];
+  const row = Object.fromEntries(names.map((key, index) => [key, parameters[index]]));
+  return { ...row, sequence: String(row.sequence), payload: JSON.parse(String(row.payload)) };
+}
+function auditFixture() {
+  const f = storageFixture(null);
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("audit_chain_head"))
+      return { rows: [{ sequence: "0", entryHash: null }], rowCount: 1 };
+    if (sql.includes("FROM public.audit_logs")) return { rows: [], rowCount: 0 };
+    if (sql.includes("INSERT INTO public.audit_logs"))
+      return { rows: [auditRow(parameters!)], rowCount: 1 };
+    return previous(sql, parameters);
+  });
+  return f;
+}
+it("appends one real audit on the owner client before returning a new intent", async () => {
+  const f = auditFixture();
+  const result = await f.repository.enqueue(f.transaction, f.request, clock);
+  expect(result).toMatchObject({
+    ok: true,
+    value: { outcome: "ENQUEUED", receipt: { status: "PENDING", intent: f.request.intent } },
+  });
+  const inserts = f.query.mock.calls.filter(([sql]) =>
+    sql.includes("INSERT INTO public.audit_logs"),
+  );
+  expect(inserts).toHaveLength(1);
+  expect(JSON.parse(String(inserts[0]![1]![13]))).toEqual({
+    scopeKind: "TENANT",
+    scope: f.transaction.scope,
+    actor: f.transaction.actor,
+    resource: { type: "NOTIFICATION", id: rowId },
+    result: "SUCCESS",
+    occurredAt: instant,
+    sourceOccurredAt: null,
+    links: {
+      requestId: "audit-request-a",
+      occurrenceId: rowId,
+      runId: null,
+      evidenceId: null,
+      actionId: null,
+      revisionId: null,
+      approvalId: null,
+      executionId: null,
+    },
+    event: {
+      eventType: "NOTIFICATION_INTENT",
+      redactedMetadata: { channel: "IN_APP", deliveryStatus: "PENDING" },
+    },
+  });
+});
+it("rejects an audit failure after insertion so the owner rolls back its complete unit", async () => {
+  const f = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("audit_chain_head")) throw new Error("private connection detail");
+    return previous(sql, parameters);
+  });
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+    code: "UNAVAILABLE",
+    message: "Notification enqueue failed",
+  });
+  expect(
+    f.query.mock.calls.some(([sql]) => sql.includes("INSERT INTO public.notification_outbox")),
+  ).toBe(true);
+});
+function deliveredRow(readAt: string | null = null): Row {
+  const row = {
+    ...pendingRow(),
+    status: "DELIVERED",
+    attempt: "1",
+    nextAttemptAtMs: null,
+    deliveredAtMs: String(Date.parse(instant)),
+  };
+  const inbox = Object.fromEntries(
+    Object.entries(row)
+      .filter(
+        ([key]) =>
+          (insertNames.includes(key) && !["connectionGeneration", "nextAttemptAt"].includes(key)) ||
+          ["createdAtMs", "notBeforeMs", "deliveredAtMs"].includes(key),
+      )
+      .map(([key, value]) => [`inbox${key[0]!.toUpperCase()}${key.slice(1)}`, value]),
+  );
+  return { ...row, ...inbox, inboxOutboxId: rowId, inboxReadAtMs: readAt };
+}
+it.each(["PENDING", "LEASED", "FAILED", "UNKNOWN"] as const)(
+  "replays a valid %s receipt",
+  async (status) => {
+    const row = {
+      ...pendingRow(),
+      status,
+      attempt: status === "PENDING" ? "0" : "1",
+      nextAttemptAtMs: status === "PENDING" ? String(Date.parse(instant)) : null,
+      leaseToken: status === "LEASED" ? "lease-token" : null,
+      leaseUntilMs: status === "LEASED" ? String(Date.parse(later)) : null,
+    };
+    const f = storageFixture(row);
+    expect(await f.repository.enqueue(f.transaction, f.request, clock)).toMatchObject({
+      ok: true,
+      value: { receipt: { status, readState: status === "UNKNOWN" ? "UNKNOWN" : "UNREAD" } },
+    });
+    expect(f.query.mock.calls.some(([sql]) => sql.includes("audit_"))).toBe(false);
+  },
+);
+it.each([null, String(Date.parse(later))])(
+  "reads delivery and confirmed read from one snapshot (%s)",
+  async (readAt) => {
+    const f = storageFixture(deliveredRow(readAt));
+    expect(await f.repository.enqueue(f.transaction, f.request, clock)).toMatchObject({
+      ok: true,
+      value: {
+        receipt: {
+          status: "DELIVERED",
+          readAt: readAt === null ? null : later,
+          readState: readAt === null ? "UNREAD" : "READ",
+        },
+      },
+    });
+    expect(f.query.mock.calls.filter(([sql]) => sql.includes("recipient_inbox"))).toHaveLength(1);
+  },
+);
+it.each([
+  { inboxOutboxId: null },
+  { inboxIntentId: "other" },
+  { inboxSeverity: "CRITICAL" },
+  { inboxDeliveredAtMs: String(Date.parse(later)) },
+  { inboxReadAtMs: String(Date.parse(instant) - 1) },
+])("rejects a contradictory inbox projection %j", async (change) => {
+  const f = storageFixture({ ...deliveredRow(), ...change });
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+  });
+});
+it("rejects a missing snapshot marker instead of treating it as an absent inbox", async () => {
+  const f = storageFixture({ ...pendingRow(), inboxOutboxId: undefined });
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+  });
+});
+it("does not recover inside a transaction aborted by an intent-key conflict", async () => {
+  const f = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("INSERT INTO public.notification_outbox"))
+      throw { code: "23505", detail: "private foreign identity" };
+    return previous(sql, parameters);
+  });
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+    code: "CONFLICT",
+  });
+  expect(f.query).toHaveBeenCalledTimes(5);
+});
+it("rejects a different inserted payload before appending audit", async () => {
+  const f = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("INSERT INTO public.notification_outbox"))
+      return { rows: [{ ...pendingRow(parameters), severity: "CRITICAL" }], rowCount: 1 };
+    return previous(sql, parameters);
+  });
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+  });
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("audit_"))).toBe(false);
+});
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+it("deduplicates overlapping same-client inserts with one first-insert audit", async () => {
+  const f = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  const gate = deferred();
+  let reads = 0;
+  let stored: Row | undefined;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("FROM public.notification_outbox")) {
+      if (++reads <= 2) {
+        if (reads === 2) gate.resolve();
+        await gate.promise;
+        return { rows: [], rowCount: 0 };
+      }
+      return { rows: stored ? [stored] : [], rowCount: stored ? 1 : 0 };
+    }
+    if (sql.includes("INSERT INTO public.notification_outbox")) {
+      if (stored) return { rows: [], rowCount: 0 };
+      stored = pendingRow(parameters);
+      return { rows: [stored], rowCount: 1 };
+    }
+    return previous(sql, parameters);
+  });
+  const other = new NotificationEnqueueRepository({ decisionKey: () => "decision-v1" });
+  const results = await Promise.all([
+    f.repository.enqueue(f.transaction, f.request, clock),
+    other.enqueue(f.transaction, f.request, clock),
+  ]);
+  expect(results.map((result) => result.ok && result.value.outcome).sort()).toEqual([
+    "DEDUPLICATED",
+    "ENQUEUED",
+  ]);
+  expect(
+    f.query.mock.calls.filter(([sql]) => sql.includes("INSERT INTO public.audit_logs")),
+  ).toHaveLength(1);
+  expect(stored?.intentId).toBe(f.request.intent.id);
+});
+it("allows an independent client to finish while another client's audit waits", async () => {
+  const f = auditFixture();
+  const independent = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  const reached = deferred();
+  const release = deferred();
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("audit_chain_head")) {
+      reached.resolve();
+      await release.promise;
+    }
+    return previous(sql, parameters);
+  });
+  const pending = f.repository.enqueue(f.transaction, f.request, clock);
+  await reached.promise;
+  try {
+    expect(
+      await independent.repository.enqueue(independent.transaction, independent.request, clock),
+    ).toMatchObject({ ok: true });
+  } finally {
+    release.resolve();
+  }
+  expect(await pending).toMatchObject({ ok: true });
+});
+it("stops audit queries when control expires during the audit head await", async () => {
+  const f = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  let now = instant;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("audit_chain_head")) now = later;
+    return previous(sql, parameters);
+  });
+  await expect(
+    f.repository.enqueue(f.transaction, f.request, { ...clock, now: () => now }),
+  ).rejects.toMatchObject({ name: "NotificationEnqueueError" });
+  expect(f.query.mock.calls.some(([sql]) => sql.includes("INSERT INTO public.audit_logs"))).toBe(
+    false,
+  );
+});
+it("rechecks owner lifetime after the audit insert await", async () => {
+  const f = auditFixture();
+  const previous = f.query.getMockImplementation()!;
+  let active = true;
+  f.query.mockImplementation(async (sql, parameters) => {
+    const result = await previous(sql, parameters);
+    if (sql.includes("INSERT INTO public.audit_logs")) active = false;
+    return result;
+  });
+  await expect(
+    f.repository.enqueue({ ...f.transaction, isActive: () => active }, f.request, clock),
+  ).rejects.toMatchObject({ name: "NotificationEnqueueError" });
 });
