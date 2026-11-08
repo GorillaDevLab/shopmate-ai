@@ -82,12 +82,14 @@ function plainJson(value: unknown, ancestors = new Set<object>()): void {
   if (value === null || typeof value === "boolean") return;
   if (typeof value === "number" && Number.isFinite(value)) return;
   if (typeof value !== "object" || value === null || ancestors.has(value)) fail("INVALID_INPUT");
-  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype)
+  if (Object.getPrototypeOf(value) !== (Array.isArray(value) ? Array.prototype : Object.prototype))
     fail("INVALID_INPUT");
   ancestors.add(value);
   for (const key of Reflect.ownKeys(value)) {
     if (Array.isArray(value) && key === "length") continue;
     if (typeof key !== "string") fail("INVALID_INPUT");
+    if (Array.isArray(value) && (!/^(?:0|[1-9][0-9]*)$/u.test(key) || Number(key) >= value.length))
+      fail("INVALID_INPUT");
     validUnicode(key);
     const property = Object.getOwnPropertyDescriptor(value, key);
     if (!property?.enumerable || !("value" in property)) fail("INVALID_INPUT");

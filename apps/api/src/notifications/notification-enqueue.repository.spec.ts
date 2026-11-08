@@ -918,3 +918,28 @@ it("rejects a lone-surrogate persisted lease token", async () => {
     name: "NotificationEnqueueError",
   });
 });
+class ExoticVersions extends Array<number> {}
+it("rejects exotic arrays before accepting a JSON request", async () => {
+  const f = fixture();
+  const request = {
+    ...f.request,
+    decision: {
+      ...f.request.decision,
+      run: {
+        ...f.request.decision.run,
+        provider: {
+          ...f.request.decision.run.provider,
+          supportedInputVersions: ExoticVersions.of(1),
+        },
+      },
+    },
+  };
+  expect(
+    await f.repository.enqueue(
+      f.transaction,
+      request as unknown as NotificationEnqueueRequest,
+      clock,
+    ),
+  ).toEqual({ ok: false, code: "INVALID_INPUT" });
+  expect(f.query).not.toHaveBeenCalled();
+});
