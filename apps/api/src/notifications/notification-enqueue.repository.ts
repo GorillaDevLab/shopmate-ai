@@ -12,11 +12,18 @@ import {
   createEventFingerprint,
   ExternalIdSchema,
   NotificationEnqueueRequestSchema,
+  NotificationIntentSchema,
+  NotificationIntentIdentitySchema,
+  createNotificationIntentKey,
+  DeliveryReceiptSchema,
   TenantIdSchema,
   type ConnectorBinding,
   type EvaluationContext,
   type EventEvidenceReference,
   type NotificationEnqueueRequest,
+  type NotificationIntent,
+  type NotificationEnqueueOutcome,
+  type EventEntity,
   type NotificationPortError,
   type SecurityClock,
   type TransactionalEnqueuePort,
@@ -446,6 +453,248 @@ async function currentWinner(operation: Operation): Promise<boolean> {
   }
 }
 
+const immutableColumns = [
+  "intentId",
+  ...bindingKeys,
+  "recipientUserId",
+  "eventId",
+  "eventState",
+  "eventRevision",
+  "channel",
+  "decisionRunId",
+  "route",
+  "eventType",
+  "severity",
+  "createdAt",
+  "notBefore",
+  "evidenceId",
+  "evidenceVersion",
+  "evidenceHash",
+  "entityKind",
+  "entityId",
+  "definitionVersion",
+  "baselineVersion",
+];
+const insertColumns = [...immutableColumns, "connectionGeneration", "nextAttemptAt"];
+const receiptColumns = [
+  "rowId",
+  "connectionGeneration",
+  "status",
+  "attempt",
+  "leaseToken",
+  "nextAttemptAt",
+  "leaseUntil",
+  "deliveredAt",
+];
+const timeColumns = new Set([
+  "createdAt",
+  "notBefore",
+  "nextAttemptAt",
+  "leaseUntil",
+  "deliveredAt",
+  "readAt",
+]);
+function projection(table: string, columns: readonly string[], prefix = ""): string {
+  return columns
+    .map((key) => {
+      const alias = prefix ? `${prefix}${key[0]!.toUpperCase()}${key.slice(1)}` : key;
+      return timeColumns.has(key)
+        ? millisecondsSql(`${table}."${key}"`, `${alias}Ms`)
+        : `${table}."${key}" AS "${alias}"`;
+    })
+    .join(",");
+}
+const returning = projection("o", [...immutableColumns, ...receiptColumns]);
+const naturalColumns = [
+  ...bindingKeys,
+  "eventId",
+  "eventState",
+  "eventRevision",
+  "recipientUserId",
+  "channel",
+];
+const lookupSql = `SELECT ${returning},i."outboxId" AS "inboxOutboxId",
+  ${projection("i", [...immutableColumns, "deliveredAt", "readAt"], "inbox")}
+  FROM public.notification_outbox o LEFT JOIN public.recipient_inbox i ON i."outboxId"=o."rowId"
+  AND ${[...bindingKeys, "recipientUserId"].map((key) => `i."${key}"=o."${key}"`).join(" AND ")}
+  WHERE ${naturalColumns.map((key, index) => `o."${key}"=$${index + 1}`).join(" AND ")}
+  AND o."connectionGeneration"=$11
+  AND public.notification_scope_access($1,$2,$3,$4,$5,$9,$11,'ENQUEUE')`;
+const insertSql = `INSERT INTO public.notification_outbox AS o (${insertColumns.map((key) => `"${key}"`).join(",")})
+  VALUES (${insertColumns.map((_, index) => `$${index + 1}`).join(",")})
+  ON CONFLICT ON CONSTRAINT notification_outbox_natural_key DO NOTHING RETURNING ${returning}`;
+function entityId(entity: EventEntity): string | null {
+  switch (entity.kind) {
+    case "STORE":
+      return null;
+    case "SKU":
+      return entity.externalSkuId;
+    case "CAMPAIGN":
+      return entity.externalCampaignId;
+    case "CONNECTION":
+      return entity.connectionId;
+  }
+}
+function postgresTime(value: string): string {
+  const canonical = preciseTime(value);
+  return canonical.startsWith("0000-")
+    ? canonical.replace(/^0000/u, "0001").replace("T", " ").replace("Z", "+00 BC")
+    : canonical;
+}
+function toPendingColumns(intent: NotificationIntent, generation: number): unknown[] {
+  const ref = intent.evidence;
+  return [
+    intent.id,
+    ...values(intent.recipient.binding),
+    intent.recipient.userId,
+    intent.eventId,
+    intent.eventState,
+    intent.eventRevision,
+    intent.channel,
+    intent.decisionRunId,
+    intent.route,
+    intent.summary.eventType,
+    intent.summary.severity,
+    postgresTime(intent.createdAt),
+    postgresTime(intent.notBefore),
+    ref.id,
+    ref.version,
+    ref.hash,
+    ref.entity.kind,
+    entityId(ref.entity),
+    ref.definitionVersion,
+    ref.baselineVersion,
+    generation,
+    postgresTime(intent.notBefore),
+  ];
+}
+function validateStoredLiterals(row: Row): void {
+  for (const key of immutableColumns) {
+    const value = row[key];
+    if (typeof value === "string" && !timeColumns.has(key) && key !== "eventRevision")
+      literal(value);
+  }
+}
+function toIntent(row: Row): NotificationIntent {
+  const binding = storedBinding(row);
+  validateStoredLiterals(row);
+  const identity = {
+    recipient: { binding, userId: row.recipientUserId },
+    eventId: row.eventId,
+    eventState: row.eventState,
+    eventRevision: integer(row.eventRevision, 1),
+    channel: row.channel,
+  };
+  const intent = {
+    schemaVersion: 1,
+    id: row.intentId,
+    ...identity,
+    evidence: {
+      schemaVersion: 1,
+      id: row.evidenceId,
+      version: row.evidenceVersion,
+      hash: row.evidenceHash,
+      binding,
+      eventType: row.eventType,
+      entity: storedEntity(row.entityKind, row.entityId),
+      definitionVersion: row.definitionVersion,
+      baselineVersion: row.baselineVersion,
+    },
+    decisionRunId: row.decisionRunId,
+    route: row.route,
+    createdAt: storedTime(row.createdAtMs),
+    notBefore: storedTime(row.notBeforeMs),
+    summary: { eventType: row.eventType, severity: row.severity },
+  };
+  const parsedIdentity = NotificationIntentIdentitySchema.parse(identity);
+  return NotificationIntentSchema.parse({
+    ...intent,
+    dedupKey: createNotificationIntentKey(parsedIdentity),
+  });
+}
+function nullableTime(value: unknown): string | null {
+  return value === null ? null : storedTime(value);
+}
+function inboxRow(row: Row): Row {
+  return Object.fromEntries(
+    Object.entries(row)
+      .filter(([key]) => key.startsWith("inbox") && key !== "inboxOutboxId")
+      .map(([key, value]) => [key[5]!.toLowerCase() + key.slice(6), value]),
+  );
+}
+function projectionReadAt(row: Row, intent: NotificationIntent): string | null {
+  const inboxPresent = row.inboxOutboxId !== null && row.inboxOutboxId !== undefined;
+  const deliveredAt = nullableTime(row.deliveredAtMs);
+  if (row.status === "DELIVERED") {
+    if (
+      !inboxPresent ||
+      row.inboxOutboxId !== row.rowId ||
+      !isDeepStrictEqual(toIntent(inboxRow(row)), intent) ||
+      nullableTime(row.inboxDeliveredAtMs) !== deliveredAt
+    )
+      fail("UNAVAILABLE");
+  } else if (inboxPresent) fail("UNAVAILABLE");
+  return row.status === "DELIVERED" ? nullableTime(row.inboxReadAtMs) : null;
+}
+function toReceipt(row: Row, operation: Operation, inserted = false) {
+  DecisionCorrelationIdSchema.parse(row.rowId);
+  if (
+    integer(row.connectionGeneration, 0, 2147483647) !== operation.transaction.connectionGeneration
+  )
+    fail("CONFLICT");
+  const intent = toIntent(row);
+  if (intent.dedupKey !== operation.request.intent.dedupKey) fail("CONFLICT");
+  const readAt = projectionReadAt(row, intent);
+  const receipt = DeliveryReceiptSchema.parse({
+    schemaVersion: 1,
+    intent,
+    status: row.status,
+    attempt: integer(row.attempt),
+    nextAttemptAt: nullableTime(row.nextAttemptAtMs),
+    leaseToken: row.leaseToken,
+    leaseUntil: nullableTime(row.leaseUntilMs),
+    deliveredAt: nullableTime(row.deliveredAtMs),
+    readAt,
+    readState: row.status === "UNKNOWN" ? "UNKNOWN" : readAt === null ? "UNREAD" : "READ",
+  });
+  if (
+    inserted &&
+    (receipt.status !== "PENDING" ||
+      receipt.attempt !== 0 ||
+      receipt.nextAttemptAt !== receipt.intent.notBefore)
+  )
+    fail("UNAVAILABLE");
+  return receipt;
+}
+async function lookup(operation: Operation) {
+  const intent = operation.request.intent;
+  return query(operation, lookupSql, [
+    ...values(operation.transaction.binding),
+    intent.eventId,
+    intent.eventState,
+    intent.eventRevision,
+    intent.recipient.userId,
+    intent.channel,
+    operation.transaction.connectionGeneration,
+  ]);
+}
+async function store(operation: Operation): Promise<NotificationEnqueueOutcome> {
+  const existing = await lookup(operation);
+  if (existing) return { outcome: "DEDUPLICATED", receipt: toReceipt(existing, operation) };
+  const row = await query(
+    operation,
+    insertSql,
+    toPendingColumns(operation.request.intent, operation.transaction.connectionGeneration),
+  );
+  if (!row) {
+    const winner = await lookup(operation);
+    if (!winner) fail("CONFLICT");
+    return { outcome: "DEDUPLICATED", receipt: toReceipt(winner, operation) };
+  }
+  toReceipt(row, operation, true);
+  return fail("UNAVAILABLE");
+}
+
 /** Never owns transaction boundaries. The owner must roll back typed denials and rejections. */
 export class NotificationEnqueueRepository
   implements TransactionalEnqueuePort<BoundNotificationTransaction>
@@ -463,7 +712,7 @@ export class NotificationEnqueueRepository
       if (!(await authorize(operation))) return { ok: false, code: "FORBIDDEN" };
       if (!(await currentEvent(operation)) || !(await currentWinner(operation)))
         return { ok: false, code: "CONFLICT" };
-      return { ok: false, code: "CONFLICT" };
+      return { ok: true, value: await store(operation) };
     } catch (error) {
       const code = error instanceof NotificationEnqueueError ? error.code : "INVALID_INPUT";
       if (operation?.sqlStarted)

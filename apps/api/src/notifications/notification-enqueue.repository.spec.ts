@@ -463,3 +463,146 @@ it.each([
   });
   expect(f.query).toHaveBeenCalledTimes(3);
 });
+const rowId = "57a1befc-02cb-4acc-8a1a-6975b2016242";
+const insertNames = [
+  "intentId",
+  ...Object.keys(binding),
+  "recipientUserId",
+  "eventId",
+  "eventState",
+  "eventRevision",
+  "channel",
+  "decisionRunId",
+  "route",
+  "eventType",
+  "severity",
+  "createdAt",
+  "notBefore",
+  "evidenceId",
+  "evidenceVersion",
+  "evidenceHash",
+  "entityKind",
+  "entityId",
+  "definitionVersion",
+  "baselineVersion",
+  "connectionGeneration",
+  "nextAttemptAt",
+];
+function immutableRow(): Row {
+  const intent = requestFixture().intent;
+  return {
+    intentId: intent.id,
+    ...binding,
+    recipientUserId: intent.recipient.userId,
+    eventId: intent.eventId,
+    eventState: intent.eventState,
+    eventRevision: "1",
+    channel: intent.channel,
+    decisionRunId: intent.decisionRunId,
+    route: intent.route,
+    eventType: intent.summary.eventType,
+    severity: intent.summary.severity,
+    evidenceId: reference.id,
+    evidenceVersion: reference.version,
+    evidenceHash: reference.hash,
+    entityKind: "CONNECTION",
+    entityId: binding.connectionId,
+    definitionVersion: reference.definitionVersion,
+    baselineVersion: null,
+    connectionGeneration: 0,
+  };
+}
+function pendingRow(parameters?: unknown[]): Row {
+  const row = parameters
+    ? Object.fromEntries(insertNames.map((key, index) => [key, parameters[index]]))
+    : immutableRow();
+  return {
+    ...row,
+    rowId,
+    status: "PENDING",
+    attempt: "0",
+    leaseToken: null,
+    createdAtMs: String(Date.parse(instant)),
+    notBeforeMs: String(Date.parse(instant)),
+    nextAttemptAtMs: String(Date.parse(instant)),
+    leaseUntilMs: null,
+    deliveredAtMs: null,
+    inboxOutboxId: null,
+    inboxReadAtMs: null,
+  };
+}
+function storageFixture(existing: Row | null = pendingRow()) {
+  const f = winnerFixture();
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("FROM public.notification_outbox"))
+      return { rows: existing ? [existing] : [], rowCount: existing ? 1 : 0 };
+    if (sql.includes("INSERT INTO public.notification_outbox"))
+      return { rows: [pendingRow(parameters)], rowCount: 1 };
+    return previous(sql, parameters);
+  });
+  return f;
+}
+it("reuses the first natural intent after a committed winner's lease expires", async () => {
+  const row = { ...pendingRow(), intentId: "original/intent", severity: "MEDIUM" };
+  const f = storageFixture(row);
+  const result = await f.repository.enqueue(f.transaction, f.request, clock);
+  expect(result).toMatchObject({
+    ok: true,
+    value: {
+      outcome: "DEDUPLICATED",
+      receipt: {
+        status: "PENDING",
+        intent: { id: "original/intent", summary: { severity: "MEDIUM" } },
+      },
+    },
+  });
+  expect(f.query).toHaveBeenCalledTimes(4);
+  expect(f.query.mock.calls[3]![0]).toContain("LEFT JOIN public.recipient_inbox");
+});
+it.each([null, true, "", "01", "9007199254740992", "1.5", -1])(
+  "rejects corrupt attempt %s",
+  async (attempt) => {
+    const f = storageFixture({ ...pendingRow(), attempt });
+    await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+      name: "NotificationEnqueueError",
+    });
+  },
+);
+it("binds only permitted pending columns and uses the private UUID default", async () => {
+  const f = storageFixture(null);
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+  });
+  const call = f.query.mock.calls.find(([sql]) =>
+    sql.includes("INSERT INTO public.notification_outbox"),
+  );
+  expect(call?.[0].split("VALUES")[0]).not.toContain('"rowId"');
+  expect(call?.[0]).toContain(
+    "ON CONFLICT ON CONSTRAINT notification_outbox_natural_key DO NOTHING",
+  );
+  expect(call?.[1]).toEqual([
+    f.request.intent.id,
+    ...Object.values(binding),
+    "recipient-a",
+    "event/a .1",
+    "OPEN",
+    1,
+    "IN_APP",
+    "run/a .1",
+    "DAILY_BRIEF",
+    "SYNC_FAILURE",
+    "LOW",
+    instant,
+    instant,
+    reference.id,
+    "v1",
+    "hash-a",
+    "CONNECTION",
+    binding.connectionId,
+    "metrics-v1",
+    null,
+    0,
+    instant,
+  ]);
+});
