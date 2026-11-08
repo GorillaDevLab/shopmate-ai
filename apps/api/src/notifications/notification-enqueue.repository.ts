@@ -646,6 +646,7 @@ function projectionReadAt(row: Row, intent: NotificationIntent): string | null {
 }
 function toReceipt(row: Row, operation: Operation, inserted = false) {
   DecisionCorrelationIdSchema.parse(row.rowId);
+  if (typeof row.leaseToken === "string") literal(row.leaseToken);
   if (
     integer(row.connectionGeneration, 0, 2147483647) !== operation.transaction.connectionGeneration
   )

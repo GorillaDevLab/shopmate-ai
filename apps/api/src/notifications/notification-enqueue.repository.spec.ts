@@ -905,3 +905,16 @@ it("accepts PostgreSQL's canonical UUID column with uppercase logical correlatio
   });
   expect(await f.repository.enqueue(f.transaction, request, clock)).toMatchObject({ ok: true });
 });
+it("rejects a lone-surrogate persisted lease token", async () => {
+  const f = storageFixture({
+    ...pendingRow(),
+    status: "LEASED",
+    attempt: "1",
+    nextAttemptAtMs: null,
+    leaseToken: "lease\ud800",
+    leaseUntilMs: String(Date.parse(later)),
+  });
+  await expect(f.repository.enqueue(f.transaction, f.request, clock)).rejects.toMatchObject({
+    name: "NotificationEnqueueError",
+  });
+});
