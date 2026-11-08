@@ -429,7 +429,8 @@ function winnerMatches(row: Row, operation: Operation): boolean {
     row.claimWinnerStatus === "EVALUATED" &&
     integer(row.claimEventRevision, 1) === context.event.revision &&
     row.resultStatus === "EVALUATED" &&
-    row.correlationId === context.correlationId &&
+    DecisionCorrelationIdSchema.parse(row.correlationId).toLowerCase() ===
+      context.correlationId.toLowerCase() &&
     persisted.result.correlationId === context.correlationId &&
     Date.parse(storedTime(row.claimExpiresAtMs)) > Date.parse(storedTime(row.claimCreatedAtMs)) &&
     (row.fallbackOf === null

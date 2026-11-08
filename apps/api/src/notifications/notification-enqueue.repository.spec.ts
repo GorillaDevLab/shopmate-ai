@@ -880,3 +880,28 @@ it("rechecks owner lifetime after the audit insert await", async () => {
     f.repository.enqueue({ ...f.transaction, isActive: () => active }, f.request, clock),
   ).rejects.toMatchObject({ name: "NotificationEnqueueError" });
 });
+it("accepts PostgreSQL's canonical UUID column with uppercase logical correlation metadata", async () => {
+  const f = storageFixture();
+  const correlationId = f.request.decision.context.correlationId.toUpperCase();
+  const request = NotificationEnqueueRequestSchema.parse({
+    ...f.request,
+    decision: {
+      ...f.request.decision,
+      context: { ...f.request.decision.context, correlationId },
+      run: {
+        ...f.request.decision.run,
+        result: { ...f.request.decision.run.result, correlationId },
+      },
+    },
+  });
+  const previous = f.query.getMockImplementation()!;
+  f.query.mockImplementation(async (sql, parameters) => {
+    if (sql.includes("FROM public.decision_runs"))
+      return {
+        rows: [{ ...physicalRun(request), correlationId: correlationId.toLowerCase() }],
+        rowCount: 1,
+      };
+    return previous(sql, parameters);
+  });
+  expect(await f.repository.enqueue(f.transaction, request, clock)).toMatchObject({ ok: true });
+});
