@@ -5,6 +5,22 @@ const FIELDS = `query($org:String!,$number:Int!,$after:String){organization(logi
 const ITEMS = `query($org:String!,$number:Int!,$after:String){organization(login:$org){projectV2(number:$number){id items(first:100,after:$after){nodes{id content{... on Issue{number repository{nameWithOwner}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name optionId}}} ${PAGE}}}}}`;
 const ITEM = `query($id:ID!){node(id:$id){... on ProjectV2Item{id project{id} content{... on Issue{number repository{nameWithOwner}}} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name optionId}}}}}`;
 const UPDATE = `mutation($projectId:ID!,$itemId:ID!,$fieldId:ID!,$optionId:String!){updateProjectV2ItemFieldValue(input:{projectId:$projectId,itemId:$itemId,fieldId:$fieldId,value:{singleSelectOptionId:$optionId}}){projectV2Item{id}}}`;
+const STAGED = `query($id:ID!,$after:String){node(id:$id){... on Issue{id number title state repository{nameWithOwner} assignees(first:2){totalCount nodes{login}} labels(first:100){totalCount nodes{name}} projectItems(first:100,after:$after,includeArchived:true){nodes{id isArchived project{id} fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name optionId}}} ${PAGE}}}}}`;
+const ADD = `mutation($projectId:ID!,$contentId:ID!){addProjectV2ItemById(input:{projectId:$projectId,contentId:$contentId}){item{id}}}`;
+
+async function staged(ctx, id) {
+  let identity;
+  const items = await graphPages(async (after) => {
+    const { node } = await client(ctx).graphql(STAGED, { id, after });
+    if (!node?.projectItems) throw new Error("staged issue unavailable");
+    const { projectItems, ...current } = node;
+    if (identity && JSON.stringify(identity) !== JSON.stringify(current))
+      throw new Error("staged issue changed");
+    identity = current;
+    return projectItems;
+  });
+  return { ...identity, items };
+}
 
 function projectItem(row, fullName) {
   if (row.content?.repository?.nameWithOwner !== fullName) return null;
@@ -65,6 +81,11 @@ export function createProjectApi(http, org, number, fullName) {
   return {
     readProject: () => readProject(ctx),
     readProjectItem: (id) => readProjectItem(ctx, id),
+    readStagedIssue: (id) => staged(ctx, id),
+    addItem: async (projectId, contentId) => {
+      const data = await client(ctx).graphql(ADD, { projectId, contentId });
+      return data.addProjectV2ItemById?.item?.id;
+    },
     updateStatus: (projectId, itemId, fieldId, optionId) =>
       client(ctx).graphql(UPDATE, { projectId, itemId, fieldId, optionId }),
   };
