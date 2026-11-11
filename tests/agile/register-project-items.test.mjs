@@ -1,12 +1,12 @@
 /* global structuredClone */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import test from "node:test";
-import { URL } from "node:url";
+import { URL, pathToFileURL } from "node:url";
 import { register, restore, validate } from "../../scripts/agile/register-project-items.mjs";
 import { createProjectApi } from "../../scripts/agile/github-project.mjs";
 
@@ -170,6 +170,9 @@ test("restore rejects a changed manifest, different run or unlisted receipt", ()
     { run: "11" },
     { attempt: 0 },
     { receipts: { "P04-001": "PVTI_new" } },
+    { apply: false },
+    { pendingId: "P04-001" },
+    { receipts: { [row.id]: "invalid item" } },
   ]) {
     assert.throws(() => restore({ ...prev, ...changed }, manifest, structuredClone(next)));
   }
@@ -365,7 +368,7 @@ test("CLI rejects non-main or nonmanual authority before writing a report", asyn
     { REGISTRATION_APPLY: "yes" },
   ]) {
     const result = spawnSync(process.execPath, [script], {
-      env: cliEnv(directory, override),
+      env: cliEnv(directory, { REGISTRATION_APPLY: "false", ...override }),
       encoding: "utf8",
     });
     assert.equal(result.status, 1);
@@ -390,4 +393,94 @@ test("CLI fails closed with bounded evidence when the fixed reviewed manifest is
     JSON.stringify(report) + result.stdout + result.stderr,
     /test-must-never-be-logged/,
   );
+});
+
+async function projectCli(t, options = [{ id: "back", name: "Backlog" }]) {
+  const fixture = await isolatedCli(t);
+  const hook = join(fixture.directory, "mock-project.mjs");
+  const calls = join(fixture.directory, "calls.jsonl");
+  await writeFile(
+    hook,
+    `import { appendFileSync } from "node:fs";
+globalThis.fetch = async (_url, init) => {
+  const call = JSON.parse(init.body);
+  appendFileSync(${JSON.stringify(calls)}, JSON.stringify(call) + "\\n");
+  if (!call.query.startsWith("query")) throw Error("mutation refused");
+  const field = { id: "field", name: "Status", options: ${JSON.stringify(options)} };
+  const connection = nodes => ({ nodes, totalCount: nodes.length,
+    pageInfo: { hasNextPage: false, endCursor: null } });
+  const projectV2 = { id: "PVT_destination", fields: connection([field]), items: connection([]) };
+  return new Response(JSON.stringify({ data: { organization: { projectV2 } } }));
+};`,
+  );
+  return { ...fixture, hook, calls };
+}
+
+async function runProjectCli(f, overrides = {}) {
+  const result = spawnSync(process.execPath, ["--import", pathToFileURL(f.hook).href, f.script], {
+    env: cliEnv(f.directory, { REGISTRATION_APPLY: "false", ...overrides }),
+    encoding: "utf8",
+  });
+  const report = JSON.parse(await readFile(join(f.directory, "agile-state-plan.json"), "utf8"));
+  return { result, report };
+}
+
+test("missing-manifest trusted preview records only the fixed App destination without mutations", async (t) => {
+  const f = await projectCli(t);
+  const { result, report } = await runProjectCli(f);
+  assert.equal(result.status, 0);
+  assert.equal(report.status, "setup-required");
+  assert.equal(report.step, "manifest-required");
+  assert.deepEqual(report.destination, {
+    repository: manifest.repository,
+    projectNumber: 1,
+    projectId: "PVT_destination",
+    fieldId: "field",
+    backlogOptionId: "back",
+  });
+  assert.equal(report.partialWrite, false);
+  assert.deepEqual(report.receipts, {});
+  assert.deepEqual(report.appliedIds, []);
+  const calls = (await readFile(f.calls, "utf8")).trim().split("\n").map(JSON.parse);
+  assert.ok(calls.length > 0);
+  assert.ok(
+    calls.every(
+      (c) =>
+        c.query.startsWith("query") &&
+        c.variables.org === "GorillaDevLab" &&
+        c.variables.number === 1,
+    ),
+  );
+});
+
+test("missing-manifest apply never reads the App destination", async (t) => {
+  const f = await projectCli(t);
+  const { result, report } = await runProjectCli(f, { REGISTRATION_APPLY: "true" });
+  assert.equal(result.status, 1);
+  assert.equal(report.status, "failed");
+  assert.equal(report.destination, undefined);
+  await assert.rejects(readFile(f.calls), { code: "ENOENT" });
+});
+
+test("a malformed reviewed manifest never falls back to destination preview", async (t) => {
+  const f = await projectCli(t);
+  const docs = join(f.directory, "docs", "engineering");
+  await mkdir(docs, { recursive: true });
+  await writeFile(join(docs, "observed-prerequisite-registration.json"), "{}");
+  const { result, report } = await runProjectCli(f);
+  assert.equal(result.status, 1);
+  assert.equal(report.status, "failed");
+  assert.equal(report.destination, undefined);
+  await assert.rejects(readFile(f.calls), { code: "ENOENT" });
+});
+
+test("destination preview fails closed when the App Project lacks verified Backlog setup", async (t) => {
+  const f = await projectCli(t, [{ id: "ready", name: "Ready" }]);
+  const { result, report } = await runProjectCli(f);
+  assert.equal(result.status, 1);
+  assert.equal(report.status, "failed");
+  assert.equal(report.destination, undefined);
+  assert.equal(report.partialWrite, false);
+  assert.deepEqual(report.receipts, {});
+  assert.ok((await readFile(f.calls, "utf8")).length > 0);
 });

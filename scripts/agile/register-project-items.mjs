@@ -135,13 +135,10 @@ async function one(x, r) {
 
 export async function register(x) {
   validate(x.m);
-  const p = await x.api.readProject();
-  check(
-    p.projectId === x.m.projectId && nodeId(p.fieldId) && nodeId(p.optionsByName?.Backlog),
-    "project identity",
-  );
+  const p = destination(await x.api.readProject());
+  check(p.projectId === x.m.projectId, "project identity");
   x.field = p.fieldId;
-  x.backlog = p.optionsByName.Backlog;
+  x.backlog = p.backlogOptionId;
   for (const r of x.m.entries) {
     await step(x, r, "preflight", false);
     x.report.planned[r.id] = state(x, r, await itemFor(x, r));
@@ -208,6 +205,41 @@ async function resume(e, m, report) {
   restore(JSON.parse(await readFile(path, "utf8")), m, report);
 }
 
+function destination(p) {
+  check(
+    nodeId(p.projectId) && nodeId(p.fieldId) && nodeId(p.optionsByName?.Backlog),
+    "project identity",
+  );
+  return {
+    repository: repo,
+    projectNumber: 1,
+    projectId: p.projectId,
+    fieldId: p.fieldId,
+    backlogOptionId: p.optionsByName.Backlog,
+  };
+}
+
+async function reviewedManifest(report) {
+  let bytes;
+  try {
+    bytes = await readFile(manifestPath);
+  } catch (error) {
+    // Only the absent allowlist permits a read-only bootstrap identity report.
+    if (!report.apply && error.code === "ENOENT") return null;
+    throw error;
+  }
+  check(bytes.length <= 32768, "manifest size");
+  report.digest = createHash("sha256").update(bytes).digest("hex");
+  return validate(JSON.parse(bytes));
+}
+
+async function setupPreview(api, report, path) {
+  report.step = "project-identity";
+  report.destination = destination(await api.readProject());
+  Object.assign(report, { status: "setup-required", step: "manifest-required" });
+  await persist(path, report);
+}
+
 function newReport(e) {
   return {
     kind: "staged-registration-v1",
@@ -230,17 +262,15 @@ async function main(e) {
   const path = join(e.RUNNER_TEMP, "agile-state-plan.json");
   const report = newReport(e);
   try {
-    const bytes = await readFile(manifestPath);
-    check(bytes.length <= 32768, "manifest size");
-    report.digest = createHash("sha256").update(bytes).digest("hex");
-    const m = validate(JSON.parse(bytes));
-    await resume(e, m, report);
+    const m = await reviewedManifest(report);
     const api = createProjectApi(
       createHttp(globalThis.fetch, e.PROJECT_TOKEN),
       "GorillaDevLab",
       1,
       repo,
     );
+    if (!m) return await setupPreview(api, report, path);
+    await resume(e, m, report);
     await register({ api, m, apply: report.apply, report, save: (r) => persist(path, r) });
   } catch (error) {
     report.reason =
