@@ -1,0 +1,1062 @@
+{
+  "status": "DESIGN_DRAFT_NOT_APPROVED_NOT_REGISTERED",
+  "sourceMain": "93754e8e4ff4e7b9a83f86049de23dac290bb3ac",
+  "proposedOwner": "Harry",
+  "idCheck": {
+    "localP03Maximum": "P03-018",
+    "localP04Maximum": "P04-032",
+    "liveRemoteUniqueness": "CHECKED_AT_RECORDED_SNAPSHOT_RECHECK_IMMEDIATELY_BEFORE_ALLOCATION",
+    "liveEvidence": "prerequisite-live-id-preflight.json",
+    "scannedIssueAndPrIdentities": 545
+  },
+  "estimatePolicy": "Every card has a <=4h planning cap including focused tests and review preparation, not an observed duration or promise. Split before claiming if the reviewed seam cannot fit. No blanket 4h full-scenario claim.",
+  "approvalGate": "Controller review then local written-spec commit for the user. Written-spec approval including 008 Choice A precedes implementation commits, claims, Issues and activation. This is a recorded release condition outside the graph.",
+  "commonAcceptance": [
+    "Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.",
+    "Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.",
+    "Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.",
+    "DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.",
+    "One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.",
+    "Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections."
+  ],
+  "commonSharedLocks": [
+    "packages/contracts/src/index.ts",
+    "packages/database/src/index.ts",
+    "apps/api/vitest.tenant.config.ts",
+    "apps/api/vitest.config.ts",
+    "scripts/test-tenant-database.mjs"
+  ],
+  "cards": [
+    {
+      "id": "P03-019",
+      "title": "Freeze observed-fact, causal-model and selection contracts",
+      "capHours": 4,
+      "track": "P3/contracts",
+      "hardDependencies": [
+        "P2-GATE",
+        "P03-018"
+      ],
+      "contract": "ObservedFactV1 / ObservedReceiptV1 / ScopedMetricInputV1 / mock-business-observed-v1",
+      "ownedFiles": [
+        "packages/contracts/src/observations/observed-fact.schema.ts",
+        "packages/contracts/src/observations/observed-ports.ts",
+        "packages/contracts/src/observations/observed-fact.schema.spec.ts"
+      ],
+      "sharedLocks": [
+        "packages/contracts/src/index.ts"
+      ],
+      "acceptance": [
+        "Strict domain union, full binding/generation/subject/time/source-version/hash, bounded sizes, null versus verified zero and immutable receipt coverage rules.",
+        "Freeze causal producer ports, v3 config shape, publication commit/read protocol and authorized selection proof; no arbitrary payload or derived event-answer field."
+      ],
+      "proof": [
+        "Parse valid domain samples and reject cross-scope references, unsafe values, future observations, extra/oracle fields and incomplete known-cost provenance."
+      ],
+      "outOfScope": [
+        "Persistence, generator behavior, detector thresholds, service grants"
+      ]
+    },
+    {
+      "id": "P03-020",
+      "title": "Store immutable observed facts and capability boundaries",
+      "capHours": 4,
+      "track": "P3/database",
+      "hardDependencies": [
+        "P03-019"
+      ],
+      "contract": "observed-facts-v1 append-only tables and RLS",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_observed_fact_storage/migration.sql",
+        "packages/database/test/observed-fact-storage.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/prisma/schema.prisma",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Typed domain constraints, unique generation/domain/fact/version identities, receipts and version-chain links; no direct UPDATE/DELETE/TRUNCATE.",
+        "NOLOGIN capability roles, FORCE RLS, safe-login checks, fixed search paths, PUBLIC revocation; migration grants no existing production login."
+      ],
+      "proof": [
+        "Disposable restricted logins prove cross-binding/generation denial, immutability, malformed payload rejection and operator-only provisioning."
+      ],
+      "outOfScope": [
+        "Source publication, append API, capture or metric calculation"
+      ]
+    },
+    {
+      "id": "P03-021",
+      "title": "Consume certified observed pages atomically",
+      "capHours": 4,
+      "track": "P3/source",
+      "hardDependencies": [
+        "P03-020",
+        "P03-035"
+      ],
+      "contract": "appendObservedPage consumes already-sealed publication and current grant",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_observed_fact_commit/migration.sql",
+        "packages/database/src/observations/observed-writer.ts",
+        "packages/database/test/observed-fact-commit.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/src/index.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Resolve and verify P03-035 immutable publication certificate; SQL checks exact certified records/coverage, full binding/generation, domain grant, lease/fence, cursor chain and publication availability.",
+        "Append facts, receipt and cursor in one transaction; current service/domain authority checked at commit; same-page replay returns original receipt, conflict/fork/stale fence fails."
+      ],
+      "proof": [
+        "Real publisher/consumer grants, ten retries, old/new versions, injected rollback, revocation and generation reset; no fact or completeness receipt survives failed commit."
+      ],
+      "outOfScope": [
+        "Causal business producers, observed reads, metric calculations"
+      ]
+    },
+    {
+      "id": "P03-022",
+      "title": "Capture and read joined temporal observed sources",
+      "capHours": 4,
+      "track": "P3/database",
+      "hardDependencies": [
+        "P03-021"
+      ],
+      "contract": "captureObserved/readObserved / p2-observed-v1 revision",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_observed_capture/migration.sql",
+        "packages/database/src/observations/observed-source.repository.ts",
+        "packages/database/src/observations/observed-source.decode.ts",
+        "packages/database/test/observed-source-capture.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/src/index.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Join immutable base revision and selected observed receipts/facts; hash full binding/generation/windows/cutoff/clock/model/coverage/comparison references.",
+        "First capture only at authoritative current business clock; immutable historic read revalidates current actor membership/generation. Optional base capture permitted only for source-health domains.",
+        "Late arrival, unknown domain and gaps never become complete or zero; bounded decode/overflow fails closed."
+      ],
+      "proof": [
+        "Seal Day3, advance/append Day5 and replay identical Day3; backdated first capture denied; cross-tenant read, current revocation and changed generation denied."
+      ],
+      "outOfScope": [
+        "Reconstructing unsealed historical base bundles or implementing business calculators"
+      ]
+    },
+    {
+      "id": "P03-023",
+      "title": "Emit causal frozen finance observations",
+      "capHours": 4,
+      "track": "P3/mock-source",
+      "hardDependencies": [
+        "P03-019",
+        "P03-024"
+      ],
+      "contract": "mock-business-observed-v1 finance reducer",
+      "ownedFiles": [
+        "apps/api/src/integrations/mock/observed-finance-model.ts",
+        "apps/api/src/integrations/mock/observed-finance-model.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Freeze versioned acquisition cost at actual payment; emit fee charges, settled refund allocations and accepted resellable-return receipts only when business events occur.",
+        "Conserve merchandise/shipping/refund/quantity values; return cost uses original frozen version; advertising fee has a single source charge identity.",
+        "Do not consume current selling price as cost or offline snapshot.economics; unavailable cost stays null."
+      ],
+      "proof": [
+        "Payment then cost change, partial refund, no-return/late-return, nonresellable return, zero fee versus missing fee and duplicate event cases."
+      ],
+      "outOfScope": [
+        "G4 formula changes, metric runtime activation, external settlement integration"
+      ]
+    },
+    {
+      "id": "P03-024",
+      "title": "Generate visits before transactions and measured marketing",
+      "capHours": 4,
+      "track": "P3/mock-source",
+      "hardDependencies": [
+        "P03-019"
+      ],
+      "contract": "mock-business-observed-v1 demand transitions and measured coverage",
+      "ownedFiles": [
+        "apps/api/src/integrations/mock/observed-business-model.ts",
+        "apps/api/src/integrations/mock/observed-traffic-model.ts",
+        "apps/api/src/integrations/mock/observed-traffic-model.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Versioned deterministic demand starts with visitor events, then cart/checkout/payment; order facts and SKU/store counters share causal transitions, never inferred inverse conversion.",
+        "Emit exact window measurements at close; explicit campaign eligibility/attribution policy and measured counters prove coverage. Store unique counts are not SKU sums.",
+        "Model accepts contract-owned supply/finance ports; no test labels, scenario IDs or expected event conditions in emitted facts."
+      ],
+      "proof": [
+        "Same seed/config replay, price intervention changes observed progression, no payment without checkout, zero visitors versus unmeasured window, partial attribution and distinct-store counts."
+      ],
+      "outOfScope": [
+        "Persistent publication registration, finance/inventory reducers, detector answers"
+      ]
+    },
+    {
+      "id": "P03-025",
+      "title": "Emit listing, inventory-age and announced supply history",
+      "capHours": 4,
+      "track": "P3/mock-source",
+      "hardDependencies": [
+        "P03-019"
+      ],
+      "contract": "versioned listing/price/lot/movement/supplier-notice observations",
+      "ownedFiles": [
+        "apps/api/src/integrations/mock/observed-inventory-model.ts",
+        "apps/api/src/integrations/mock/observed-inventory-model.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Actual listing/price edges, conserved receipt and stock movements, remaining-lot quantity-weighted holding age, quarantine and inbound measurements.",
+        "Supplier notice records known promise and revised ETA when announced; future arrival schedule is not read as a current notice.",
+        "008 has no listing/history before T0; 006 has genuine surviving aged lots rather than fabricated dates."
+      ],
+      "proof": [
+        "Old stock consumed then new receipt changes age; 90-day threshold; future notice excluded before announcement; real new listing cannot obtain prelaunch sales."
+      ],
+      "outOfScope": [
+        "Inventory detector policy changes, supplier network calls, current cost valuation"
+      ]
+    },
+    {
+      "id": "P03-026",
+      "title": "Record business-time sync transitions independently of bundles",
+      "capHours": 4,
+      "track": "P3/sync",
+      "hardDependencies": [
+        "P03-020"
+      ],
+      "contract": "SyncObservationV1 immutable transition history",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_sync_observation_history/migration.sql",
+        "packages/database/src/observations/sync-observation.repository.ts",
+        "packages/database/test/sync-observation-history.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/src/sync-host/index.ts",
+        "packages/database/src/index.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Append observed FAILED/SUCCEEDED transition in its actual committed job-control transaction, including authoritative business time, fence, stream and known watermark; works before first page.",
+        "Map generic CONNECTOR_FAILED conservatively; typed errors only from actual pipeline result. No failure-rule input or raw provider text.",
+        "Authorized source-health read does not require four-stream capture; recovery appends rather than erases history."
+      ],
+      "proof": [
+        "Real failed initial job yields persisted observation without normal bundle; page rollback followed by failure transition; later recovery cannot appear at earlier cutoff; revoked worker fails."
+      ],
+      "outOfScope": [
+        "Treating DB downtime as a durable observation, failure-oracle projection, event publication"
+      ]
+    },
+    {
+      "id": "P03-027",
+      "title": "Map selected observed receipts into metric inputs",
+      "capHours": 4,
+      "track": "P3/adapter",
+      "hardDependencies": [
+        "P03-022"
+      ],
+      "contract": "ObservedMetricSourceAdapter / ScopedMetricInputV1",
+      "ownedFiles": [
+        "apps/api/src/metrics/observed-metric-source.adapter.ts",
+        "apps/api/src/metrics/observed-metric-source.validation.ts",
+        "apps/api/src/metrics/observed-metric-source.adapter.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Map confirmed finance, traffic, campaign coverage and inventory extensions from authorized selected receipt sets; keep listing/lot/notice projection references for event assemblers.",
+        "Singleton subject/window coverage requires all relevant domains; retain all evidence IDs/input revision; unknown and complete empty are distinct.",
+        "Leave createNormalizedMetricSourceAdapter and old manifests unchanged."
+      ],
+      "proof": [
+        "Wrong subject, mismatched receipt hash/version/cutoff, future return/notice and absent domain fail; exact measured zero is accepted only with proof."
+      ],
+      "outOfScope": [
+        "Generating facts, broad runtime registry activation, changing leaf financial semantics"
+      ]
+    },
+    {
+      "id": "P03-028",
+      "title": "Calculate exact SKU sales, refund cohort and conversion",
+      "capHours": 4,
+      "track": "P3/metrics",
+      "hardDependencies": [
+        "P03-027"
+      ],
+      "contract": "metrics-g4-observed-v2 scoped subject calculators",
+      "ownedFiles": [
+        "apps/api/src/metrics/scoped-commerce-metrics.ts",
+        "apps/api/src/metrics/scoped-funnel-metrics.ts",
+        "apps/api/src/metrics/scoped-commerce-metrics.spec.ts",
+        "apps/api/src/metrics/scoped-funnel-metrics.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Compute exact SKU line units, distinct qualifying paid/refunded orders and allocated refund amounts; never relabel store totals or rewrite original order payment totals.",
+        "SKU traffic calculator requires matching ScopedMetricInputV1 selection proof and complete measured denominators; old STORE funnel behavior is untouched.",
+        "Unsupported SKU fees/advertising allocations remain explicit unavailable."
+      ],
+      "proof": [
+        "Multi-SKU order, multiple lines same SKU, partial refund, denominator zero/missing, cross-SKU traffic and mature versus immature cohorts."
+      ],
+      "outOfScope": [
+        "SKU campaign ROAS or proportional fee allocation, detector rules, production registry selection"
+      ]
+    },
+    {
+      "id": "P03-029",
+      "title": "Compute persisted aligned profit delta and decomposition",
+      "capHours": 4,
+      "track": "P3/metrics",
+      "hardDependencies": [
+        "P03-027",
+        "P03-033",
+        "P03-034"
+      ],
+      "contract": "Calculate ProfitDeltaMetrics with P03-034 comparison plan; append via P03-033 atomic snapshot/companion port",
+      "ownedFiles": [
+        "apps/api/src/metrics/observed-profit-period.ts",
+        "apps/api/src/metrics/observed-profit-runtime.ts",
+        "apps/api/src/metrics/observed-profit-runtime.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Use authorized P03-034 median-matching historical capture and actual G4 aggregate inputs; call existing createProfitDeltaAttribution. An even median between actual observations has explicit attribution-unavailable quality.",
+        "Consume P03-033 transaction-bound atomic writer for immutable scalar/components/residual and both capture references. Never rebuild companion from a newer source.",
+        "No sum allocation to SKU without source proof; unallocated operating changes stay residual, and residual plus components exactly equals delta."
+      ],
+      "proof": [
+        "Volume/price/mix/cost/advertising counterfactual inputs, changed cost version, shipping/refund/accepted returns, missing cost, misaligned weekday and visibleAt rejection."
+      ],
+      "outOfScope": [
+        "Changing attribution mathematics or robust event baseline algorithm"
+      ]
+    },
+    {
+      "id": "P03-030",
+      "title": "Activate observed metric definitions and opt-in registry",
+      "capHours": 4,
+      "track": "P3/runtime",
+      "hardDependencies": [
+        "P03-027",
+        "P03-028",
+        "P03-029",
+        "P03-036"
+      ],
+      "contract": "metrics-g4-observed-v2 release manifest and metric runtime version dispatch",
+      "ownedFiles": [
+        "apps/api/src/metrics/observed-runtime-composition.ts",
+        "apps/api/src/metrics/observed-runtime-policy.ts",
+        "apps/api/test/observed-metric-runtime.e2e-spec.ts",
+        "docs/operations/observed-fact-runtime.md"
+      ],
+      "sharedLocks": [
+        "apps/api/src/metrics/metric-runtime.service.ts",
+        "apps/api/src/metrics/metric-runtime-composition.ts",
+        "apps/api/src/metrics/metrics.environment.ts",
+        "packages/database/src/metric-runtime-pool.ts",
+        "apps/api/vitest.tenant.config.ts",
+        "apps/api/vitest.config.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Explicit definition provisioning and metric dispatch compose the existing P03-036 observed source with prior metric modules. Preserve prior hashes, definitions and historical reads.",
+        "Dedicated observed runtime environment and grants are required, absent configuration safely unavailable; operator runbook separates publisher/consumer/read/provisioner credentials without granting production logins.",
+        "Real restricted publisher->commit->capture->compute->snapshot proof includes receipt and full generation linkage; old v1 path remains compatible."
+      ],
+      "proof": [
+        "Restricted PG real source->capture->metric snapshot roundtrip; missing capability or coverage, generation change and old-definition replay."
+      ],
+      "outOfScope": [
+        "New business logic beyond composing prior cards, deployment/production grants, event effects"
+      ]
+    },
+    {
+      "id": "P03-031",
+      "title": "Admit v3 source generations in SQL and typed decoders",
+      "capHours": 4,
+      "track": "P3/source-version",
+      "hardDependencies": [
+        "P03-019"
+      ],
+      "contract": "Version admission/compatibility for mock-source-v3",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_mock_observed_generation_admission/migration.sql",
+        "packages/database/test/observed-generation-admission.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/src/mock-platform/configuration.ts",
+        "packages/database/src/mock-platform/publication-types.ts",
+        "packages/database/src/mock-platform/publication-validation.ts",
+        "packages/database/src/mock-platform/generations.ts",
+        "apps/api/src/integrations/mock/mock-config.ts",
+        "apps/api/src/integrations/mock/persistent-read-port.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "New migration supersedes v2-only Runtime/BuildJob version checks from 20261009050000_mock_scenario_version, verifies model/config hash and validates strict v3 shape. Reuse six-kind transport only under unchanged runtime protocol.",
+        "Update corresponding serializers, allowlists and decoders. Existing v1/v2 generations and bytes remain replayable."
+      ],
+      "proof": [
+        "Restricted fixture admits valid v3, rejects model/config mismatch or unsupported version and replays historic v1/v2 publications."
+      ],
+      "outOfScope": [
+        "Causal generators, interruption/replay controls, producer composition"
+      ]
+    },
+    {
+      "id": "P03-032",
+      "title": "Admit scoped v3 interruption and repeated delivery controls",
+      "capHours": 4,
+      "track": "P3/sync",
+      "hardDependencies": [
+        "P03-031",
+        "P03-026"
+      ],
+      "contract": "Generation-bound real failure/replay controls for v3",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_mock_observed_sync_controls/migration.sql",
+        "packages/database/test/observed-sync-controls.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/src/sync-host/index.ts",
+        "apps/sync-worker/src/scenario-delivery.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Revalidate the current scoped worker grant and exact generation/model hash before applying v3 interruption/delivery policy. Fresh SQL supersedes v2-only checks in 20261009150000/20261009140000. Preserve v2 configured replay behavior.",
+        "Provide a bounded v3 test-driver policy for ten distinct acknowledged delivery attempts of the same saved version, then older/newer versions through actual commit/dedup path. Failure config stays producer-only."
+      ],
+      "proof": [
+        "v3 initial interrupted job fails through real worker and emits P03-026 observation. Ten delivery attempts yield one canonical fact; older does not replace newer. Wrong grant/generation rejected."
+      ],
+      "outOfScope": [
+        "Any failure-rule input to event system or broad worker privileges"
+      ]
+    },
+    {
+      "id": "P03-033",
+      "title": "Atomically persist and read derived profit decomposition",
+      "capHours": 4,
+      "track": "P3/database",
+      "hardDependencies": [
+        "P03-020",
+        "P03-022"
+      ],
+      "contract": "ProfitDeltaCompanionV1 / appendProfitComputation / readProfitCompanion",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_profit_delta_companion/migration.sql",
+        "packages/database/src/profit-companion.repository.ts",
+        "packages/database/test/profit-companion.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/src/metric-snapshot.repository.ts",
+        "packages/database/src/index.ts",
+        "packages/database/prisma/schema.prisma",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Derived companion table with immutable snapshot FK, complete binding/generation, definition/method versions, ordered current+baseline capture FKs, canonical payload hash and evidence lineage; FORCE RLS/deny direct mutation.",
+        "Refactor existing scalar append into a transaction-bound internal primitive. Restricted append writes scalar+companion in one DB transaction; exact replay returns original pair and different content conflicts. Current authority checked under locks.",
+        "Reader requires actor/binding/generation/snapshotId/hash. Source business ledger remains distinct."
+      ],
+      "proof": [
+        "Two-connection restricted PG proof of atomic rollback in each write direction, retry, divergent hash, current revocation, cross-tenant denial and old pair after later facts."
+      ],
+      "outOfScope": [
+        "Calculator logic, arbitrary JSON sink or backfilling legacy scalar records"
+      ]
+    },
+    {
+      "id": "P03-034",
+      "title": "Select actual aligned comparison captures for profit attribution",
+      "capHours": 4,
+      "track": "P3/metrics",
+      "hardDependencies": [
+        "P03-022",
+        "P03-027"
+      ],
+      "contract": "planProfitComparison(actor,binding,currentCapture,fourHistoryRefs)",
+      "ownedFiles": [
+        "apps/api/src/metrics/observed-profit-comparison.ts",
+        "apps/api/src/metrics/observed-profit-comparison.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Read authorized historical captures with matching subject, definition/cost policy, duration, weekday/hour cutoff, observation lag, generation and original <=cutoff proofs.",
+        "For event explanation select latest actual historical capture whose CONTRIBUTION equals four-sample robust median; an in-between median has explicit unavailable attribution. Pass actual capture refs to composite source revision."
+      ],
+      "proof": [
+        "Reject swapped/future/misaligned windows, missing originals, median not equal to any actual period, expired role and mixed generation; prove true comparator with distinct historical facts."
+      ],
+      "outOfScope": [
+        "Manufactured median SKU data or user-selected comparison amount"
+      ]
+    },
+    {
+      "id": "P03-035",
+      "title": "Seal trusted observed publications and domain coverage",
+      "capHours": 4,
+      "track": "P3/source",
+      "hardDependencies": [
+        "P03-020"
+      ],
+      "contract": "Immutable model-bound publication certificate",
+      "ownedFiles": [
+        "packages/database/prisma/migrations/<fresh>_observed_publication_certificate/migration.sql",
+        "packages/database/src/observations/observed-publication.ts",
+        "packages/database/test/observed-publication.test.mjs"
+      ],
+      "sharedLocks": [
+        "packages/database/src/index.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "A distinct publisher role attests immutable bounded source payload hashes and sealed coverage with live scoped producer service grant/model/config, verified business clock cutoff, domain, full binding/generation and expected sequence.",
+        "Server independently derives receipt counts/hash/contiguous terminal completeness from certified source pages; consumer cannot sign coverage."
+      ],
+      "proof": [
+        "Restricted publisher accepts exact replay, rejects wrong domain/generation, future business observations, untrusted completeness, gap, hash fork and concurrent revoked grant."
+      ],
+      "outOfScope": [
+        "Consumer append/cursor changes or production credentials"
+      ]
+    },
+    {
+      "id": "P03-036",
+      "title": "Compose v3 causal source publication with existing transport",
+      "capHours": 4,
+      "track": "P3/mock-source",
+      "hardDependencies": [
+        "P03-021",
+        "P03-023",
+        "P03-024",
+        "P03-025",
+        "P03-031",
+        "P03-032"
+      ],
+      "contract": "Observed source composition with pinned v3 model and service grant",
+      "ownedFiles": [
+        "apps/api/src/integrations/mock/observed-source-composition.ts",
+        "apps/api/test/observed-source-publication.e2e-spec.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/src/integrations/mock/mock-source-groups.ts",
+        "packages/database/src/mock-platform/publication.ts",
+        "apps/api/vitest.tenant.config.ts",
+        "apps/api/vitest.config.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Connect visit/transaction, finance and inventory model reducers to actual v3 producer publication; six recognized commerce kinds continue through original sync commit while separate observed pages use P03-035/021.",
+        "Pin recurring weekly causal warmup schedule for 003/013; each sample has real independently committed facts and receipts. Supports declared calibrated sales/coverage for causal scenario manifest without event-answer fields."
+      ],
+      "proof": [
+        "Real v3 generation->publish->commit receipt roundtrip for one window; v1/v2 transport remains byte-compatible; revoked publisher fails."
+      ],
+      "outOfScope": [
+        "Metric calculator registry, source-health evaluation or event outcomes"
+      ]
+    },
+    {
+      "id": "P04-033",
+      "title": "Freeze causal observation windows and capture helper",
+      "capHours": 4,
+      "track": "P4/qa-foundation",
+      "hardDependencies": [
+        "P03-030",
+        "P04-041"
+      ],
+      "contract": "scenario-observation-v2 causal manifest only",
+      "ownedFiles": [
+        "apps/api/test/fixtures/events/scenario-observation-v2.ts",
+        "apps/api/test/helpers/observed-scenario-capture.ts",
+        "apps/api/test/observed-scenario-cutoff.e2e-spec.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/vitest.tenant.config.ts",
+        "apps/api/vitest.config.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Freeze T0, Day3+72h/Day5+120h, per-family exact periods, genuine 120-day warmup/remaining old lots and four weekly same-weekday/hour baseline captures.",
+        "Freeze weekly comparisons by shifting both cohort and visibleAt by 7/14/21/28d. For C=[T0,T0+24h), Day3/5 end lags are 48h/96h. Stage historical captures in wall-independent chronological business-clock order before advancement. 015 counts same exact Day5 W stockout/discount/spend, with mature C refunds independently required.",
+        "Helper advances real causal source/commits/captures only, with immutable version pins; expected/forbidden answers remain in later 031/032.",
+        "009 interruption includes the actual D3 try during [T0+48h,T0+72h], then ends before a successful retry by D5. The 010 policy requires ten real deliveries by D5 and distinct old/new versions."
+      ],
+      "proof": [
+        "Day3 hash replay after Day5, no hidden future refund/notice/listing, actual cohort/sample/aged inventory preconditions checked without writing metric/event answers.",
+        "Check actual measured, complete same-W frame prerequisites for all three 015 issues, paired seasonal/twin windows, genuine launch absence before T0, and original observation watermarks for mature refund baselines."
+      ],
+      "outOfScope": [
+        "Expected labels, final scenario acceptance, production detector or generator changes"
+      ]
+    },
+    {
+      "id": "P04-034",
+      "title": "Detect a qualified early launch under pinned versioned policy",
+      "capHours": 4,
+      "track": "P4/policy",
+      "hardDependencies": [
+        "P03-019"
+      ],
+      "contract": "EarlyLaunchEvidenceV1 strict subset / LaunchOpportunityPolicyV1 / event-policy-observed-v2",
+      "ownedFiles": [
+        "packages/contracts/src/events/early-launch.schema.ts",
+        "apps/api/src/events/early-launch-policy.ts",
+        "apps/api/src/events/detectors/early-launch.detector.ts",
+        "apps/api/src/events/detectors/early-launch.detector.spec.ts"
+      ],
+      "sharedLocks": [
+        "packages/contracts/src/index.ts"
+      ],
+      "acceptance": [
+        "Named typed branch uses existing real fields and null/MISSING baseline, pinned separate mode manifest; no fake four-week history or undeclared v1 evidence fields.",
+        "Age 24..120h, complete postlisting 24h, >=20 units/paid orders, >=100 visitors, >=10% conversion and complete coverage. LOW/ESTIMATED, INSUFFICIENT_DATA, no DEEP/HIGH, qualified early-opportunity text.",
+        "Delegate mature comparisons to unchanged four-week ProductBreakoutDetector. Persist event rulePolicyVersion through existing envelope. Decision enforcement and formatting are owned by P04-042/043."
+      ],
+      "proof": [
+        "Valid measured Day3/5-shaped launch, 1-2 orders, unknown traffic, prelisting window, missing baseline, mature branch and old-policy regression; enforce event candidate LOW and data quality ESTIMATED."
+      ],
+      "outOfScope": [
+        "New schemaVersion2 storage, fabricated baselines, UI redesign, final 008 acceptance"
+      ]
+    },
+    {
+      "id": "P04-035",
+      "title": "Assemble finance event frames from immutable comparison evidence",
+      "capHours": 4,
+      "track": "P4/adapter",
+      "hardDependencies": [
+        "P03-030",
+        "P03-033",
+        "P03-034",
+        "P04-041"
+      ],
+      "contract": "ObservedProfitEventFrameBuilder",
+      "ownedFiles": [
+        "apps/api/src/events/observed-profit-frame.ts",
+        "apps/api/src/events/observed-profit-frame.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Build PROFIT_MARGIN_DROP evidence from current/baseline G4 metrics and persisted decomposition; source references point to exact joined revision with reachable raw receipts.",
+        "Retain cost coverage/null reasons, buyer shipping and component residual reconciliation; missing data cannot yield high-confidence profitable/negative claims.",
+        "Read P03-033 immutable companion by scalar snapshot/hash, check current contribution minus actual robust median equals companion delta, and require real matching baseline capture. A median between observed periods produces typed unavailable attribution."
+      ],
+      "proof": [
+        "Exact period/subject/definition/revision match, component sum+residual, missing cost, late return and incompatible comparison rejected."
+      ],
+      "outOfScope": [
+        "Detector formula changes, event persistence, decision or outbox effects"
+      ]
+    },
+    {
+      "id": "P04-036",
+      "title": "Assemble measured marketing and conversion frames",
+      "capHours": 4,
+      "track": "P4/adapter",
+      "hardDependencies": [
+        "P03-030",
+        "P04-041"
+      ],
+      "contract": "ObservedMarketingFrameBuilder / ObservedConversionFrameBuilder",
+      "ownedFiles": [
+        "apps/api/src/events/observed-marketing-frame.ts",
+        "apps/api/src/events/observed-conversion-frame.ts",
+        "apps/api/src/events/observed-marketing-frame.spec.ts",
+        "apps/api/src/events/observed-conversion-frame.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Campaign entity ROAS/spend frames use actual full-day measured attribution and aligned baseline; SKU conversion uses exact selected visitors/paid orders.",
+        "Price correlation references observed price edge, never hidden intervention; pre-effective windows and unknown attribution remain unavailable/insufficient."
+      ],
+      "proof": [
+        "Exact campaign/SKU context, complete daily versus partial coverage, pre-price negative, absent visitors, zero denominators and missing attribution."
+      ],
+      "outOfScope": [
+        "Changing attribution or conversion thresholds, causal claims about price, runtime effects"
+      ]
+    },
+    {
+      "id": "P04-037",
+      "title": "Assemble stock, stagnation and launch source frames",
+      "capHours": 4,
+      "track": "P4/adapter",
+      "hardDependencies": [
+        "P03-030",
+        "P04-034",
+        "P04-041"
+      ],
+      "contract": "ObservedInventoryFrameBuilder / ObservedLaunchFrameBuilder",
+      "ownedFiles": [
+        "apps/api/src/events/observed-inventory-frame.ts",
+        "apps/api/src/events/observed-launch-frame.ts",
+        "apps/api/src/events/observed-inventory-frame.spec.ts",
+        "apps/api/src/events/observed-launch-frame.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Forecast stockout uses current available, exact SKU sales and announced supplier notice; delay is not inferred from future receipt.",
+        "Stagnation uses conserved remaining-lot age and actual listing age; launch consumes authentic listing/SKU sales/conversion with explicitly selected early/mature policy.",
+        "Observed zero-stock remains independently usable when forecast extensions are unknown."
+      ],
+      "proof": [
+        "Zero/sufficient/unknown inventory, delayed versus healthy known ETA, missing notice, genuine 90-day lots versus new receipt, early listing and wrong-subject metrics."
+      ],
+      "outOfScope": [
+        "Supply model generation, changing mature detector thresholds, event persistence"
+      ]
+    },
+    {
+      "id": "P04-038",
+      "title": "Assemble refund, cancellation, discount and revenue observations",
+      "capHours": 4,
+      "track": "P4/adapter",
+      "hardDependencies": [
+        "P03-030",
+        "P04-041"
+      ],
+      "contract": "ObservedCommerceFrameBuilder and normalized aggregate baseline references",
+      "ownedFiles": [
+        "apps/api/src/events/observed-commerce-frame.ts",
+        "apps/api/src/events/observed-commerce-observations.ts",
+        "apps/api/src/events/observed-commerce-frame.spec.ts"
+      ],
+      "sharedLocks": [],
+      "acceptance": [
+        "Exact persisted order/refund payment state yields cohort concentration, cancellation and discount aggregates; unknown reasons remain UNKNOWN.",
+        "Revenue uses authentic aligned snapshot history; normalized aggregates retain joined revision/time/evidence provenance accepted by BaselinePort.",
+        "Separate runs for distinct cohort/observation windows, with no store-to-SKU relabel or discount double deduction."
+      ],
+      "proof": [
+        "Mature/immature refund cohort, pending cancellation without refund, same-SKU concentration, paid/discount identity, normal seasonal and true decline observations."
+      ],
+      "outOfScope": [
+        "Generator changes, new detector thresholds, notification routing"
+      ]
+    },
+    {
+      "id": "P04-039",
+      "title": "Evaluate actual sync failure without a successful bundle",
+      "capHours": 4,
+      "track": "P4/adapter",
+      "hardDependencies": [
+        "P03-026",
+        "P03-030",
+        "P04-041"
+      ],
+      "contract": "ObservedSyncFrameBuilder / AuthorizedEmptyMetricRead",
+      "ownedFiles": [
+        "apps/api/src/events/observed-sync-frame.ts",
+        "apps/api/src/events/observed-sync-frame.spec.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/src/events/event-evaluation.service.ts"
+      ],
+      "acceptance": [
+        "Build CONNECTION SYNC_FAILURE evidence only from sealed job-observation history; measures=[] still revalidates current membership/full binding/generation.",
+        "Empty authorized metric read can succeed without a commerce bundle; nonempty read failures never become empty successful results.",
+        "Source-quality blocking suppresses stale-sales REVENUE_DROP and recovery uses only facts visible at its own cutoff."
+      ],
+      "proof": [
+        "Failed initial job with absent four streams, stale sales suppression, subsequent recovery/replay, revoked reader and forbidden fake failure-rule input."
+      ],
+      "outOfScope": [
+        "Global read bypass, synthetic stale metric snapshots, notification delivery"
+      ]
+    },
+    {
+      "id": "P04-040",
+      "title": "Compose the full observed frame registry within the existing runtime",
+      "capHours": 4,
+      "track": "P4/integration",
+      "hardDependencies": [
+        "P04-029",
+        "P04-033",
+        "P04-034",
+        "P04-035",
+        "P04-036",
+        "P04-037",
+        "P04-038",
+        "P04-039",
+        "P04-042",
+        "P04-043"
+      ],
+      "contract": "ObservedEventFrameRegistry / pinned policy and source selection to existing evaluation UoW",
+      "ownedFiles": [
+        "apps/api/src/events/observed-event-frame-registry.ts",
+        "apps/api/src/events/observed-event-frame-registry.spec.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/src/events/events.module.ts",
+        "apps/api/src/decisions/decisions.module.ts",
+        "apps/api/src/app.module.ts"
+      ],
+      "acceptance": [
+        "Opt-in versioned registry assembles already-tested frames, captures and computes exact metric jobs, then calls existing EventEvaluationService and P04-029 transaction/winner/audit/outbox.",
+        "Source health precedes affected business signals. Invoke P04-042 assurance/rules gates and expose P04-043 authenticated read formatter for qualified early launches.",
+        "No expected/oracle fields reach providers, no test-only policy override, no effect outside actual won decision; absent observed capability safely unavailable."
+      ],
+      "proof": [
+        "Composition test: each family registers exactly once with exact policy/version; source-health runs first, missing capability fails safely, same trusted UoW is invoked. Restricted cross-family smoke and effects belong to P04-044."
+      ],
+      "outOfScope": [
+        "New causal sources/calculators, rewrites of 029 atomicity, 030 contention suite, claiming 031/032 acceptance"
+      ]
+    },
+    {
+      "id": "P04-041",
+      "title": "Freeze robust historical selection and baseline registry",
+      "capHours": 4,
+      "track": "P4/baseline",
+      "hardDependencies": [
+        "P03-030"
+      ],
+      "contract": "robust-baseline-observed-v2 / selectObservedBaselineHistory",
+      "ownedFiles": [
+        "apps/api/src/events/observed-baseline-policy.ts",
+        "apps/api/src/events/observed-baseline-history.ts",
+        "apps/api/src/events/observed-baseline-history.spec.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/src/events/event-rule-policy.ts",
+        "apps/api/src/events/robust-baseline.ts"
+      ],
+      "acceptance": [
+        "Register a sibling BaselinePort using minimumSamples=4, lookbackWeeks=4, maximumAgeSeconds=3024000, while current freshness <=3600 seconds. Keep event-policy-v1 and robust-baseline-v1 identical.",
+        "Require four original authorized captures at offsets 7/14/21/28d. Shift both period and observation instant by same offset. Validate original freshness, then current historical age. Serialize pinned measure/subject/proofs."
+      ],
+      "proof": [
+        "Four full periods yield 100% slot coverage; missing or mismatched lag, stale original data, >35d age, wrong pin and old-policy regression."
+      ],
+      "outOfScope": [
+        "Rewriting robust median algorithm or supplying prelaunch history"
+      ]
+    },
+    {
+      "id": "P04-042",
+      "title": "Apply trusted early-launch policy through rules and hard gate",
+      "capHours": 4,
+      "track": "P4/decisions",
+      "hardDependencies": [
+        "P04-034",
+        "P04-029"
+      ],
+      "contract": "Verified early-launch event/evidence plus immutable policy assurance",
+      "ownedFiles": [
+        "apps/api/src/decisions/early-launch-decision-policy.ts",
+        "apps/api/src/decisions/early-launch-decision-policy.spec.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/src/decisions/rules-evidence-gate.ts",
+        "apps/api/src/decisions/rules-decision.provider.ts",
+        "apps/api/src/decisions/decision-ruleset.ts",
+        "apps/api/src/decisions/decision-hard-gate.ts",
+        "apps/api/src/decisions/decision-input-sanitizer.ts",
+        "apps/api/src/decisions/decisions.module.ts"
+      ],
+      "acceptance": [
+        "Select branch from trusted persisted event rulePolicyVersion + ruleset + exact current evidence and per-call assurance. Sanitizer equality alone cannot elect a policy. Restrict comparative count-gate bypass to that verified early branch.",
+        "Persist normal decision labels: LOW severity/LOW_PRIORITY, INSUFFICIENT_DATA, NO_LLM_NEEDED, suggested DAILY_BRIEF. Existing routing may demote to IGNORE. Block HIGH/CRITICAL, NOTIFY_NOW, ESCALATE, DEEP and SUFFICIENT."
+      ],
+      "proof": [
+        "Mature weekly path unchanged; forged sanitized pin, stale/wrong evidence or cross-tenant rejects; stage-wise labels and replay verified."
+      ],
+      "outOfScope": [
+        "Stored summary text, new evidence payload or route effects"
+      ]
+    },
+    {
+      "id": "P04-043",
+      "title": "Render qualified launch wording from authorized historical evidence",
+      "capHours": 4,
+      "track": "P4/read",
+      "hardDependencies": [
+        "P04-042"
+      ],
+      "contract": "Authenticated deterministic policy-aware observation display",
+      "ownedFiles": [
+        "apps/api/src/events/early-launch-display.ts",
+        "apps/api/src/events/early-launch-display.spec.ts",
+        "packages/contracts/src/events/event-assessment-view.schema.ts",
+        "apps/api/src/events/event-assessment.controller.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/src/events/event-query.service.ts",
+        "packages/contracts/src/events/event.schema.ts",
+        "apps/api/src/events/events.module.ts",
+        "apps/api/src/events/event-decision-unit-of-work.ts",
+        "packages/contracts/src/index.ts"
+      ],
+      "acceptance": [
+        "Provide a versioned authenticated read-view formatter using stored event rulePolicyVersion, exact linked immutable evidence and persisted decision ruleset. Return the approved qualified wording on the response view. Do not add a persisted summary string.",
+        "Expose strict EventAssessmentViewV1 {mode, displayLabel, evidenceReference, rulePolicyVersion} through authenticated GET on both store-route aliases at /events/:eventId/evidence/:evidenceId/assessment, using exact version/hash/definition query and existing ownership checks. Render only a mode verified against the pinned historical decision/ruleset/evidence. The same deterministic formatter prepares the summary for an eligible IN_APP winner; existing event/decision envelopes remain untouched.",
+        "EARLY_LAUNCH displayLabel is the exact approved qualified text in the written spec. For obsolete/unknown policy provenance return typed unavailable; no guessed display mode."
+      ],
+      "proof": [
+        "Authorized current/historical reads display the early qualification, mature v1 retains existing text, unrecognized/mixed provenance cannot display early/confirmed growth, denied tenant has no content."
+      ],
+      "outOfScope": [
+        "P7/P8/UI redesign or storing generated text"
+      ]
+    },
+    {
+      "id": "P04-044",
+      "title": "Prove all observed families enter real restricted event transactions",
+      "capHours": 4,
+      "track": "P4/integration-proof",
+      "hardDependencies": [
+        "P04-040",
+        "P04-033",
+        "P04-043"
+      ],
+      "contract": "Observed runtime DI and effect linkage smoke",
+      "ownedFiles": [
+        "apps/api/test/observed-event-adapters.e2e-spec.ts"
+      ],
+      "sharedLocks": [
+        "apps/api/vitest.tenant.config.ts",
+        "apps/api/vitest.config.ts",
+        "scripts/test-tenant-database.mjs"
+      ],
+      "acceptance": [
+        "Use real restricted source publication/receipts, defined metrics, actor-bound store and existing event decision UoW; cover each adapter family and initial sync failure through DI.",
+        "Verify exact event/evidence/snapshot binding, qualified launch labels/read display, winner and eligible intent replay. No QA answers enter provider."
+      ],
+      "proof": [
+        "Targeted tenant E2E with explicit positive counts and no skips; 031/032 retain full Day3/5 positives/controls, contention remains 030."
+      ],
+      "outOfScope": [
+        "Implementation changes or claiming final scenario acceptance"
+      ]
+    }
+  ],
+  "existingCardDependencyUpdates": {
+    "P04-029": "Retain bounded observed-zero-stock integration and existing dependencies; do not make it depend on full-family adapters.",
+    "P04-030": "Existing P04-029 contention/atomicity hard dependencies unchanged.",
+    "P04-031": {
+      "addHardDependencies": [
+        "P04-033",
+        "P04-044"
+      ],
+      "preserve": "All 001-008 positives/controls; 008 Choice A is an explicit product-approved qualified opportunity, not a silently dropped positive."
+    },
+    "P04-032": {
+      "addHardDependencies": [
+        "P04-044"
+      ],
+      "preserve": "P04-029/P04-030/P04-031 and P2-GATE; all 009-015 positives/controls, true revenue decline twin and oracle-isolation mutation proof. Same Day5 W/generation/revision for stockout+discount+spend, >=2 distinct winners, cap/rank/replay. Separately assert C/96h mature refund. Existing authorized automatic deployment after reviewed green merge applies."
+    }
+  },
+  "registrationBoundary": "Three reviewed bootstrap/coordination cards sit outside the catalog/DAG they enable, so registration never depends on a card already appearing in that same pool. User written approval is a release condition recorded as evidence and is never an unknown graph node.",
+  "counts": {
+    "previousCatalog": 228,
+    "previousCatalogHours": 728,
+    "addedPoolCards": 30,
+    "addedPlanningCapHours": 120,
+    "resultingCatalog": 258,
+    "resultingPlannedHours": 848,
+    "resultingP03Cards": 36,
+    "resultingP04Cards": 44,
+    "separateNonCatalogRegistrationWorkPackets": 3
+  },
+  "registrationWorkPackets": [
+    {
+      "id": "R1",
+      "capHours": 4,
+      "title": "Add allowlisted Project registration mode in existing App workflow",
+      "hardDependencies": [],
+      "contract": "trusted-main allowlist + addProjectV2ItemById + Backlog initialization",
+      "ownedFiles": [
+        "scripts/agile/register-project-items.mjs",
+        "tests/agile/register-project-items.test.mjs"
+      ],
+      "sharedLocks": [
+        ".github/workflows/agile-state-sync.yml",
+        "scripts/agile/github-project.mjs",
+        "scripts/agile/sync.mjs",
+        "tests/agile/workflow.test.mjs"
+      ],
+      "acceptance": [
+        "Operator dispatch only through existing trusted-main workflow, current selected-repo App/token/Project and existing permissions. Validate exact reviewed manifest of Issue numbers/node IDs and destination Project against actual repository, staged titles and Harry reservation. Reject unrelated existing or active items.",
+        "Idempotently add each allowlisted missing Project item and initialize verified Backlog option only for its blank new Status. Preserve established items, existing assignees and all unrelated fields; read back issue/item/status after each mutation. Record precise step/partialWrite/appliedIds/failedId for resume. Independent normal sync retains fail-closed global validation."
+      ],
+      "proof": [
+        "Mocked GraphQL pagination/duplicate, wrong repo/Project, item already present with valid Backlog, blank Status, add-success/status-fail and safe retry; workflow security directives unchanged.",
+        "Verify manifest was reviewed on trusted main, reject arbitrary dispatch allowlists; current GitHub authorization canary uses existing App permissions. If denied, record partial status and stop before activation."
+      ],
+      "outOfScope": [
+        "New workflow, App permissions, credentials, quota optimization/workaround or catalog activation"
+      ]
+    },
+    {
+      "id": "R2",
+      "capHours": 4,
+      "title": "Prepare canonical catalog and staged registration manifest",
+      "hardDependencies": [
+        "R1"
+      ],
+      "contract": "existing canonical 20-field backlog shape and non-ID staging Issues",
+      "ownedFiles": [
+        "tests/agile/observed-prerequisite-catalog.test.mjs",
+        "docs/engineering/observed-prerequisite-registration.json"
+      ],
+      "sharedLocks": [
+        "docs/superpowers/plans/p3-p13-agile/backlog.json",
+        "docs/superpowers/plans/p3-p13-agile/phase-03.md",
+        "docs/superpowers/plans/p3-p13-agile/phase-04.md",
+        "docs/superpowers/plans/p3-p13-agile/README.md",
+        "docs/superpowers/plans/2026-10-04-p3-p13-agile-task-pool.md",
+        "docs/engineering/agile-state-sync.md"
+      ],
+      "acceptance": [
+        "Refresh all Issue/PR identities and current 228 pairs before allocation. Translate all 30 draft cards to canonical 20 fields including file ownership/real dependencies. Update 029/031/032 prose, downstream dependencies/counts, phase lists and existing automatic deployment wording. Validate graph and source/docs match.",
+        "Stage exact issue bodies under non-ID titles without pool labels, native sole assignee Harry; freeze staged Issue number/nodeID allowlist and preserve unrelated metadata. Stage consumer body edits locally before activation.",
+        "Reviewed main activation manifest gives the exact staged number/nodeId/repository/Project identity for R1 and R3. Only Issue title, labels and dependency sections intentionally changed are activated; read back all others unchanged."
+      ],
+      "proof": [
+        "Catalog 258 unique IDs, 848 planned hours at caps, 36 P03/44 P04; graph valid all IDs and external gates; docs/issue dependency-section correspondence; full agile tests and independent approved diff."
+      ],
+      "outOfScope": [
+        "Creating active claims, exact-ID title activation or import from caller-supplied workflow payload"
+      ]
+    },
+    {
+      "id": "R3",
+      "capHours": 4,
+      "title": "Activate and verify catalog, Issues and Project pairs",
+      "hardDependencies": [
+        "R1",
+        "R2"
+      ],
+      "contract": "allowlisted staged registration plus global readback",
+      "ownedFiles": [
+        "coordinator/registration-run-report.json"
+      ],
+      "sharedLocks": [
+        ".github/workflows/agile-state-sync.yml",
+        "existing Issue/Project/catalog lifecycle and 031/032 dependency bodies"
+      ],
+      "acceptance": [
+        "Register staging Issues via approved R1 mode on the actual reviewed main allowlist and read back Backlog before exact-ID activation; during catalog/Issue transition full global reconciliation must fail before writes. Record window start/end and preserve existing work.",
+        "Apply exact titles, canonical dependency bodies, pool labels/milestones and sole new assignee Harry; preserve existing assignments/active states. Preview then apply once when valid. Enforce max one active Ready card after dependency and lock confirmation."
+      ],
+      "proof": [
+        "All 258 catalog IDs have exactly one Issue/Project pair, Status/option IDs and required bodies match, existing metadata preserved and all new reservations correct. Save default SHA/run/attempt/report/partial-write readback, then fresh zero-unexplained-change preview. On quota/partial-write inspect report/readback before any retry."
+      ],
+      "outOfScope": [
+        "New credentials, new workflows, system setting changes, duplicate dispatch or overwriting active cards"
+      ]
+    }
+  ]
+}
