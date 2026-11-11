@@ -20,6 +20,10 @@ on:
         description: Apply the full reconciliation plan
         type: boolean
         default: false
+      register_prerequisites:
+        description: Register the staged Issues listed on trusted main
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -78,18 +82,33 @@ jobs:
           permission-organization-projects: write
 
       - name: Preview task state
-        if: github.event_name == 'workflow_dispatch' && inputs.apply != true
+        if: github.event_name == 'workflow_dispatch' && inputs.register_prerequisites != true && inputs.apply != true
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}
         run: node scripts/agile/sync.mjs --report "$RUNNER_TEMP/agile-state-plan.json"
 
       - name: Reconcile task state
-        if: github.event_name != 'workflow_dispatch' || inputs.apply == true
+        if: github.event_name != 'workflow_dispatch' || (inputs.register_prerequisites != true && inputs.apply == true)
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}
         run: node scripts/agile/sync.mjs --apply --report "$RUNNER_TEMP/agile-state-plan.json"
+
+      - name: Restore prior registration acknowledgement
+        if: github.event_name == 'workflow_dispatch' && inputs.register_prerequisites == true && inputs.apply == true && github.run_attempt != '1' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous=$((GITHUB_RUN_ATTEMPT - 1))
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "agile-state-plan-${GITHUB_RUN_ID}-${previous}" --dir "$RUNNER_TEMP/r1-resume"
+
+      - name: Register staged Project items
+        if: github.event_name == 'workflow_dispatch' && inputs.register_prerequisites == true
+        env:
+          REGISTRATION_APPLY: ${{ inputs.apply }}
+          PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: node scripts/agile/register-project-items.mjs
 
       - name: Save reconciliation evidence
         if: always()
