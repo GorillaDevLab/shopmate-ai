@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { requireIsolatedDatabaseUrl } from "../helpers/isolated-postgres.mjs";
 import { tenantEnvironment } from "../../../../scripts/test-tenant-database.mjs";
 import { EventEvidenceV1Schema, DecisionResultSchema, ExternalIdSchema } from "@shopmate/contracts";
+import { createEventRepository, createDecisionRunRepository } from "../../dist/src/index.js";
 
 if (!process.env.TEST_DATABASE_URL)
   throw new Error("Decision storage requires runner TEST_DATABASE_URL");
@@ -654,6 +655,81 @@ async function capabilities(client, url, action) {
     }
   }
 }
+async function repositoryContext(client, row) {
+  const actor = {
+    userId: "decision-OWNER",
+    merchantId: "decision-a",
+    organizationId: binding.organizationId,
+    workspaceId: binding.workspaceId,
+    role: "OWNER",
+    permissions: ["tenant:read"],
+  };
+  const events = createEventRepository({ actor, client, now: () => instant });
+  const detail = await events.detail({ actor, binding, eventId: row.id });
+  assert.equal(detail.ok, true);
+  const linked = await events.evidence({
+    actor,
+    binding,
+    eventId: row.id,
+    reference: detail.value.currentEvidence,
+  });
+  assert.equal(linked.ok, true);
+  return {
+    schemaVersion: 1,
+    actor,
+    requestId: randomUUID(),
+    correlationId,
+    event: detail.value,
+    evidence: linked.value,
+  };
+}
+async function restrictedRepositoryClaim(client, row) {
+  await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+  try {
+    const input = await repositoryContext(client, row);
+    const repository = createDecisionRunRepository({
+      actor: input.actor,
+      client,
+      clock: { timeDomain: "SECURITY_UTC", now: () => new Date().toISOString() },
+      decisionKey: () => "restricted-runtime-key",
+    });
+    const result = await repository.claim({
+      context: input,
+      decisionKey: "restricted-runtime-key",
+      control: {
+        timeDomain: "SECURITY_UTC",
+        deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+        signal: new globalThis.AbortController().signal,
+      },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.value.status, "CLAIMED");
+  } finally {
+    await client.query("ROLLBACK");
+  }
+}
+test("runtime repository claims without direct claim UPDATE capability", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    await fixture(client);
+    const row = await appendEvent(client);
+    await capabilities(client, url, async (roles) => {
+      const login = (await roles.writer.query("SELECT current_user AS name")).rows[0].name;
+      assert.match(login, /^decision_writer_[a-f0-9]+$/u);
+      await client.query(`GRANT shopmate_event_writer TO ${login}`);
+      try {
+        await context(roles.writer, "decision-OWNER", () =>
+          restrictedRepositoryClaim(roles.writer, row),
+        );
+        await assert.rejects(roles.writer.query('UPDATE decision_claims SET "winnerRunId"=NULL'), {
+          code: "42501",
+        });
+      } finally {
+        await client.query(`REVOKE shopmate_event_writer FROM ${login}`);
+      }
+    });
+  });
+});
 async function writerCases(t, roles, row) {
   await t.test("restricted assigned OPERATOR claims, appends and chooses one winner", () =>
     context(roles.writer, "decision-OPERATOR", async () => {
