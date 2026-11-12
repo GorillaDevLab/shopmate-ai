@@ -9,7 +9,7 @@ import { createProjectApi } from "./github-project.mjs";
 const repo = "GorillaDevLab/shopmate-ai";
 const owner = "hannnnnnnny";
 const reportKeys =
-  "kind run attempt apply status step partialWrite failedId appliedIds historicalAppliedIds receipts planned pendingId digest";
+  "kind run attempt apply status step partialWrite failedId appliedIds historicalAppliedIds receipts planned pendingId digest continuityEstablished";
 const rowSteps = new Set([
   "preflight",
   "read",
@@ -165,6 +165,7 @@ async function one(x, r) {
 
 export async function register(x) {
   validate(x.m);
+  check(!x.apply || x.report.continuityEstablished === true, "registration continuity unavailable");
   await phase(x, "project-identity");
   const p = destination(await x.api.readProject());
   check(p.projectId === x.m.projectId, "project identity");
@@ -209,6 +210,7 @@ function trusted(e) {
 function envelope(prior, report) {
   const reasonKey = prior && Object.hasOwn(prior, "reason") ? " reason" : "";
   check(shape(prior, reportKeys + reasonKey), "invalid checkpoint shape");
+  check(prior.continuityEstablished === true, "checkpoint continuity unavailable");
   check(
     prior.kind === "staged-registration-v1" &&
       prior.kind === report.kind &&
@@ -299,6 +301,7 @@ function recoveredEvidence(prior, m) {
   );
   checkpointPhase(prior, m, receipts);
   return Object.freeze({
+    continuityEstablished: true,
     pendingId: prior.pendingId,
     partialWrite: prior.pendingId !== null,
     receipts,
@@ -318,7 +321,12 @@ export function restore(prior, m, report) {
 }
 
 async function resume(e, m, report, path) {
-  if (+e.GITHUB_RUN_ATTEMPT === 1 || !report.apply) return;
+  if (!report.apply) return;
+  if (+e.GITHUB_RUN_ATTEMPT === 1) {
+    // Only the first attempt has no predecessor history to establish.
+    report.continuityEstablished = true;
+    return;
+  }
   report.step = "restore";
   await persist(path, report);
   const bytes = await readFile(join(e.RUNNER_TEMP, "r1-resume", "agile-state-plan.json"));
@@ -377,6 +385,7 @@ function newReport(e) {
     receipts: {},
     planned: {},
     pendingId: null,
+    continuityEstablished: false,
   };
 }
 

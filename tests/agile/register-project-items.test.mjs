@@ -1,5 +1,6 @@
 /* global structuredClone */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -75,6 +76,7 @@ function fixture() {
     report: {
       appliedIds: [],
       historicalAppliedIds: [],
+      continuityEstablished: true,
       receipts: {},
       planned: {},
       pendingId: null,
@@ -97,6 +99,7 @@ function checkpoint(attempt, extra = {}) {
     failedId: null,
     appliedIds: [],
     historicalAppliedIds: [],
+    continuityEstablished: attempt === 1,
     receipts: {},
     planned: {},
     pendingId: null,
@@ -230,6 +233,8 @@ test("a previously verified existing item cannot be recreated after an operator 
 });
 
 const invalidProgress = [
+  { continuityEstablished: false },
+  { continuityEstablished: undefined },
   { appliedIds: [row.id, row.id] },
   { appliedIds: ["P04-001"] },
   { historicalAppliedIds: ["P04-001"] },
@@ -377,14 +382,14 @@ test("a rejected trailing receipt cannot escape through a failed artifact into a
   failed.status = "failed";
   const artifact = JSON.parse(JSON.stringify(failed));
   const next = checkpoint(3);
-  restore(artifact, manifest, next);
+  assert.throws(() => restore(artifact, manifest, next), /continuity/);
   f.issue.items = [f.item];
   f.input.report = next;
   let writes = 0;
   f.api.updateStatus = async () => {
     writes++;
   };
-  await assert.rejects(register(f.input), /protected/);
+  await assert.rejects(register(f.input), /continuity/);
   assert.equal(writes, 0);
   assert.deepEqual(artifact.receipts, {});
   assert.equal(artifact.pendingId, null);
@@ -611,6 +616,7 @@ test("CLI fails closed with bounded evidence when the fixed reviewed manifest is
   const report = JSON.parse(await readFile(join(directory, "agile-state-plan.json"), "utf8"));
   assert.equal(report.status, "failed");
   assert.equal(report.step, "manifest");
+  assert.equal(report.continuityEstablished, false);
   assert.equal(report.partialWrite, false);
   assert.deepEqual(report.receipts, {});
   assert.doesNotMatch(
@@ -652,8 +658,129 @@ async function runProjectCli(f, overrides = {}) {
 async function writeManifest(f, value = manifest) {
   const docs = join(f.directory, "docs", "engineering");
   await mkdir(docs, { recursive: true });
-  await writeFile(join(docs, "observed-prerequisite-registration.json"), JSON.stringify(value));
+  const bytes = JSON.stringify(value);
+  await writeFile(join(docs, "observed-prerequisite-registration.json"), bytes);
+  return createHash("sha256").update(bytes).digest("hex");
 }
+
+async function firstPartialAttempt() {
+  const f = twoRows();
+  f.input.api.addItem = async (_project, id) => {
+    if (id === f.second.nodeId) throw Error("B add failed");
+    return f.a.api.addItem();
+  };
+  await assert.rejects(register(f.input), /B add failed/);
+  f.input.report.status = "failed";
+  assert.deepEqual(f.input.report.appliedIds, [row.id]);
+  assert.equal(f.b.issue.items.length, 0);
+  f.a.issue.items = [];
+  return f;
+}
+
+async function brokenRestoreArtifact(t, f, mode) {
+  const cli = await projectCli(t);
+  const digest = await writeManifest(cli, f.input.m);
+  f.input.report.digest = digest;
+  await writeFile(join(cli.directory, "attempt-1.json"), JSON.stringify(f.input.report));
+  const path = join(cli.directory, "r1-resume");
+  await mkdir(path);
+  if (mode === "read") await mkdir(join(path, "agile-state-plan.json"));
+  else await writeFile(join(path, "agile-state-plan.json"), "{");
+  const { result, report } = await runProjectCli(cli, {
+    REGISTRATION_APPLY: "true",
+    GITHUB_RUN_ATTEMPT: "2",
+    PROJECT_TOKEN: "",
+  });
+  assert.equal(result.status, 1);
+  assert.equal(report.step, "restore");
+  assert.equal(report.continuityEstablished, false);
+  assert.equal(report.digest, digest);
+  await assert.rejects(readFile(cli.calls), { code: "ENOENT" });
+  return JSON.parse(JSON.stringify(report));
+}
+
+async function denyThirdAttempt(f, prior) {
+  const next = checkpoint(3, { digest: prior.digest });
+  let adds = 0,
+    statuses = 0;
+  f.input.api.addItem = async () => {
+    adds++;
+    return f.a.item.id;
+  };
+  f.input.api.updateStatus = async () => {
+    statuses++;
+  };
+  await assert.rejects(async () => {
+    restore(prior, f.input.m, next);
+    f.input.report = next;
+    await register(f.input);
+  }, /continuity/);
+  assert.equal(adds, 0);
+  assert.equal(statuses, 0);
+  next.status = "failed";
+  next.step = "restore";
+  assert.throws(
+    () =>
+      restore(JSON.parse(JSON.stringify(next)), f.input.m, checkpoint(4, { digest: prior.digest })),
+    /continuity/,
+  );
+}
+
+test("a failed or interrupted restore cannot reset A history on the third attempt", async (t) => {
+  for (const mode of ["read", "json", "interrupted"]) {
+    const f = await firstPartialAttempt();
+    const artifact = await brokenRestoreArtifact(t, f, mode);
+    if (mode === "interrupted") artifact.status = "started";
+    const prior = JSON.parse(JSON.stringify(artifact));
+    await denyThirdAttempt(f, prior);
+    assert.equal(prior.continuityEstablished, false);
+  }
+});
+
+async function credentialFailureAfterRestore(t, f) {
+  const cli = await projectCli(t);
+  f.input.report.digest = await writeManifest(cli, f.input.m);
+  const directory = join(cli.directory, "r1-resume");
+  await mkdir(directory);
+  await writeFile(join(directory, "agile-state-plan.json"), JSON.stringify(f.input.report));
+  const { result, report } = await runProjectCli(cli, {
+    REGISTRATION_APPLY: "true",
+    GITHUB_RUN_ATTEMPT: "2",
+    PROJECT_TOKEN: "",
+  });
+  assert.equal(result.status, 1);
+  assert.equal(report.step, "project-identity");
+  assert.equal(report.continuityEstablished, true);
+  assert.deepEqual(report.historicalAppliedIds, [row.id]);
+  await assert.rejects(readFile(cli.calls), { code: "ENOENT" });
+  return JSON.parse(JSON.stringify(report));
+}
+
+test("credential construction occurs after full restore and retains legitimate retry history", async (t) => {
+  const f = await firstPartialAttempt();
+  const artifact = await credentialFailureAfterRestore(t, f);
+  const next = checkpoint(3, { digest: artifact.digest });
+  restore(artifact, f.input.m, next);
+  assert.equal(next.continuityEstablished, true);
+  assert.deepEqual(next.historicalAppliedIds, [row.id]);
+  f.input.report = next;
+  let writes = 0;
+  f.input.api.addItem = f.input.api.updateStatus = async () => {
+    writes++;
+  };
+  await assert.rejects(register(f.input), /acknowledged item changed|completed item missing/);
+  assert.equal(writes, 0);
+});
+
+test("pre-continuity diagnostics are ineligible regardless of their phase", () => {
+  for (const step of ["manifest", "restore", "project-identity"]) {
+    const prior = checkpoint(2, { step, status: "failed", continuityEstablished: false });
+    assert.throws(
+      () => restore(JSON.parse(JSON.stringify(prior)), manifest, checkpoint(3)),
+      /continuity/,
+    );
+  }
+});
 
 test("CLI identifies a missing resume artifact before any Project request", async (t) => {
   const f = await projectCli(t);
@@ -684,6 +811,7 @@ test("bootstrap credential setup failures are attributed to Project identity", a
   const { result, report } = await runProjectCli(f, { PROJECT_TOKEN: "" });
   assert.equal(result.status, 1);
   assert.equal(report.step, "project-identity");
+  assert.equal(report.continuityEstablished, false);
   assert.deepEqual(report.receipts, {});
   await assert.rejects(readFile(f.calls), { code: "ENOENT" });
 });
@@ -694,6 +822,7 @@ test("missing-manifest trusted preview records only the fixed App destination wi
   assert.equal(result.status, 0);
   assert.equal(report.status, "setup-required");
   assert.equal(report.step, "manifest-required");
+  assert.equal(report.continuityEstablished, false);
   assert.deepEqual(report.destination, {
     repository: manifest.repository,
     projectNumber: 1,
@@ -733,6 +862,7 @@ test("a malformed reviewed manifest never falls back to destination preview", as
   const { result, report } = await runProjectCli(f);
   assert.equal(result.status, 1);
   assert.equal(report.status, "failed");
+  assert.equal(report.continuityEstablished, false);
   assert.equal(report.destination, undefined);
   await assert.rejects(readFile(f.calls), { code: "ENOENT" });
 });
