@@ -655,21 +655,21 @@ async function capabilities(client, url, action) {
     }
   }
 }
-async function repositoryContext(client, row) {
+async function repositoryContext(client, row, scope = binding) {
   const actor = {
     userId: "decision-OWNER",
-    merchantId: "decision-a",
-    organizationId: binding.organizationId,
-    workspaceId: binding.workspaceId,
+    merchantId: scope === binding ? "decision-a" : "decision-max",
+    organizationId: scope.organizationId,
+    workspaceId: scope.workspaceId,
     role: "OWNER",
     permissions: ["tenant:read"],
   };
   const events = createEventRepository({ actor, client, now: () => instant });
-  const detail = await events.detail({ actor, binding, eventId: row.id });
+  const detail = await events.detail({ actor, binding: scope, eventId: row.id });
   assert.equal(detail.ok, true);
   const linked = await events.evidence({
     actor,
-    binding,
+    binding: scope,
     eventId: row.id,
     reference: detail.value.currentEvidence,
   });
@@ -683,10 +683,10 @@ async function repositoryContext(client, row) {
     evidence: linked.value,
   };
 }
-async function restrictedRepositoryClaim(client, row) {
+async function restrictedRepositoryClaim(client, row, scope = binding) {
   await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
   try {
-    const input = await repositoryContext(client, row);
+    const input = await repositoryContext(client, row, scope);
     const repository = createDecisionRunRepository({
       actor: input.actor,
       client,
@@ -728,6 +728,26 @@ test("runtime repository claims without direct claim UPDATE capability", async (
         await client.query(`REVOKE shopmate_event_writer FROM ${login}`);
       }
     });
+  });
+});
+test("runtime repository preserves event fingerprints longer than external IDs", async () => {
+  await withDatabase(async (client) => {
+    await migrate(client);
+    const scope = await maximumScopeFixture(client);
+    const row = await appendEvent(client, scope);
+    assert.ok(row.fingerprint.length > 256);
+    const settings = Object.fromEntries(
+      Object.entries(scope).map(([key, value]) => [
+        key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`),
+        value,
+      ]),
+    );
+    await context(
+      client,
+      "decision-OWNER",
+      () => restrictedRepositoryClaim(client, row, scope),
+      settings,
+    );
   });
 });
 async function writerCases(t, roles, row) {
