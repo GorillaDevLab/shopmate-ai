@@ -12,6 +12,8 @@ import { requireIsolatedDatabaseUrl } from "../helpers/isolated-postgres.mjs";
 import { tenantEnvironment } from "../../../../scripts/test-tenant-database.mjs";
 import { EventEvidenceV1Schema, DecisionResultSchema, ExternalIdSchema } from "@shopmate/contracts";
 import { createEventRepository, createDecisionRunRepository } from "../../dist/src/index.js";
+import * as database from "../../dist/src/index.js";
+import { prepareEventDecisionRuntime } from "../helpers/tenant-api-fixture.mjs";
 
 if (!process.env.TEST_DATABASE_URL)
   throw new Error("Decision storage requires runner TEST_DATABASE_URL");
@@ -748,6 +750,30 @@ test("runtime repository preserves event fingerprints longer than external IDs",
       () => restrictedRepositoryClaim(client, row, scope),
       settings,
     );
+  });
+});
+test("checked event decision pool accepts only its composed restricted capability", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    const runtime = await prepareEventDecisionRuntime(url);
+    assert.equal(typeof database.createEventDecisionPool, "function");
+    const pool = database.createEventDecisionPool(runtime);
+    const unsafe = database.createEventDecisionPool(url);
+    try {
+      const connection = await pool.connect();
+      assert.equal(
+        (await connection.query("SELECT current_user AS name")).rows[0].name,
+        "shopmate_event_decision_api",
+      );
+      connection.release();
+      await assert.rejects(unsafe.connect(), { message: "Event decision database unavailable" });
+      await client.query("GRANT shopmate_metric_writer TO shopmate_event_decision_api");
+      await assert.rejects(pool.connect(), { message: "Event decision database unavailable" });
+    } finally {
+      await pool.end();
+      await unsafe.end();
+      await client.query("REVOKE shopmate_metric_writer FROM shopmate_event_decision_api");
+    }
   });
 });
 async function writerCases(t, roles, row) {

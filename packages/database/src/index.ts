@@ -16,6 +16,7 @@ export type {
 } from "./decision-run.repository.js";
 export { createMetricRuntimePool } from "./metric-runtime-pool.js";
 export type { MetricRuntimePool } from "./metric-runtime-pool.js";
+export { createEventDecisionPool, type EventDecisionPool } from "./event-decision-pool.js";
 export {
   ensureMetricDefinitions,
   type RuntimeMetricDefinition,
