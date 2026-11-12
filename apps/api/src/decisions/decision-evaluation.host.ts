@@ -153,7 +153,7 @@ function unavailable(context: EvaluationContext, code: DecisionUnavailableCode):
     code,
   });
 }
-function stableKey(
+export function stableKey(
   context: EvaluationContext,
   ruleset: DecisionRulesetV1,
   primary: DecisionProvider,
