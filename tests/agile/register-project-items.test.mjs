@@ -260,6 +260,43 @@ test("restore rejects a changed manifest, different run or unlisted receipt", ()
   assert.equal(next.partialWrite, true);
 });
 
+test("a rejected trailing receipt cannot escape through a failed artifact into another retry", async () => {
+  const f = fixture();
+  const prior = checkpoint(1, {
+    pendingId: row.id,
+    partialWrite: true,
+    receipts: { [row.id]: f.item.id, "P04-001": "PVTI_invalid" },
+  });
+  const failed = checkpoint(2);
+  assert.throws(() => restore(prior, manifest, failed), /receipt/);
+  failed.status = "failed";
+  const artifact = JSON.parse(JSON.stringify(failed));
+  const next = checkpoint(3);
+  restore(artifact, manifest, next);
+  f.issue.items = [f.item];
+  f.input.report = next;
+  let writes = 0;
+  f.api.updateStatus = async () => {
+    writes++;
+  };
+  await assert.rejects(register(f.input), /protected/);
+  assert.equal(writes, 0);
+  assert.deepEqual(artifact.receipts, {});
+  assert.equal(artifact.pendingId, null);
+});
+
+test("rejected restore leaves the target checkpoint unchanged", () => {
+  const next = checkpoint(2),
+    before = structuredClone(next);
+  const prior = checkpoint(1, {
+    pendingId: row.id,
+    partialWrite: true,
+    receipts: { [row.id]: "PVTI_new", "P04-001": "PVTI_invalid" },
+  });
+  assert.throws(() => restore(prior, manifest, next), /receipt/);
+  assert.deepEqual(next, before);
+});
+
 test("staged read paginates issue items; add uses only exact node IDs", async () => {
   const calls = [];
   const issue = { id: row.nodeId, projectItems: null };

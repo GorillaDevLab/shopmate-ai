@@ -197,12 +197,17 @@ export function restore(prior, m, report) {
     prior.pendingId === null || m.entries.some((r) => r.id === prior.pendingId),
     "invalid pending entry",
   );
-  report.pendingId = prior.pendingId;
-  report.partialWrite = prior.pendingId !== null;
-  for (const [id, item] of Object.entries(prior.receipts)) {
-    check(m.entries.some((r) => r.id === id) && nodeId(item), "invalid add receipt");
-    report.receipts[id] = item;
-  }
+  const entries = Object.entries(prior.receipts);
+  check(
+    entries.every(([id, item]) => m.entries.some((r) => r.id === id) && nodeId(item)),
+    "invalid add receipt",
+  );
+  const recovered = Object.freeze({
+    pendingId: prior.pendingId,
+    partialWrite: prior.pendingId !== null,
+    receipts: Object.freeze(Object.fromEntries(entries)),
+  });
+  Object.assign(report, { ...recovered, receipts: { ...recovered.receipts } });
 }
 
 async function resume(e, m, report) {
