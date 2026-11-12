@@ -8,6 +8,19 @@ import { createProjectApi } from "./github-project.mjs";
 
 const repo = "GorillaDevLab/shopmate-ai";
 const owner = "hannnnnnnny";
+const reportKeys =
+  "kind run attempt apply status step partialWrite failedId appliedIds historicalAppliedIds receipts planned pendingId digest";
+const rowSteps = new Set([
+  "preflight",
+  "read",
+  "add-requested",
+  "add-acknowledged",
+  "add-readback",
+  "status-requested",
+  "status-readback",
+  "verified-backlog",
+]);
+const phaseSteps = new Set(["manifest", "restore", "project-identity", "complete"]);
 
 class RegistrationError extends Error {}
 
@@ -91,15 +104,15 @@ async function itemFor(x, r) {
 
 function state(x, r, item) {
   const receipt = x.report.receipts[r.id];
+  const completed =
+    x.report.appliedIds.includes(r.id) || x.report.historicalAppliedIds.includes(r.id);
   if (receipt) check(item?.id === receipt, "acknowledged item changed");
+  check(item || !completed, "completed item missing");
   if (!item) return "missing";
   const status = item.fieldValueByName;
   if (status?.name === "Backlog" && status.optionId === x.backlog) return "ready";
   check(
-    status === null &&
-      receipt === item.id &&
-      x.report.pendingId === r.id &&
-      !x.report.appliedIds.includes(r.id),
+    status === null && receipt === item.id && x.report.pendingId === r.id && !completed,
     "existing status protected",
   );
   return "blank";
@@ -110,6 +123,15 @@ async function step(x, r, name, partialWrite) {
   if (name === "verified-backlog" && x.report.pendingId === r.id) x.report.pendingId = null;
   Object.assign(x.report, {
     failedId: r.id,
+    step: name,
+    partialWrite: x.report.pendingId !== null,
+  });
+  await x.save(x.report);
+}
+
+async function phase(x, name) {
+  Object.assign(x.report, {
+    failedId: null,
     step: name,
     partialWrite: x.report.pendingId !== null,
   });
@@ -127,12 +149,14 @@ async function one(x, r) {
     check(nodeId(id), "add acknowledgement missing");
     x.report.receipts[r.id] = id;
     await step(x, r, "add-acknowledged", true);
+    await step(x, r, "add-readback", true);
     item = await itemFor(x, r);
     stage = state(x, r, item);
   }
   if (stage === "blank") {
     await step(x, r, "status-requested", true);
     await x.api.updateStatus(x.m.projectId, item.id, x.field, x.backlog);
+    await step(x, r, "status-readback", true);
     check(state(x, r, await itemFor(x, r)) === "ready", "status readback failed");
   }
   if (!x.report.appliedIds.includes(r.id)) x.report.appliedIds.push(r.id);
@@ -141,6 +165,7 @@ async function one(x, r) {
 
 export async function register(x) {
   validate(x.m);
+  await phase(x, "project-identity");
   const p = destination(await x.api.readProject());
   check(p.projectId === x.m.projectId, "project identity");
   x.field = p.fieldId;
@@ -181,39 +206,124 @@ function trusted(e) {
   );
 }
 
-export function restore(prior, m, report) {
+function envelope(prior, report) {
+  const reasonKey = prior && Object.hasOwn(prior, "reason") ? " reason" : "";
+  check(shape(prior, reportKeys + reasonKey), "invalid checkpoint shape");
   check(
-    prior.kind === report.kind &&
+    prior.kind === "staged-registration-v1" &&
+      prior.kind === report.kind &&
       prior.apply === true &&
+      report.apply === true &&
+      /^[a-f0-9]{64}$/.test(prior.digest) &&
       prior.digest === report.digest &&
+      typeof prior.run === "string" &&
+      /^\d+$/.test(prior.run) &&
       prior.run === report.run &&
-      prior.attempt === report.attempt - 1 &&
-      prior.receipts &&
-      typeof prior.receipts === "object" &&
-      !Array.isArray(prior.receipts),
+      Number.isSafeInteger(prior.attempt) &&
+      prior.attempt >= 1 &&
+      Number.isSafeInteger(report.attempt) &&
+      prior.attempt === report.attempt - 1,
     "untrusted resume report",
   );
+  check(["started", "failed", "registered"].includes(prior.status), "invalid checkpoint status");
   check(
-    prior.pendingId === null || m.entries.some((r) => r.id === prior.pendingId),
-    "invalid pending entry",
+    !reasonKey ||
+      (typeof prior.reason === "string" &&
+        prior.reason.length <= 256 &&
+        !/\p{Cc}/u.test(prior.reason)),
+    "invalid checkpoint reason",
   );
-  const entries = Object.entries(prior.receipts);
-  check(
-    entries.every(([id, item]) => m.entries.some((r) => r.id === id) && nodeId(item)),
-    "invalid add receipt",
-  );
-  const recovered = Object.freeze({
-    pendingId: prior.pendingId,
-    partialWrite: prior.pendingId !== null,
-    receipts: Object.freeze(Object.fromEntries(entries)),
-  });
-  Object.assign(report, { ...recovered, receipts: { ...recovered.receipts } });
 }
 
-async function resume(e, m, report) {
+function entryIds(values, m) {
+  check(
+    Array.isArray(values) &&
+      new Set(values).size === values.length &&
+      values.every((id) => m.entries.some((r) => r.id === id)),
+    "invalid completion evidence",
+  );
+  return Object.freeze([...values]);
+}
+
+function entryMap(value, m, valid) {
+  check(value && typeof value === "object" && !Array.isArray(value), "invalid checkpoint map");
+  const entries = Object.entries(value);
+  check(
+    entries.every(([id, item]) => m.entries.some((r) => r.id === id) && valid(item)),
+    "invalid add receipt or plan",
+  );
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+function checkpointPhase(prior, m, receipts) {
+  check(rowSteps.has(prior.step) || phaseSteps.has(prior.step), "invalid checkpoint step");
+  const row = m.entries.some((r) => r.id === prior.failedId);
+  check(rowSteps.has(prior.step) ? row : prior.failedId === null, "invalid checkpoint failure ID");
+  if (
+    ["add-acknowledged", "add-readback", "status-requested", "status-readback"].includes(prior.step)
+  ) {
+    check(
+      prior.failedId === prior.pendingId && nodeId(receipts[prior.pendingId]),
+      "invalid pending receipt",
+    );
+  }
+  if (prior.step === "verified-backlog")
+    check(prior.appliedIds.includes(prior.failedId), "invalid verified completion");
+  if (prior.step === "complete" || prior.status === "registered") {
+    check(
+      prior.step === "complete" &&
+        prior.pendingId === null &&
+        prior.appliedIds.length === m.entries.length,
+      "invalid completed checkpoint",
+    );
+  }
+}
+
+function recoveredEvidence(prior, m) {
+  const completed = new Set([
+    ...entryIds(prior.historicalAppliedIds, m),
+    ...entryIds(prior.appliedIds, m),
+  ]);
+  const receipts = entryMap(prior.receipts, m, nodeId);
+  entryMap(prior.planned, m, (value) => ["missing", "ready", "blank"].includes(value));
+  check(
+    (prior.pendingId === null || m.entries.some((r) => r.id === prior.pendingId)) &&
+      !completed.has(prior.pendingId) &&
+      prior.partialWrite === (prior.pendingId !== null),
+    "invalid pending entry",
+  );
+  check(
+    new Set(Object.values(receipts)).size === Object.keys(receipts).length &&
+      Object.keys(receipts).every((id) => completed.has(id) || id === prior.pendingId),
+    "invalid receipt ownership",
+  );
+  checkpointPhase(prior, m, receipts);
+  return Object.freeze({
+    pendingId: prior.pendingId,
+    partialWrite: prior.pendingId !== null,
+    receipts,
+    historicalAppliedIds: Object.freeze([...completed]),
+  });
+}
+
+export function restore(prior, m, report) {
+  validate(m);
+  envelope(prior, report);
+  const recovered = recoveredEvidence(prior, m);
+  Object.assign(report, {
+    ...recovered,
+    receipts: { ...recovered.receipts },
+    historicalAppliedIds: [...recovered.historicalAppliedIds],
+  });
+}
+
+async function resume(e, m, report, path) {
   if (+e.GITHUB_RUN_ATTEMPT === 1 || !report.apply) return;
-  const path = join(e.RUNNER_TEMP, "r1-resume", "agile-state-plan.json");
-  restore(JSON.parse(await readFile(path, "utf8")), m, report);
+  report.step = "restore";
+  await persist(path, report);
+  const bytes = await readFile(join(e.RUNNER_TEMP, "r1-resume", "agile-state-plan.json"));
+  check(bytes.length <= 32768, "checkpoint size");
+  restore(JSON.parse(bytes), m, report);
 }
 
 function destination(p) {
@@ -244,9 +354,10 @@ async function reviewedManifest(report) {
   return validate(JSON.parse(bytes));
 }
 
-async function setupPreview(api, report, path) {
+async function setupPreview(e, report, path) {
   report.step = "project-identity";
-  report.destination = destination(await api.readProject());
+  await persist(path, report);
+  report.destination = destination(await projectApi(e).readProject());
   Object.assign(report, { status: "setup-required", step: "manifest-required" });
   await persist(path, report);
 }
@@ -262,10 +373,15 @@ function newReport(e) {
     partialWrite: false,
     failedId: null,
     appliedIds: [],
+    historicalAppliedIds: [],
     receipts: {},
     planned: {},
     pendingId: null,
   };
+}
+
+function projectApi(e) {
+  return createProjectApi(createHttp(globalThis.fetch, e.PROJECT_TOKEN), "GorillaDevLab", 1, repo);
 }
 
 async function main(e) {
@@ -273,15 +389,12 @@ async function main(e) {
   const path = join(e.RUNNER_TEMP, "agile-state-plan.json");
   const report = newReport(e);
   try {
+    await persist(path, report);
     const m = await reviewedManifest(report);
-    const api = createProjectApi(
-      createHttp(globalThis.fetch, e.PROJECT_TOKEN),
-      "GorillaDevLab",
-      1,
-      repo,
-    );
-    if (!m) return await setupPreview(api, report, path);
-    await resume(e, m, report);
+    if (!m) return await setupPreview(e, report, path);
+    await resume(e, m, report, path);
+    report.step = "project-identity";
+    const api = projectApi(e);
     await register({ api, m, apply: report.apply, report, save: (r) => persist(path, r) });
   } catch (error) {
     report.reason =

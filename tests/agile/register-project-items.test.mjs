@@ -72,7 +72,13 @@ function fixture() {
     api,
     m: manifest,
     apply: true,
-    report: { appliedIds: [], receipts: {}, planned: {}, pendingId: null },
+    report: {
+      appliedIds: [],
+      historicalAppliedIds: [],
+      receipts: {},
+      planned: {},
+      pendingId: null,
+    },
     save: async () => {},
   };
   return { issue, item, api, input };
@@ -90,6 +96,7 @@ function checkpoint(attempt, extra = {}) {
     partialWrite: false,
     failedId: null,
     appliedIds: [],
+    historicalAppliedIds: [],
     receipts: {},
     planned: {},
     pendingId: null,
@@ -155,6 +162,103 @@ test("a completed A stays protected when pending B is retried from the prior art
   await assert.rejects(register(f.input), /protected/);
   assert.equal(writes, 0);
   assert.equal(f.a.item.fieldValueByName, null);
+});
+
+async function partialBatch(existing) {
+  const f = twoRows();
+  if (existing) {
+    f.a.item.fieldValueByName = { name: "Backlog", optionId: "back" };
+    f.a.issue.items = [f.a.item];
+  }
+  await assert.rejects(register(f.input), /second status failed/);
+  return f;
+}
+
+test("prior verified progress survives a Project outage and a later preflight failure", async () => {
+  for (const existing of [false, true]) {
+    const f = await partialBatch(existing),
+      next = checkpoint(2);
+    if (existing) assert.equal(f.input.report.receipts[row.id], undefined);
+    restore(JSON.parse(JSON.stringify(f.input.report)), f.input.m, next);
+    assert.deepEqual(next.historicalAppliedIds, [row.id]);
+    assert.deepEqual(next.appliedIds, []);
+    f.input.report = next;
+    f.input.api.readProject = async () => {
+      throw Error("Project unavailable");
+    };
+    await assert.rejects(register(f.input), /unavailable/);
+    assert.equal(next.step, "project-identity");
+    next.status = "failed";
+    const later = checkpoint(3);
+    restore(JSON.parse(JSON.stringify(next)), f.input.m, later);
+    f.input.report = later;
+    f.input.api.readProject = f.a.api.readProject;
+    f.a.issue.title = "Prerequisite draft: Operator edit";
+    await assert.rejects(register(f.input), /identity/);
+    assert.equal(later.step, "preflight");
+    assert.deepEqual(later.historicalAppliedIds, [row.id]);
+    assert.deepEqual(later.appliedIds, []);
+  }
+});
+
+test("historical completion is separate from successful fresh readback", async () => {
+  const f = await partialBatch(true),
+    next = checkpoint(2);
+  restore(JSON.parse(JSON.stringify(f.input.report)), f.input.m, next);
+  f.input.report = next;
+  f.input.api.updateStatus = async () => {
+    await f.b.api.updateStatus();
+  };
+  await register(f.input);
+  assert.deepEqual(next.historicalAppliedIds, [row.id]);
+  assert.deepEqual(next.appliedIds, [row.id, f.second.id]);
+});
+
+test("a previously verified existing item cannot be recreated after an operator removes it", async () => {
+  const f = await partialBatch(true),
+    next = checkpoint(2);
+  restore(JSON.parse(JSON.stringify(f.input.report)), f.input.m, next);
+  f.a.issue.items = [];
+  f.input.report = next;
+  let adds = 0;
+  f.input.api.addItem = async () => {
+    adds++;
+    return f.a.item.id;
+  };
+  await assert.rejects(register(f.input), /completed item missing/);
+  assert.equal(adds, 0);
+});
+
+const invalidProgress = [
+  { appliedIds: [row.id, row.id] },
+  { appliedIds: ["P04-001"] },
+  { historicalAppliedIds: ["P04-001"] },
+  { historicalAppliedIds: [row.id, row.id] },
+  { historicalAppliedIds: undefined },
+  { appliedIds: undefined },
+  { pendingId: row.id },
+  { partialWrite: false },
+  { attempt: 1.5 },
+  { digest: "invalid" },
+  { receipts: { [row.id]: "PVTI_new", "P03-020": "PVTI_new" } },
+  { receipts: { [row.id]: "PVTI_new" } },
+  { receipts: { "P03-020": "PVTI_second", "P04-001": "PVTI_other" } },
+  { planned: { "P04-001": "missing" } },
+  { planned: { [row.id]: "invented" } },
+  { failedId: "P04-001" },
+  { step: "invented" },
+  { status: "registered" },
+  { unexpected: true },
+];
+
+test("restored progress and pending receipt invariants are validated before any assignment", async () => {
+  const f = await partialBatch(false);
+  for (const changed of invalidProgress) {
+    const next = checkpoint(2),
+      before = structuredClone(next);
+    assert.throws(() => restore({ ...f.input.report, ...changed }, f.input.m, next));
+    assert.deepEqual(next, before);
+  }
 });
 
 test("acknowledged add survives status failure and retry", async () => {
@@ -235,15 +339,14 @@ test("unacknowledged add cannot authorize a later blank write", async () => {
 });
 
 test("restore rejects a changed manifest, different run or unlisted receipt", () => {
-  const next = {
-    kind: "staged-registration-v1",
-    apply: true,
-    digest: "hash",
-    run: "10",
-    attempt: 2,
-    receipts: {},
-  };
-  const prev = { ...next, attempt: 1, receipts: { [row.id]: "PVTI_new" }, pendingId: row.id };
+  const next = checkpoint(2);
+  const prev = checkpoint(1, {
+    receipts: { [row.id]: "PVTI_new" },
+    pendingId: row.id,
+    partialWrite: true,
+    step: "status-requested",
+    failedId: row.id,
+  });
   for (const changed of [
     { digest: "other" },
     { run: "11" },
@@ -265,6 +368,8 @@ test("a rejected trailing receipt cannot escape through a failed artifact into a
   const prior = checkpoint(1, {
     pendingId: row.id,
     partialWrite: true,
+    step: "status-requested",
+    failedId: row.id,
     receipts: { [row.id]: f.item.id, "P04-001": "PVTI_invalid" },
   });
   const failed = checkpoint(2);
@@ -291,6 +396,8 @@ test("rejected restore leaves the target checkpoint unchanged", () => {
   const prior = checkpoint(1, {
     pendingId: row.id,
     partialWrite: true,
+    step: "status-requested",
+    failedId: row.id,
     receipts: { [row.id]: "PVTI_new", "P04-001": "PVTI_invalid" },
   });
   assert.throws(() => restore(prior, manifest, next), /receipt/);
@@ -361,7 +468,8 @@ test("the acknowledged add checkpoint precedes status and survives a blocked rea
   };
   await assert.rejects(register(f.input), /identity/);
   assert.equal(writes, 0);
-  assert.equal(checkpoints.at(-1).step, "add-acknowledged");
+  assert.equal(checkpoints.at(-1).step, "add-readback");
+  assert.ok(checkpoints.some((r) => r.step === "add-acknowledged"));
   assert.equal(checkpoints.at(-1).receipts[row.id], f.item.id);
   assert.equal(checkpoints.at(-1).partialWrite, true);
 });
@@ -388,7 +496,7 @@ test("status readback conflicts retain precise partial evidence without rollback
   };
   await assert.rejects(register(f.input), /protected/);
   assert.equal(f.input.report.failedId, row.id);
-  assert.equal(f.input.report.step, "status-requested");
+  assert.equal(f.input.report.step, "status-readback");
   assert.equal(f.input.report.partialWrite, true);
   assert.deepEqual(f.input.report.appliedIds, []);
   assert.equal(f.item.fieldValueByName.name, "Ready");
@@ -540,6 +648,45 @@ async function runProjectCli(f, overrides = {}) {
   const report = JSON.parse(await readFile(join(f.directory, "agile-state-plan.json"), "utf8"));
   return { result, report };
 }
+
+async function writeManifest(f, value = manifest) {
+  const docs = join(f.directory, "docs", "engineering");
+  await mkdir(docs, { recursive: true });
+  await writeFile(join(docs, "observed-prerequisite-registration.json"), JSON.stringify(value));
+}
+
+test("CLI identifies a missing resume artifact before any Project request", async (t) => {
+  const f = await projectCli(t);
+  await writeManifest(f);
+  const { result, report } = await runProjectCli(f, {
+    REGISTRATION_APPLY: "true",
+    GITHUB_RUN_ATTEMPT: "2",
+  });
+  assert.equal(result.status, 1);
+  assert.equal(report.step, "restore");
+  assert.deepEqual(report.appliedIds, []);
+  assert.deepEqual(report.historicalAppliedIds, []);
+  await assert.rejects(readFile(f.calls), { code: "ENOENT" });
+});
+
+test("CLI attributes a destination API failure to Project identity instead of manifest", async (t) => {
+  const f = await projectCli(t, []);
+  await writeManifest(f);
+  const { result, report } = await runProjectCli(f, { REGISTRATION_APPLY: "true" });
+  assert.equal(result.status, 1);
+  assert.equal(report.step, "project-identity");
+  assert.deepEqual(report.historicalAppliedIds, []);
+  assert.ok((await readFile(f.calls, "utf8")).length > 0);
+});
+
+test("bootstrap credential setup failures are attributed to Project identity", async (t) => {
+  const f = await projectCli(t);
+  const { result, report } = await runProjectCli(f, { PROJECT_TOKEN: "" });
+  assert.equal(result.status, 1);
+  assert.equal(report.step, "project-identity");
+  assert.deepEqual(report.receipts, {});
+  await assert.rejects(readFile(f.calls), { code: "ENOENT" });
+});
 
 test("missing-manifest trusted preview records only the fixed App destination without mutations", async (t) => {
   const f = await projectCli(t);
