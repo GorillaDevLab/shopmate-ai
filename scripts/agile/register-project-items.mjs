@@ -95,7 +95,13 @@ function state(x, r, item) {
   if (!item) return "missing";
   const status = item.fieldValueByName;
   if (status?.name === "Backlog" && status.optionId === x.backlog) return "ready";
-  check(status === null && receipt === item.id, "existing status protected");
+  check(
+    status === null &&
+      receipt === item.id &&
+      x.report.pendingId === r.id &&
+      !x.report.appliedIds.includes(r.id),
+    "existing status protected",
+  );
   return "blank";
 }
 

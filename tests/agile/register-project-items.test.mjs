@@ -78,6 +78,85 @@ function fixture() {
   return { issue, item, api, input };
 }
 
+function checkpoint(attempt, extra = {}) {
+  return {
+    kind: "staged-registration-v1",
+    apply: true,
+    digest: "a".repeat(64),
+    run: "10",
+    attempt,
+    status: "started",
+    step: "manifest",
+    partialWrite: false,
+    failedId: null,
+    appliedIds: [],
+    receipts: {},
+    planned: {},
+    pendingId: null,
+    ...extra,
+  };
+}
+
+function twoRows() {
+  const a = fixture(),
+    b = fixture();
+  const second = {
+    ...row,
+    id: "P03-020",
+    number: 701,
+    nodeId: "I_second",
+    title: "Prerequisite draft: Traffic",
+  };
+  Object.assign(b.issue, { id: second.nodeId, number: second.number, title: second.title });
+  b.item.id = "PVTI_second";
+  const api = {
+    ...a.api,
+    readStagedIssue: async (id) => structuredClone(id === row.nodeId ? a.issue : b.issue),
+    addItem: async (_project, id) => (id === row.nodeId ? a.api : b.api).addItem(),
+    updateStatus: async (_project, id) => {
+      if (id === b.item.id) throw Error("second status failed");
+      await a.api.updateStatus();
+    },
+  };
+  const input = {
+    ...a.input,
+    api,
+    m: { ...manifest, entries: [row, second] },
+    report: checkpoint(1),
+  };
+  return { a, b, second, input };
+}
+
+test("completed add receipts cannot reinitialize an operator-cleared Status", async () => {
+  const f = fixture();
+  await register(f.input);
+  f.item.fieldValueByName = null;
+  let writes = 0;
+  f.api.updateStatus = async () => {
+    writes++;
+  };
+  await assert.rejects(register(f.input), /protected/);
+  assert.equal(writes, 0);
+});
+
+test("a completed A stays protected when pending B is retried from the prior artifact", async () => {
+  const f = twoRows();
+  await assert.rejects(register(f.input), /second status failed/);
+  assert.deepEqual(f.input.report.appliedIds, [row.id]);
+  assert.equal(f.input.report.pendingId, f.second.id);
+  const next = checkpoint(2);
+  restore(JSON.parse(JSON.stringify(f.input.report)), f.input.m, next);
+  f.input.report = next;
+  f.a.item.fieldValueByName = null;
+  let writes = 0;
+  f.input.api.updateStatus = async () => {
+    writes++;
+  };
+  await assert.rejects(register(f.input), /protected/);
+  assert.equal(writes, 0);
+  assert.equal(f.a.item.fieldValueByName, null);
+});
+
 test("acknowledged add survives status failure and retry", async () => {
   const f = fixture(),
     update = f.api.updateStatus;
