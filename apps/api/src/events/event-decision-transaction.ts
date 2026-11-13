@@ -107,11 +107,17 @@ export class EventDecisionTransactionOwner {
       ]);
     await scope.reauthorize();
     const result = await work(scope);
-    if (result !== null && typeof result === "object" && "ok" in result && result.ok === false)
-      throw runtimeUnavailable();
+    return this.finish(op, result);
+  }
+  private async finish<T>(op: Operation, result: T): Promise<T> {
     op.lifetime.close();
     await op.lifetime.drain();
     if (op.discard) throw runtimeUnavailable();
+    if (result !== null && typeof result === "object" && "ok" in result && result.ok === false) {
+      if (op.input.writable) throw runtimeUnavailable();
+      await op.raw.query("ROLLBACK");
+      return result;
+    }
     // This single READ COMMITTED statement is the authority linearization point, not physical COMMIT.
     await checkRuntimeAuthority(op.raw, op.input, this.clock);
     op.committing = true;
