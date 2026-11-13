@@ -1545,6 +1545,26 @@
 - `apps/api/src/decisions/decisions.module.ts`
 - `apps/api/src/events/event-decision-unit-of-work.ts`
 - `apps/api/test/event-decisions.e2e-spec.ts`
+- `apps/api/src/decisions/decision-runtime-history.ts`
+- `apps/api/src/decisions/decision-runtime-host.ts`
+- `apps/api/src/decisions/decision-runtime-policy.ts`
+- `apps/api/src/events/event-decision-runtime.service.ts`
+- `apps/api/src/events/event-decision-transaction.spec.ts`
+- `apps/api/src/events/event-decision-transaction.ts`
+- `apps/api/src/events/event-lifecycle-runtime.ts`
+- `apps/api/src/events/event-runtime-authority.ts`
+- `apps/api/src/events/event-runtime-effects.ts`
+- `apps/api/src/events/event-runtime-persistence.ts`
+- `apps/api/src/events/event-runtime-registry.spec.ts`
+- `apps/api/src/events/event-runtime-registry.ts`
+- `apps/api/src/events/event-runtime-source.ts`
+- `apps/api/src/events/event-runtime.environment.spec.ts`
+- `apps/api/src/events/event-runtime.environment.ts`
+- `apps/api/src/events/event-transaction-lifetime.spec.ts`
+- `apps/api/src/events/event-transaction-lifetime.ts`
+- `packages/database/src/event-decision-pool.ts`
+- `packages/database/test/helpers/event-decisions-api-fixture.d.mts`
+- `packages/database/test/helpers/event-decisions-api-fixture.mjs`
 
 **共享文件锁（协调集成修改）：**
 
@@ -1552,6 +1572,15 @@
 - `apps/api/vitest.tenant.config.ts`
 - `scripts/test-tenant-database.mjs`
 - `apps/api/vitest.config.ts`
+- `packages/database/src/decision-run.repository.ts`
+- `packages/database/src/index.ts`
+- `apps/api/src/decisions/decision-evaluation.host.ts`
+- `apps/api/src/decisions/decision-evaluation.host.spec.ts`
+- `packages/database/test/integration/decision-storage.test.mjs`
+- `packages/database/test/helpers/tenant-api-fixture.mjs`
+- `packages/database/test/helpers/tenant-api-fixture.d.mts`
+- `apps/api/src/decisions/decision-hard-gate.ts`
+- `apps/api/src/decisions/decision-hard-gate.spec.ts`
 
 **硬依赖：** P2-GATE, P03-018, P04-003, P04-004, P04-005, P04-006, P04-007, P04-008, P04-009, P04-010, P04-011, P04-012, P04-013, P04-014, P04-015, P04-016, P04-017, P04-018, P04-019, P04-020, P04-021, P04-022, P04-023, P04-024, P04-025, P04-026, P04-027, P09-004, P10-003, P04-028
 
@@ -1579,7 +1608,8 @@
 
 **并行分组：** `event-decision-029`
 
-**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:app-module及shared:tenant-vitest协调锁；只负责DI与事务适配，所有叶实现/表由前卡提供；本地isolatedPostgres验证。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。
+**执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 shared:app-module及shared:tenant-vitest协调锁；只负责DI与事务适配，所有叶实现/表由前卡提供；本地isolatedPostgres验证。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。 真实接线Ready要求硬闭包覆盖所有已消费叶子的integrationDependsOn；fixture-Done不能关闭runtime gate。 本卡仅完成现有授权指标源到事件、Rules、winner、audit/outbox的DI与原子事务接线；以真实同subject、同窗口、同cutoff的已观测零库存正例及健康/未知负例证明闭环。未知预测扩展保持typed unavailable；不伪造流量、成本、上架、ETA或失败事实。完整观测家族由P04-033..044提供；不增加这些卡为029硬依赖，不声称030并发证明或031/032全场景验收。
+
 
 <a id="p04-030"></a>
 
@@ -1650,6 +1680,7 @@
 
 - P2-GATE已批准的001..008因果source fixture/观测时点；P03-018/P04-029统一运行链
 - H事件/证据与Decision设计允许/禁止标签集合，oracleVersion/labelVersion只在测试侧
+- scenario-observation-v2真实因果观测与P04-044受限完整家族接线证明；所有expected/forbidden/oracle仅QA持有。
 
 **输出：**
 
@@ -1669,7 +1700,7 @@
 - `scripts/test-tenant-database.mjs`
 - `apps/api/vitest.config.ts`
 
-**硬依赖：** P2-GATE, P03-018, P04-029
+**硬依赖：** P2-GATE, P03-018, P04-029, P04-033, P04-044
 
 **实际接线依赖：** 无
 
@@ -1679,6 +1710,7 @@
 - [ ] 充足库存、新上市1-2单、缺归因/成本、涨价前窗口等forbidden事件/高置信决策均不出现
 - [ ] Day3/Day5只使用各观察点可见事实；隐藏batch真因不在输入；provider看不到expected/forbidden/oracle字段
 - [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
+- [ ] 001..008各正例与控制完整保留；008按已批准Choice A必须检出真实早期新品LOW/ESTIMATED机会，基线null/MISSING，INSUFFICIENT_DATA、NO_LLM_NEEDED、LOW_PRIORITY，建议DAILY_BRIEF且可被既有路由降为IGNORE；禁止HIGH/DEEP/SUFFICIENT/NOTIFY_NOW/ESCALATE或确认增长。授权证据视图与合格intent使用“早期新品机会，基线未成熟”。Day3/Day5与四周历史均使用原观察点封存事实；不删除008正例，不以未成熟基线制造比较增长。
 
 **测试：**
 
@@ -1695,6 +1727,7 @@
 
 **执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 本卡复用已完成源与模块，不新增generator/业务检测；helper仅test目录，8个场景共享同一固定capture/assert机制，避免重复手写实现。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
 
+
 <a id="p04-032"></a>
 
 ## P04-032：回归场景009至015与答案隔离负例
@@ -1707,6 +1740,7 @@
 
 - P2-GATE已批准009..015因果fixture与预期清单；P04-029/030真实event/decision/outbox链
 - P04-031 test-only benchmark helper，same-weekday/hour baseline与版本化允许/禁止标签
+- P04-044真实受限接线及scenario-observation-v2封存时序；P04-031仅提供QA helper。
 
 **输出：**
 
@@ -1726,7 +1760,7 @@
 - `scripts/test-tenant-database.mjs`
 - `apps/api/vitest.config.ts`
 
-**硬依赖：** P2-GATE, P04-029, P04-030, P04-031
+**硬依赖：** P2-GATE, P04-029, P04-030, P04-031, P04-044
 
 **实际接线依赖：** 无
 
@@ -1736,6 +1770,7 @@
 - [ ] 013同weekday/hour正常波动禁止无依据HIGH/REVENUE_DROP；014低量禁止SUFFICIENT与DEEP填数据；配套真实同窗营收下降正例必须检出，证明负例不是恒不报警
 - [ ] 015同一窗口多问题排序稳定并满足通知聚合限额，重复推进不重复intent；修改/删除expected答案不改生产provider输入或输出
 - [ ] pnpm test:tenant仅用isolatedPostgres新建/stop disposable数据库及runner生成TEST_DATABASE_URL/runtime DATABASE_URL；清除继承开发DATABASE_URL，目标集非空且每个注册目标执行>0、0 skipped，零选择或skip失败
+- [ ] 完整保留009..015正例/控制、真实营收下降twin与修改/删除expected不改变provider输入输出的隔离证明。009为真实D3中断失败且D5已成功恢复；010通过十次真实saved-page投递及新旧版本乱序。015库存售罄、异常折扣、实际5倍花费三帧必须同Day5 W=[T-24h,T)、visibleAt、generation与joined revision，三者均eligible且该同窗至少两个不同won candidates；验证cap、rank、唯一合格intent及重放幂等。另单独断言成熟退款C=[T0,T0+24h)、96h lag，不计入上述同窗winner数量。
 
 **测试：**
 
@@ -1751,3 +1786,782 @@
 **并行分组：** `event-decision-032`
 
 **执行边界：** 新路径均为拟新增；工时包含实现、聚焦验证及PR准备。函数/测试回调/SQL体<40行，TS禁any；独立commit与feat/add/fix分支，PR审查、最新CI及main合并后Done。 仅QA expected数据，不实现Jev benchmark网络调用；本卡不新增Phase7提案功能，015仅证明事件与delivery-intent幂等，提案幂等由后续阶段负责。 必跑目标注册属于本卡，不留给未来runner任务；测试database helper只用runner URL，不允许直跑套用开发DATABASE_URL。
+
+<a id="p04-033"></a>
+
+## P04-033：冻结因果观测窗口与捕获助手
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** qa · **类型：** verification · **优先级：** P0
+
+**契约：** scenario-observation-v2 causal manifest only
+
+**输入：**
+
+- P03-030
+- P04-041
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Day3 hash replay after Day5, no hidden future refund/notice/listing, actual cohort/sample/aged inventory preconditions checked without writing metric/event answers.
+- Check actual measured, complete same-W frame prerequisites for all three 015 issues, paired seasonal/twin windows, genuine launch absence before T0, and original observation watermarks for mature refund baselines.
+- Explicitly register required restricted DB/API target(s) under shared runner/config locks: apps/api/test/observed-scenario-cutoff.e2e-spec.ts. API targets enter tenant include and default exclude; runner explicitly selects DB targets. Every registered target executes positive assertion counts with zero skipped/todo/pending; use only isolatedPostgres runner credentials, never inherited development DATABASE_URL.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/test/fixtures/events/scenario-observation-v2.ts`
+- `apps/api/test/helpers/observed-scenario-capture.ts`
+- `apps/api/test/observed-scenario-cutoff.e2e-spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
+- `scripts/test-tenant-database.mjs`
+
+**硬依赖：** P03-030, P04-041
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Freeze T0, Day3+72h/Day5+120h, per-family exact periods, genuine 120-day warmup/remaining old lots and four weekly same-weekday/hour baseline captures.
+- [ ] Freeze weekly comparisons by shifting both cohort and visibleAt by 7/14/21/28d. For C=[T0,T0+24h), Day3/5 end lags are 48h/96h. Stage historical captures in wall-independent chronological business-clock order before advancement. 015 counts same exact Day5 W stockout/discount/spend, with mature C refunds independently required.
+- [ ] Helper advances real causal source/commits/captures only, with immutable version pins; expected/forbidden answers remain in later 031/032.
+- [ ] 009 interruption includes the actual D3 try during [T0+48h,T0+72h], then ends before a successful retry by D5. The 010 policy requires ten real deliveries by D5 and distinct old/new versions.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+- [ ] T0 is midnight Asia/Shanghai at intervention/real launch; Day3=T0+72h, Day5=T0+120h. At each T capture and compute before advancing. W=[T-24h,T), C=[T0,T0+24h); campaigns use full local days. Historical weekly period AND visibleAt shift by 7/14/21/28d; historical freshness is assessed at original observation and then age <=35d. Warmup starts T0-120d; 008 SKU does not exist before T0.
+- [ ] 001/007: W, lag 0, observed stockout and announced supplier-delay positives by D5 with healthy controls. 002: C with D3=48h and D5=96h end lag and weekly REFUND_COHORT_ORDER_RATE at identical lag. 003: W/0h, weekly CONTRIBUTION and actual median-matching comparator. 004: full local day W/0h, weekly ROAS and AD_SPEND, both D5 signals. 005: W/0h weekly CONVERSION_RATE with separately captured pre-price negative.
+- [ ] 006: genuine surviving >=90d lots, listed >=30d, >=20 units, >90d demand cover; exactly 90d cover is negative. 008: required D5 qualified LOW opportunity and D3 age/volume/coverage branches with absent prelaunch baseline. 009: real D3 failed job during [T0+48h,T0+72h], actual successful recovery before D5. 010: ten actual saved-page delivery attempts and old/new reordering by D5.
+- [ ] 011 discount and 012 paid/pending cancellation use W/0h, with weekly CANCELLED_ORDER_RATE and pending-not-refund control. 013 uses weekly PAID_REVENUE for normal weekday/hour seasonal negative AND true revenue-decline twin. 014 retains six-order/day new-store/unknown controls, only real available history, no SUFFICIENT/DEEP/fabricated baseline.
+- [ ] 015: same exact D5 W, visibleAt, binding/generation and joined revision for observed stockout, unusual discount and measured actual 5x spend spike; all three eligible frames and >=2 distinct won candidates in this one W, stable ordering/cap/intents/replay. Separately require mature C refunds with exact 96h lag; exclude refunds from the same-window count.
+
+**测试：**
+
+- pnpm --filter @shopmate/api typecheck
+- pnpm test:tenant
+
+**不包含：**
+
+- Expected labels, final scenario acceptance, production detector or generator changes
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-033`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/qa-foundation.
+
+<a id="p04-034"></a>
+
+## P04-034：按固定策略检测早期新品机会
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** EarlyLaunchEvidenceV1 strict subset / LaunchOpportunityPolicyV1 / event-policy-observed-v2
+
+**输入：**
+
+- P03-019
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Valid measured Day3/5-shaped launch, 1-2 orders, unknown traffic, prelisting window, missing baseline, mature branch and old-policy regression; enforce event candidate LOW and data quality ESTIMATED.
+
+**独占文件（新路径为计划创建）：**
+
+- `packages/contracts/src/events/early-launch.schema.ts`
+- `apps/api/src/events/early-launch-policy.ts`
+- `apps/api/src/events/detectors/early-launch.detector.ts`
+- `apps/api/src/events/detectors/early-launch.detector.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `packages/contracts/src/index.ts`
+
+**硬依赖：** P03-019
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Named typed branch uses existing real fields and null/MISSING baseline, pinned separate mode manifest; no fake four-week history or undeclared v1 evidence fields.
+- [ ] Age 24..120h, complete postlisting 24h, >=20 units/paid orders, >=100 visitors, >=10% conversion and complete coverage. LOW/ESTIMATED, INSUFFICIENT_DATA, no DEEP/HIGH, qualified early-opportunity text.
+- [ ] Delegate mature comparisons to unchanged four-week ProductBreakoutDetector. Persist event rulePolicyVersion through existing envelope. Decision enforcement and formatting are owned by P04-042/043.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+- [ ] Approved Choice A only: existing PRODUCT_BREAKOUT type is compatibility detail, never confirmed-growth wording. EarlyLaunchEvidenceV1 has real listedAt, complete post-listing 24h window, listing age 24..120h, >=20 paid orders AND units, >=100 measured visitors, conversion >=1000bps, coverage 10000bps, observation age <=1h, honestly null/MISSING baseline. Exact qualified read wording is “早期新品机会，基线未成熟”. Optional missing margin remains explicit; no fabricated RobustBaselineV1 or undeclared v1 fields.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/detectors/early-launch.detector.spec.ts
+- pnpm --filter @shopmate/contracts typecheck
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- New schemaVersion2 storage, fabricated baselines, UI redesign, final 008 acceptance
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-034`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/policy.
+
+<a id="p04-035"></a>
+
+## P04-035：组装不可变财务比较事件帧
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ObservedProfitEventFrameBuilder
+
+**输入：**
+
+- P03-030
+- P03-033
+- P03-034
+- P04-041
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Exact period/subject/definition/revision match, component sum+residual, missing cost, late return and incompatible comparison rejected.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/observed-profit-frame.ts`
+- `apps/api/src/events/observed-profit-frame.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P03-030, P03-033, P03-034, P04-041
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Build PROFIT_MARGIN_DROP evidence from current/baseline G4 metrics and persisted decomposition; source references point to exact joined revision with reachable raw receipts.
+- [ ] Retain cost coverage/null reasons, buyer shipping and component residual reconciliation; missing data cannot yield high-confidence profitable/negative claims.
+- [ ] Read P03-033 immutable companion by scalar snapshot/hash, check current contribution minus actual robust median equals companion delta, and require real matching baseline capture. A median between observed periods produces typed unavailable attribution.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/observed-profit-frame.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- Detector formula changes, event persistence, decision or outbox effects
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-035`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/adapter.
+
+<a id="p04-036"></a>
+
+## P04-036：组装实测营销与转换事件帧
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ObservedMarketingFrameBuilder / ObservedConversionFrameBuilder
+
+**输入：**
+
+- P03-030
+- P04-041
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Exact campaign/SKU context, complete daily versus partial coverage, pre-price negative, absent visitors, zero denominators and missing attribution.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/observed-marketing-frame.ts`
+- `apps/api/src/events/observed-conversion-frame.ts`
+- `apps/api/src/events/observed-marketing-frame.spec.ts`
+- `apps/api/src/events/observed-conversion-frame.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P03-030, P04-041
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Campaign entity ROAS/spend frames use actual full-day measured attribution and aligned baseline; SKU conversion uses exact selected visitors/paid orders.
+- [ ] Price correlation references observed price edge, never hidden intervention; pre-effective windows and unknown attribution remain unavailable/insufficient.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/observed-marketing-frame.spec.ts
+- pnpm --filter @shopmate/api test src/events/observed-conversion-frame.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- Changing attribution or conversion thresholds, causal claims about price, runtime effects
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-036`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/adapter.
+
+<a id="p04-037"></a>
+
+## P04-037：组装库存、滞销与新品事件帧
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ObservedInventoryFrameBuilder / ObservedLaunchFrameBuilder
+
+**输入：**
+
+- P03-030
+- P04-034
+- P04-041
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Zero/sufficient/unknown inventory, delayed versus healthy known ETA, missing notice, genuine 90-day lots versus new receipt, early listing and wrong-subject metrics.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/observed-inventory-frame.ts`
+- `apps/api/src/events/observed-launch-frame.ts`
+- `apps/api/src/events/observed-inventory-frame.spec.ts`
+- `apps/api/src/events/observed-launch-frame.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P03-030, P04-034, P04-041
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Forecast stockout uses current available, exact SKU sales and announced supplier notice; delay is not inferred from future receipt.
+- [ ] Stagnation uses conserved remaining-lot age and actual listing age; launch consumes authentic listing/SKU sales/conversion with explicitly selected early/mature policy.
+- [ ] Observed zero-stock remains independently usable when forecast extensions are unknown.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/observed-inventory-frame.spec.ts
+- pnpm --filter @shopmate/api test src/events/observed-launch-frame.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- Supply model generation, changing mature detector thresholds, event persistence
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-037`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/adapter.
+
+<a id="p04-038"></a>
+
+## P04-038：组装退款、取消、折扣与营收事件帧
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ObservedCommerceFrameBuilder and normalized aggregate baseline references
+
+**输入：**
+
+- P03-030
+- P04-041
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Mature/immature refund cohort, pending cancellation without refund, same-SKU concentration, paid/discount identity, normal seasonal and true decline observations.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/observed-commerce-frame.ts`
+- `apps/api/src/events/observed-commerce-observations.ts`
+- `apps/api/src/events/observed-commerce-frame.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- 无
+
+**硬依赖：** P03-030, P04-041
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Exact persisted order/refund payment state yields cohort concentration, cancellation and discount aggregates; unknown reasons remain UNKNOWN.
+- [ ] Revenue uses authentic aligned snapshot history; normalized aggregates retain joined revision/time/evidence provenance accepted by BaselinePort.
+- [ ] Separate runs for distinct cohort/observation windows, with no store-to-SKU relabel or discount double deduction.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/observed-commerce-frame.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- Generator changes, new detector thresholds, notification routing
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-038`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/adapter.
+
+<a id="p04-039"></a>
+
+## P04-039：无成功数据包时评估真实同步失败
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** ObservedSyncFrameBuilder / AuthorizedEmptyMetricRead
+
+**输入：**
+
+- P03-026
+- P03-030
+- P04-041
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Failed initial job with absent four streams, stale sales suppression, subsequent recovery/replay, revoked reader and forbidden fake failure-rule input.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/observed-sync-frame.ts`
+- `apps/api/src/events/observed-sync-frame.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/src/events/event-evaluation.service.ts`
+
+**硬依赖：** P03-026, P03-030, P04-041
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Build CONNECTION SYNC_FAILURE evidence only from sealed job-observation history; measures=[] still revalidates current membership/full binding/generation.
+- [ ] Empty authorized metric read can succeed without a commerce bundle; nonempty read failures never become empty successful results.
+- [ ] Source-quality blocking suppresses stale-sales REVENUE_DROP and recovery uses only facts visible at its own cutoff.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/observed-sync-frame.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- Global read bypass, synthetic stale metric snapshots, notification delivery
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-039`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/adapter.
+
+<a id="p04-040"></a>
+
+## P04-040：接线完整观测事件注册表
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** integration · **类型：** integration · **优先级：** P0
+
+**契约：** ObservedEventFrameRegistry / pinned policy and source selection to existing evaluation UoW
+
+**输入：**
+
+- P04-029
+- P04-033
+- P04-034
+- P04-035
+- P04-036
+- P04-037
+- P04-038
+- P04-039
+- P04-042
+- P04-043
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Composition test: each family registers exactly once with exact policy/version; source-health runs first, missing capability fails safely, same trusted UoW is invoked. Restricted cross-family smoke and effects belong to P04-044.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/observed-event-frame-registry.ts`
+- `apps/api/src/events/observed-event-frame-registry.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/src/events/events.module.ts`
+- `apps/api/src/decisions/decisions.module.ts`
+- `apps/api/src/app.module.ts`
+
+**硬依赖：** P04-029, P04-033, P04-034, P04-035, P04-036, P04-037, P04-038, P04-039, P04-042, P04-043
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Opt-in versioned registry assembles already-tested frames, captures and computes exact metric jobs, then calls existing EventEvaluationService and P04-029 transaction/winner/audit/outbox.
+- [ ] Source health precedes affected business signals. Invoke P04-042 assurance/rules gates and expose P04-043 authenticated read formatter for qualified early launches.
+- [ ] No expected/oracle fields reach providers, no test-only policy override, no effect outside actual won decision; absent observed capability safely unavailable.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/observed-event-frame-registry.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- New causal sources/calculators, rewrites of 029 atomicity, 030 contention suite, claiming 031/032 acceptance
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-040`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/integration.
+
+<a id="p04-041"></a>
+
+## P04-041：冻结历史选择与稳健基线注册
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** robust-baseline-observed-v2 / selectObservedBaselineHistory
+
+**输入：**
+
+- P03-030
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Four full periods yield 100% slot coverage; missing or mismatched lag, stale original data, >35d age, wrong pin and old-policy regression.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/observed-baseline-policy.ts`
+- `apps/api/src/events/observed-baseline-history.ts`
+- `apps/api/src/events/observed-baseline-history.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/src/events/event-rule-policy.ts`
+- `apps/api/src/events/robust-baseline.ts`
+
+**硬依赖：** P03-030
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Register a sibling BaselinePort using minimumSamples=4, lookbackWeeks=4, maximumAgeSeconds=3024000, while current freshness <=3600 seconds. Keep event-policy-v1 and robust-baseline-v1 identical.
+- [ ] Require four original authorized captures at offsets 7/14/21/28d. Shift both period and observation instant by same offset. Validate original freshness, then current historical age. Serialize pinned measure/subject/proofs.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/observed-baseline-history.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- Rewriting robust median algorithm or supplying prelaunch history
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-041`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/baseline.
+
+<a id="p04-042"></a>
+
+## P04-042：执行可信早期新品决策门槛
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** Verified early-launch event/evidence plus immutable policy assurance
+
+**输入：**
+
+- P04-034
+- P04-029
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Mature weekly path unchanged; forged sanitized pin, stale/wrong evidence or cross-tenant rejects; stage-wise labels and replay verified.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/decisions/early-launch-decision-policy.ts`
+- `apps/api/src/decisions/early-launch-decision-policy.spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/src/decisions/rules-evidence-gate.ts`
+- `apps/api/src/decisions/rules-decision.provider.ts`
+- `apps/api/src/decisions/decision-ruleset.ts`
+- `apps/api/src/decisions/decision-hard-gate.ts`
+- `apps/api/src/decisions/decision-input-sanitizer.ts`
+- `apps/api/src/decisions/decisions.module.ts`
+
+**硬依赖：** P04-034, P04-029
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Select branch from trusted persisted event rulePolicyVersion + ruleset + exact current evidence and per-call assurance. Sanitizer equality alone cannot elect a policy. Restrict comparative count-gate bypass to that verified early branch.
+- [ ] Persist normal decision labels: LOW severity/LOW_PRIORITY, INSUFFICIENT_DATA, NO_LLM_NEEDED, suggested DAILY_BRIEF. Existing routing may demote to IGNORE. Block HIGH/CRITICAL, NOTIFY_NOW, ESCALATE, DEEP and SUFFICIENT.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/decisions/early-launch-decision-policy.spec.ts
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- Stored summary text, new evidence payload or route effects
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-042`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/decisions.
+
+<a id="p04-043"></a>
+
+## P04-043：授权展示历史证据的新品限定文案
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** backend · **类型：** component · **优先级：** P0
+
+**契约：** Authenticated deterministic policy-aware observation display
+
+**输入：**
+
+- P04-042
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Authorized current/historical reads display the early qualification, mature v1 retains existing text, unrecognized/mixed provenance cannot display early/confirmed growth, denied tenant has no content.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/src/events/early-launch-display.ts`
+- `apps/api/src/events/early-launch-display.spec.ts`
+- `packages/contracts/src/events/event-assessment-view.schema.ts`
+- `apps/api/src/events/event-assessment.controller.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/src/events/event-query.service.ts`
+- `packages/contracts/src/events/event.schema.ts`
+- `apps/api/src/events/events.module.ts`
+- `apps/api/src/events/event-decision-unit-of-work.ts`
+- `packages/contracts/src/index.ts`
+
+**硬依赖：** P04-042
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Provide a versioned authenticated read-view formatter using stored event rulePolicyVersion, exact linked immutable evidence and persisted decision ruleset. Return the approved qualified wording on the response view. Do not add a persisted summary string.
+- [ ] Expose strict EventAssessmentViewV1 {mode, displayLabel, evidenceReference, rulePolicyVersion} through authenticated GET on both store-route aliases at /events/:eventId/evidence/:evidenceId/assessment, using exact version/hash/definition query and existing ownership checks. Render only a mode verified against the pinned historical decision/ruleset/evidence. The same deterministic formatter prepares the summary for an eligible IN_APP winner; existing event/decision envelopes remain untouched.
+- [ ] EARLY_LAUNCH displayLabel is the exact approved qualified text in the written spec. For obsolete/unknown policy provenance return typed unavailable; no guessed display mode.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+- [ ] EARLY_LAUNCH displayLabel must equal “早期新品机会，基线未成熟”. Preserve PRODUCT_BREAKOUT compatibility without presenting its internal name as confirmed growth; no persisted summary column.
+
+**测试：**
+
+- pnpm --filter @shopmate/api test src/events/early-launch-display.spec.ts
+- pnpm --filter @shopmate/contracts typecheck
+- pnpm --filter @shopmate/api typecheck
+
+**不包含：**
+
+- P7/P8/UI redesign or storing generated text
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-043`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/read.
+
+<a id="p04-044"></a>
+
+## P04-044：证明观测事件进入真实受限事务
+
+**工时：** 4h（实现 + 定向验证 + PR 准备） · **轨道：** qa · **类型：** verification · **优先级：** P0
+
+**契约：** Observed runtime DI and effect linkage smoke
+
+**输入：**
+
+- P04-040
+- P04-033
+- P04-043
+- Frozen written observed-fact design and contract-owned producer/reader ports; actual authorized immutable source facts, scoped grants and publication/page receipts; no runtime metric answer injection.
+
+**输出：**
+
+- Targeted tenant E2E with explicit positive counts and no skips; 031/032 retain full Day3/5 positives/controls, contention remains 030.
+- Explicitly register required restricted DB/API target(s) under shared runner/config locks: apps/api/test/observed-event-adapters.e2e-spec.ts. API targets enter tenant include and default exclude; runner explicitly selects DB targets. Every registered target executes positive assertion counts with zero skipped/todo/pending; use only isolatedPostgres runner credentials, never inherited development DATABASE_URL.
+
+**独占文件（新路径为计划创建）：**
+
+- `apps/api/test/observed-event-adapters.e2e-spec.ts`
+
+**共享文件锁（协调集成修改）：**
+
+- `apps/api/vitest.tenant.config.ts`
+- `apps/api/vitest.config.ts`
+- `scripts/test-tenant-database.mjs`
+
+**硬依赖：** P04-040, P04-033, P04-043
+
+**实际接线依赖：** 无
+
+**验收：**
+
+- [ ] Use real restricted source publication/receipts, defined metrics, actor-bound store and existing event decision UoW; cover each adapter family and initial sync failure through DI.
+- [ ] Verify exact event/evidence/snapshot binding, qualified launch labels/read display, winner and eligible intent replay. No QA answers enter provider.
+- [ ] Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.
+- [ ] Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.
+- [ ] Critical paths have focused meaningful tests; source facts use authentic restricted writes with scoped service grants, publication/page receipts and authorized reads, never metric answer injection.
+- [ ] DB proof only isolatedPostgres runner-issued credentials, explicit target registration under locks, nonzero assertion counts and zero skipped/todo/pending.
+- [ ] One commit per independently verified change and one card PR. Independent review, latest-head CI and actual main merge precede Done. Existing authorized automatic deployment continues after reviewed green merges. Exclude manual production operations, credentials/grants changes, manual online migrations, real platform/LLM calls and external P07/P08 work.
+- [ ] Use DB SECURITY_UTC clock_timestamp() for grants, expiry, leases and deadlines; business time selects source visibility only. Under READ COMMITTED, lock generation, grant and membership in fixed order, repeat authority/expiry checks at the final write or capture, then commit. Revocation/reset obtains conflicting locks. Test both orderings and expiry during lock wait on two connections.
+- [ ] Observed facts retain full ConnectorBinding/generation/domain/subject, immutable source/producer versions, sequence/priorVersion, UTC millisecond occurredAt/observedAt, payloadHash and DB-recordedAt/receipt linkage. Windows are half-open, Asia/Shanghai/CNY; money is safe integer minor CNY, ratios integer basis points, nullable unknown has a quality reason and complete measured zero requires receipt proof. No customer/session identifiers, raw provider text, scenario IDs, hidden batch causes, expected/forbidden labels or failure-rule configuration enter runtime observations/providers.
+- [ ] Publication authority is server-certified model/config/hash, scoped live grant, binding/generation/domain, business clock and contiguous receipt coverage; worker claims cannot certify completeness. First capture uses authoritative current business clock; historic replay requires a sealed capture and its original receipt set. Future or late facts cannot rewrite earlier visibility. SECURITY_UTC remains independent of adjustable business time.
+- [ ] Retain typed failures: OVERFLOW, INVALID_INPUT, CONFLICT, VERSION_MISMATCH, NOT_FOUND/FORBIDDEN and SOURCE_UNAVAILABLE; bounded errors expose no SQL, payload or secrets. Current authorization includes membership and connection/full binding/generation; GUCs alone confer no authority.
+
+**测试：**
+
+- pnpm --filter @shopmate/api typecheck
+- pnpm test:tenant
+
+**不包含：**
+
+- Implementation changes or claiming final scenario acceptance
+
+**风险：** Receipt/authority/quality errors must fail closed; missing observations cannot become verified zero or invented history. Four-hour ceiling requires split before claim if exceeded.
+
+**并行分组：** `event-decision-044`
+
+**执行边界：** Approved written Choice A on 2026-11-11 is release evidence outside the dependency graph; no USER_* gate. Four hours is a planning ceiling including proof and PR preparation, not observed duration; split before claim if the seam cannot fit. The frozen written design and JSON at docs/superpowers/specs/2026-11-11-observed-fact-prerequisites-design.md and 2026-11-11-observed-fact-prerequisite-cards.json remain normative. Preserve p2-normalized-v1, metrics-g4-v1, mock-source-v1/v2, event-policy-v1 and robust-baseline-v1 meaning/history; additive observed-facts-v1, p2-observed-v1:<sha256>, metrics-g4-observed-v2, mock-business-observed-v1 and mock-source-v3 only. New version selection is explicitly provisioned opt-in; rollback disables new selection while retaining immutable history. Missing capabilities/configuration fail safely unavailable. Native Issue sole assignee hannnnnnnny records reservation only; no catalog owner/status fields and no active claim. 触及这些共享路径必须先取得锁（仅条件性全局规则，不表示本卡计划编辑或预占）：packages/contracts/src/index.ts, packages/database/src/index.ts, apps/api/vitest.tenant.config.ts, apps/api/vitest.config.ts, scripts/test-tenant-database.mjs。保留所有既有runner/config目标。 Original planning track: P4/integration-proof.

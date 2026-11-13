@@ -23,6 +23,11 @@ const arrayFields =
   "consumes produces files sharedFiles dependsOn integrationDependsOn acceptance tests outOfScope".split(
     " ",
   );
+const section = (card) =>
+  read(`${pool}phase-${String(card.phase).padStart(2, "0")}.md`)
+    .split(`## ${card.id}：`)[1]
+    ?.split(/\n<a id=/)[0];
+
 // Hashes freeze reviewed data without copying the 228-card historical fixture into tests.
 test("the real catalog contains the approved coherent 30-card DAG and capped totals", () => {
   assert.equal(cards.length, 258);
@@ -134,6 +139,77 @@ test("consumer full-family hard gates preserve separate bounded 029 and contenti
     "P04-031",
     "P04-044",
   ]);
+});
+
+const bullets = (text, heading) =>
+  text
+    .split(`**${heading}：**`)[1]
+    ?.split(/\n\*\*/)[0]
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.replaceAll("\\*", "*"));
+
+function assertDocumentFields(card, text) {
+  for (const [field, heading] of [
+    ["consumes", "输入"],
+    ["produces", "输出"],
+    ["acceptance", "验收"],
+    ["tests", "测试"],
+    ["outOfScope", "不包含"],
+  ]) {
+    const prefix = field === "acceptance" ? "- [ ] " : "- ";
+    assert.deepEqual(
+      bullets(text, heading),
+      card[field].map((value) => prefix + value),
+      `${card.id}.${field}`,
+    );
+  }
+  for (const [field, heading] of [
+    ["files", "独占文件（新路径为计划创建）"],
+    ["sharedFiles", "共享文件锁（协调集成修改）"],
+  ]) {
+    assert.deepEqual(
+      bullets(text, heading),
+      card[field].length ? card[field].map((value) => `- \`${value}\``) : ["- 无"],
+      `${card.id}.${field}`,
+    );
+  }
+}
+
+test("phase documentation retains every approved field and exact shared-file lists", () => {
+  for (const card of cards.filter(
+    (entry) => ids.includes(entry.id) || consumers.includes(entry.id),
+  )) {
+    const text = section(card);
+    assert.ok(text, card.id);
+    assert.ok(text.includes(`**契约：** ${card.contract}`), card.id);
+    assertDocumentFields(card, text);
+    assert.ok(text.includes(`**硬依赖：** ${card.dependsOn.join(", ") || "无"}`));
+    assert.ok(text.includes(`**实际接线依赖：** ${card.integrationDependsOn.join(", ") || "无"}`));
+    assert.ok(text.includes(`**执行边界：** ${card.note}`));
+  }
+});
+
+test("the complete README index and documented counts match the catalog", () => {
+  const index = read(`${pool}README.md`);
+  const rows = index.split("\n").filter((line) => /^\| \[P\d{2}-\d{3}\]/.test(line));
+  assert.equal(rows.length, cards.length);
+  for (const card of cards) {
+    const row = rows.find((line) => line.startsWith(`| [${card.id}]`));
+    assert.ok(row, card.id);
+    const cells = row
+      .split("|")
+      .slice(1, -1)
+      .map((value) => value.trim());
+    assert.equal(cells[1], card.title);
+    assert.equal(cells[2], `${card.hours}h`);
+    assert.equal(cells[3], card.dependsOn.join(", ") || "无");
+  }
+  assert.match(index, /258.*848/);
+  assert.match(index, /初始 Ready 仅表示无硬依赖/);
+  assert.match(read("docs/engineering/agile-state-sync.md"), /258/);
+  assert.match(read("docs/superpowers/plans/2026-10-04-p3-p13-agile-task-pool.md"), /258.*848/);
 });
 
 // Freeze the coordinated consumer footprint and approved requirement text independently.

@@ -8,6 +8,14 @@
 
 **Tech Stack:** TypeScript、Zod/contracts、NestJS、Next.js/React、Prisma/PostgreSQL、Vitest、Playwright、GitHub Issues/Projects。
 
+## Approved observed-fact registration boundary
+
+2026-11-11 用户书面批准 Choice A 的 30 张观测事实前置卡及 R1/R2/R3。规范目录现为 258 张 / 848 cap-hours；P3 为 36 张 / 129h，P4 为 44 张 / 151h，其余阶段不变。四小时为包含聚焦证明与 PR 准备的规划上限，超过边界须领取前拆分。
+
+R1 已在现有可信 main App 工作流实现固定身份清单注册；R2 维护目录、文档及经真实 readback 核验的清单；R3 独占协调激活和全量 258 对 Issue/Project 验证。三个包不进入本目录或 DAG。书面批准不是 USER_* 图节点；元数据登记不代表业务源码实现、依赖已完成或自动领取。30 张新卡仍为拟议、未原生注册状态，Harry sole assignee 仅预留，现有负责人和 active 状态保持。P04-029 的既有有界 DI/事务接线及共享锁与全家族后续卡分开；031/032 的真实全场景验收保留 Choice A 008 与 015 同窗证明。
+
+仅使用现有 App、权限与可信 main 固定清单；先审查 staged Issue 正文并重查实时身份唯一性，再创建无池标签的原生预留 Issues，逐项 readback 实际 number/nodeId/title/repository/owner/body 后封存清单。R1 注册并验证 Backlog 后，由 R3 协调 title/label/body 激活。普通自动事件在一致后可立即 apply，协调窗口不能视作原子事务；不完整映射全量 fail closed。激活前保存旧 228 对完整快照，激活后保存全 258 对、Status option/owner/依赖和零未解释变更的 preview。既有 reviewed green merge 后授权的自动部署策略保持；不新增手工线上操作。
+
 ## Global Constraints
 
 - 每卡工时为实现、定向验证、PR 准备的人工估算，取值 1、2、3、4 小时，不是交付时间承诺。
@@ -94,3 +102,5 @@
 **Next:** 先完成 P2 并记录 P2-GATE 验收；P3 onward 由两位开发者领取，本代理不自动认领。
 
 **Commit messages:** `docs(plan): define P3-P13 agile claim and delivery workflow`; `docs(plan): add bounded phase task cards and dependency map`。
+
+本组 30 张卡已获用户批准由 Harry（hannnnnnnny）唯一预留。Harry 可在真实 Ready、硬依赖/实际接线闭包已核验、文件锁无冲突后启动自己预留的卡；同一时间最多一张 active catalog 卡。预留不自动激活，其他已有负责人和 active 状态保持。每个独立可验证改动单独 commit；独立审查、最新 head CI 与实际 main 合并后才可 Done。既有 reviewed green merge 后获授权的自动部署继续；合并不等于已部署，不新增手工生产操作、凭据/权限、线上迁移或真实供应商/LLM 调用。
