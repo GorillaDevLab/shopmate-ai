@@ -50,3 +50,15 @@ test("rerun evidence artifacts use a unique run attempt name", async () => {
   const yaml = await read(".github/workflows/agile-state-sync.yml");
   assert.ok(yaml.includes("name: agile-state-plan-${{ github.run_id }}-${{ github.run_attempt }}"));
 });
+
+test("registration is manual and normal reconciliation keeps its guards", async () => {
+  const y = await read(".github/workflows/agile-state-sync.yml");
+  assert.match(y, /register_prerequisites:/);
+  assert.match(y, /inputs\.register_prerequisites != true && inputs\.apply != true/);
+  assert.match(
+    y,
+    /github\.event_name != 'workflow_dispatch' \|\| \(inputs\.register_prerequisites != true && inputs\.apply == true\)/,
+  );
+  assert.match(y, /gh run download "\$GITHUB_RUN_ID"/);
+  assert.match(y, /node scripts\/agile\/register-project-items\.mjs/);
+});
