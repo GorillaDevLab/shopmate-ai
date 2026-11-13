@@ -293,6 +293,93 @@ it("binds immutable reference versions, evidence facts, and server-selected poli
 function issue(code: string, field = "sales") {
   return { code, field, evidenceIds: [source.id] };
 }
+function observedZeroWithForecastLimits(patch: object = {}): EventEvidenceV1 {
+  return evidenceFixture({
+    dataStatus: "INSUFFICIENT",
+    sampleSize: 0,
+    issues: [
+      issue("INVENTORY_UNKNOWN", "facts.estimatedHoursRemaining"),
+      issue("PAYMENT_UNKNOWN", "facts.salesUnits"),
+      issue("LEAD_TIME_MISSING", "facts.supplierLeadTimeHours"),
+    ],
+    facts: {
+      ...facts,
+      availableUnits: 0,
+      salesUnits: null,
+      estimatedHoursRemaining: null,
+      supplierLeadTimeHours: null,
+    },
+    ...patch,
+  });
+}
+it("preserves observed zero-stock authority without laundering unknown forecast evidence", () => {
+  const evidence = observedZeroWithForecastLimits();
+  const before = structuredClone(evidence);
+  const context = contextFixture(evidence, "LOW");
+  const request = requestFixture(context, {
+    reasonCodes: ["MISSING_DATA"],
+    evidenceSufficiency: "INSUFFICIENT_DATA",
+  });
+  const result = value(gate(context).evaluate(request));
+  expect(result).toMatchObject({
+    effective: {
+      severity: "CRITICAL",
+      notificationRoute: "NOTIFY_NOW",
+      llmEscalation: "NO_LLM_NEEDED",
+      evidenceSufficiency: "INSUFFICIENT_DATA",
+      attentionPriority: "URGENT",
+    },
+    overrideReason: "INSUFFICIENT_EVIDENCE",
+  });
+  expect(result.effective.reasonCodes).toContain("CONFIRMED_STOCKOUT");
+  expect(evidence).toEqual(before);
+  expect(context.evidence.evidence).toEqual(before);
+  expect(evidence).toMatchObject({
+    dataStatus: "INSUFFICIENT",
+    facts: {
+      availableUnits: 0,
+      salesUnits: null,
+      estimatedHoursRemaining: null,
+      supplierLeadTimeHours: null,
+      inventoryStatus: "VERIFIED",
+    },
+  });
+});
+it.each([
+  { issues: [issue("INVENTORY_UNKNOWN", "facts.availableUnits")] },
+  { issues: [issue("INVENTORY_UNKNOWN", "inventory")] },
+  { facts: { ...facts, availableUnits: null, inventoryStatus: "UNAVAILABLE" } },
+  { facts: { ...facts, availableUnits: 0, inventoryStatus: "STALE" } },
+  {
+    facts: {
+      ...facts,
+      availableUnits: 0,
+      inventoryObservedAt: "2026-10-24T00:00:00Z",
+      inventoryAgeSeconds: 90000,
+    },
+  },
+  { facts: { ...facts, availableUnits: 1 } },
+  ...["SOURCE_INCONSISTENT", "WINDOW_MISMATCH", "VERSION_MISMATCH"].map((code) => ({
+    issues: [
+      issue("INVENTORY_UNKNOWN", "facts.estimatedHoursRemaining"),
+      issue(code, "facts.estimatedHoursRemaining"),
+    ],
+  })),
+  {
+    issues: [
+      issue("INVENTORY_UNKNOWN", "facts.estimatedHoursRemaining"),
+      issue("INVENTORY_UNKNOWN", "facts.availableUnits"),
+    ],
+  },
+])("never uplifts unsupported inventory to confirmed stockout %#", (patch) => {
+  const context = contextFixture(observedZeroWithForecastLimits(patch), "LOW");
+  const result = value(
+    gate(context).evaluate(requestFixture(context, { evidenceSufficiency: "INSUFFICIENT_DATA" })),
+  );
+  expect(result.effective.reasonCodes).not.toContain("CONFIRMED_STOCKOUT");
+  expect(result.effective.notificationRoute).toBe("IGNORE");
+  expect(result.effective.severity).not.toBe("CRITICAL");
+});
 const qualityCases = [
   [{ sampleSize: 0 }, "INSUFFICIENT_SAMPLE", "INSUFFICIENT_DATA"],
   [
