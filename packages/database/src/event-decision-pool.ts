@@ -43,7 +43,7 @@ const safeSql = `SELECT current_user=session_user
       OR EXISTS(SELECT 1 FROM pg_class WHERE relowner=r.oid)
       OR EXISTS(SELECT 1 FROM pg_proc WHERE proowner=r.oid)
       OR has_database_privilege(r.oid,current_database(),'CREATE')))
-  AND NOT has_table_privilege(session_user,'public.decision_claims','UPDATE')
+  AND NOT has_any_column_privilege(session_user,'public.decision_claims','UPDATE')
   AND has_column_privilege(session_user,'public."OrganizationMember"','role','SELECT')
   AS safe`;
 

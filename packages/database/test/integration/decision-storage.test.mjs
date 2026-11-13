@@ -776,6 +776,29 @@ test("checked event decision pool accepts only its composed restricted capabilit
     }
   });
 });
+test("checked runtime pool rejects even a single direct claim UPDATE column", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    const pool = database.createEventDecisionPool(await prepareEventDecisionRuntime(url));
+    await client.query(
+      'GRANT UPDATE ("claimToken") ON public.decision_claims TO shopmate_event_decision_api',
+    );
+    try {
+      await assert.rejects(
+        async () => {
+          const connection = await pool.connect();
+          connection.release();
+        },
+        { message: "Event decision database unavailable" },
+      );
+    } finally {
+      await pool.end();
+      await client.query(
+        'REVOKE UPDATE ("claimToken") ON public.decision_claims FROM shopmate_event_decision_api',
+      );
+    }
+  });
+});
 async function writerCases(t, roles, row) {
   await t.test("restricted assigned OPERATOR claims, appends and chooses one winner", () =>
     context(roles.writer, "decision-OPERATOR", async () => {
