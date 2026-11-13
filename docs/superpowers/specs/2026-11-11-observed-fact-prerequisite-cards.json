@@ -1,5 +1,5 @@
 {
-  "status": "DESIGN_DRAFT_NOT_APPROVED_NOT_REGISTERED",
+  "status": "WRITTEN_CHOICE_A_APPROVED_2026_11_11_NOT_REGISTERED",
   "sourceMain": "93754e8e4ff4e7b9a83f86049de23dac290bb3ac",
   "proposedOwner": "Harry",
   "idCheck": {
@@ -10,7 +10,7 @@
     "scannedIssueAndPrIdentities": 545
   },
   "estimatePolicy": "Every card has a <=4h planning cap including focused tests and review preparation, not an observed duration or promise. Split before claiming if the reviewed seam cannot fit. No blanket 4h full-scenario claim.",
-  "approvalGate": "Controller review then local written-spec commit for the user. Written-spec approval including 008 Choice A precedes implementation commits, claims, Issues and activation. This is a recorded release condition outside the graph.",
+  "approvalGate": "User approved written Choice A on 2026-11-11, including all 30 prerequisite cards and R1/R2/R3 packets. Approval is recorded release evidence outside the graph. Proposed cards remain unregistered and inactive until reviewed native registration and coordinated R3 activation; per-card requirements remain unchanged.",
   "commonAcceptance": [
     "Preserve existing version semantics and history; additive changes only, migrations use actual fresh creation timestamps.",
     "Strict typed inputs, safe integer arithmetic, parameterized SQL, no PII/oracle fields or secrets; functions/test callbacks/SQL bodies <40 lines, TS no any without approved rationale.",
