@@ -18,7 +18,7 @@ import {
 } from "@shopmate/database";
 import { MetricRuntimeService } from "../metrics/metric-runtime.service.js";
 import { METRIC_RUNTIME_DEFINITION_VERSION } from "../metrics/metric-runtime-calculator.js";
-import { EventDecisionUnitOfWork } from "./event-decision-unit-of-work.js";
+import { EventDecisionUnitOfWork, runtimeControl } from "./event-decision-unit-of-work.js";
 import { runtimeUnavailable } from "./event-transaction-lifetime.js";
 import type { EventRuntimeTransaction } from "./event-decision-transaction.js";
 
@@ -195,6 +195,7 @@ export class EventRuntimeSource {
     return exact;
   }
   private async compute(observation: RuntimeObservation) {
+    const bundle = await this.captureCurrent(observation);
     const subject = { kind: "SKU" as const, externalSkuId: observation.externalSkuId };
     const computed = await this.metrics.compute({
       actor: observation.actor,
@@ -204,13 +205,48 @@ export class EventRuntimeSource {
         window: observation.window,
         visibleAt: observation.observedAt,
         definitionVersion: METRIC_RUNTIME_DEFINITION_VERSION,
-        inputRevision: null,
+        inputRevision: bundle.inputRevision,
         coverageRequests: STOCKOUT_METRIC_KINDS.map((kind) => ({ kind, subject })),
       },
     });
     if (!computed.ok || computed.value.length !== STOCKOUT_METRIC_KINDS.length)
       throw runtimeUnavailable();
     return computed.value;
+  }
+  private captureCurrent(observation: RuntimeObservation): Promise<NormalizedMetricSourceBundle> {
+    if (!["OWNER", "ADMIN"].includes(observation.actor.role)) throw runtimeUnavailable();
+    return this.uow.transaction(
+      {
+        actor: observation.actor,
+        binding: observation.binding,
+        generation: null,
+        revisions: [],
+        recipientId: null,
+        writable: true,
+        control: runtimeControl(),
+      },
+      async (scope) => {
+        const sql = "SELECT public.metric_source_capture($1,$2,$3) AS bundle";
+        const values = [
+          JSON.stringify(observation.binding),
+          JSON.stringify(observation.window),
+          observation.observedAt,
+        ];
+        let result = await scope.client.query(sql, values);
+        if (!result.rows[0]?.bundle) result = await scope.client.query(sql, values);
+        if (result.rows.length !== 1 || !result.rows[0]?.bundle) throw runtimeUnavailable();
+        const bundle = decodeNormalizedMetricSourceBundle(result.rows[0].bundle);
+        // Only a live capture can authorize first publication; persisted reads remain replayable.
+        if (
+          !isDeepStrictEqual(bundle.binding, observation.binding) ||
+          !sameEventPeriod(bundle.window, observation.window) ||
+          Date.parse(bundle.visibleAt) !== Date.parse(observation.observedAt) ||
+          Date.parse(bundle.businessNow) !== Date.parse(observation.observedAt)
+        )
+          throw runtimeUnavailable();
+        return bundle;
+      },
+    );
   }
   async prepare(observation: RuntimeObservation): Promise<PersistedRuntimeFrame> {
     observation = {

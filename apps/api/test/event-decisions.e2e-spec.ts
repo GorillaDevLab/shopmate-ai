@@ -84,6 +84,7 @@ let metrics: MetricRuntimeService;
 let uow: EventDecisionUnitOfWork;
 let first: EventRuntimeResult;
 let second: EventRuntimeResult;
+let clockObservation: EventRuntimeResult;
 function evaluation(at = observedAt, control?: DecisionControl) {
   return runtime.evaluate({
     identity,
@@ -355,7 +356,7 @@ async function finalBarrier<T>(mutate: () => Promise<void>, work: () => Promise<
   const hook: EventDecisionUnitOfWork["transaction"] = (input, operation) =>
     original(input, async (scope) => {
       const result = await operation(scope);
-      if (input.writable) await mutate();
+      if (input.writable && input.recipientId !== null) await mutate();
       return result;
     });
   const spy = vi.spyOn(uow, "transaction").mockImplementation(hook);
@@ -598,6 +599,45 @@ it("serializes two fresh runtime calls into one durable winner and one set of ef
   expect(after.decision_records).toBe(before.decision_records! + 6);
   expect(after.audit_logs).toBe(before.audit_logs! + 2);
   expect(after.notification_outbox).toBe(before.notification_outbox! + 1);
+});
+it("rejects an uncomputed old cutoff after only the authoritative clock advances", async () => {
+  await fixture.seed(time(8), 0);
+  const before = await fixture.counts();
+  const snapshots = await publicationState();
+  await fixture.advance(time(9));
+  await expect(evaluation(time(8))).rejects.toMatchObject({ status: 503 });
+  expect(await fixture.counts()).toEqual(before);
+  expect(await publicationState()).toEqual(snapshots);
+});
+async function publicationState() {
+  return (
+    await fixture.query(`SELECT (SELECT count(*)::int FROM metric_snapshots) AS metrics,
+      (SELECT count(*)::int FROM metric_source_bundles) AS bundles,
+      (SELECT count(*)::int FROM sync_host."Job") AS jobs`)
+  ).rows;
+}
+it("publishes from the actual current clock without requiring a new source job", async () => {
+  clockObservation = await evaluation(time(9));
+  expect(clockObservation.decisions).toHaveLength(1);
+  const saved = await fixture.query("SELECT payload FROM event_evidence WHERE id=$1", [
+    clockObservation.events[0]!.currentEvidence.id,
+  ]);
+  expect(EventEvidenceV1Schema.parse(saved.rows[0]?.payload).observedAt).toBe(time(9));
+});
+it("replays an authorized persisted old observation after the clock advances", async () => {
+  await fixture.advance(time(10));
+  await membership("OPERATOR");
+  try {
+    const before = await fixture.counts();
+    const snapshots = await publicationState();
+    const result = await evaluation(time(9));
+    expect(result.decisions).toEqual(clockObservation.decisions);
+    await expect(evaluation(time(10))).rejects.toMatchObject({ status: 503 });
+    expect(await fixture.counts()).toEqual(before);
+    expect(await publicationState()).toEqual(snapshots);
+  } finally {
+    await membership("OWNER");
+  }
 });
 it("keeps startup and health available when the dedicated capability is absent", async () => {
   const configured = process.env.EVENT_DECISION_DATABASE_URL;
