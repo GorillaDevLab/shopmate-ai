@@ -12,6 +12,7 @@ import {
 import {
   prepareTenantApiRuntime,
   prepareMetricApiRuntime,
+  prepareEventDecisionRuntime,
 } from "../packages/database/test/helpers/tenant-api-fixture.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
@@ -19,6 +20,7 @@ const apiTargets = [
   "test/tenant-database.e2e-spec.ts",
   "test/demo-commerce-database.e2e-spec.ts",
   "test/metrics-database.e2e-spec.ts",
+  "test/event-decisions.e2e-spec.ts",
 ];
 const requiredTargetCounts = new Map([
   ["test/integration/audit-storage.test.mjs", 206],
@@ -32,7 +34,9 @@ function metricRuntimeEnvironment(isolatedUrl, metrics) {
   for (const [key, login] of [
     ["METRIC_DATABASE_URL", "shopmate_metric_api"],
     ["METRIC_DEFINITION_DATABASE_URL", "shopmate_metric_definition_api"],
+    ["EVENT_DECISION_DATABASE_URL", "shopmate_event_decision_api"],
   ]) {
+    if (key === "EVENT_DECISION_DATABASE_URL" && metrics[key] === undefined) continue;
     const value = metrics[key];
     requireIsolatedDatabaseUrl(value);
     const url = new URL(value);
@@ -44,6 +48,9 @@ function metricRuntimeEnvironment(isolatedUrl, metrics) {
   return {
     METRIC_DATABASE_URL: metrics.METRIC_DATABASE_URL,
     METRIC_DEFINITION_DATABASE_URL: metrics.METRIC_DEFINITION_DATABASE_URL,
+    ...(metrics.EVENT_DECISION_DATABASE_URL === undefined
+      ? {}
+      : { EVENT_DECISION_DATABASE_URL: metrics.EVENT_DECISION_DATABASE_URL }),
     METRIC_CURSOR_SECRET: randomBytes(48).toString("hex"),
   };
 }
@@ -388,7 +395,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       TEST_DATABASE_URL: server.url,
     });
     const runtimeUrl = await prepareTenantApiRuntime(server.url);
-    const metrics = await prepareMetricApiRuntime(server.url);
+    const metrics = {
+      ...(await prepareMetricApiRuntime(server.url)),
+      EVENT_DECISION_DATABASE_URL: await prepareEventDecisionRuntime(server.url),
+    };
     const reportPath = path.join(reportDirectory, "api.json");
     await run(
       "apps/api",

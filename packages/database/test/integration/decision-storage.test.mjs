@@ -776,6 +776,41 @@ test("checked event decision pool accepts only its composed restricted capabilit
     }
   });
 });
+test("event runtime child environment accepts only its owned isolated restricted URL", () => {
+  const urls = Object.fromEntries(
+    [
+      ["METRIC_DATABASE_URL", "shopmate_metric_api"],
+      ["METRIC_DEFINITION_DATABASE_URL", "shopmate_metric_definition_api"],
+      ["EVENT_DECISION_DATABASE_URL", "shopmate_event_decision_api"],
+    ].map(([key, login]) => {
+      const url = new URL(serverUrl);
+      url.username = login;
+      return [key, url.toString()];
+    }),
+  );
+  const inherited = {
+    EVENT_DECISION_DATABASE_URL: "unsafe",
+    DATABASE_URL: "unsafe",
+    PGHOST: "unsafe",
+  };
+  assert.equal(tenantEnvironment(inherited, serverUrl).EVENT_DECISION_DATABASE_URL, undefined);
+  assert.equal(
+    tenantEnvironment(inherited, serverUrl, undefined, urls).EVENT_DECISION_DATABASE_URL,
+    urls.EVENT_DECISION_DATABASE_URL,
+  );
+  for (const bad of [
+    serverUrl,
+    "postgresql://shopmate_event_decision_api@example.com/shopmate_tenant_test",
+    urls.EVENT_DECISION_DATABASE_URL.replace("shopmate_tenant_test", "shopmate_tenant_test_other"),
+    "",
+  ])
+    assert.throws(() =>
+      tenantEnvironment(inherited, serverUrl, undefined, {
+        ...urls,
+        EVENT_DECISION_DATABASE_URL: bad,
+      }),
+    );
+});
 test("checked runtime pool rejects even a single direct claim UPDATE column", async () => {
   await withDatabase(async (client, url) => {
     await migrate(client);

@@ -8,6 +8,7 @@ export default defineConfig({
       "test/tenant-database.e2e-spec.ts",
       "test/demo-commerce-database.e2e-spec.ts",
       "test/metrics-database.e2e-spec.ts",
+      "test/event-decisions.e2e-spec.ts",
     ],
     coverage: {
       provider: "v8",
