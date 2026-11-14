@@ -78,7 +78,11 @@ export async function initializeRuntime(
   client: RuntimeTransactionClient,
   input: RuntimeAuthority,
 ): Promise<void> {
-  await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+  await client.query(
+    input.writable
+      ? "BEGIN ISOLATION LEVEL READ COMMITTED"
+      : "BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY",
+  );
   await client.query("SET LOCAL statement_timeout='10s'");
   await client.query("SET LOCAL lock_timeout='5s'");
   await client.query(

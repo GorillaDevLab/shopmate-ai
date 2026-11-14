@@ -95,6 +95,7 @@ it("rolls back a read denial while preserving its typed not-found result", async
   const denial = { ok: false, error: { code: "NOT_FOUND", evidenceIds: [] } };
   const result = await test.owner.run({ ...test.authority, writable: false }, async () => denial);
   expect(result).toEqual(denial);
+  expect(test.calls[0]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY");
   expect(test.calls.at(-1)).toBe("ROLLBACK");
   expect(test.calls).not.toContain("COMMIT");
 });
