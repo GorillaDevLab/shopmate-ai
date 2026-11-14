@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { URL } from "node:url";
 import { validateGraph } from "../../scripts/agile/policy.mjs";
+import { validate } from "../../scripts/agile/register-project-items.mjs";
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 const pool = "docs/superpowers/plans/p3-p13-agile/";
@@ -222,4 +223,24 @@ test("consumer amendments retain exact original acceptance plus approved scope a
     hash([approved.cards, approved.commonAcceptance, approved.commonSharedLocks]),
     "74c9fc08c6f32a126735cca94013f3208fcfea2a1abd405f291ad8aeee44d973",
   );
+});
+
+// Digest binds the exact reviewed native identities, not invented example numbers.
+test("fixed registration manifest contains exactly the 30 verified staged identities", () => {
+  const path = "docs/engineering/observed-prerequisite-registration.json";
+  assert.ok(
+    existsSync(new URL(`../../${path}`, import.meta.url)),
+    "verified native manifest required",
+  );
+  const manifest = validate(JSON.parse(read(path)));
+  assert.equal(manifest.projectId, "PVT_kwDOE26LGM4Blpxq");
+  assert.deepEqual(
+    manifest.entries.map((entry) => entry.id),
+    ids,
+  );
+  for (const entry of manifest.entries) {
+    const card = additions.find((item) => item.id === entry.id);
+    assert.equal(entry.title, `Prerequisite draft: ${card.id} ${card.title}`);
+  }
+  assert.equal(hash(manifest), "04d9a5334e94206e31325f2a71cb8b29a23b55e09b574789eaa9aff85a7585f3");
 });
