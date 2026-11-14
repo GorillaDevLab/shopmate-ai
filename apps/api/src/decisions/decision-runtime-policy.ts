@@ -19,6 +19,11 @@ export const RUNTIME_ROUTING_POLICY = Object.freeze({
   batchWindowSeconds: 3600,
   maximumImmediatePerStore: 5,
 });
+// Historical epochs are literals so a future current-policy change cannot relabel old winners.
+const routingEpochs = Object.freeze({ "decision-rules-v1": "event-routing-v1" });
+export function runtimeRoutingEpoch(rulesetVersion: string): string | null {
+  return Object.entries(routingEpochs).find(([ruleset]) => ruleset === rulesetVersion)?.[1] ?? null;
+}
 export const RUNTIME_RULE_DEFAULTS = EventTypeSchema.options.map((eventType) => ({
   eventType,
   labels: DEFAULT_DECISION_RULESET.defaultLabels,

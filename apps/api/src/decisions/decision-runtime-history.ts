@@ -12,7 +12,7 @@ import type { EventRuntimeTransaction } from "../events/event-decision-transacti
 import { runtimeBindingKeys } from "../events/event-runtime-authority.js";
 import { runtimeUnavailable } from "../events/event-transaction-lifetime.js";
 import type { DecisionRoutingSnapshot } from "./decision-routing.service.js";
-import { RUNTIME_ROUTING_POLICY } from "./decision-runtime-policy.js";
+import { runtimeRoutingEpoch } from "./decision-runtime-policy.js";
 
 const integer = z.union([
   z.number().int().positive().safe(),
@@ -136,8 +136,10 @@ async function historyEntry(
   });
   if (!runs.ok || runs.value.length !== 1) throw runtimeUnavailable();
   const run = runs.value[0]!;
+  const policyVersion = runtimeRoutingEpoch(run.rulesetVersion);
   const audit = await runtimeAgentAudit(scope, run.id);
   if (
+    policyVersion === null ||
     !audit ||
     audit.event.eventType !== "AGENT_RUN" ||
     audit.event.redactedMetadata.runStatus !== "COMPLETED" ||
@@ -153,7 +155,7 @@ async function historyEntry(
     run: RoutedPrimaryDecisionRunSchema.parse(run),
     eventRevision: row.eventRevision,
     eventState: await eventState(scope, row.eventId, row.eventRevision),
-    policyVersion: RUNTIME_ROUTING_POLICY.version,
+    policyVersion,
     routedAt: audit.occurredAt,
   };
 }

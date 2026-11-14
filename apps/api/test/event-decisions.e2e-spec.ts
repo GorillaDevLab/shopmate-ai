@@ -1,16 +1,22 @@
 import "reflect-metadata";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Test } from "@nestjs/testing";
-import type { INestApplication } from "@nestjs/common";
+import { BadRequestException, type INestApplication } from "@nestjs/common";
 import {
   TENANT_ROLE_PERMISSIONS,
   EventEvidenceV1Schema,
+  EvaluationContextSchema,
+  RoutedPrimaryDecisionRunSchema,
+  TenantAuditEventSchema,
+  type EvaluationContext,
+  type PrimaryDecisionRun,
   type TenantContext,
   type DecisionControl,
 } from "@shopmate/contracts";
 import {
   disconnectPrismaClient,
   createEventDecisionPool,
+  createDecisionRunRepository,
   type EventDecisionPool,
 } from "@shopmate/database";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -21,7 +27,14 @@ import {
   window,
 } from "../../../packages/database/test/helpers/event-decisions-api-fixture.mjs";
 import { MetricRuntimeService } from "../src/metrics/metric-runtime.service.js";
-import { EventDecisionUnitOfWork } from "../src/events/event-decision-unit-of-work.js";
+import {
+  EventDecisionUnitOfWork,
+  EVENT_SECURITY_CLOCK,
+  runtimeControl,
+} from "../src/events/event-decision-unit-of-work.js";
+import type { EventRuntimeTransaction } from "../src/events/event-decision-transaction.js";
+import { loadRuntimeHistory } from "../src/decisions/decision-runtime-history.js";
+import { AuditAppendRepository } from "../src/audit/audit-append.repository.js";
 import { EVENT_RUNTIME_POOL_FACTORY } from "../src/events/event-runtime-pool.js";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -639,6 +652,120 @@ it("replays an authorized persisted old observation after the clock advances", a
     await membership("OWNER");
   }
 });
+async function historyContext(scope: EventRuntimeTransaction): Promise<EvaluationContext> {
+  const events = uow.events(scope);
+  const event = await events.detail({ actor, binding, eventId: clockObservation.events[0]!.id });
+  if (!event.ok) throw new BadRequestException("History fixture event unavailable");
+  const evidence = await events.evidence({
+    actor,
+    binding,
+    eventId: event.value.id,
+    reference: event.value.currentEvidence,
+  });
+  if (!evidence.ok) throw new BadRequestException("History fixture evidence unavailable");
+  return EvaluationContextSchema.parse({
+    schemaVersion: 1,
+    actor,
+    event: event.value,
+    evidence: evidence.value,
+    requestId: randomUUID(),
+    correlationId: randomUUID(),
+  });
+}
+function epochRun(context: EvaluationContext, epoch: string) {
+  const original = clockObservation.decisions[0]!;
+  if (original.result.status !== "EVALUATED") throw new BadRequestException();
+  return RoutedPrimaryDecisionRunSchema.parse({
+    ...original,
+    id: randomUUID(),
+    decisionKey: `history:${epoch}`,
+    requestId: context.requestId,
+    rulesetVersion: epoch,
+    createdAt: EVENT_SECURITY_CLOCK.now(),
+    result: { ...original.result, correlationId: context.correlationId, rulesetVersion: epoch },
+  });
+}
+async function appendEpochAudit(scope: EventRuntimeTransaction, run: PrimaryDecisionRun) {
+  const audit = TenantAuditEventSchema.parse({
+    scopeKind: "TENANT",
+    scope: scope.handle.scope,
+    actor: scope.handle.actor,
+    resource: { type: "RUN", id: run.id },
+    result: "SUCCESS",
+    occurredAt: EVENT_SECURITY_CLOCK.now(),
+    sourceOccurredAt: null,
+    links: {
+      requestId: scope.handle.auditRequestId,
+      occurrenceId: `run:${run.id}`,
+      runId: run.id,
+      evidenceId: run.evidence.id,
+      actionId: null,
+      revisionId: null,
+      approvalId: null,
+      executionId: null,
+    },
+    event: { eventType: "AGENT_RUN", redactedMetadata: { runStatus: "COMPLETED" } },
+  });
+  await new AuditAppendRepository().appendTenant(scope.handle, audit);
+}
+async function appendEpochWinner(scope: EventRuntimeTransaction, epoch: string) {
+  const context = await historyContext(scope);
+  const run = epochRun(context, epoch);
+  const repository = createDecisionRunRepository({
+    actor,
+    client: scope.client,
+    clock: EVENT_SECURITY_CLOCK,
+    decisionKey: () => run.decisionKey,
+  });
+  const request = { context, decisionKey: run.decisionKey, control: scope.authority.control };
+  const claim = await repository.claim(request);
+  if (!claim.ok || claim.value.status !== "CLAIMED") throw new BadRequestException();
+  const committed = await repository.commit(
+    { ...request, commitToken: claim.value.commitToken, runs: [run] },
+    async (value) => ({ ok: true, value }),
+  );
+  if (!committed.ok) throw new BadRequestException();
+  await appendEpochAudit(scope, committed.value);
+  return repository;
+}
+it("attributes supported persisted winners to their original immutable routing epoch", async () => {
+  const history = await uow.read(actor, binding, (scope) =>
+    loadRuntimeHistory(scope, uow.decisions(scope)),
+  );
+  expect(history.length).toBeGreaterThan(1);
+  expect(history.every((entry) => entry.run.rulesetVersion === "decision-rules-v1")).toBe(true);
+  expect(history.every((entry) => entry.policyVersion === "event-routing-v1")).toBe(true);
+  expect(history.some((entry) => entry.eventState === "ACKNOWLEDGED")).toBe(true);
+});
+it.each(["decision-rules-v0", "decision-rules-unknown"])(
+  "rejects otherwise complete persisted history from unsupported epoch %s",
+  async (epoch) => {
+    const before = await fixture.counts();
+    let seeded = false;
+    await expect(
+      uow.transaction(
+        {
+          actor,
+          binding,
+          generation: null,
+          revisions: [],
+          recipientId: null,
+          writable: true,
+          control: runtimeControl(),
+        },
+        async (scope) => {
+          const repository = await appendEpochWinner(scope, epoch);
+          seeded = true;
+          await loadRuntimeHistory(scope, repository);
+          // Roll back even if the loader incorrectly accepts the unsupported winner.
+          throw new BadRequestException("Unsupported history accepted");
+        },
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(seeded).toBe(true);
+    expect(await fixture.counts()).toEqual(before);
+  },
+);
 it("keeps startup and health available when the dedicated capability is absent", async () => {
   const configured = process.env.EVENT_DECISION_DATABASE_URL;
   if (!configured) throw new Error("Expected runner-provisioned capability");
