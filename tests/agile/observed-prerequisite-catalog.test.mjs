@@ -217,7 +217,7 @@ test("the complete README index and documented counts match the catalog", () => 
 test("consumer amendments retain exact original acceptance plus approved scope and locks", () => {
   assert.equal(
     hash(cards.filter((card) => consumers.includes(card.id))),
-    "25661488c59c9920a7398ce2fa4cdb83a95b32b708233f90f1d3d679483e409b",
+    "edd584f6d0c7d3ad219cae016fa63207e5d9c003790056b2f4965e30c8f48687",
   );
   assert.equal(
     hash([approved.cards, approved.commonAcceptance, approved.commonSharedLocks]),
@@ -243,4 +243,10 @@ test("fixed registration manifest contains exactly the 30 verified staged identi
     assert.equal(entry.title, `Prerequisite draft: ${card.id} ${card.title}`);
   }
   assert.equal(hash(manifest), "04d9a5334e94206e31325f2a71cb8b29a23b55e09b574789eaa9aff85a7585f3");
+});
+
+test("029 final coordinated ownership includes its actual runtime pool helper", () => {
+  const card = cards.find((entry) => entry.id === "P04-029");
+  assert.equal(card.files.length, 25);
+  assert.ok(card.files.includes("apps/api/src/events/event-runtime-pool.ts"));
 });

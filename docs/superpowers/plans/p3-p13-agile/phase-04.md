@@ -1565,6 +1565,7 @@
 - `packages/database/src/event-decision-pool.ts`
 - `packages/database/test/helpers/event-decisions-api-fixture.d.mts`
 - `packages/database/test/helpers/event-decisions-api-fixture.mjs`
+- `apps/api/src/events/event-runtime-pool.ts`
 
 **共享文件锁（协调集成修改）：**
 
