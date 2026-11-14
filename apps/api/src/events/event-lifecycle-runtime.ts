@@ -68,14 +68,12 @@ export class EventLifecycleRuntime
     return record;
   }
   private async pin(scope: EventRuntimeTransaction, record: EventRecord): Promise<void> {
-    const evidence = await this.uow
-      .events(scope)
-      .evidence({
-        actor: scope.authority.actor,
-        binding: scope.authority.binding,
-        eventId: record.id,
-        reference: record.currentEvidence,
-      });
+    const evidence = await this.uow.events(scope).evidence({
+      actor: scope.authority.actor,
+      binding: scope.authority.binding,
+      eventId: record.id,
+      reference: record.currentEvidence,
+    });
     if (!evidence.ok) throw runtimeUnavailable();
     const value = evidence.value.evidence;
     const revisions = [...new Set(value.sourceReferences.map((ref) => ref.version))];
