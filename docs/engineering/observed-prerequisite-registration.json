@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "repository": "GorillaDevLab/shopmate-ai",
+  "projectNumber": 1,
+  "projectId": "PVT_kwDOE26LGM4Blpxq",
+  "entries": [
+    {
+      "id": "P03-019",
+      "number": 548,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGUJg",
+      "title": "Prerequisite draft: P03-019 冻结观测事实、因果模型与选择契约"
+    },
+    {
+      "id": "P03-020",
+      "number": 549,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGWBw",
+      "title": "Prerequisite draft: P03-020 存储不可变观测事实与能力边界"
+    },
+    {
+      "id": "P03-021",
+      "number": 550,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGX-Q",
+      "title": "Prerequisite draft: P03-021 原子消费认证观测页面"
+    },
+    {
+      "id": "P03-022",
+      "number": 551,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGaAQ",
+      "title": "Prerequisite draft: P03-022 捕获并授权读取时态观测源"
+    },
+    {
+      "id": "P03-023",
+      "number": 552,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGbqg",
+      "title": "Prerequisite draft: P03-023 生成因果冻结财务观测"
+    },
+    {
+      "id": "P03-024",
+      "number": 553,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGmOg",
+      "title": "Prerequisite draft: P03-024 先生成访问再生成交易与广告观测"
+    },
+    {
+      "id": "P03-025",
+      "number": 554,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGn4Q",
+      "title": "Prerequisite draft: P03-025 生成上架、库龄与供应通知历史"
+    },
+    {
+      "id": "P03-026",
+      "number": 555,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGp-w",
+      "title": "Prerequisite draft: P03-026 独立记录业务时间同步状态"
+    },
+    {
+      "id": "P03-027",
+      "number": 556,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGsOg",
+      "title": "Prerequisite draft: P03-027 将观测回执映射为指标输入"
+    },
+    {
+      "id": "P03-028",
+      "number": 557,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLGt7A",
+      "title": "Prerequisite draft: P03-028 计算精确SKU销售、退款与转换"
+    },
+    {
+      "id": "P03-029",
+      "number": 558,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLG1SA",
+      "title": "Prerequisite draft: P03-029 计算并持久化对齐利润分解"
+    },
+    {
+      "id": "P03-030",
+      "number": 559,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLG3Mg",
+      "title": "Prerequisite draft: P03-030 接线观测指标定义与版本路由"
+    },
+    {
+      "id": "P03-031",
+      "number": 560,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLG5jQ",
+      "title": "Prerequisite draft: P03-031 准入v3代际与类型解码"
+    },
+    {
+      "id": "P03-032",
+      "number": 561,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLG7mA",
+      "title": "Prerequisite draft: P03-032 准入v3中断与重复投递控制"
+    },
+    {
+      "id": "P03-033",
+      "number": 562,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLG9_g",
+      "title": "Prerequisite draft: P03-033 原子存储并读取利润分解伴随记录"
+    },
+    {
+      "id": "P03-034",
+      "number": 563,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHF5w",
+      "title": "Prerequisite draft: P03-034 选择真实对齐利润比较捕获"
+    },
+    {
+      "id": "P03-035",
+      "number": 564,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHIiw",
+      "title": "Prerequisite draft: P03-035 封存可信观测发布与覆盖证明"
+    },
+    {
+      "id": "P03-036",
+      "number": 565,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHKdg",
+      "title": "Prerequisite draft: P03-036 接线v3因果源发布"
+    },
+    {
+      "id": "P04-033",
+      "number": 566,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHM3A",
+      "title": "Prerequisite draft: P04-033 冻结因果观测窗口与捕获助手"
+    },
+    {
+      "id": "P04-034",
+      "number": 567,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHO4g",
+      "title": "Prerequisite draft: P04-034 按固定策略检测早期新品机会"
+    },
+    {
+      "id": "P04-035",
+      "number": 568,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHY5w",
+      "title": "Prerequisite draft: P04-035 组装不可变财务比较事件帧"
+    },
+    {
+      "id": "P04-036",
+      "number": 569,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHa3g",
+      "title": "Prerequisite draft: P04-036 组装实测营销与转换事件帧"
+    },
+    {
+      "id": "P04-037",
+      "number": 570,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHcmQ",
+      "title": "Prerequisite draft: P04-037 组装库存、滞销与新品事件帧"
+    },
+    {
+      "id": "P04-038",
+      "number": 571,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHeeQ",
+      "title": "Prerequisite draft: P04-038 组装退款、取消、折扣与营收事件帧"
+    },
+    {
+      "id": "P04-039",
+      "number": 572,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHgJA",
+      "title": "Prerequisite draft: P04-039 无成功数据包时评估真实同步失败"
+    },
+    {
+      "id": "P04-040",
+      "number": 573,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHtVw",
+      "title": "Prerequisite draft: P04-040 接线完整观测事件注册表"
+    },
+    {
+      "id": "P04-041",
+      "number": 574,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHvRg",
+      "title": "Prerequisite draft: P04-041 冻结历史选择与稳健基线注册"
+    },
+    {
+      "id": "P04-042",
+      "number": 575,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHxiw",
+      "title": "Prerequisite draft: P04-042 执行可信早期新品决策门槛"
+    },
+    {
+      "id": "P04-043",
+      "number": 576,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLHzZw",
+      "title": "Prerequisite draft: P04-043 授权展示历史证据的新品限定文案"
+    },
+    {
+      "id": "P04-044",
+      "number": 577,
+      "nodeId": "I_kwDOUH5jIs8AAAABfLH1mg",
+      "title": "Prerequisite draft: P04-044 证明观测事件进入真实受限事务"
+    }
+  ]
+}
