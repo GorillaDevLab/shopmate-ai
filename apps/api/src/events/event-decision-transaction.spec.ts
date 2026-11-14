@@ -99,3 +99,10 @@ it("rolls back a read denial while preserving its typed not-found result", async
   expect(test.calls.at(-1)).toBe("ROLLBACK");
   expect(test.calls).not.toContain("COMMIT");
 });
+it("keeps a lifecycle handle bound to the generation pinned from its actual evidence", async () => {
+  const test = fixture();
+  await test.owner.run({ ...test.authority, generation: null }, async (scope) => {
+    scope.authority.generation = 1;
+    expect(scope.handle.connectionGeneration).toBe(1);
+  });
+});

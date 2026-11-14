@@ -88,7 +88,9 @@ export class EventDecisionTransactionOwner {
         actor: { actorId: input.actor.userId, actorKind: "USER", identitySource: "SERVER" },
         isActive: lifetime.isActive,
         binding: input.binding,
-        connectionGeneration: input.generation ?? 0,
+        get connectionGeneration() {
+          return input.generation ?? 0;
+        },
         auditRequestId: randomUUID(),
       },
     };
