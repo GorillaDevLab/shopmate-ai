@@ -40,6 +40,8 @@ const safeSql = `SELECT current_user=session_user
       OR r.rolname=ANY($2::text[])
       OR EXISTS(SELECT 1 FROM pg_database WHERE datdba=r.oid)
       OR EXISTS(SELECT 1 FROM pg_namespace WHERE nspowner=r.oid)
+      OR EXISTS(SELECT 1 FROM pg_namespace n WHERE n.nspname !~ '^pg_(toast_)?temp_'
+        AND has_schema_privilege(r.oid,n.oid,'CREATE'))
       OR EXISTS(SELECT 1 FROM pg_class WHERE relowner=r.oid)
       OR EXISTS(SELECT 1 FROM pg_proc WHERE proowner=r.oid)
       OR has_database_privilege(r.oid,current_database(),'CREATE')))

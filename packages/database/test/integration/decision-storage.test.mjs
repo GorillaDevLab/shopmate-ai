@@ -834,6 +834,44 @@ test("checked runtime pool rejects even a single direct claim UPDATE column", as
     }
   });
 });
+async function checkedCheckout(pool) {
+  const connection = await pool.connect();
+  connection.release();
+}
+async function schemaCreateCase(client, url, inherited) {
+  const pool = database.createEventDecisionPool(await prepareEventDecisionRuntime(url));
+  const role = inherited ? "event_runtime_schema_creator" : "shopmate_event_decision_api";
+  try {
+    if (inherited) {
+      await client.query("CREATE ROLE event_runtime_schema_creator NOLOGIN");
+      await client.query("GRANT event_runtime_schema_creator TO shopmate_event_decision_api");
+    }
+    await checkedCheckout(pool);
+    await client.query(`GRANT CREATE ON SCHEMA public TO ${role}`);
+    await assert.rejects(() => checkedCheckout(pool), {
+      message: "Event decision database unavailable",
+    });
+  } finally {
+    try {
+      await client.query(`REVOKE CREATE ON SCHEMA public FROM ${role}`);
+      if (inherited) {
+        await client.query("REVOKE event_runtime_schema_creator FROM shopmate_event_decision_api");
+        await client.query("DROP ROLE event_runtime_schema_creator");
+      }
+      await checkedCheckout(pool);
+    } finally {
+      await pool.end();
+    }
+  }
+}
+for (const inherited of [false, true]) {
+  test(`checked runtime pool rejects ${inherited ? "inherited" : "direct"} schema CREATE`, async () => {
+    await withDatabase(async (client, url) => {
+      await migrate(client);
+      await schemaCreateCase(client, url, inherited);
+    });
+  });
+}
 async function writerCases(t, roles, row) {
   await t.test("restricted assigned OPERATOR claims, appends and chooses one winner", () =>
     context(roles.writer, "decision-OPERATOR", async () => {
