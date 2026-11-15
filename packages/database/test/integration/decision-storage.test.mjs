@@ -838,6 +838,65 @@ async function checkedCheckout(pool) {
   const connection = await pool.connect();
   connection.release();
 }
+async function additionalWriteCase(client, url, grant, revoke, inherited = false) {
+  const pool = database.createEventDecisionPool(await prepareEventDecisionRuntime(url));
+  const role = inherited ? "event_runtime_extra_writer" : "shopmate_event_decision_api";
+  try {
+    if (inherited) {
+      await client.query("CREATE ROLE event_runtime_extra_writer NOLOGIN");
+      await client.query("GRANT event_runtime_extra_writer TO shopmate_event_decision_api");
+    }
+    await checkedCheckout(pool);
+    await client.query(`${grant} TO ${role}`);
+    await assert.rejects(() => checkedCheckout(pool), {
+      message: "Event decision database unavailable",
+    });
+  } finally {
+    try {
+      await client.query(`${revoke} FROM ${role}`);
+      if (inherited) {
+        await client.query("REVOKE event_runtime_extra_writer FROM shopmate_event_decision_api");
+        await client.query("DROP ROLE event_runtime_extra_writer");
+      }
+      await checkedCheckout(pool);
+    } finally {
+      await pool.end();
+    }
+  }
+}
+const additionalWrites = [
+  ["authority role UPDATE", 'UPDATE (role) ON public."OrganizationMember"'],
+  ["recipient inbox UPDATE", 'UPDATE ("readAt") ON public.recipient_inbox'],
+  ["noncomposed outbox UPDATE", "UPDATE (status) ON public.notification_outbox"],
+  ["noncomposed event INSERT column", 'INSERT ("winnerRunId") ON public.decision_claims'],
+];
+for (const [name, privilege] of additionalWrites) {
+  for (const inherited of [false, true]) {
+    test(`checked runtime pool rejects ${inherited ? "inherited" : "direct"} ${name}`, async () => {
+      await withDatabase(async (client, url) => {
+        await migrate(client);
+        await additionalWriteCase(
+          client,
+          url,
+          `GRANT ${privilege}`,
+          `REVOKE ${privilege}`,
+          inherited,
+        );
+      });
+    });
+  }
+}
+test("checked runtime pool rejects notification recipient membership", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    await additionalWriteCase(
+      client,
+      url,
+      "GRANT shopmate_notification_recipient",
+      "REVOKE shopmate_notification_recipient",
+    );
+  });
+});
 async function schemaCreateCase(client, url, inherited) {
   const pool = database.createEventDecisionPool(await prepareEventDecisionRuntime(url));
   const role = inherited ? "event_runtime_schema_creator" : "shopmate_event_decision_api";

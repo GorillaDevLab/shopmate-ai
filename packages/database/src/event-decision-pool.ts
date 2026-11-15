@@ -30,6 +30,36 @@ const forbidden = [
   "shopmate_audit_chain",
   "shopmate_audit_service_writer",
 ];
+// Freeze the existing six-capability write union, including the enqueuer's column boundary.
+// Comparing effective privileges also catches unnamed roles and direct ACL equivalents.
+const writeBoundarySql = `WITH permitted(relation,inserts,updates) AS (VALUES
+  ('public.events'::regclass,ARRAY['*'],ARRAY['state','revision','lastSeenAt','currentEvidenceId','currentEvidenceVersion','currentEvidenceHash']),
+  ('public.event_evidence'::regclass,ARRAY['*'],ARRAY[]::text[]),
+  ('public.event_evidence_metrics'::regclass,ARRAY['*'],ARRAY[]::text[]),
+  ('public.decision_runs'::regclass,ARRAY['*'],ARRAY[]::text[]),
+  ('public.decision_records'::regclass,ARRAY['*'],ARRAY[]::text[]),
+  ('public.decision_comparisons'::regclass,ARRAY['*'],ARRAY[]::text[]),
+  ('public.audit_logs'::regclass,ARRAY['*'],ARRAY[]::text[]),
+  ('public.audit_checkpoints'::regclass,ARRAY['*'],ARRAY[]::text[]),
+  ('public.notification_outbox'::regclass,
+    ARRAY['intentId','organizationId','workspaceId','storeId','connectionId','externalStoreId','recipientUserId',
+      'eventId','eventState','eventRevision','channel','decisionRunId','route','eventType','severity','createdAt',
+      'notBefore','evidenceId','evidenceVersion','evidenceHash','entityKind','entityId','definitionVersion',
+      'baselineVersion','connectionGeneration','nextAttemptAt'],ARRAY[]::text[])
+), available AS (SELECT oid FROM pg_roles WHERE pg_has_role(session_user,oid,'MEMBER')),
+relations AS (SELECT c.oid,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+  WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema')
+SELECT NOT EXISTS(SELECT 1 FROM available r CROSS JOIN relations c
+  WHERE (c.relkind='S' AND has_sequence_privilege(r.oid,c.oid,'USAGE,UPDATE'))
+    OR (c.relkind IN ('r','p','v','m','f') AND (
+      has_table_privilege(r.oid,c.oid,'DELETE,TRUNCATE,TRIGGER')
+      OR EXISTS(SELECT 1 FROM pg_attribute a CROSS JOIN (VALUES ('INSERT'),('UPDATE'),('REFERENCES')) AS v(privilege)
+        WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped
+          AND has_column_privilege(r.oid,c.oid,a.attnum,v.privilege)
+          AND NOT EXISTS(SELECT 1 FROM permitted p WHERE p.relation=c.oid
+            AND (CASE v.privilege WHEN 'INSERT' THEN '*'=ANY(p.inserts) OR a.attname=ANY(p.inserts)
+              WHEN 'UPDATE' THEN a.attname=ANY(p.updates) ELSE false END))))))
+  AS writes_safe`;
 const safeSql = `SELECT current_user=session_user
   AND current_setting('role') IN ('none',session_user)
   AND EXISTS(SELECT 1 FROM pg_roles WHERE rolname=session_user AND rolcanlogin)
@@ -60,6 +90,9 @@ async function checked(pool: Pool): Promise<PoolClient> {
     const result = await client.query(safeSql, [capabilities, forbidden]);
     if (failed || result.rows.length !== 1 || result.rows[0]?.safe !== true)
       throw new Error("Unsafe event decision capability");
+    const writes = await client.query(writeBoundarySql);
+    if (failed || writes.rows.length !== 1 || writes.rows[0]?.writes_safe !== true)
+      throw new Error("Unsafe event decision write capability");
     return client;
   } catch {
     client.release(true);
