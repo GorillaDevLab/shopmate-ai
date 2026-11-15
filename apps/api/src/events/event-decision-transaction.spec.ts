@@ -1,4 +1,16 @@
-import { expect, it } from "vitest";
+import "reflect-metadata";
+import { expect, it, vi } from "vitest";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
+import { MetricRuntimeService } from "../metrics/metric-runtime.service.js";
+import { TenantScopeService } from "../tenant/tenant-scope.service.js";
+import { EventDecisionUnitOfWork } from "./event-decision-unit-of-work.js";
+import { EventLifecycleRuntime } from "./event-lifecycle-runtime.js";
+import { runtimeUnavailable } from "./event-transaction-lifetime.js";
 import {
   EventDecisionTransactionOwner,
   type RuntimeConnection,
@@ -105,4 +117,63 @@ it("keeps a lifecycle handle bound to the generation pinned from its actual evid
     scope.authority.generation = 1;
     expect(scope.handle.connectionGeneration).toBe(1);
   });
+});
+function lifecycleFixture() {
+  const tenants = new TenantScopeService({ resolve: async () => actor });
+  const metrics = new MetricRuntimeService();
+  const uow = new EventDecisionUnitOfWork(() => {
+    throw new Error("Unexpected pool checkout");
+  });
+  const available = vi.spyOn(uow, "requireAvailable").mockImplementation(() => undefined);
+  const resolve = vi.spyOn(metrics, "resolve").mockResolvedValue(binding);
+  const transaction = vi.spyOn(uow, "transaction");
+  const principal = { userId: actor.userId, merchantId: actor.merchantId, permissions: [] };
+  const service = new EventLifecycleRuntime(tenants, metrics, uow);
+  const work = vi.fn(async () => "changed");
+  return {
+    tenants,
+    available,
+    resolve,
+    transaction,
+    work,
+    run: () => service.run(principal, binding, work),
+  };
+}
+it("normalizes a rejected preliminary lifecycle binding resolver to bounded 503", async () => {
+  const test = lifecycleFixture();
+  test.resolve.mockRejectedValue(new Error("private metric configuration or storage failure"));
+  await expect(test.run()).rejects.toMatchObject({
+    status: 503,
+    message: "Event runtime unavailable",
+  });
+  expect(test.transaction).not.toHaveBeenCalled();
+  expect(test.work).not.toHaveBeenCalled();
+});
+it("requires lifecycle capability before preliminary dependency work", async () => {
+  const test = lifecycleFixture();
+  const tenant = vi.spyOn(test.tenants, "resolve");
+  test.available.mockImplementation(() => {
+    throw runtimeUnavailable();
+  });
+  await expect(test.run()).rejects.toMatchObject({ status: 503 });
+  expect(tenant).not.toHaveBeenCalled();
+  expect(test.resolve).not.toHaveBeenCalled();
+  expect(test.transaction).not.toHaveBeenCalled();
+  expect(test.work).not.toHaveBeenCalled();
+});
+it.each([BadRequestException, ForbiddenException, NotFoundException, ConflictException])(
+  "preserves intended lifecycle binding HTTP error %s",
+  async (Exception) => {
+    const test = lifecycleFixture();
+    const failure = new Exception();
+    test.resolve.mockRejectedValue(failure);
+    await expect(test.run()).rejects.toBe(failure);
+    expect(test.transaction).not.toHaveBeenCalled();
+  },
+);
+it("preserves lifecycle not-found for an unresolved binding", async () => {
+  const test = lifecycleFixture();
+  test.resolve.mockResolvedValue(null);
+  await expect(test.run()).rejects.toMatchObject({ status: 404 });
+  expect(test.transaction).not.toHaveBeenCalled();
 });

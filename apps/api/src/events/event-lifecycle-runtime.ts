@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import type { EventQueryPort, EventRecord } from "@shopmate/contracts";
+import { HttpException, Injectable } from "@nestjs/common";
+import type { EventQueryPort, EventRecord, TenantContext } from "@shopmate/contracts";
 import type { AuthContext } from "../auth/contracts/index.js";
 import type { BoundNotificationTransaction } from "../notifications/notification-enqueue.repository.js";
 import { TenantScopeService, tenantNotFound } from "../tenant/tenant-scope.service.js";
@@ -28,10 +28,10 @@ export class EventLifecycleRuntime
     selection: LifecycleSelection,
     work: (scope: LifecycleScope<BoundNotificationTransaction>) => Promise<T>,
   ): Promise<T> {
+    this.uow.requireAvailable();
     const actor = await this.tenants.resolve(identity, selection.workspaceId);
     if (actor.organizationId !== selection.organizationId) tenantNotFound();
-    const binding = await this.metrics.resolve(actor, selection.storeId);
-    if (!binding) tenantNotFound();
+    const binding = await this.resolve(actor, selection.storeId);
     return this.uow.transaction(
       {
         actor,
@@ -58,6 +58,16 @@ export class EventLifecycleRuntime
           },
         }),
     );
+  }
+  private async resolve(actor: TenantContext, storeId: string) {
+    try {
+      const binding = await this.metrics.resolve(actor, storeId);
+      if (!binding) tenantNotFound();
+      return binding;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw runtimeUnavailable();
+    }
   }
   private async detail(
     scope: EventRuntimeTransaction,

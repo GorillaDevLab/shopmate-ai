@@ -800,6 +800,56 @@ it("keeps startup and health available when the dedicated capability is absent",
     vi.stubEnv("EVENT_DECISION_DATABASE_URL", configured);
   }
 });
+async function withoutLifecycleCapabilities(work: (disabled: INestApplication) => Promise<void>) {
+  const keys = ["EVENT_DECISION_DATABASE_URL", "METRIC_DATABASE_URL"] as const;
+  const configured = keys.map((key) => process.env[key]);
+  for (const key of keys) vi.stubEnv(key, "");
+  let disabled: INestApplication | undefined;
+  try {
+    const [{ AppModule }, { configureApp }] = await Promise.all([
+      import("../src/app.module.js"),
+      import("../src/app.config.js"),
+    ]);
+    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    disabled = module.createNestApplication();
+    configureApp(disabled);
+    await disabled.listen(0, "127.0.0.1");
+    await work(disabled);
+  } finally {
+    try {
+      if (disabled) await disabled.close();
+    } finally {
+      keys.forEach((key, index) => vi.stubEnv(key, configured[index]));
+    }
+  }
+}
+const unavailableLifecycleCases = ["OWNER", "ADMIN", "OPERATOR"].flatMap((role) =>
+  [
+    { operation: "acknowledge", reason: "ACKNOWLEDGED_BY_OPERATOR" },
+    { operation: "resolve", reason: "MANUALLY_RESOLVED" },
+    { operation: "suppress", reason: "FALSE_POSITIVE" },
+  ].map((operation) => ({ role, ...operation })),
+);
+it.each(unavailableLifecycleCases)(
+  "returns bounded disabled lifecycle 503 for $role $operation",
+  async ({ role, operation, reason }) => {
+    try {
+      await membership(role);
+      const before = await fixture.counts();
+      await withoutLifecycleCapabilities(async (disabled) => {
+        const response = await request(disabled.getHttpServer())
+          .post(`${path}/${first.events[0]!.id}/${operation}`)
+          .send({ expectedRevision: first.events[0]!.revision, reason })
+          .set("Cookie", cookie())
+          .expect(503);
+        expect(response.body.message).toBe("Event runtime unavailable");
+      });
+      expect(await fixture.counts()).toEqual(before);
+    } finally {
+      await membership("OWNER");
+    }
+  },
+);
 it("registers no public evaluation entry point and performs no vendor, Jev or LLM transport", async () => {
   await request(app.getHttpServer())
     .post(`${path}/evaluate`)
