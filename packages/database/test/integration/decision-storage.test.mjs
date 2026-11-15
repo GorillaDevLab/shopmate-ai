@@ -11,6 +11,9 @@ import { fileURLToPath } from "node:url";
 import { requireIsolatedDatabaseUrl } from "../helpers/isolated-postgres.mjs";
 import { tenantEnvironment } from "../../../../scripts/test-tenant-database.mjs";
 import { EventEvidenceV1Schema, DecisionResultSchema, ExternalIdSchema } from "@shopmate/contracts";
+import { createEventRepository, createDecisionRunRepository } from "../../dist/src/index.js";
+import * as database from "../../dist/src/index.js";
+import { prepareEventDecisionRuntime } from "../helpers/tenant-api-fixture.mjs";
 
 if (!process.env.TEST_DATABASE_URL)
   throw new Error("Decision storage requires runner TEST_DATABASE_URL");
@@ -653,6 +656,280 @@ async function capabilities(client, url, action) {
       await client.query(`DROP ROLE ${name}`);
     }
   }
+}
+async function repositoryContext(client, row, scope = binding) {
+  const actor = {
+    userId: "decision-OWNER",
+    merchantId: scope === binding ? "decision-a" : "decision-max",
+    organizationId: scope.organizationId,
+    workspaceId: scope.workspaceId,
+    role: "OWNER",
+    permissions: ["tenant:read"],
+  };
+  const events = createEventRepository({ actor, client, now: () => instant });
+  const detail = await events.detail({ actor, binding: scope, eventId: row.id });
+  assert.equal(detail.ok, true);
+  const linked = await events.evidence({
+    actor,
+    binding: scope,
+    eventId: row.id,
+    reference: detail.value.currentEvidence,
+  });
+  assert.equal(linked.ok, true);
+  return {
+    schemaVersion: 1,
+    actor,
+    requestId: randomUUID(),
+    correlationId,
+    event: detail.value,
+    evidence: linked.value,
+  };
+}
+async function restrictedRepositoryClaim(client, row, scope = binding) {
+  await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+  try {
+    const input = await repositoryContext(client, row, scope);
+    const repository = createDecisionRunRepository({
+      actor: input.actor,
+      client,
+      clock: { timeDomain: "SECURITY_UTC", now: () => new Date().toISOString() },
+      decisionKey: () => "restricted-runtime-key",
+    });
+    const result = await repository.claim({
+      context: input,
+      decisionKey: "restricted-runtime-key",
+      control: {
+        timeDomain: "SECURITY_UTC",
+        deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+        signal: new globalThis.AbortController().signal,
+      },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.value.status, "CLAIMED");
+  } finally {
+    await client.query("ROLLBACK");
+  }
+}
+test("runtime repository claims without direct claim UPDATE capability", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    await fixture(client);
+    const row = await appendEvent(client);
+    await capabilities(client, url, async (roles) => {
+      const login = (await roles.writer.query("SELECT current_user AS name")).rows[0].name;
+      assert.match(login, /^decision_writer_[a-f0-9]+$/u);
+      await client.query(`GRANT shopmate_event_writer TO ${login}`);
+      try {
+        await context(roles.writer, "decision-OWNER", () =>
+          restrictedRepositoryClaim(roles.writer, row),
+        );
+        await assert.rejects(roles.writer.query('UPDATE decision_claims SET "winnerRunId"=NULL'), {
+          code: "42501",
+        });
+      } finally {
+        await client.query(`REVOKE shopmate_event_writer FROM ${login}`);
+      }
+    });
+  });
+});
+test("runtime repository preserves event fingerprints longer than external IDs", async () => {
+  await withDatabase(async (client) => {
+    await migrate(client);
+    const scope = await maximumScopeFixture(client);
+    const row = await appendEvent(client, scope);
+    assert.ok(row.fingerprint.length > 256);
+    const settings = Object.fromEntries(
+      Object.entries(scope).map(([key, value]) => [
+        key.replace(/[A-Z]/gu, (letter) => `_${letter.toLowerCase()}`),
+        value,
+      ]),
+    );
+    await context(
+      client,
+      "decision-OWNER",
+      () => restrictedRepositoryClaim(client, row, scope),
+      settings,
+    );
+  });
+});
+test("checked event decision pool accepts only its composed restricted capability", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    const runtime = await prepareEventDecisionRuntime(url);
+    assert.equal(typeof database.createEventDecisionPool, "function");
+    const pool = database.createEventDecisionPool(runtime);
+    const unsafe = database.createEventDecisionPool(url);
+    try {
+      const connection = await pool.connect();
+      assert.equal(
+        (await connection.query("SELECT current_user AS name")).rows[0].name,
+        "shopmate_event_decision_api",
+      );
+      connection.release();
+      await assert.rejects(unsafe.connect(), { message: "Event decision database unavailable" });
+      await client.query("GRANT shopmate_metric_writer TO shopmate_event_decision_api");
+      await assert.rejects(pool.connect(), { message: "Event decision database unavailable" });
+    } finally {
+      await pool.end();
+      await unsafe.end();
+      await client.query("REVOKE shopmate_metric_writer FROM shopmate_event_decision_api");
+    }
+  });
+});
+test("event runtime child environment accepts only its owned isolated restricted URL", () => {
+  const urls = Object.fromEntries(
+    [
+      ["METRIC_DATABASE_URL", "shopmate_metric_api"],
+      ["METRIC_DEFINITION_DATABASE_URL", "shopmate_metric_definition_api"],
+      ["EVENT_DECISION_DATABASE_URL", "shopmate_event_decision_api"],
+    ].map(([key, login]) => {
+      const url = new URL(serverUrl);
+      url.username = login;
+      return [key, url.toString()];
+    }),
+  );
+  const inherited = {
+    EVENT_DECISION_DATABASE_URL: "unsafe",
+    DATABASE_URL: "unsafe",
+    PGHOST: "unsafe",
+  };
+  assert.equal(tenantEnvironment(inherited, serverUrl).EVENT_DECISION_DATABASE_URL, undefined);
+  assert.equal(
+    tenantEnvironment(inherited, serverUrl, undefined, urls).EVENT_DECISION_DATABASE_URL,
+    urls.EVENT_DECISION_DATABASE_URL,
+  );
+  for (const bad of [
+    serverUrl,
+    "postgresql://shopmate_event_decision_api@example.com/shopmate_tenant_test",
+    urls.EVENT_DECISION_DATABASE_URL.replace("shopmate_tenant_test", "shopmate_tenant_test_other"),
+    "",
+  ])
+    assert.throws(() =>
+      tenantEnvironment(inherited, serverUrl, undefined, {
+        ...urls,
+        EVENT_DECISION_DATABASE_URL: bad,
+      }),
+    );
+});
+test("checked runtime pool rejects even a single direct claim UPDATE column", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    const pool = database.createEventDecisionPool(await prepareEventDecisionRuntime(url));
+    await client.query(
+      'GRANT UPDATE ("claimToken") ON public.decision_claims TO shopmate_event_decision_api',
+    );
+    try {
+      await assert.rejects(
+        async () => {
+          const connection = await pool.connect();
+          connection.release();
+        },
+        { message: "Event decision database unavailable" },
+      );
+    } finally {
+      await pool.end();
+      await client.query(
+        'REVOKE UPDATE ("claimToken") ON public.decision_claims FROM shopmate_event_decision_api',
+      );
+    }
+  });
+});
+async function checkedCheckout(pool) {
+  const connection = await pool.connect();
+  connection.release();
+}
+async function additionalWriteCase(client, url, grant, revoke, inherited = false) {
+  const pool = database.createEventDecisionPool(await prepareEventDecisionRuntime(url));
+  const role = inherited ? "event_runtime_extra_writer" : "shopmate_event_decision_api";
+  try {
+    if (inherited) {
+      await client.query("CREATE ROLE event_runtime_extra_writer NOLOGIN");
+      await client.query("GRANT event_runtime_extra_writer TO shopmate_event_decision_api");
+    }
+    await checkedCheckout(pool);
+    await client.query(`${grant} TO ${role}`);
+    await assert.rejects(() => checkedCheckout(pool), {
+      message: "Event decision database unavailable",
+    });
+  } finally {
+    try {
+      await client.query(`${revoke} FROM ${role}`);
+      if (inherited) {
+        await client.query("REVOKE event_runtime_extra_writer FROM shopmate_event_decision_api");
+        await client.query("DROP ROLE event_runtime_extra_writer");
+      }
+      await checkedCheckout(pool);
+    } finally {
+      await pool.end();
+    }
+  }
+}
+const additionalWrites = [
+  ["authority role UPDATE", 'UPDATE (role) ON public."OrganizationMember"'],
+  ["recipient inbox UPDATE", 'UPDATE ("readAt") ON public.recipient_inbox'],
+  ["noncomposed outbox UPDATE", "UPDATE (status) ON public.notification_outbox"],
+  ["noncomposed event INSERT column", 'INSERT ("winnerRunId") ON public.decision_claims'],
+];
+for (const [name, privilege] of additionalWrites) {
+  for (const inherited of [false, true]) {
+    test(`checked runtime pool rejects ${inherited ? "inherited" : "direct"} ${name}`, async () => {
+      await withDatabase(async (client, url) => {
+        await migrate(client);
+        await additionalWriteCase(
+          client,
+          url,
+          `GRANT ${privilege}`,
+          `REVOKE ${privilege}`,
+          inherited,
+        );
+      });
+    });
+  }
+}
+test("checked runtime pool rejects notification recipient membership", async () => {
+  await withDatabase(async (client, url) => {
+    await migrate(client);
+    await additionalWriteCase(
+      client,
+      url,
+      "GRANT shopmate_notification_recipient",
+      "REVOKE shopmate_notification_recipient",
+    );
+  });
+});
+async function schemaCreateCase(client, url, inherited) {
+  const pool = database.createEventDecisionPool(await prepareEventDecisionRuntime(url));
+  const role = inherited ? "event_runtime_schema_creator" : "shopmate_event_decision_api";
+  try {
+    if (inherited) {
+      await client.query("CREATE ROLE event_runtime_schema_creator NOLOGIN");
+      await client.query("GRANT event_runtime_schema_creator TO shopmate_event_decision_api");
+    }
+    await checkedCheckout(pool);
+    await client.query(`GRANT CREATE ON SCHEMA public TO ${role}`);
+    await assert.rejects(() => checkedCheckout(pool), {
+      message: "Event decision database unavailable",
+    });
+  } finally {
+    try {
+      await client.query(`REVOKE CREATE ON SCHEMA public FROM ${role}`);
+      if (inherited) {
+        await client.query("REVOKE event_runtime_schema_creator FROM shopmate_event_decision_api");
+        await client.query("DROP ROLE event_runtime_schema_creator");
+      }
+      await checkedCheckout(pool);
+    } finally {
+      await pool.end();
+    }
+  }
+}
+for (const inherited of [false, true]) {
+  test(`checked runtime pool rejects ${inherited ? "inherited" : "direct"} schema CREATE`, async () => {
+    await withDatabase(async (client, url) => {
+      await migrate(client);
+      await schemaCreateCase(client, url, inherited);
+    });
+  });
 }
 async function writerCases(t, roles, row) {
   await t.test("restricted assigned OPERATOR claims, appends and chooses one winner", () =>

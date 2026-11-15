@@ -12,6 +12,7 @@ import {
   EventDetailQuerySchema,
   EventHistoryQuerySchema,
   EventEvidenceRecordSchema,
+  EventRecordSchema,
   createEventFingerprint,
   sameDecisionEvidence,
   EvaluationContextSchema,
@@ -132,7 +133,7 @@ function decodeLease(row: Row) {
     binding: binding(row),
     eventId: ExternalIdSchema.parse(row.eventId),
     eventRevision: integer(row.eventRevision),
-    fingerprint: ExternalIdSchema.parse(row.fingerprint),
+    fingerprint: EventRecordSchema.unwrap().shape.fingerprint.parse(row.fingerprint),
     evidenceId: ExternalIdSchema.parse(row.evidenceId),
     evidenceVersion: ExternalIdSchema.parse(row.evidenceVersion),
     evidenceHash: ExternalIdSchema.parse(row.evidenceHash),
@@ -325,7 +326,7 @@ async function findLease(options: Bound, request: Identity): Promise<Lease | nul
   const { event, evidence } = request.context;
   const result = await options.client.query(
     `SELECT * FROM public.decision_claims WHERE ${scoped} /* decision:lease */
-    AND "eventId"=$6 AND "evidenceId"=$7 AND "decisionKey"=$8 FOR UPDATE`,
+    AND "eventId"=$6 AND "evidenceId"=$7 AND "decisionKey"=$8`,
     [...values(event.binding), event.id, evidence.reference.id, request.decisionKey],
   );
   if (result.rows.length > 1) throw new TypeError("Duplicate claim");

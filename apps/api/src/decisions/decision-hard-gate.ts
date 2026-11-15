@@ -405,10 +405,11 @@ function reliableSoldOut(evidence: EventEvidenceV1, rule: QualityRule): boolean 
     evidence.facts.availableUnits === 0 &&
     evidence.facts.inventoryStatus === "VERIFIED" &&
     fresh(evidence.facts.inventoryObservedAt, evidence, rule) &&
-    !evidence.issues.some((issue) =>
-      ["SOURCE_INCONSISTENT", "WINDOW_MISMATCH", "VERSION_MISMATCH", "INVENTORY_UNKNOWN"].includes(
-        issue.code,
-      ),
+    !evidence.issues.some(
+      (issue) =>
+        ["SOURCE_INCONSISTENT", "WINDOW_MISMATCH", "VERSION_MISMATCH"].includes(issue.code) ||
+        // A missing forecast does not contradict the separately verified observed quantity.
+        (issue.code === "INVENTORY_UNKNOWN" && issue.field !== "facts.estimatedHoursRemaining"),
     )
   );
 }

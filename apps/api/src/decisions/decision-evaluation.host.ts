@@ -153,11 +153,11 @@ function unavailable(context: EvaluationContext, code: DecisionUnavailableCode):
     code,
   });
 }
-function stableKey(
+export function stableKey(
   context: EvaluationContext,
   ruleset: DecisionRulesetV1,
-  primary: DecisionProvider,
-  fallback: DecisionProvider,
+  primary: Pick<DecisionProvider, "descriptor">,
+  fallback: Pick<DecisionProvider, "descriptor">,
 ): string {
   const binding = context.event.binding;
   const evidence = context.evidence.reference;

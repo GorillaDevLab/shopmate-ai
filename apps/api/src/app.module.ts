@@ -11,6 +11,7 @@ import { TenantModule } from "./tenant/tenant.module.js";
 import { AgentActionsModule } from "./ai/actions/agent-actions.module.js";
 import { DemoCommerceModule } from "./demo-commerce/demo-commerce.module.js";
 import { MetricsModule } from "./metrics/metrics.module.js";
+import { EventsModule } from "./events/events.module.js";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { MetricsModule } from "./metrics/metrics.module.js";
     AgentActionsModule,
     DemoCommerceModule,
     MetricsModule,
+    EventsModule,
   ],
 })
 export class AppModule {}

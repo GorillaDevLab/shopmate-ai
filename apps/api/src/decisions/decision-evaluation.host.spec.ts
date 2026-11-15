@@ -21,6 +21,7 @@ import { DEFAULT_DECISION_RULESET as ruleset } from "./decision-ruleset.js";
 import {
   DecisionEvaluationHost,
   DecisionProviderRegistry,
+  stableKey,
   type DecisionEvaluationAuthority,
   type DecisionCommitRequest,
 } from "./decision-evaluation.host.js";
@@ -227,6 +228,16 @@ it("defaults to Rules PRIMARY and publishes a gated immutable run once", async (
   expect(result.effective).toEqual(labels);
   expect(test.history).toHaveLength(1);
   expect(test.routes()).toBe(1);
+});
+
+it("exports the canonical stable key without changing host identity bytes", async () => {
+  const test = fixture();
+  const context = contextFixture();
+  const run = value(await test.host.evaluate(context, control()));
+  expect(stableKey(context, ruleset, provider(), provider())).toBe(run.decisionKey);
+  expect(run.decisionKey).toBe(
+    "decision:f93ec68bc82b940fb3111ff8aa38494c7b0c9e805e5a9f2ebf91a0b9b56729b1",
+  );
 });
 
 it.each(["throw", "invalid", "unsupported", "timeout"] as const)(

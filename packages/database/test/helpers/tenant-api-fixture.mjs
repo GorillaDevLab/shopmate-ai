@@ -69,6 +69,31 @@ export async function prepareMetricApiRuntime(url) {
   }
 }
 
+/** Isolated operator provisioning only; production grants require a reviewed operator runbook. */
+export async function prepareEventDecisionRuntime(url) {
+  const client = new pg.Client({ connectionString: requireIsolatedDatabaseUrl(url) });
+  await client.connect();
+  try {
+    const login = "shopmate_event_decision_api";
+    if (!(await client.query("SELECT 1 FROM pg_roles WHERE rolname=$1", [login])).rowCount)
+      await client.query(
+        `CREATE ROLE ${login} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`,
+      );
+    await client.query(
+      `GRANT shopmate_event_writer,shopmate_decision_writer,shopmate_metric_reader,shopmate_metric_source,shopmate_audit_writer,shopmate_notification_enqueuer TO ${login}`,
+    );
+    await client.query(
+      `GRANT SELECT ("organizationId","userId",role) ON public."OrganizationMember" TO ${login}`,
+    );
+    const runtime = new URL(url);
+    runtime.username = login;
+    runtime.password = "";
+    return runtime.toString();
+  } finally {
+    await client.end();
+  }
+}
+
 export class TenantApiFixture {
   constructor(url) {
     this.client = new pg.Client({ connectionString: requireIsolatedDatabaseUrl(url) });

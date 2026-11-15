@@ -16,11 +16,13 @@ export type {
 } from "./decision-run.repository.js";
 export { createMetricRuntimePool } from "./metric-runtime-pool.js";
 export type { MetricRuntimePool } from "./metric-runtime-pool.js";
+export { createEventDecisionPool, type EventDecisionPool } from "./event-decision-pool.js";
 export {
   ensureMetricDefinitions,
   type RuntimeMetricDefinition,
 } from "./metric-definition.repository.js";
 export { createMetricSourceBundleRepository } from "./metric-source-bundle.repository.js";
+export { decodeNormalizedMetricSourceBundle } from "./metric-source-bundle.decode.js";
 export type * from "./metric-source-bundle.types.js";
 export type {
   MetricHashDescriptor,
