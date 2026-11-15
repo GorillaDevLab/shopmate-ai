@@ -21,6 +21,7 @@ const apiTargets = [
   "test/demo-commerce-database.e2e-spec.ts",
   "test/metrics-database.e2e-spec.ts",
   "test/event-decisions.e2e-spec.ts",
+  "test/event-route-atomicity.e2e-spec.ts",
 ];
 const requiredTargetCounts = new Map([
   ["test/integration/audit-storage.test.mjs", 206],
@@ -380,6 +381,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       TEST_DATABASE_URL: server.url,
     });
     await run("packages/database", "test/integration/event-storage.test.mjs", [], {
+      TEST_DATABASE_URL: server.url,
+    });
+    await run("packages/database", "test/integration/event-decision-concurrency.test.mjs", [], {
       TEST_DATABASE_URL: server.url,
     });
     await run("packages/database", "test/integration/decision-storage.test.mjs", [], {

@@ -7,6 +7,7 @@ export default defineConfig({
       "test/demo-commerce-database.e2e-spec.ts",
       "test/metrics-database.e2e-spec.ts",
       "test/event-decisions.e2e-spec.ts",
+      "test/event-route-atomicity.e2e-spec.ts",
     ],
     hookTimeout: 60_000,
     testTimeout: 30_000,
