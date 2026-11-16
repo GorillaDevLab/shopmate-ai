@@ -399,3 +399,4 @@ export * from "./decisions/decision-provider.js";
 export type * from "./decisions/decision-ports.js";
 export * from "./audit/audit.schema.js";
 export * from "./notifications/delivery.schema.js";
+export * from "./actions/proposal.schema.js";

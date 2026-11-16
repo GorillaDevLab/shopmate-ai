@@ -57,4 +57,36 @@ describe("@shopmate/contracts 公共包", () => {
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
   });
+
+  it("从根入口公开提案与人工审批契约", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `
+          const contracts = await import("@shopmate/contracts");
+          for (const name of [
+            "ActionProposalV1Schema",
+            "ApprovalBindingV1Schema",
+            "ApprovalDecisionRequestSchema",
+            "approvalMatchesProposal",
+            "verifyHumanApprovalAuthority",
+          ]) {
+            if (contracts[name] === undefined) throw new Error(name + " export missing");
+          }
+          if (contracts.APPROVAL_REQUIRED_PERMISSIONS.join() !== "actions:approve,products:write") {
+            throw new Error("APPROVAL_REQUIRED_PERMISSIONS export missing");
+          }
+        `,
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  });
 });
