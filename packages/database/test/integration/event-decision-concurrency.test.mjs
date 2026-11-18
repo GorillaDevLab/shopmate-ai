@@ -26,44 +26,58 @@ test("ten sequential and overlapping duplicate appends retain one active event a
 
 test("stale expected revisions and delayed source evidence cannot replace a newer committed observation", async () => {
   await fixture(async ({ sessions: [left, right], admin }) => {
-    const first = unwrap(await transaction(left, (repo) => repo.appendEvidence(appendRequest())));
-    const newer = unwrap(
-      await transaction(right, (repo) => repo.appendEvidence(appendRequest(3, 1))),
-    );
+    const original = appendRequest();
+    const first = unwrap(await transaction(left, (repo) => repo.appendEvidence(original)));
+    const history = await savedEvidence(admin, original.reference.id);
+    assert.deepEqual(history, expectedEvidence(original));
+
+    const next = appendRequest(3, 1);
+    const newer = unwrap(await transaction(right, (repo) => repo.appendEvidence(next)));
+    const accepted = await savedCurrentEvidence(admin, first.id);
+    assert.deepEqual(accepted, expectedEvidence(next));
     assert.equal(newer.id, first.id);
     assert.equal(newer.revision, 2);
-    const stale = await transaction(left, (repo) => repo.appendEvidence(appendRequest(4, 1)));
-    assert.deepEqual(stale, { ok: false, error: { code: "CONFLICT", evidenceIds: [] } });
-    const delayed = await transaction(right, (repo) => repo.appendEvidence(appendRequest(2, 2)));
-    assert.deepEqual(delayed, { ok: false, error: { code: "VERSION_MISMATCH", evidenceIds: [] } });
-    await immutableSourceCase(left, admin, first);
+
+    await assertRejectedAppends(left, right);
     assert.deepEqual(await durable(admin), { active: 1, evidence: 2, revision: 2 });
-    const saved = await admin.query(
-      'SELECT "currentEvidenceId","currentEvidenceVersion" FROM events WHERE id=$1',
-      [first.id],
-    );
-    assert.deepEqual(saved.rows, [
-      { currentEvidenceId: "evidence-3", currentEvidenceVersion: "v3" },
-    ]);
+    assert.deepEqual(await savedCurrentEvidence(admin, first.id), accepted);
+    assert.deepEqual(await savedEvidence(admin, original.reference.id), history);
   });
 });
 
-async function immutableSourceCase(client, admin, event) {
-  const original = await admin.query("SELECT payload FROM event_evidence WHERE id=$1", [
-    event.currentEvidence.id,
-  ]);
+function expectedEvidence({ reference: { id, version, hash }, candidate: { evidence } }) {
+  return { id, version, hash, payload: evidence };
+}
+
+async function savedEvidence(admin, id) {
+  const result = await admin.query(
+    "SELECT id,version,hash,payload FROM event_evidence WHERE id=$1",
+    [id],
+  );
+  assert.equal(result.rowCount, 1);
+  return result.rows[0];
+}
+
+async function savedCurrentEvidence(admin, eventId) {
+  const result = await admin.query(
+    `SELECT e."currentEvidenceId" AS id,e."currentEvidenceVersion" AS version,
+    e."currentEvidenceHash" AS hash,v.payload
+    FROM events e JOIN event_evidence v ON v.id=e."currentEvidenceId" WHERE e.id=$1`,
+    [eventId],
+  );
+  assert.equal(result.rowCount, 1);
+  return result.rows[0];
+}
+
+async function assertRejectedAppends(left, right) {
+  const stale = await transaction(left, (repo) => repo.appendEvidence(appendRequest(4, 1)));
+  assert.deepEqual(stale, { ok: false, error: { code: "CONFLICT", evidenceIds: [] } });
+  const delayed = await transaction(right, (repo) => repo.appendEvidence(appendRequest(2, 2)));
+  assert.deepEqual(delayed, { ok: false, error: { code: "VERSION_MISMATCH", evidenceIds: [] } });
   const reused = globalThis.structuredClone(appendRequest(5, 2));
   reused.candidate.evidence.sourceReferences[0].version = "v1";
-  const result = await transaction(client, (repo) => repo.appendEvidence(reused));
+  const result = await transaction(left, (repo) => repo.appendEvidence(reused));
   assert.deepEqual(result, { ok: false, error: { code: "VERSION_MISMATCH", evidenceIds: [] } });
-  assert.deepEqual(
-    (
-      await admin.query("SELECT payload FROM event_evidence WHERE id=$1", [
-        event.currentEvidence.id,
-      ])
-    ).rows,
-    original.rows,
-  );
 }
 
 test("ten same-key decision attempts on overlapping sessions retain exactly one effective winner", async () => {
