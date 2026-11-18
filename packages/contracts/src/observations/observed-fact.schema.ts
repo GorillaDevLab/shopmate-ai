@@ -8,6 +8,7 @@ import {
   QuantitySchema,
   SourceVersionSchema,
 } from "../commerce/connector-common.schema.js";
+import { MockScenarioPlanSchema } from "../commerce/mock-scenario.schema.js";
 import { EventEntitySchema } from "../events/event-evidence.schema.js";
 import {
   BasisPointsSchema,
@@ -28,6 +29,7 @@ const utcMs = z.iso
   );
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 const generation = QuantitySchema.max(2147483647);
+const modelVersion = z.literal("mock-business-observed-v1");
 const sequence = QuantitySchema.min(1);
 const hours = z.number().finite().min(0).max(Number.MAX_SAFE_INTEGER);
 const observedVersionPattern = /^observed-v1:g:(0|[1-9]\d*):e:([1-9]\d*)$/u;
@@ -79,7 +81,7 @@ const envelope = z.strictObject({
   priorVersion: observedVersion.nullable(),
   sourceVersion: observedVersion,
   producerVersion: SourceVersionSchema,
-  modelVersion: z.literal("mock-business-observed-v1"),
+  modelVersion,
   occurredAt: utcMs,
   observedAt: utcMs,
   payloadHash: sha256,
@@ -475,3 +477,61 @@ export const ObservedFactV1Schema = z
   ])
   .readonly();
 export type ObservedFactV1 = z.infer<typeof ObservedFactV1Schema>;
+
+const observedScenarioPlan = MockScenarioPlanSchema.transform((plan) =>
+  Object.freeze({
+    ...plan,
+    mutations: Object.freeze(plan.mutations.map((mutation) => Object.freeze(mutation))),
+    delivery: Object.freeze(plan.delivery),
+  }),
+).nullable();
+
+const latestBusinessInstant = Date.parse("9999-12-31T23:59:59.999Z");
+const observedConfig = z
+  .strictObject({
+    modelVersion,
+    binding: ConnectorBindingSchema,
+    seed: QuantitySchema.max(4294967295),
+    profile: z.enum(["growing", "problematic", "mature", "new"]),
+    historyStart: utcMs.refine((time) => time.endsWith("T16:00:00.000Z")),
+    days: QuantitySchema.min(1).max(365),
+    productCount: QuantitySchema.min(1).max(100),
+    variantsPerProduct: QuantitySchema.min(1).max(3),
+    dailyOrders: QuantitySchema.min(1).max(300),
+    growthBps: BasisPointsSchema,
+    refundBps: BasisPointsSchema.max(5000),
+    adSpendMinor: MinorAmountSchema.max(100000000),
+    scenarioPlan: observedScenarioPlan,
+  })
+  .refine(
+    (config) =>
+      config.days * Math.ceil(config.dailyOrders * 1.35) <= 150000 &&
+      Date.parse(config.historyStart) + (config.days + 5) * dayMs <= latestBusinessInstant,
+    "Generator run exceeds the supported horizon",
+  )
+  .refine(
+    ({ scenarioPlan, productCount, variantsPerProduct, binding, days }) =>
+      scenarioPlan === null ||
+      (scenarioPlan.externalStoreId === binding.externalStoreId &&
+        scenarioPlan.endDay <= days &&
+        scenarioPlan.mutations.every(
+          ({ skuIndex }) => skuIndex < productCount * variantsPerProduct,
+        )),
+    "Scenario must belong to the configured store, history and SKU range",
+  )
+  .readonly();
+
+/**
+ * The hash preimage is UTF-8 JSON.stringify of the decoded inner config, including a null
+ * scenarioPlan. Schema declaration order fixes the object keys and preserves mutation array order.
+ * Generation and configHash live in the envelope. The publisher verifies the hash at runtime.
+ */
+export const MockObservedGenerationConfigV3Schema = z
+  .strictObject({
+    generatorVersion: z.literal("mock-source-v3"),
+    generation,
+    configHash: sha256,
+    config: observedConfig,
+  })
+  .readonly();
+export type MockObservedGenerationConfigV3 = z.infer<typeof MockObservedGenerationConfigV3Schema>;

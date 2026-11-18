@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import * as api from "../index.js";
 import {
+  MockObservedGenerationConfigV3Schema,
   ObservedDomainSchema,
   ObservedFactV1Schema,
   ObservedSubjectSchema,
@@ -517,4 +518,175 @@ it("rejects malformed identities, invalid tags, and open nested records", () => 
   rejects({ ...cost, subject: { ...sku, sessionId: "session" } });
   expect(ObservedDomainSchema.safeParse("PROFIT").success).toBe(false);
   expect(ObservedSubjectSchema.safeParse({ ...store, externalSkuId: "sku-A" }).success).toBe(false);
+});
+
+const config = {
+  modelVersion: "mock-business-observed-v1",
+  binding,
+  seed: 0,
+  profile: "growing",
+  historyStart: start,
+  days: 120,
+  productCount: 10,
+  variantsPerProduct: 2,
+  dailyOrders: 30,
+  growthBps: 0,
+  refundBps: 0,
+  adSpendMinor: 100,
+  scenarioPlan: null,
+};
+const configEnvelope = {
+  generatorVersion: "mock-source-v3",
+  generation: 0,
+  configHash: hash,
+  config,
+};
+const scenarioMutation = {
+  skuIndex: 19,
+  retainDemandBps: 5000,
+  priceBps: 10000,
+  discountBps: 100,
+  refundBps: 500,
+  cancelBps: 0,
+  restockBps: 10000,
+  launchRampDays: 1,
+  restockDelayDays: 2,
+};
+const scenarioPlan = {
+  version: "mock-scenario-v1",
+  scenarioId: "SCENARIO_001",
+  externalStoreId: binding.externalStoreId,
+  startDay: 10,
+  endDay: 120,
+  mutations: [scenarioMutation, { ...scenarioMutation, skuIndex: 0 }],
+  campaignSpendBps: 10000,
+  campaignConversionBps: 7000,
+  delivery: { kind: "INTERRUPT", durationMs: 1000 },
+};
+
+function withConfig(changes: object) {
+  return { ...configEnvelope, config: { ...config, ...changes } };
+}
+
+it("exposes a strictly opted-in, generation-scoped configuration from the package root", () => {
+  expect(api.MockObservedGenerationConfigV3Schema.parse(configEnvelope)).toEqual(configEnvelope);
+  expect(
+    MockObservedGenerationConfigV3Schema.safeParse({ ...configEnvelope, generation: 2147483647 })
+      .success,
+  ).toBe(true);
+  for (const generation of [-1, 2147483648, 0.5]) {
+    expect(
+      MockObservedGenerationConfigV3Schema.safeParse({ ...configEnvelope, generation }).success,
+    ).toBe(false);
+  }
+  for (const generatorVersion of ["mock-source-v1", "mock-source-v2"]) {
+    expect(
+      MockObservedGenerationConfigV3Schema.safeParse({ ...configEnvelope, generatorVersion })
+        .success,
+    ).toBe(false);
+  }
+  expect(
+    MockObservedGenerationConfigV3Schema.safeParse({
+      ...configEnvelope,
+      configHash: "A".repeat(64),
+    }).success,
+  ).toBe(false);
+  expect(
+    MockObservedGenerationConfigV3Schema.safeParse({ ...configEnvelope, credentials: {} }).success,
+  ).toBe(false);
+});
+
+it.each([
+  ["modelVersion", undefined],
+  ["modelVersion", "mock-business-observed-v2"],
+  ["scenarioPlan", undefined],
+  ["seed", -1],
+  ["seed", 4294967296],
+  ["seed", "0"],
+  ["seed", NaN],
+  ["profile", "unknown"],
+  ["days", 0],
+  ["days", 366],
+  ["productCount", 101],
+  ["variantsPerProduct", 4],
+  ["dailyOrders", 301],
+  ["growthBps", 10001],
+  ["refundBps", 5001],
+  ["adSpendMinor", 100000001],
+  ["adSpendMinor", Infinity],
+  ["historyStart", "2026-11-01T16:01:00.000Z"],
+  ["historyStart", "2026-11-02T00:00:00.000+08:00"],
+  ["historyStart", "0000-11-01T16:00:00.000Z"],
+  ["expected", "WINNER"],
+] as const)("rejects v3 %s value %s", (key, value) => {
+  expect(MockObservedGenerationConfigV3Schema.safeParse(withConfig({ [key]: value })).success).toBe(
+    false,
+  );
+});
+
+it("admits maximum supported generator settings and the latest midnight with room for its run", () => {
+  const maxSettings = withConfig({
+    seed: 4294967295,
+    days: 365,
+    productCount: 100,
+    variantsPerProduct: 3,
+    dailyOrders: 300,
+    growthBps: 10000,
+    refundBps: 5000,
+    adSpendMinor: 100000000,
+  });
+  expect(MockObservedGenerationConfigV3Schema.parse(maxSettings)).toEqual(maxSettings);
+  const latest = withConfig({ historyStart: "9999-12-25T16:00:00.000Z", days: 1 });
+  expect(MockObservedGenerationConfigV3Schema.parse(latest)).toEqual(latest);
+  const tooLate = withConfig({ historyStart: "9999-12-26T16:00:00.000Z", days: 1 });
+  expect(MockObservedGenerationConfigV3Schema.safeParse(tooLate).success).toBe(false);
+});
+
+it("restricts scenarios to the same store, in-range SKU indices and the generation horizon", () => {
+  const withScenario = withConfig({ scenarioPlan });
+  expect(MockObservedGenerationConfigV3Schema.parse(withScenario)).toEqual(withScenario);
+  for (const override of [
+    { externalStoreId: "shop-other" },
+    { endDay: 121 },
+    { mutations: [{ ...scenarioMutation, skuIndex: 20 }] },
+    { forbidden: "hidden answer" },
+    { delivery: { kind: "INTERRUPT", durationMs: 1000, failureRules: [] } },
+  ]) {
+    const invalid = withConfig({ scenarioPlan: { ...scenarioPlan, ...override } });
+    expect(MockObservedGenerationConfigV3Schema.safeParse(invalid).success).toBe(false);
+  }
+});
+
+function reversedFields(fields: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(fields).reverse());
+}
+
+it("decodes the v3 hash preimage in schema order with an explicit null scenario", () => {
+  const parsed = MockObservedGenerationConfigV3Schema.parse(
+    withConfig({ binding: reversedFields(binding) }),
+  );
+  expect(JSON.stringify(parsed.config)).toBe(JSON.stringify(config));
+});
+
+it("preserves scenario hash field order and the original order of mutations", () => {
+  const unorderedScenario = reversedFields({
+    ...scenarioPlan,
+    mutations: scenarioPlan.mutations.map(reversedFields),
+    delivery: reversedFields(scenarioPlan.delivery),
+  });
+  const parsed = MockObservedGenerationConfigV3Schema.parse({
+    ...configEnvelope,
+    config: reversedFields({
+      ...config,
+      binding: reversedFields(binding),
+      scenarioPlan: unorderedScenario,
+    }),
+  });
+  expect(JSON.stringify(parsed.config)).toBe(JSON.stringify({ ...config, scenarioPlan }));
+  expect(Object.isFrozen(parsed)).toBe(true);
+  expect(Object.isFrozen(parsed.config)).toBe(true);
+  expect(Object.isFrozen(parsed.config.scenarioPlan)).toBe(true);
+  expect(Object.isFrozen(parsed.config.scenarioPlan?.mutations)).toBe(true);
+  expect(Object.isFrozen(parsed.config.scenarioPlan?.mutations[0])).toBe(true);
+  expect(Object.isFrozen(parsed.config.scenarioPlan?.delivery)).toBe(true);
 });
