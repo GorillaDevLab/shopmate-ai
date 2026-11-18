@@ -126,9 +126,14 @@ it.each(["audit", "outbox", "denial"] as const)(
     await withAtomicity(async (fixture) => {
       const component = new ComponentEvaluator(fixture),
         before = await fixture.source.counts();
-      await expect(sqlFault(fixture, boundary, () => component.evaluate())).rejects.toMatchObject({
-        status: 503,
-      });
+      const { evidence, result } = await sqlFault(fixture, boundary, () => component.evaluate());
+      expect(evidence.upstream).toEqual([{ events: 1, runs: 1 }]);
+      if (boundary === "denial") {
+        expect(evidence.authorization).toEqual([{ allowed: false, currentUser: actor.userId }]);
+      } else {
+        expect(evidence.injected).toBe(boundary);
+      }
+      expect(result).toMatchObject({ status: "rejected", reason: { status: 503 } });
       expect(await fixture.source.counts()).toEqual(before);
       const run = await component.evaluate();
       await savedWinner(fixture, run);

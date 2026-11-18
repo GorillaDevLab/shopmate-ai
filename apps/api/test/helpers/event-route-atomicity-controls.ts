@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { expect, vi } from "vitest";
+import { vi } from "vitest";
 import type { EventDecisionUnitOfWork } from "../../src/events/event-decision-unit-of-work.js";
 import type { EventRuntimeTransaction } from "../../src/events/event-decision-transaction.js";
 import type { AtomicityFixture } from "./event-route-atomicity-fixture.js";
@@ -82,38 +82,50 @@ function matches(sql: string, boundary: Boundary) {
     sql.startsWith("SELECT public.notification_scope_access") && sql.includes('AS "currentUser"')
   );
 }
+interface FaultEvidence {
+  intercepted?: true;
+  upstream?: unknown;
+  injected?: "audit" | "outbox";
+  authorization?: unknown;
+}
 async function hitBoundary(
   fixture: AtomicityFixture,
   scope: EventRuntimeTransaction,
   boundary: Boundary,
+  evidence: FaultEvidence,
 ) {
   const rows = await scope.client.query(
     "SELECT (SELECT count(*)::int FROM events) AS events,(SELECT count(*)::int FROM decision_runs) AS runs",
   );
-  expect(rows.rows[0]).toMatchObject({ events: 1, runs: 1 });
-  if (boundary === "denial")
-    await fixture.source.query('UPDATE "WorkspaceMember" SET status=$1 WHERE "userId"=$2', [
-      "INACTIVE",
-      "event-runtime-recipient",
-    ]);
-  else throw new Error(`Injected actual ${boundary} SQL boundary failure`);
+  evidence.upstream = rows.rows;
+  if (boundary === "denial") {
+    await setRecipientStatus(fixture, "INACTIVE");
+    return;
+  }
+  evidence.injected = boundary;
+  throw new Error(`Injected actual ${boundary} SQL boundary failure`);
+}
+async function setRecipientStatus(fixture: AtomicityFixture, status: "ACTIVE" | "INACTIVE") {
+  await fixture.source.query('UPDATE "WorkspaceMember" SET status=$1 WHERE "userId"=$2', [
+    status,
+    "event-runtime-recipient",
+  ]);
 }
 async function faultIn<T>(
   fixture: AtomicityFixture,
   scope: EventRuntimeTransaction,
   boundary: Boundary,
-  reached: { value: boolean },
+  evidence: FaultEvidence,
   operation: (scope: EventRuntimeTransaction) => Promise<T>,
 ) {
   const query = scope.client.query.bind(scope.client);
   const spy = vi.spyOn(scope.client, "query").mockImplementation(async (sql, values) => {
-    if (!reached.value && matches(sql, boundary)) {
-      reached.value = true;
-      await hitBoundary(fixture, scope, boundary);
-    }
+    if (evidence.intercepted || !matches(sql, boundary)) return query(sql, values);
+
+    evidence.intercepted = true;
+    await hitBoundary(fixture, scope, boundary, evidence);
     const result = await query(sql, values);
-    if (boundary === "denial" && matches(sql, boundary))
-      expect(result.rows[0]?.allowed).toBe(false);
+    evidence.authorization = result.rows;
     return result;
   });
   try {
@@ -127,19 +139,16 @@ export async function sqlFault<T>(
   boundary: Boundary,
   work: () => Promise<T>,
 ) {
-  const original = fixture.uow.transaction.bind(fixture.uow),
-    reached = { value: false };
+  const original = fixture.uow.transaction.bind(fixture.uow);
+  const evidence: FaultEvidence = {};
   const hook: EventDecisionUnitOfWork["transaction"] = (input, operation) =>
-    original(input, (scope) => faultIn(fixture, scope, boundary, reached, operation));
+    original(input, (scope) => faultIn(fixture, scope, boundary, evidence, operation));
   const spy = vi.spyOn(fixture.uow, "transaction").mockImplementation(hook);
   try {
-    return await work();
+    const [result] = await Promise.allSettled([work()]);
+    return { result, evidence };
   } finally {
     spy.mockRestore();
-    await fixture.source.query('UPDATE "WorkspaceMember" SET status=$1 WHERE "userId"=$2', [
-      "ACTIVE",
-      "event-runtime-recipient",
-    ]);
-    expect(reached.value).toBe(true);
+    if (boundary === "denial") await setRecipientStatus(fixture, "ACTIVE");
   }
 }
