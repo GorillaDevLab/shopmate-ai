@@ -1,6 +1,7 @@
 import { recoveryContext } from "./helpers/event-route-component-recovery.js";
 import "reflect-metadata";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { disconnectPrismaClient, getPrismaClient } from "@shopmate/database";
 import request from "supertest";
 import {
   withAtomicity,
@@ -151,6 +152,46 @@ it.each(["audit", "outbox", "denial"] as const)(
     });
   },
 );
+it("finishes fixture cleanup and restores process state when disposers fail", async () => {
+  const fetch = globalThis.fetch;
+  const databaseUrl = process.env.DATABASE_URL;
+  const runtimeUrl = process.env.EVENT_DECISION_DATABASE_URL;
+  const workFailure = new Error("Fixture work failed");
+  const appFailure = new Error("App disposer failed");
+  const sourceFailure = new Error("Source disposer failed");
+  let childPrisma: ReturnType<typeof getPrismaClient> | undefined;
+  try {
+    const [result] = await Promise.allSettled([
+      withAtomicity(async ({ app, source }) => {
+        childPrisma = getPrismaClient();
+        const closeApp = app.close.bind(app);
+        vi.spyOn(app, "close").mockImplementationOnce(async () => {
+          await closeApp();
+          throw appFailure;
+        });
+        // Keep the child safe to drop even if the cleanup regression recurs.
+        await source.close();
+        vi.spyOn(source, "close").mockRejectedValueOnce(sourceFailure);
+        throw workFailure;
+      }),
+    ]);
+    expect({
+      databaseRestored: process.env.DATABASE_URL === databaseUrl,
+      runtimeRestored: process.env.EVENT_DECISION_DATABASE_URL === runtimeUrl,
+      fetchRestored: globalThis.fetch === fetch,
+    }).toEqual({ databaseRestored: true, runtimeRestored: true, fetchRestored: true });
+    expect(getPrismaClient() === childPrisma).toBe(false);
+    expect(result).toMatchObject({
+      status: "rejected",
+      reason: { errors: [workFailure, appFailure, sourceFailure] },
+    });
+  } finally {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await disconnectPrismaClient();
+  }
+});
+
 function lateProvider() {
   const entered = deferred(),
     release = deferred(),

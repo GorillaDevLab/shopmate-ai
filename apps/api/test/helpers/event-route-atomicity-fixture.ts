@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { randomBytes } from "node:crypto";
-import { Test } from "@nestjs/testing";
+import { Test, type TestingModule } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import { TENANT_ROLE_PERMISSIONS, type TenantContext } from "@shopmate/contracts";
 import { disconnectPrismaClient } from "@shopmate/database";
@@ -66,13 +66,19 @@ async function environment(url: string, signingKey: string) {
   };
   Object.entries(auth).forEach(([key, value]) => vi.stubEnv(key, value));
 }
-async function startApp() {
+interface OwnedApp {
+  module?: TestingModule;
+  app?: INestApplication;
+}
+async function startApp(owned: OwnedApp) {
   const [{ AppModule }, { configureApp }] = await Promise.all([
     import("../../src/app.module.js"),
     import("../../src/app.config.js"),
   ]);
   const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  owned.module = module;
   const app = module.createNestApplication();
+  owned.app = app;
   configureApp(app);
   await app.listen(0, "127.0.0.1");
   return {
@@ -82,11 +88,27 @@ async function startApp() {
     uow: module.get(EventDecisionUnitOfWork),
   };
 }
+async function disposeAtomicity(
+  workFailures: unknown[],
+  disposers: Array<() => void | Promise<void>>,
+) {
+  const failures: unknown[] = [];
+  for (const dispose of disposers) {
+    try {
+      await dispose();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length)
+    throw new AggregateError([...workFailures, ...failures], "Atomicity fixture cleanup failed");
+}
 export async function withAtomicity(work: (fixture: AtomicityFixture) => Promise<void>) {
   await childDatabase(async ({ admin, url }) => {
     await migrate(admin);
     const source = new EventDecisionsApiFixture(url.toString());
-    let app: INestApplication | undefined;
+    const owned: OwnedApp = {};
+    const workFailures: unknown[] = [];
     const transport = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValue(new Error("External transport prohibited"));
@@ -95,20 +117,28 @@ export async function withAtomicity(work: (fixture: AtomicityFixture) => Promise
       await source.seed();
       const signingKey = randomBytes(48).toString("hex");
       await environment(url.toString(), signingKey);
-      const started = await startApp();
-      app = started.app;
+      const started = await startApp(owned);
       const provisioned = await started.metrics.provisionDefinitions({ actor, binding });
       if (!provisioned.ok)
         throw new Error(`Metric definition fixture unavailable: ${JSON.stringify(provisioned)}`);
       const cookie = `${DEMO_SESSION_COOKIE_NAME}=${signDemoSession(identity, signingKey, 3600).token}`;
       await work({ ...started, source, cookie });
       if (transport.mock.calls.length) throw new Error("Unexpected vendor transport");
+    } catch (error) {
+      workFailures.push(error);
+      throw error;
     } finally {
-      if (app) await app.close();
-      await disconnectPrismaClient();
-      await source.close();
-      vi.unstubAllEnvs();
-      transport.mockRestore();
+      await disposeAtomicity(workFailures, [
+        () => (owned.app ? owned.app.close() : owned.module?.close()),
+        disconnectPrismaClient,
+        () => source.close(),
+        () => {
+          vi.unstubAllEnvs();
+        },
+        () => {
+          transport.mockRestore();
+        },
+      ]);
     }
   });
 }
