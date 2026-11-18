@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { vi } from "vitest";
+import { overlapAtBarrier } from "../../../../packages/database/test/helpers/event-decision-concurrency-fixture.mjs";
 import type { EventDecisionUnitOfWork } from "../../src/events/event-decision-unit-of-work.js";
 import type { EventRuntimeTransaction } from "../../src/events/event-decision-transaction.js";
 import type { AtomicityFixture } from "./event-route-atomicity-fixture.js";
@@ -23,25 +24,6 @@ async function waiting(fixture: AtomicityFixture, firstPid: number) {
   }
   throw new Error("A second real restricted runtime session did not wait on PostgreSQL");
 }
-async function finishOverlap<T>(
-  fixture: AtomicityFixture,
-  pid: number,
-  release: () => void,
-  first: Promise<T>,
-  second: Promise<T>,
-) {
-  let failure: unknown;
-  try {
-    await waiting(fixture, pid);
-  } catch (error) {
-    failure = error;
-  } finally {
-    release();
-  }
-  const results = await Promise.all([first, second]);
-  if (failure) throw failure;
-  return results;
-}
 export async function overlapping<T>(fixture: AtomicityFixture, evaluate: () => Promise<T>) {
   const entered = deferred<number>(),
     release = deferred();
@@ -60,17 +42,15 @@ export async function overlapping<T>(fixture: AtomicityFixture, evaluate: () => 
       return result;
     });
   const spy = vi.spyOn(fixture.uow, "transaction").mockImplementation(hook);
-  const first = evaluate();
   try {
-    const pid = await Promise.race([
-      entered.promise,
-      first.then(() => {
-        throw new Error("No runtime barrier reached");
-      }),
-    ]);
-    return await finishOverlap(fixture, pid, release.resolve, first, evaluate());
+    return await overlapAtBarrier({
+      entered: entered.promise,
+      release: release.resolve,
+      first: evaluate,
+      second: evaluate,
+      waitForOverlap: (pid) => waiting(fixture, pid),
+    });
   } finally {
-    release.resolve();
     spy.mockRestore();
   }
 }

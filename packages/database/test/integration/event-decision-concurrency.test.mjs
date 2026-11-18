@@ -24,6 +24,33 @@ test("ten sequential and overlapping duplicate appends retain one active event a
   });
 });
 
+test("an early second operation rejection drains both restricted transactions before fixture teardown", async () => {
+  const failure = new Error("Second operation rejected before waiting on a lock");
+  let secondFinished = false;
+  await fixture(async (state) => {
+    const identities = await Promise.all(
+      state.sessions.map((client) => client.query("SELECT pg_backend_pid() AS pid")),
+    );
+    const pids = identities.map(({ rows }) => rows[0].pid);
+    const pending = overlap(
+      state,
+      async (repo) => repo.appendEvidence(appendRequest()),
+      async () => {
+        secondFinished = true;
+        throw failure;
+      },
+    );
+    await assert.rejects(pending, (error) => error === failure);
+    const activity = await state.admin.query(
+      "SELECT state FROM pg_stat_activity WHERE pid=ANY($1::int[]) ORDER BY pid",
+      [pids],
+    );
+    assert.deepEqual(activity.rows, [{ state: "idle" }, { state: "idle" }]);
+    assert.deepEqual(await durable(state.admin), { active: 1, evidence: 1, revision: 1 });
+  });
+  assert.equal(secondFinished, true);
+});
+
 test("stale expected revisions and delayed source evidence cannot replace a newer committed observation", async () => {
   await fixture(async ({ sessions: [left, right], admin }) => {
     const original = appendRequest();

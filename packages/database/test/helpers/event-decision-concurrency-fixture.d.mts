@@ -13,3 +13,10 @@ export function tenantEnvironment(
     EVENT_DECISION_DATABASE_URL: string;
   },
 ): NodeJS.ProcessEnv;
+export function overlapAtBarrier<T, Barrier>(control: {
+  entered: Promise<Barrier>;
+  release: () => void;
+  first: () => Promise<T>;
+  second: () => Promise<T>;
+  waitForOverlap: (value: Barrier) => Promise<void>;
+}): Promise<[T, T]>;

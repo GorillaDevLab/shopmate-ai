@@ -164,13 +164,9 @@ export function unwrap(result) {
 export { database as childDatabase, migrate };
 export { tenantEnvironment } from "../../../../scripts/test-tenant-database.mjs";
 async function identitiesFor(left, right) {
-  const identities = await Promise.all(
-    [left, right].map((client) =>
-      client.query(
-        "SELECT pg_backend_pid() AS pid,current_user AS name,session_user AS login,(SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user) AS unsafe",
-      ),
-    ),
-  );
+  const sql =
+    "SELECT pg_backend_pid() AS pid,current_user AS name,session_user AS login,(SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user) AS unsafe";
+  const identities = [await left.query(sql), await right.query(sql)];
   assert.equal(new Set(identities.map((r) => r.rows[0].pid)).size, 2);
   assert.ok(
     identities.every(
@@ -182,28 +178,55 @@ async function identitiesFor(left, right) {
   );
   return identities;
 }
+function observe(operation) {
+  return Promise.resolve()
+    .then(operation)
+    .then(
+      (value) => ({ status: "fulfilled", value }),
+      (reason) => ({ status: "rejected", reason }),
+    );
+}
+export async function overlapAtBarrier({ entered, release, first, second, waitForOverlap }) {
+  const firstResult = observe(first);
+  let secondResult;
+  let lockResult;
+  let left;
+  let right;
+  try {
+    const barrier = await Promise.race([
+      entered.then((value) => ({ reached: true, value })),
+      firstResult.then(() => ({ reached: false })),
+    ]);
+    if (barrier.reached) {
+      secondResult = observe(second);
+      lockResult = await observe(() => waitForOverlap(barrier.value));
+    }
+  } finally {
+    release();
+    [left, right] = await Promise.all([firstResult, secondResult]);
+  }
+  if (left.status === "rejected") throw left.reason;
+  if (!right) throw new Error("First operation completed before reaching the overlap barrier");
+  if (right.status === "rejected") throw right.reason;
+  if (lockResult.status === "rejected") throw lockResult.reason;
+  return [left.value, right.value];
+}
 export async function overlap(state, firstWork, secondWork) {
   const [left, right] = state.sessions;
   const entered = deferred(),
     release = deferred();
   const identities = await identitiesFor(left, right);
-  const first = transaction(left, async (repository) => {
-    const result = await firstWork(repository, left);
-    entered.resolve();
-    await release.promise;
-    return result;
+  return overlapAtBarrier({
+    entered: entered.promise,
+    release: release.resolve,
+    first: () =>
+      transaction(left, async (repository) => {
+        const result = await firstWork(repository, left);
+        entered.resolve();
+        await release.promise;
+        return result;
+      }),
+    second: () => transaction(right, (repository) => secondWork(repository, right)),
+    waitForOverlap: () => waitForLock(state.admin, identities[1].rows[0].pid),
   });
-  await Promise.race([entered.promise, first]);
-  const second = transaction(right, (repository) => secondWork(repository, right));
-  let observed;
-  try {
-    await waitForLock(state.admin, identities[1].rows[0].pid);
-  } catch (error) {
-    observed = error;
-  } finally {
-    release.resolve();
-  }
-  const results = await Promise.all([first, second]);
-  if (observed) throw observed;
-  return results;
 }
