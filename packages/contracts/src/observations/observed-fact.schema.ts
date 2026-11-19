@@ -1463,6 +1463,14 @@ function confirmedFrozenCost(data: MetricFrozenCost["data"]): boolean {
   return data?.basis === "CONFIRMED";
 }
 
+function knownCampaignAmounts(data: MetricCampaignFact["data"]): boolean {
+  return (
+    !data.source.quality.issues.includes("SOURCE_INCONSISTENT") &&
+    data.spendMinor !== null &&
+    data.attributedRevenueMinor !== null
+  );
+}
+
 function verifiedScopedSources(input: MetricInputV1, coverage: MetricCoverageV1): boolean {
   return (
     coverage.coverageBasisPoints === 10000 &&
@@ -1474,9 +1482,7 @@ function verifiedScopedSources(input: MetricInputV1, coverage: MetricCoverageV1)
     (input.traffic ?? []).every(({ data }) => data !== null && fullTraffic(data)) &&
     (input.campaignFacts ?? []).every(
       ({ data, measuredCoverage }) =>
-        measuredCoverage?.coverageBasisPoints === 10000 &&
-        data.spendMinor !== null &&
-        data.attributedRevenueMinor !== null,
+        measuredCoverage?.coverageBasisPoints === 10000 && knownCampaignAmounts(data),
     )
   );
 }
@@ -1825,6 +1831,7 @@ function campaignMatches(
   const { data, measuredCoverage } = row;
   if (
     fact.domain !== "CAMPAIGN_MEASUREMENT" ||
+    (graph.verified && !knownCampaignAmounts(data)) ||
     !matchesProvenance(row, source, marketing) ||
     !row.evidenceIds.some((id) => marketing.has(id))
   )

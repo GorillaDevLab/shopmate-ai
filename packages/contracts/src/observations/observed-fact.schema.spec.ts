@@ -1893,6 +1893,59 @@ it("binds STORE ROAS to both campaign-day rows and all marketing pages", () => {
   expect(proof.selection.selectionReceiptIds).toEqual(campaignWitnessIds);
 });
 
+const exactCampaignWitnessIds = ["R1", "base-MARKETING"];
+const exactCampaignRoaSProof = {
+  ...storeRoaSProof,
+  request: { ...storeRoaSProof.request, subject: campaignSubject },
+  selection: {
+    subject: campaignSubject,
+    selectionReceiptIds: exactCampaignWitnessIds,
+    input: {
+      ...metricInput(campaignSubject, "ROAS", ["campaignFacts"], exactCampaignWitnessIds),
+      campaignFacts: [campaignRows[0]],
+    },
+  },
+};
+
+it.each([
+  ["STORE", storeRoaSProof],
+  ["CAMPAIGN", exactCampaignRoaSProof],
+] as const)(
+  "rejects VERIFIED %s ROAS with inconsistent retained source amounts",
+  (_scope, proof) => {
+    const [row, ...others] = proof.selection.input.campaignFacts;
+    const source = { ...hasSource, quality: { state: "PARTIAL", issues: ["SOURCE_INCONSISTENT"] } };
+    const campaignFacts = [{ ...row, data: { ...row.data, source } }, ...others];
+    const input = { ...proof.selection.input, campaignFacts };
+    const selection = { ...proof.selection, input };
+    expect(api.MetricInputV1Schema.safeParse(input).success).toBe(true);
+    expect.soft(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(false);
+    expect
+      .soft(api.ObservedSelectionProofV1Schema.safeParse({ ...proof, selection }).success)
+      .toBe(false);
+  },
+);
+
+it.each([
+  ["STORE", storeRoaSProof],
+  ["CAMPAIGN", exactCampaignRoaSProof],
+] as const)(
+  "retains known VERIFIED %s ROAS amounts with an unknown optional field",
+  (_scope, proof) => {
+    const [row, ...others] = proof.selection.input.campaignFacts;
+    const source = { ...hasSource, quality: { state: "PARTIAL", issues: ["MARKETING_UNKNOWN"] } };
+    const campaignFacts = [{ ...row, data: { ...row.data, impressions: null, source } }, ...others];
+    const selection = { ...proof.selection, input: { ...proof.selection.input, campaignFacts } };
+    expect(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(true);
+    const parsed = api.ObservedSelectionProofV1Schema.parse({ ...proof, selection });
+    expect(parsed.selection.input.campaignFacts?.[0]?.data).toMatchObject({
+      impressions: null,
+      spendMinor: 100,
+      attributedRevenueMinor: 200,
+    });
+  },
+);
+
 it.each([
   ["missing observed receipt", ["R1", "base-MARKETING", marketing2.pageId]],
   ["missing marketing page", ["R1", "R2", "base-MARKETING"]],
