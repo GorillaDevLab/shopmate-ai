@@ -9,6 +9,7 @@ import {
   QuantitySchema,
   SourceVersionSchema,
 } from "../commerce/connector-common.schema.js";
+import { ConnectorOrderSchema } from "../commerce/connector-data.schema.js";
 import { MockScenarioPlanSchema } from "../commerce/mock-scenario.schema.js";
 import { EventEntitySchema } from "../events/event-evidence.schema.js";
 import {
@@ -663,6 +664,153 @@ function boundedArray<T extends z.ZodType>(item: T, limit: number) {
 }
 
 const publicationRefFields = { publicationId: ExternalIdSchema, publicationHash: sha256 };
+
+export const ObservedErrorSchema = z
+  .strictObject({
+    code: z.enum([
+      "INVALID_INPUT",
+      "OVERFLOW",
+      "CONFLICT",
+      "VERSION_MISMATCH",
+      "NOT_FOUND",
+      "FORBIDDEN",
+      "SOURCE_UNAVAILABLE",
+    ]),
+  })
+  .readonly();
+export type ObservedError = z.infer<typeof ObservedErrorSchema>;
+
+const producerCursor = CursorSchema.nullable();
+export const ObservedProducerRunV1Schema = z
+  .strictObject({
+    config: MockObservedGenerationConfigV3Schema,
+    window: exactWindow,
+    through: utcMs,
+    cursor: producerCursor,
+    limit: sequence.max(maxPageRecords),
+  })
+  .refine(({ window, through }) => window.periodEnd <= through, "INVALID_PRODUCER_CUTOFF")
+  .readonly();
+export type ObservedProducerRunV1 = z.infer<typeof ObservedProducerRunV1Schema>;
+
+const paymentEvent = z.strictObject({
+  kind: z.literal("PAYMENT"),
+  ...lineIds,
+  quantity: sequence,
+  paidAt: utcMs,
+});
+const feeChargeEvent = z.strictObject({
+  kind: z.literal("FEE_CHARGE"),
+  chargeId: ExternalIdSchema,
+  feeKind: MetricFeeKindSchema,
+  externalOrderId: ExternalIdSchema.nullable(),
+  externalCampaignId: ExternalIdSchema.nullable(),
+  window: exactWindow,
+  chargedAt: utcMs,
+});
+const refundSettlementEvent = z
+  .strictObject({
+    kind: z.literal("REFUND_SETTLEMENT"),
+    ...lineIds,
+    externalRefundId: ExternalIdSchema,
+    quantity: QuantitySchema,
+    merchandiseMinor: MinorAmountSchema.nullable(),
+    buyerShippingMinor: MinorAmountSchema.nullable(),
+    settledAt: utcMs,
+    reason: MetricIssueCodeSchema.extract(["REFUND_UNKNOWN"]).nullable(),
+  })
+  .refine(({ merchandiseMinor, buyerShippingMinor, reason }) => {
+    const unknown = merchandiseMinor === null || buyerShippingMinor === null;
+    return reason === (unknown ? "REFUND_UNKNOWN" : null);
+  }, "INVALID_REFUND_ALLOCATION_QUALITY");
+const returnAcceptedEvent = z.strictObject({
+  kind: z.literal("RETURN_ACCEPTED"),
+  ...lineIds,
+  externalRefundId: ExternalIdSchema,
+  externalReceiptId: ExternalIdSchema,
+  acceptedAt: utcMs,
+  resellableQuantity: QuantitySchema,
+});
+const financeEventDetails = z
+  .discriminatedUnion("kind", [
+    paymentEvent,
+    feeChargeEvent,
+    refundSettlementEvent,
+    returnAcceptedEvent,
+  ])
+  .readonly();
+
+function isObservedFinanceEvent(event: z.infer<typeof financeEventDetails>, observedAt: string) {
+  switch (event.kind) {
+    case "PAYMENT":
+      return event.paidAt <= observedAt;
+    case "FEE_CHARGE":
+      return event.chargedAt <= observedAt && event.window.periodEnd <= observedAt;
+    case "REFUND_SETTLEMENT":
+      return event.settledAt <= observedAt;
+    case "RETURN_ACCEPTED":
+      return event.acceptedAt <= observedAt;
+  }
+}
+
+export const ObservedFinanceEventV1Schema = z
+  .strictObject({
+    ...scope,
+    eventId: ExternalIdSchema,
+    observedAt: utcMs,
+    event: financeEventDetails,
+  })
+  .refine(
+    ({ event, observedAt }) => isObservedFinanceEvent(event, observedAt),
+    "FUTURE_FINANCE_EVENT",
+  )
+  .readonly();
+export type ObservedFinanceEventV1 = z.infer<typeof ObservedFinanceEventV1Schema>;
+
+export const ObservedFinanceProducerRequestV1Schema = z
+  .strictObject({ run: ObservedProducerRunV1Schema, event: ObservedFinanceEventV1Schema })
+  .refine(({ run, event }) => {
+    const { config, generation } = run.config;
+    return (
+      sameScope(event, { binding: config.binding, generation }) && event.observedAt <= run.through
+    );
+  }, "FINANCE_EVENT_OUTSIDE_RUN")
+  .readonly();
+export type ObservedFinanceProducerRequestV1 = z.infer<
+  typeof ObservedFinanceProducerRequestV1Schema
+>;
+
+function producedPage<T extends z.ZodType<ObservedFactV1>>(fact: T) {
+  return z.strictObject({
+    records: boundedArray(fact, maxPageRecords),
+    nextCursor: producerCursor,
+  });
+}
+
+export const ObservedProducedPageV1Schema = producedPage(ObservedFactV1Schema).readonly();
+export type ObservedProducedPageV1 = z.infer<typeof ObservedProducedPageV1Schema>;
+
+const demandFact = z.discriminatedUnion("domain", [traffic, campaignMeasurement]).readonly();
+export const ObservedDemandPageV1Schema = producedPage(demandFact)
+  .extend({
+    financeEvents: boundedArray(ObservedFinanceEventV1Schema, maxPageRecords),
+    orders: boundedArray(ConnectorOrderSchema, maxPageRecords),
+  })
+  .readonly();
+export type ObservedDemandPageV1 = z.infer<typeof ObservedDemandPageV1Schema>;
+
+const financeFact = z
+  .discriminatedUnion("domain", [frozenCost, refundAllocation, returnReceipt, fee])
+  .readonly();
+export const ObservedFinancePageV1Schema = producedPage(financeFact).readonly();
+export type ObservedFinancePageV1 = z.infer<typeof ObservedFinancePageV1Schema>;
+
+const supplyFact = z
+  .discriminatedUnion("domain", [listing, price, inventoryLot, supplierNotice, inventoryPosition])
+  .readonly();
+export const ObservedSupplyPageV1Schema = producedPage(supplyFact).readonly();
+export type ObservedSupplyPageV1 = z.infer<typeof ObservedSupplyPageV1Schema>;
+
 const publicationPins = { modelVersion, configHash: sha256 };
 const pageIndex = QuantitySchema.max(maxPages - 1);
 const pageRecordCount = QuantitySchema.max(maxPageRecords);

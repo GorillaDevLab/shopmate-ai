@@ -2593,3 +2593,254 @@ it("rejects overlapping exact-window traffic measurements without discarding one
     false,
   );
 });
+
+const producerRun = { config: configEnvelope, window, through: end, cursor: null, limit: 200 };
+const payment = {
+  binding,
+  generation: 0,
+  eventId: "event-payment-1",
+  observedAt: end,
+  event: { kind: "PAYMENT", ...line, quantity: 1, paidAt: end },
+};
+const feeCharge = {
+  kind: "FEE_CHARGE",
+  chargeId: "charge-1",
+  feeKind: "FULFILLMENT",
+  externalOrderId: "o1",
+  externalCampaignId: null,
+  window,
+  chargedAt: end,
+};
+const refundSettlement = {
+  kind: "REFUND_SETTLEMENT",
+  ...line,
+  externalRefundId: "refund-1",
+  quantity: 0,
+  merchandiseMinor: 0,
+  buyerShippingMinor: 0,
+  settledAt: end,
+  reason: null,
+};
+const returnAccepted = {
+  kind: "RETURN_ACCEPTED",
+  ...line,
+  externalRefundId: "refund-1",
+  externalReceiptId: "return-1",
+  acceptedAt: end,
+  resellableQuantity: 0,
+};
+
+it("exports a closed, readonly observed error from the package root", () => {
+  const errorCodes = [
+    "INVALID_INPUT",
+    "OVERFLOW",
+    "CONFLICT",
+    "VERSION_MISMATCH",
+    "NOT_FOUND",
+    "FORBIDDEN",
+    "SOURCE_UNAVAILABLE",
+  ];
+  for (const code of errorCodes) {
+    const parsed = api.ObservedErrorSchema.safeParse({ code });
+    expect(parsed).toMatchObject({ success: true, data: { code } });
+    expect(Object.isFrozen(parsed.data)).toBe(true);
+  }
+  expect(api.ObservedErrorSchema.safeParse({ code: "SCOPE_MISMATCH" }).success).toBe(false);
+});
+
+it.each(["message", "query", "stack", "payload", "secret"])(
+  "rejects %s on a typed observation failure",
+  (field) => {
+    expect(api.ObservedErrorSchema.safeParse({ code: "FORBIDDEN", [field]: "extra" }).success).toBe(
+      false,
+    );
+  },
+);
+
+it("accepts a closed scoped producer run with a nullable opaque cursor", () => {
+  const parsed = api.ObservedProducerRunV1Schema.safeParse(producerRun);
+  expect(parsed).toMatchObject({ success: true, data: producerRun });
+  expect(Object.isFrozen(parsed.data)).toBe(true);
+  const continuation = { ...producerRun, cursor: "opaque:resume/1", limit: 1 };
+  expect(api.ObservedProducerRunV1Schema.safeParse(continuation).success).toBe(true);
+});
+
+it.each([
+  { through: start },
+  { cursor: undefined },
+  { cursor: "x".repeat(1025) },
+  { limit: 0 },
+  { limit: 201 },
+  { config: { ...configEnvelope, generation: 2147483648 } },
+  { failureRule: "refund-failure" },
+  { grantId: "service-grant" },
+])("rejects a producer run outside its closed bounds %o", (changes) => {
+  expect(api.ObservedProducerRunV1Schema.safeParse({ ...producerRun, ...changes }).success).toBe(
+    false,
+  );
+});
+
+it.each([payment.event, feeCharge, refundSettlement, returnAccepted])(
+  "decodes a readonly finance event from $kind",
+  (event) => {
+    const envelope = { ...payment, event };
+    const parsed = api.ObservedFinanceEventV1Schema.safeParse(envelope);
+    expect(parsed).toMatchObject({ success: true, data: envelope });
+    expect(Object.isFrozen(parsed.data)).toBe(true);
+    expect(Object.isFrozen(parsed.data?.event)).toBe(true);
+  },
+);
+
+it.each([
+  { ...payment.event, paidAt: later },
+  { ...payment.event, quantity: 0 },
+  { ...payment.event, currentPriceMinor: 100 },
+  { ...payment.event, scenarioHint: "winner" },
+  { ...feeCharge, chargedAt: later },
+  { ...feeCharge, window: { ...window, periodEnd: later } },
+  { ...feeCharge, feeKind: "UNKNOWN_CHARGE" },
+  { ...feeCharge, externalOrderId: undefined },
+  { ...refundSettlement, settledAt: later },
+  { ...refundSettlement, merchandiseMinor: null },
+  { ...refundSettlement, buyerShippingMinor: null },
+  { ...refundSettlement, buyerShippingMinor: null, reason: undefined },
+  { ...refundSettlement, reason: "REFUND_UNKNOWN" },
+  { ...refundSettlement, quantity: null },
+  { ...returnAccepted, acceptedAt: later },
+  { ...returnAccepted, resellableQuantity: -1 },
+  { ...returnAccepted, expectedStockout: true },
+  { kind: "MARGIN_DROP" },
+])("rejects invalid or embellished finance event payload %o", (event) => {
+  expect(api.ObservedFinanceEventV1Schema.safeParse({ ...payment, event }).success).toBe(false);
+});
+
+it.each(["merchandiseMinor", "buyerShippingMinor"])(
+  "accepts an explicitly unknown refund allocation for %s",
+  (field) => {
+    const event = { ...refundSettlement, [field]: null, reason: "REFUND_UNKNOWN" };
+    expect(api.ObservedFinanceEventV1Schema.safeParse({ ...payment, event }).success).toBe(true);
+  },
+);
+
+it.each([
+  { generation: -1 },
+  { generation: 2147483648 },
+  { eventId: "event\u200b" },
+  { failureRule: "always-fail" },
+  { payload: {} },
+])("rejects invalid finance event envelope fields %o", (changes) => {
+  expect(api.ObservedFinanceEventV1Schema.safeParse({ ...payment, ...changes }).success).toBe(
+    false,
+  );
+});
+
+it("pins a synthetic PAYMENT to its run at both generation boundaries", () => {
+  const limits = [0, 2147483647];
+  for (const generation of limits) {
+    const request = {
+      run: { ...producerRun, config: { ...configEnvelope, generation } },
+      event: { ...payment, generation },
+    };
+    const parsed = api.ObservedFinanceProducerRequestV1Schema.safeParse(request);
+    expect(parsed).toMatchObject({ success: true, data: request });
+    expect(Object.isFrozen(parsed.data)).toBe(true);
+  }
+});
+
+it.each(Object.keys(binding))("pins the finance event's %s to the producer run", (field) => {
+  const event = { ...payment, binding: { ...binding, [field]: "other" } };
+  expect(api.ObservedFinanceEventV1Schema.safeParse(event).success).toBe(true);
+  expect(
+    api.ObservedFinanceProducerRequestV1Schema.safeParse({ run: producerRun, event }).success,
+  ).toBe(false);
+});
+
+it.each([{ generation: 1 }, { observedAt: later }])(
+  "rejects mismatched finance event generation or cutoff %o",
+  (changes) => {
+    const event = { ...payment, ...changes };
+    expect(api.ObservedFinanceEventV1Schema.safeParse(event).success).toBe(true);
+    expect(
+      api.ObservedFinanceProducerRequestV1Schema.safeParse({ run: producerRun, event }).success,
+    ).toBe(false);
+  },
+);
+
+const supplyRecords = [listing, price, lot, notice, position];
+const financeRecords = [cost, refund, receipt, fee];
+const produced = { records: domains, nextCursor: "opaque:page/2" };
+const demand = {
+  records: [traffic, campaign],
+  orders: [originalOrder],
+  financeEvents: [payment],
+  nextCursor: null,
+};
+
+it("exports produced pages without a receipt or completeness claim", () => {
+  const parsed = api.ObservedProducedPageV1Schema.safeParse(produced);
+  expect(parsed).toMatchObject({ success: true, data: produced });
+  expect(Object.isFrozen(parsed.data?.records)).toBe(true);
+  expect(Object.isFrozen(parsed.data?.records[0])).toBe(true);
+  expect(
+    api.ObservedProducedPageV1Schema.safeParse({ records: [], nextCursor: null }).success,
+  ).toBe(true);
+});
+
+it.each([
+  { records: Array.from({ length: 201 }, () => cost) },
+  { nextCursor: undefined },
+  { nextCursor: "" },
+  { receiptId: "receipt-1" },
+  { grantId: "grant-1" },
+  { terminalCoverage: { coverageBasisPoints: 10000 } },
+  { config: configEnvelope },
+])("rejects unbounded or unauthorized produced page case %#", (changes) => {
+  expect(api.ObservedProducedPageV1Schema.safeParse({ ...produced, ...changes }).success).toBe(
+    false,
+  );
+});
+
+it("decodes readonly demand facts, causal finance events and original orders", () => {
+  const parsed = api.ObservedDemandPageV1Schema.safeParse(demand);
+  expect(parsed).toMatchObject({ success: true, data: demand });
+  expect(Object.isFrozen(parsed.data)).toBe(true);
+  expect(Object.isFrozen(parsed.data?.records)).toBe(true);
+  expect(Object.isFrozen(parsed.data?.records[0])).toBe(true);
+  expect(Object.isFrozen(parsed.data?.financeEvents)).toBe(true);
+  expect(Object.isFrozen(parsed.data?.orders)).toBe(true);
+});
+
+it.each([
+  { records: [sync] },
+  { records: [price] },
+  { records: Array.from({ length: 201 }, () => traffic) },
+  { financeEvents: Array.from({ length: 201 }, () => payment) },
+  { financeEvents: [{ ...payment, scenarioHint: "winner" }] },
+  { orders: Array.from({ length: 201 }, () => originalOrder) },
+  { orders: [{ ...originalOrder, buyerEmail: "extra" }] },
+  { failureRule: "ad-delivery" },
+])("rejects disallowed demand output case %#", (changes) => {
+  expect(api.ObservedDemandPageV1Schema.safeParse({ ...demand, ...changes }).success).toBe(false);
+});
+
+it("decodes only finance source records on a readonly finance page", () => {
+  const page = { records: financeRecords, nextCursor: null };
+  const parsed = api.ObservedFinancePageV1Schema.safeParse(page);
+  expect(parsed).toMatchObject({ success: true, data: page });
+  expect(Object.isFrozen(parsed.data?.records)).toBe(true);
+  expect(Object.isFrozen(parsed.data?.records[0])).toBe(true);
+  expect(api.ObservedFinancePageV1Schema.safeParse({ ...page, records: [listing] }).success).toBe(
+    false,
+  );
+});
+
+it("decodes only supply source records on a readonly supply page", () => {
+  const page = { records: supplyRecords, nextCursor: null };
+  const parsed = api.ObservedSupplyPageV1Schema.safeParse(page);
+  expect(parsed).toMatchObject({ success: true, data: page });
+  expect(Object.isFrozen(parsed.data?.records)).toBe(true);
+  expect(Object.isFrozen(parsed.data?.records[0])).toBe(true);
+  expect(api.ObservedSupplyPageV1Schema.safeParse({ ...page, records: [cost] }).success).toBe(
+    false,
+  );
+});
