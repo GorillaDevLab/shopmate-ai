@@ -1228,6 +1228,39 @@ function matchesMember(fact: ObservedFactV1, ref: Member, claim: CertifiedReceip
   );
 }
 
+function consistentReceiptClaims(
+  receipts: ReadonlyMap<string, CertifiedReceipt>,
+  selected: ReadonlyMap<string, StoredObservedFactV1>,
+): boolean {
+  // Receipt and certificate scopes already match the capture; source positions span windows.
+  const claims = new Map<string, CertifiedReceipt>();
+  for (const claim of receipts.values()) {
+    const { receipt, publication } = claim;
+    for (const member of receipt.factRefs) {
+      const key = selectedVersionKey(receipt.domain, member.sourceVersion);
+      const prior = claims.get(key);
+      const priorMember = prior?.members.get(member.sourceVersion);
+      if (
+        prior &&
+        (priorMember?.factId !== member.factId ||
+          priorMember.payloadHash !== member.payloadHash ||
+          priorMember.originReceiptId !== member.originReceiptId ||
+          subjectKey(prior.receipt.subject) !== subjectKey(receipt.subject) ||
+          prior.publication.producerVersion !== publication.producerVersion)
+      )
+        return false;
+      const stored = selected.get(key);
+      if (
+        stored &&
+        (stored.receiptId !== member.originReceiptId || !matchesMember(stored.fact, member, claim))
+      )
+        return false;
+      if (!prior) claims.set(key, claim);
+    }
+  }
+  return true;
+}
+
 type CaptureGraph = Readonly<{
   receipts: ReadonlyMap<string, CertifiedReceipt>;
   selected: ReadonlyMap<string, StoredObservedFactV1>;
@@ -1312,7 +1345,9 @@ function validCaptureGraph(capture: Capture): boolean {
     validCaptureCoverage(capture, graph) &&
     graph.matchedVersions.size === selected.size &&
     graph.usedReceipts.size === receipts.size &&
-    new Set(capture.receipts.map(({ publicationId }) => publicationId)).size === publications.size
+    new Set(capture.receipts.map(({ publicationId }) => publicationId)).size ===
+      publications.size &&
+    consistentReceiptClaims(receipts, selected)
   );
 }
 

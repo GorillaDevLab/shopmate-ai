@@ -1269,6 +1269,54 @@ it("selects the corrected snapshot while preserving the original A1 insertion an
   expect(earlier.facts).toEqual([a1, b1]);
 });
 
+it.each(["fact ID", "payload hash", "origin receipt", "publication cutoff"])(
+  "rejects a contradictory %s for an immutable source version in a historical receipt",
+  (conflict) => {
+    const [historical, current] = correctedCapture.receipts;
+    const correctedMember = membership(b2);
+    const contradictory = {
+      ...correctedMember,
+      factId: conflict === "fact ID" ? "other-fact" : correctedMember.factId,
+      payloadHash: conflict === "payload hash" ? b1.fact.payloadHash : correctedMember.payloadHash,
+      originReceiptId: conflict === "origin receipt" ? historical.receiptId : current.receiptId,
+    };
+    const changed = { ...historical, factRefs: [membership(a1), contradictory] };
+    expect(api.ObservedReceiptV1Schema.safeParse(changed).success).toBe(true);
+    const result = api.ObservedCaptureV1Schema.safeParse({
+      ...correctedCapture,
+      receipts: [changed, current],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map(({ message }) => message)).toContain("INVALID_CAPTURE_GRAPH");
+  },
+);
+
+it("rejects conflicting claims for an unselected version shared by two origin receipts", () => {
+  const c = returnedFact(
+    { ...a1.fact, factId: "C", sequence: 4, sourceVersion: "observed-v1:g:0:e:4" },
+    "R3",
+  );
+  const active = snapshot([a1, b2, c], 2, t2);
+  const otherOrigin = snapshot([b1, c], 3, end);
+  const capture = captured([a1, b2, c], active, firstSnapshot);
+  const historical = {
+    ...capture,
+    publications: [...capture.publications, otherOrigin.certificate],
+    receipts: [...capture.receipts, otherOrigin.certifiedReceipt],
+  };
+  expect(api.ObservedCaptureV1Schema.safeParse(historical).success).toBe(true);
+  const conflictingOrigin = {
+    ...otherOrigin.certifiedReceipt,
+    factRefs: [{ ...membership(b1), payloadHash: b2.fact.payloadHash }, membership(c)],
+  };
+  expect(
+    api.ObservedCaptureV1Schema.safeParse({
+      ...historical,
+      receipts: [...capture.receipts, conflictingOrigin],
+    }).success,
+  ).toBe(false);
+});
+
 it.each([
   [
     "two snapshots as one chain",
