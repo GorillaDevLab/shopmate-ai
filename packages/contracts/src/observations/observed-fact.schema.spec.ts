@@ -1575,6 +1575,103 @@ const trafficProof = {
   selection: trafficSelection,
 };
 
+function withPublicationDecodeProbe(changes: object = {}) {
+  const [certificate] = skuCapture.publications;
+  let touches = 0;
+  return {
+    capture: {
+      ...skuCapture,
+      ...changes,
+      publications: [
+        {
+          ...certificate,
+          get publicationId() {
+            touches += 1;
+            return certificate.publicationId;
+          },
+        },
+      ],
+    },
+    touches: () => touches,
+  };
+}
+
+const captureOverflowCases = [
+  ["receipt members", { receipts: [{ ...skuTrafficReceipt, factRefs: Array<unknown>(201) }] }],
+  [
+    "coverage receipt IDs",
+    { coverage: [{ ...skuCapture.coverage[0], receiptIds: Array<unknown>(4097) }] },
+  ],
+] as const;
+
+it.each(captureOverflowCases)(
+  "preflights oversized %s on capture before certificate decoding",
+  (_label, changes) => {
+    const { capture, touches } = withPublicationDecodeProbe(changes);
+    const result = api.ObservedCaptureV1Schema.safeParse(capture);
+    expect.soft(touches()).toBe(0);
+    expect.soft(result.error?.issues[0]).toMatchObject({ message: "OVERFLOW", path: [] });
+  },
+);
+
+it.each([
+  ...captureOverflowCases.map(([label, changes]) => ({ label, changes, proofChanges: {} })),
+  {
+    label: "request actor permissions",
+    changes: {},
+    proofChanges: {
+      request: {
+        ...trafficProof.request,
+        actor: { ...trafficProof.request.actor, permissions: Array<unknown>(11) },
+      },
+    },
+  },
+  {
+    label: "legacy nested evidence IDs",
+    changes: {},
+    proofChanges: {
+      selection: withMetricInput({
+        traffic: [{ ...trafficMetricRow, evidenceIds: Array<unknown>(4097) }],
+      }),
+    },
+  },
+])(
+  "preflights oversized $label on selection proof before certificate decoding",
+  ({ changes, proofChanges }) => {
+    const { capture, touches } = withPublicationDecodeProbe(changes);
+    const result = api.ObservedSelectionProofV1Schema.safeParse({
+      ...trafficProof,
+      capture,
+      ...proofChanges,
+    });
+    expect.soft(touches()).toBe(0);
+    expect.soft(result.error?.issues[0]).toMatchObject({ message: "OVERFLOW", path: [] });
+  },
+);
+
+it.each([
+  ["capture", api.ObservedCaptureRequestV1Schema, captureRequest],
+  ["read", api.ObservedReadRequestV1Schema, { ...captureRequest, inputRevision: revision }],
+  ["selection", api.ObservedSelectionRequestV1Schema, trafficSelectionRequest],
+] as const)(
+  "reports actor permission overflow at the %s request boundary",
+  (_label, schema, request) => {
+    const result = schema.safeParse({
+      ...request,
+      actor: { ...request.actor, permissions: Array<unknown>(11) },
+    });
+    expect(result.error?.issues[0]).toMatchObject({ message: "OVERFLOW", path: [] });
+  },
+);
+
+it("retains the standalone receipt member cap", () => {
+  const result = api.ObservedReceiptV1Schema.safeParse(captureOverflowCases[0][1].receipts[0]);
+  expect(result.error?.issues[0]).toMatchObject({
+    message: "INVALID_ARRAY_LENGTH",
+    path: ["factRefs"],
+  });
+});
+
 it("returns a three-key scoped SKU traffic input with its immutable source evidence", () => {
   expect(api.ObservedSelectionRequestV1Schema.parse(trafficSelectionRequest)).toEqual(
     trafficSelectionRequest,

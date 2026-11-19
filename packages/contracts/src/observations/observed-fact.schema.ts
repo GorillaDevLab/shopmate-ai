@@ -899,6 +899,10 @@ function rawObject(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function arrayValues(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
 function withinArrayBounds(value: unknown, limits: Readonly<Record<string, number>>): boolean {
   const fields = rawObject(value);
   return (
@@ -914,9 +918,10 @@ function preflight<T extends z.ZodType>(schema: T, withinBounds: (value: unknown
   return z.unknown().refine(withinBounds, "OVERFLOW").pipe(schema);
 }
 
+const actorArrayLimits = { permissions: 10 };
 const captureRequestFields = {
   ...captureIdentityFields,
-  actor: preflight(TenantContextSchema, (actor) => withinArrayBounds(actor, { permissions: 10 }))
+  actor: preflight(TenantContextSchema, (actor) => withinArrayBounds(actor, actorArrayLimits))
     .transform((actor) => ({ ...actor, permissions: Object.freeze(actor.permissions) }))
     .readonly(),
   comparisonWindows: boundedArray(z.strictObject(windowCutoffFields).readonly(), maxComparisons),
@@ -932,10 +937,13 @@ function validCaptureRequest(value: z.infer<z.ZodObject<typeof captureRequestFie
 }
 
 function boundedCaptureRequest(value: unknown): boolean {
-  return withinArrayBounds(value, {
-    domains: ObservedDomainSchema.options.length,
-    comparisonWindows: maxComparisons,
-  });
+  const request = rawObject(value);
+  return (
+    withinArrayBounds(request, {
+      domains: ObservedDomainSchema.options.length,
+      comparisonWindows: maxComparisons,
+    }) && withinArrayBounds(request?.actor, actorArrayLimits)
+  );
 }
 
 export const ObservedCaptureRequestV1Schema = preflight(
@@ -1040,15 +1048,23 @@ type Coverage = z.infer<typeof coverageSchema>;
 type Member = z.infer<typeof memberRefSchema>;
 
 function boundedCapture(value: unknown): boolean {
+  const capture = rawObject(value);
   return (
-    withinArrayBounds(value, {
+    withinArrayBounds(capture, {
       domains: ObservedDomainSchema.options.length,
       comparisons: maxComparisons,
       publications: maxPages,
       receipts: maxPages,
       facts: maxCaptureFacts,
       coverage: maxPages,
-    }) && withinArrayBounds(rawObject(value)?.base, { receipts: maxPages })
+    }) &&
+    withinArrayBounds(capture?.base, { receipts: maxPages }) &&
+    arrayValues(capture?.receipts).every(
+      (receipt) => arrayValues(rawObject(receipt)?.factRefs).length <= maxPageRecords,
+    ) &&
+    arrayValues(capture?.coverage).every(
+      (row) => arrayValues(rawObject(row)?.receiptIds).length <= maxPages,
+    )
   );
 }
 
@@ -1374,10 +1390,6 @@ export type ObservedSelectionRequestV1 = z.infer<typeof ObservedSelectionRequest
 
 const metricCollections = MetricCollectionSchema.options;
 type MetricCollection = (typeof metricCollections)[number];
-
-function arrayValues(value: unknown): readonly unknown[] {
-  return Array.isArray(value) ? value : [];
-}
 
 function boundedMetricFact(value: unknown): boolean {
   const row = rawObject(value);
