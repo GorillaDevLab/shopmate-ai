@@ -138,7 +138,7 @@ it("requires the original schedule for a priced line", () => {
 
 **Interfaces.** Export the request/result schemas named in this section. Use checked data objects through Task 3’s type-only ports. Fields written as `…scope` are the explicit binding/generation pair above. `…partition` adds domain, subject, window to scope. Match domain/subject using Task 1’s matrix. Store joins must compare structured IDs (including connection/campaign/SKU) and all window fields. Use nested readonly objects/arrays; apply `.readonly()` after refinement. Only listed keys are admitted. ID lists use bounded length and uniqueness. Use maps keyed by unique IDs for joins, with fail-closed duplicate detection.
 
-Observed STORE subjects carry `storeId`, while `MetricSubjectSchema` represents STORE with only its kind. Resolve that implicit metric store from the shared binding when comparing these two subject shapes; an observed STORE ID must always equal `binding.storeId`.
+Observed STORE subjects reuse the existing strict `EventEntitySchema` shape `{kind:"STORE"}`. `MetricSubjectSchema` also represents STORE with only its kind. Resolve the implicit store in both subject shapes from the full shared binding; compare all five binding keys, including `storeId`, and do not introduce an extra subject field.
 
 - [ ] Add a failed publication test and a success example for a certified zero-row traffic partition. Include mismatching binding, domain, generation, subject, hash and cutoff variants below. Run the focused test expecting missing schema exports.
 - [ ] Define the following finite wire surfaces. Scope, business times and explicit version/hash pins travel across process boundaries; raw service credentials do not.
