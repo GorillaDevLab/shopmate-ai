@@ -249,12 +249,31 @@ const traffic = observedFact(
 }, "Traffic reason must reflect source quality for its closed window");
 
 const dayMs = 24 * 60 * 60 * 1000;
-const shanghaiOffsetMs = 8 * 60 * 60 * 1000;
+const shanghaiDateFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Shanghai",
+  calendar: "iso8601",
+  numberingSystem: "latn",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function shanghaiBusinessDate(instant: number): string {
+  const parts = shanghaiDateFormatter.formatToParts(instant);
+  const year = parts.find(({ type }) => type === "year")?.value.padStart(4, "0");
+  const month = parts.find(({ type }) => type === "month")?.value;
+  const day = parts.find(({ type }) => type === "day")?.value;
+  return year + "-" + month + "-" + day;
+}
+
 function withinBusinessDate(businessDate: string, window: z.infer<typeof exactWindow>): boolean {
-  // The mock business clock uses fixed Shanghai midnights at 16:00 UTC.
-  const midnight = Date.parse(businessDate + "T00:00:00.000Z") - shanghaiOffsetMs;
+  const start = Date.parse(window.periodStart);
+  const end = Date.parse(window.periodEnd);
+  // The exclusive end can be midnight of the next Shanghai day.
   return (
-    Date.parse(window.periodStart) >= midnight && Date.parse(window.periodEnd) <= midnight + dayMs
+    start < end &&
+    shanghaiBusinessDate(start) === businessDate &&
+    shanghaiBusinessDate(end - 1) === businessDate
   );
 }
 

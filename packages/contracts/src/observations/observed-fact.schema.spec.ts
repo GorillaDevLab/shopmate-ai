@@ -395,6 +395,58 @@ it("keeps partial campaign windows inside their named Shanghai business day", ()
   rejects({ ...campaign, subject: { ...campaignSubject, externalCampaignId: "c2" } });
 });
 
+it.each([
+  [
+    "accepts a full Shanghai day during daylight saving time",
+    "1991-07-01",
+    "1991-06-30T15:00:00.000Z",
+    "1991-07-01T15:00:00.000Z",
+    true,
+  ],
+  [
+    "rejects a fixed UTC+08 window that spills past the Shanghai day",
+    "1991-07-01",
+    "1991-06-30T16:00:00.000Z",
+    "1991-07-01T16:00:00.000Z",
+    false,
+  ],
+  [
+    "accepts the 25-hour Shanghai day when daylight saving time ended",
+    "1991-09-15",
+    "1991-09-14T15:00:00.000Z",
+    "1991-09-15T16:00:00.000Z",
+    true,
+  ],
+  [
+    "rejects the first millisecond after that 25-hour Shanghai day",
+    "1991-09-15",
+    "1991-09-14T15:00:00.000Z",
+    "1991-09-15T16:00:00.001Z",
+    false,
+  ],
+  [
+    "accepts a four-digit business date at the minimum UTC year",
+    "0001-01-01",
+    "0001-01-01T00:00:00.000Z",
+    "0001-01-01T00:00:00.001Z",
+    true,
+  ],
+  [
+    "rejects a malformed start without a refinement exception",
+    "2026-11-02",
+    "2026-11-02T99:00:00.000Z",
+    "2026-11-02T16:00:00.000Z",
+    false,
+  ],
+] as const)("%s", (_, businessDate, periodStart, periodEnd, accepted) => {
+  const fact = {
+    ...withPayload(campaign, { businessDate, window: { ...window, periodStart, periodEnd } }),
+    occurredAt: periodEnd,
+    observedAt: periodEnd,
+  };
+  expect(ObservedFactV1Schema.safeParse(fact).success).toBe(accepted);
+});
+
 it("validates actual listing and price changes for the subject SKU", () => {
   rejects(withPayload(listing, { fromStatus: "LISTED" }));
   rejects(withPayload(listing, { listedAt: start }));
