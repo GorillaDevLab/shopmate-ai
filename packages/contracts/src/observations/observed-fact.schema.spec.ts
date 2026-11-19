@@ -1126,13 +1126,10 @@ function membership({ fact, receiptId }: ReturnType<typeof returnedFact>) {
   };
 }
 
-function snapshot(
-  facts: readonly ReturnType<typeof returnedFact>[],
-  index: number,
-  through: string,
-) {
-  const first = facts[0].fact;
-  const selectedPartition = { ...partition, domain: first.domain, subject: first.subject };
+type StoredTestFact = ReturnType<typeof returnedFact>;
+function snapshot(facts: readonly StoredTestFact[], index: number, through: string) {
+  const { domain, subject, producerVersion } = facts[0].fact;
+  const selectedPartition = { ...partition, domain, subject };
   const certificate = {
     ...publication,
     ...selectedPartition,
@@ -1141,7 +1138,7 @@ function snapshot(
     publicationSequence: index,
     through,
     availableAt: through,
-    producerVersion: first.producerVersion,
+    producerVersion,
     recordCount: facts.length,
   };
   const certifiedReceipt = {
@@ -1440,4 +1437,884 @@ it("checks raw capture collection limits before decoding publication records", (
   const result = api.ObservedCaptureV1Schema.safeParse(oversized);
   expect(result.success).toBe(false);
   if (!result.success) expect(result.error.issues[0]?.message).toBe("OVERFLOW");
+});
+
+const joinedMetricContext = {
+  schemaVersion: 1,
+  binding,
+  ...window,
+  visibleAt: end,
+  sourceWatermark: end,
+  definitionVersion,
+  inputRevision: revision,
+};
+const blankMetricCollections = {
+  paymentFacts: null,
+  refundFacts: null,
+  inventoryFacts: null,
+  campaignFacts: null,
+  frozenCosts: null,
+  refundAllocations: null,
+  returnReceipts: null,
+  fees: null,
+  traffic: null,
+  inventoryExtensions: null,
+};
+
+function metricInput(subject: object, kind: string, collections: string[], evidenceIds: string[]) {
+  return {
+    ...joinedMetricContext,
+    ...blankMetricCollections,
+    status: "VERIFIED",
+    evidenceIds,
+    metricCoverage: [
+      {
+        ...joinedMetricContext,
+        subject,
+        kind,
+        collections,
+        evidenceIds,
+        observedAt: end,
+        sourceVersion: common.sourceVersion,
+        coverageBasisPoints: 10000,
+      },
+    ],
+  };
+}
+
+const skuTraffic = returnedFact({ ...pageFact, subject: sku }, "rc1");
+const skuTrafficReceipt = {
+  ...zeroReceipt,
+  subject: sku,
+  recordCount: 1,
+  factRefs: [membership(skuTraffic)],
+};
+const skuCapture = {
+  ...zeroCapture,
+  publications: [{ ...publication, subject: sku, recordCount: 1 }],
+  coverage: [{ ...zeroCoverage, subject: sku }],
+  receipts: [skuTrafficReceipt],
+  facts: [skuTraffic],
+};
+const trafficMetricRow = {
+  binding,
+  observedAt: end,
+  sourceVersion: skuTraffic.fact.sourceVersion,
+  evidenceIds: ["rc1"],
+  data: {
+    ...window,
+    visitors: 10,
+    cart: 4,
+    checkout: 2,
+    paidOrders: 1,
+    coverageBasisPoints: 10000,
+  },
+};
+const skuMetricInput = {
+  ...metricInput(sku, "CONVERSION_RATE", ["traffic"], ["rc1"]),
+  traffic: [trafficMetricRow],
+};
+const trafficSelectionRequest = {
+  ...captureRequest,
+  inputRevision: revision,
+  subject: sku,
+  kind: "CONVERSION_RATE",
+};
+const trafficSelection = { subject: sku, input: skuMetricInput, selectionReceiptIds: ["rc1"] };
+const trafficProof = {
+  request: trafficSelectionRequest,
+  capture: skuCapture,
+  selection: trafficSelection,
+};
+
+it("returns a three-key scoped SKU traffic input with its immutable source evidence", () => {
+  expect(api.ObservedSelectionRequestV1Schema.parse(trafficSelectionRequest)).toEqual(
+    trafficSelectionRequest,
+  );
+  const proved = api.ObservedSelectionProofV1Schema.parse(trafficProof);
+  expect(proved.selection).toEqual(trafficSelection);
+  expect(Object.keys(api.ScopedMetricInputV1Schema.parse(trafficSelection))).toEqual([
+    "subject",
+    "input",
+    "selectionReceiptIds",
+  ]);
+  expect(Object.isFrozen(proved.selection.input.traffic?.[0]?.data)).toBe(true);
+});
+
+function withMetricInput(changes: object) {
+  return { ...trafficSelection, input: { ...skuMetricInput, ...changes } };
+}
+
+it.each([
+  [
+    "input revision elsewhere",
+    { selection: withMetricInput({ inputRevision: "p2-observed-v1:" + configHash }) },
+  ],
+  ["legacy definition", { selection: withMetricInput({ definitionVersion: "metrics-g4-v1" }) }],
+  ["relabel store traffic as SKU", { capture: zeroCapture }],
+  ["missing traffic data", { selection: withMetricInput({ traffic: null }) }],
+  ["missing measured projection", { selection: withMetricInput({ traffic: [] }) }],
+  [
+    "data window moved",
+    {
+      selection: withMetricInput({
+        traffic: [
+          {
+            ...trafficMetricRow,
+            data: { ...trafficMetricRow.data, periodStart: start.replace("16:", "17:") },
+          },
+        ],
+      }),
+    },
+  ],
+  [
+    "base or observed evidence mismatch",
+    {
+      selection: withMetricInput({
+        traffic: [{ ...trafficMetricRow, evidenceIds: ["base-ORDERS"] }],
+      }),
+    },
+  ],
+  [
+    "extra receipt",
+    { selection: { ...trafficSelection, selectionReceiptIds: ["rc1", "base-MARKETING"] } },
+  ],
+  ["unknown receipt", { selection: { ...trafficSelection, selectionReceiptIds: ["missing"] } }],
+  [
+    "duplicate receipt",
+    { selection: { ...trafficSelection, selectionReceiptIds: ["rc1", "rc1"] } },
+  ],
+  ["kind swap", { request: { ...trafficSelectionRequest, kind: "CART_RATE" } }],
+  [
+    "comparison request missing from capture",
+    { request: { ...trafficSelectionRequest, comparisonWindows: [comparisonWindow] } },
+  ],
+  [
+    "input watermark before window end",
+    {
+      selection: withMetricInput({
+        sourceWatermark: start,
+        metricCoverage: [{ ...skuMetricInput.metricCoverage[0], sourceWatermark: start }],
+      }),
+    },
+  ],
+  [
+    "root evidence from another receipt",
+    { selection: withMetricInput({ evidenceIds: ["foreign"] }) },
+  ],
+  [
+    "nulls labeled verified",
+    {
+      selection: withMetricInput({
+        traffic: [{ ...trafficMetricRow, data: { ...trafficMetricRow.data, visitors: null } }],
+      }),
+    },
+  ],
+])("rejects a traffic proof with %s", (_label, change) => {
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, ...change }).success).toBe(
+    false,
+  );
+});
+
+it.each([
+  ["external store binding", { binding: { ...binding, externalStoreId: "shop-B" } }],
+  ["connection binding", { binding: { ...binding, connectionId: "conn-B" } }],
+  ["generation", { generation: 1 }],
+  ["SKU", { subject: { ...sku, externalSkuId: "sku-B" } }],
+  ["publication hash", { publicationHash: hash }],
+  [
+    "source version",
+    { factRefs: [{ ...membership(skuTraffic), sourceVersion: "observed-v1:g:0:e:2" }] },
+  ],
+  ["payload hash", { factRefs: [{ ...membership(skuTraffic), payloadHash: configHash }] }],
+])("rejects an overlapping receipt ID with swapped %s", (_label, change) => {
+  const capture = { ...skuCapture, receipts: [{ ...skuTrafficReceipt, ...change }] };
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, capture }).success).toBe(
+    false,
+  );
+});
+
+it("rejects mismatching measured counters with the same source and receipt IDs", () => {
+  const facts = [{ ...skuTraffic, fact: withPayload(skuTraffic.fact, { paidOrders: 9 }) }];
+  const capture = { ...skuCapture, facts };
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, capture }).success).toBe(
+    false,
+  );
+});
+
+it("preserves a nullable traffic measurement independently of publication completeness", () => {
+  const fact = withPayload(skuTraffic.fact, { visitors: null, reason: "TRAFFIC_MISSING" });
+  const capture = { ...skuCapture, facts: [{ ...skuTraffic, fact }] };
+  const traffic = [{ ...trafficMetricRow, data: { ...trafficMetricRow.data, visitors: null } }];
+  const selection = withMetricInput({ traffic, status: "INSUFFICIENT" });
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, capture, selection }).success,
+  ).toBe(true);
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...trafficProof,
+      capture,
+      selection: withMetricInput({ traffic }),
+    }).success,
+  ).toBe(false);
+});
+
+const zeroTrafficProof = {
+  request: { ...trafficSelectionRequest, subject: store },
+  capture: zeroCapture,
+  selection: {
+    subject: store,
+    selectionReceiptIds: ["rc1"],
+    input: { ...metricInput(store, "CONVERSION_RATE", ["traffic"], ["rc1"]), traffic: [] },
+  },
+};
+it("accepts zero rows only from an exact certified terminal measurement", () => {
+  expect(api.ObservedSelectionProofV1Schema.safeParse(zeroTrafficProof).success).toBe(true);
+  const incomplete = {
+    ...zeroCapture,
+    publications: [{ ...publication, pageCount: 2, recordCount: 1 }],
+    receipts: [{ ...zeroReceipt, nextCursor: "next", terminalCoverage: null }],
+    coverage: [
+      { ...zeroCoverage, status: "PARTIAL", coverageBasisPoints: 8000, reason: "PARTIAL_COVERAGE" },
+    ],
+  };
+  expect(api.ObservedCaptureV1Schema.safeParse(incomplete).success).toBe(true);
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...zeroTrafficProof, capture: incomplete })
+      .success,
+  ).toBe(false);
+});
+
+it("pins exact comparison window/cutoff pairs and does not accept another store", () => {
+  const request = { ...trafficSelectionRequest, comparisonWindows: [comparisonWindow] };
+  const capture = { ...skuCapture, comparisons: [comparisonRef] };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, request, capture }).success,
+  ).toBe(true);
+  const replacedCutoff = {
+    ...request,
+    comparisonWindows: [{ ...comparisonWindow, visibleAt: end }],
+  };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...trafficProof,
+      request: replacedCutoff,
+      capture,
+    }).success,
+  ).toBe(false);
+  const otherStore = { ...comparisonRef, binding: { ...binding, storeId: "foreign-store" } };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...trafficProof,
+      request,
+      capture: { ...capture, comparisons: [otherStore] },
+    }).success,
+  ).toBe(false);
+});
+
+it.each([
+  ["too many input evidence IDs", { evidenceIds: Array(4097) }],
+  ["too many coverage entries", { metricCoverage: Array(4097) }],
+  [
+    "too many coverage evidence IDs",
+    { metricCoverage: [{ ...skuMetricInput.metricCoverage[0], evidenceIds: Array(4097) }] },
+  ],
+  [
+    "too many nested evidence IDs",
+    { traffic: [{ ...trafficMetricRow, evidenceIds: Array(4097) }] },
+  ],
+  ["over aggregate fact budget", { paymentFacts: Array(25000), traffic: Array(25001) }],
+])("preflights %s before decoding legacy metric objects", (_label, changes) => {
+  const result = api.ScopedMetricInputV1Schema.safeParse(withMetricInput(changes));
+  expect(result.success).toBe(false);
+  if (!result.success) expect(result.error.issues[0]?.message).toBe("OVERFLOW");
+});
+
+const hasSource = {
+  version: "base-version",
+  updatedAt: end,
+  quality: { state: "COMPLETE", issues: [] },
+};
+const c1 = returnedFact(
+  {
+    ...campaign,
+    factId: "C1",
+    payload: {
+      ...campaign.payload,
+      spendMinor: 100,
+      attributedRevenueMinor: 200,
+      eligibleCount: 5,
+      measuredCount: 5,
+      coverageBasisPoints: 10000,
+      reason: null,
+    },
+  },
+  "R1",
+);
+const c2 = returnedFact(
+  {
+    ...campaign,
+    factId: "C2",
+    sequence: 2,
+    sourceVersion: "observed-v1:g:0:e:2",
+    subject: { ...campaignSubject, externalCampaignId: "c2" },
+    payload: {
+      ...campaign.payload,
+      externalCampaignId: "c2",
+      spendMinor: 300,
+      attributedRevenueMinor: 1200,
+      eligibleCount: 8,
+      measuredCount: 7,
+      coverageBasisPoints: 10000,
+      reason: null,
+    },
+  },
+  "R2",
+);
+const campaignSnapshot1 = snapshot([c1], 1, end);
+const campaignSnapshot2 = snapshot([c2], 2, end);
+const marketing2 = { stream: "MARKETING", pageId: "base-MARKETING-2", pageHash };
+const storeRoaSCapture = {
+  ...zeroCapture,
+  domains: ["CAMPAIGN_MEASUREMENT"],
+  publications: [
+    campaignSnapshot1.certificate,
+    { ...campaignSnapshot2.certificate, publicationSequence: 1 },
+  ],
+  receipts: [campaignSnapshot1.certifiedReceipt, campaignSnapshot2.certifiedReceipt],
+  coverage: [campaignSnapshot1.coverageRow, campaignSnapshot2.coverageRow],
+  facts: [c1, c2],
+  base: { ...base, receipts: [...base.receipts, marketing2] },
+};
+
+function campaignMetricRow(stored: typeof c1 | typeof c2, marketingPage: string) {
+  const { receiptId, fact } = stored;
+  const { externalCampaignId, businessDate, spendMinor, attributedRevenueMinor } = fact.payload;
+  const factContext = { binding, observedAt: end, sourceVersion: fact.sourceVersion };
+  return {
+    ...factContext,
+    evidenceIds: [receiptId, marketingPage],
+    data: {
+      externalStoreId: binding.externalStoreId,
+      externalCampaignId,
+      date: businessDate,
+      impressions: 10,
+      clicks: 5,
+      attributedOrders: 2,
+      spendMinor,
+      attributedRevenueMinor,
+      currency: "CNY",
+      source: hasSource,
+    },
+    measuredCoverage: {
+      ...factContext,
+      ...window,
+      coverageBasisPoints: 10000,
+      evidenceIds: [receiptId],
+    },
+  };
+}
+
+const campaignRows = [
+  campaignMetricRow(c1, "base-MARKETING"),
+  campaignMetricRow(c2, marketing2.pageId),
+];
+const campaignWitnessIds = ["R1", "R2", "base-MARKETING", marketing2.pageId];
+const roasInput = {
+  ...metricInput(store, "ROAS", ["campaignFacts"], campaignWitnessIds),
+  campaignFacts: campaignRows,
+};
+const storeRoaSProof = {
+  request: {
+    ...trafficSelectionRequest,
+    subject: store,
+    kind: "ROAS",
+    domains: ["CAMPAIGN_MEASUREMENT"],
+  },
+  capture: storeRoaSCapture,
+  selection: { subject: store, selectionReceiptIds: campaignWitnessIds, input: roasInput },
+};
+
+it("binds STORE ROAS to both campaign-day rows and all marketing pages", () => {
+  const proof = api.ObservedSelectionProofV1Schema.parse(storeRoaSProof);
+  expect(proof.selection.input.campaignFacts?.map((row) => row.data.externalCampaignId)).toEqual([
+    "c1",
+    "c2",
+  ]);
+  expect(proof.selection.selectionReceiptIds).toEqual(campaignWitnessIds);
+});
+
+it.each([
+  ["missing observed receipt", ["R1", "base-MARKETING", marketing2.pageId]],
+  ["missing marketing page", ["R1", "R2", "base-MARKETING"]],
+])("rejects STORE ROAS with a %s", (_label, selectionReceiptIds) => {
+  const input = {
+    ...metricInput(store, "ROAS", ["campaignFacts"], selectionReceiptIds),
+    campaignFacts: campaignRows.map((row) => ({
+      ...row,
+      evidenceIds: row.evidenceIds.filter((id) => selectionReceiptIds.includes(id)),
+      measuredCoverage: {
+        ...row.measuredCoverage,
+        evidenceIds: row.measuredCoverage.evidenceIds.filter((id) =>
+          selectionReceiptIds.includes(id),
+        ),
+      },
+    })),
+  };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...storeRoaSProof,
+      selection: { ...storeRoaSProof.selection, selectionReceiptIds, input },
+    }).success,
+  ).toBe(false);
+});
+
+it.each([
+  ["omitted campaign", [campaignRows[0]]],
+  ["duplicate campaign/day", [campaignRows[0], campaignRows[0]]],
+  [
+    "swapped per-campaign revenue",
+    campaignRows.map((row, index) => ({
+      ...row,
+      data: {
+        ...row.data,
+        attributedRevenueMinor: campaignRows[1 - index].data.attributedRevenueMinor,
+      },
+    })),
+  ],
+  ["missing measured interval", [campaignRows[0], { ...campaignRows[1], measuredCoverage: null }]],
+  [
+    "unknown attributed amount",
+    [
+      campaignRows[0],
+      {
+        ...campaignRows[1],
+        data: {
+          ...campaignRows[1].data,
+          attributedRevenueMinor: null,
+          source: { ...hasSource, quality: { state: "PARTIAL", issues: ["MARKETING_UNKNOWN"] } },
+        },
+      },
+    ],
+  ],
+])("rejects STORE ROAS with %s", (_label, campaignFacts) => {
+  const selection = { ...storeRoaSProof.selection, input: { ...roasInput, campaignFacts } };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...storeRoaSProof, selection }).success,
+  ).toBe(false);
+});
+
+it("keeps campaign and SKU selections separate from the STORE component graph", () => {
+  for (const subject of [campaignSubject, sku]) {
+    const request = { ...storeRoaSProof.request, subject };
+    const input = {
+      ...metricInput(subject, "ROAS", ["campaignFacts"], campaignWitnessIds),
+      campaignFacts: campaignRows,
+    };
+    const selection = { subject, input, selectionReceiptIds: campaignWitnessIds };
+    expect(
+      api.ObservedSelectionProofV1Schema.safeParse({ ...storeRoaSProof, request, selection })
+        .success,
+    ).toBe(false);
+  }
+});
+
+it("rejects complete STORE ROAS when an enumerated campaign partition is partial", () => {
+  const partial = {
+    ...campaignSnapshot2.coverageRow,
+    status: "PARTIAL",
+    coverageBasisPoints: 8000,
+    reason: "PARTIAL_COVERAGE",
+  };
+  const capture = { ...storeRoaSCapture, coverage: [campaignSnapshot1.coverageRow, partial] };
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...storeRoaSProof, capture }).success).toBe(
+    false,
+  );
+});
+
+function orderItem(externalLineId: string, externalSkuId: string, grossMinor: number) {
+  return {
+    externalLineId,
+    externalSkuId,
+    externalProductId: "product-A",
+    quantity: 1,
+    unitPriceMinor: grossMinor,
+    grossMinor,
+    netMinor: grossMinor,
+    discountMinor: 0,
+  };
+}
+const originalOrder = {
+  externalStoreId: binding.externalStoreId,
+  externalOrderId: "o1",
+  source: hasSource,
+  status: "PAID",
+  orderedAt: start,
+  paidAt: end,
+  currency: "CNY",
+  items: [orderItem("l1", "sku-A", 100), orderItem("l2", "sku-B", 200)],
+  grossMinor: 300,
+  discountMinor: 0,
+  shippingMinor: 5,
+  payableMinor: 305,
+  paidMinor: 305,
+  refundedMinor: 0,
+};
+const orderRow = {
+  binding,
+  observedAt: end,
+  sourceVersion: "base-order-1",
+  evidenceIds: ["base-ORDERS"],
+  data: originalOrder,
+};
+const skuOrdersInput = {
+  ...metricInput(sku, "GMV", ["paymentFacts"], ["base-ORDERS"]),
+  paymentFacts: [orderRow],
+};
+const skuOrdersProof = {
+  request: { ...trafficSelectionRequest, kind: "GMV" },
+  capture: zeroCapture,
+  selection: { subject: sku, input: skuOrdersInput, selectionReceiptIds: ["base-ORDERS"] },
+};
+it("retains the full original multi-line order and requires a matching SKU and ORDERS page", () => {
+  const output = api.ObservedSelectionProofV1Schema.parse(skuOrdersProof);
+  expect(output.selection.input.paymentFacts?.[0]?.data).toEqual(originalOrder);
+  const otherSku = { kind: "SKU", externalSkuId: "sku-C" };
+  const selection = {
+    subject: otherSku,
+    selectionReceiptIds: ["base-ORDERS"],
+    input: {
+      ...skuOrdersInput,
+      metricCoverage: [{ ...skuOrdersInput.metricCoverage[0], subject: otherSku }],
+    },
+  };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...skuOrdersProof,
+      request: { ...skuOrdersProof.request, subject: otherSku },
+      selection,
+    }).success,
+  ).toBe(false);
+  const wrongPage = { ...orderRow, evidenceIds: ["base-REFUNDS"] };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...skuOrdersProof,
+      selection: {
+        ...skuOrdersProof.selection,
+        input: { ...skuOrdersInput, paymentFacts: [wrongPage] },
+      },
+    }).success,
+  ).toBe(false);
+});
+
+const financeA = returnedFact({ ...a1.fact, payload: { ...a1.fact.payload, ...line } }, "R1");
+const financeB = returnedFact(
+  {
+    ...b1.fact,
+    subject: { ...sku, externalSkuId: "sku-B" },
+    payload: { ...b1.fact.payload, ...line, externalSkuId: "sku-B", externalLineId: "l2" },
+  },
+  "R2",
+);
+
+function costMetricRow(stored: typeof financeA | typeof financeB) {
+  const {
+    externalOrderId,
+    externalLineId,
+    externalSkuId,
+    quantity,
+    frozenAt,
+    skuCostVersion,
+    unitCostMinor,
+    basis,
+    currency,
+  } = stored.fact.payload;
+  return {
+    binding,
+    observedAt: end,
+    sourceVersion: stored.fact.sourceVersion,
+    evidenceIds: [stored.receiptId],
+    data: {
+      externalOrderId,
+      externalLineId,
+      externalSkuId,
+      quantity,
+      frozenAt,
+      skuCostVersion,
+      unitCostMinor,
+      basis,
+      currency,
+    },
+  };
+}
+const financeSnapshotA = snapshot([financeA], 1, end);
+const financeSnapshotB = snapshot([financeB], 2, end);
+const financeStoreCapture = {
+  ...zeroCapture,
+  domains: ["FROZEN_COST"],
+  facts: [financeA, financeB],
+  publications: [financeSnapshotA.certificate, financeSnapshotB.certificate],
+  receipts: [financeSnapshotA.certifiedReceipt, financeSnapshotB.certifiedReceipt],
+  coverage: [financeSnapshotA.coverageRow, financeSnapshotB.coverageRow],
+};
+const financeEvidence = ["R1", "R2", "base-ORDERS"];
+const financeInput = {
+  ...metricInput(store, "GMV", ["paymentFacts", "frozenCosts"], financeEvidence),
+  paymentFacts: [orderRow],
+  frozenCosts: [costMetricRow(financeA), costMetricRow(financeB)],
+};
+const storeCostProof = {
+  request: { ...skuOrdersProof.request, subject: store, domains: ["FROZEN_COST"] },
+  capture: financeStoreCapture,
+  selection: { subject: store, input: financeInput, selectionReceiptIds: financeEvidence },
+};
+
+it("retains each confirmed SKU cost under its own matching original STORE order line", () => {
+  expect(api.ObservedSelectionProofV1Schema.safeParse(storeCostProof).success).toBe(true);
+  const costs = financeInput.frozenCosts.map((row) => ({
+    ...row,
+    data: { ...row.data, externalLineId: "l1" },
+  }));
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...storeCostProof,
+      selection: { ...storeCostProof.selection, input: { ...financeInput, frozenCosts: costs } },
+    }).success,
+  ).toBe(false);
+  const incomplete = {
+    ...financeStoreCapture,
+    facts: [financeA],
+    coverage: [financeSnapshotA.coverageRow],
+    publications: [financeSnapshotA.certificate],
+    receipts: [financeSnapshotA.certifiedReceipt],
+  };
+  const evidence = ["R1", "base-ORDERS"];
+  const input = {
+    ...financeInput,
+    ...metricInput(store, "GMV", ["paymentFacts", "frozenCosts"], evidence),
+    paymentFacts: [orderRow],
+    frozenCosts: [costMetricRow(financeA)],
+  };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...storeCostProof,
+      capture: incomplete,
+      selection: { subject: store, input, selectionReceiptIds: evidence },
+    }).success,
+  ).toBe(false);
+});
+
+it("keeps an unavailable cost unknown even when the partition is fully enumerated", () => {
+  const changed = {
+    ...financeA,
+    fact: withPayload(financeA.fact, {
+      basis: "UNAVAILABLE",
+      unitCostMinor: null,
+      skuCostVersion: null,
+      reason: "COST_MISSING",
+    }),
+  };
+  const capture = { ...financeStoreCapture, facts: [changed, financeB] };
+  const first = costMetricRow(financeA);
+  const frozenCosts = [
+    {
+      ...first,
+      data: { ...first.data, basis: "UNAVAILABLE", unitCostMinor: null, skuCostVersion: null },
+    },
+    costMetricRow(financeB),
+  ];
+  const input = { ...financeInput, frozenCosts };
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...storeCostProof,
+      capture,
+      selection: { ...storeCostProof.selection, input },
+    }).success,
+  ).toBe(false);
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({
+      ...storeCostProof,
+      capture,
+      selection: { ...storeCostProof.selection, input: { ...input, status: "INSUFFICIENT" } },
+    }).success,
+  ).toBe(true);
+});
+
+const positionFact = returnedFact(position, "R1");
+const noticeFact = returnedFact(
+  { ...notice, sequence: 2, sourceVersion: "observed-v1:g:0:e:2" },
+  "R2",
+);
+const positionSnapshot = snapshot([positionFact], 1, end);
+const noticeSnapshot = snapshot([noticeFact], 2, end);
+const extensionCapture = {
+  ...zeroCapture,
+  domains: ["INVENTORY_POSITION", "SUPPLIER_NOTICE"],
+  facts: [positionFact, noticeFact],
+  publications: [positionSnapshot.certificate, noticeSnapshot.certificate],
+  receipts: [positionSnapshot.certifiedReceipt, noticeSnapshot.certifiedReceipt],
+  coverage: [positionSnapshot.coverageRow, noticeSnapshot.coverageRow],
+};
+const extensionRow = {
+  binding,
+  observedAt: end,
+  sourceVersion: positionFact.fact.sourceVersion,
+  evidenceIds: ["R1", "R2"],
+  data: {
+    ...location,
+    asOf: end,
+    quarantine: 0,
+    inbound: 8,
+    leadTimeHours: 24,
+    safetyBufferHours: 1.5,
+    eta: later,
+  },
+};
+const extensionsInput = {
+  ...metricInput(sku, "LEAD_TIME_HOURS", ["inventoryExtensions"], ["R1", "R2"]),
+  inventoryExtensions: [extensionRow],
+};
+const extensionProof = {
+  request: {
+    ...trafficSelectionRequest,
+    kind: "LEAD_TIME_HOURS",
+    domains: extensionCapture.domains,
+  },
+  capture: extensionCapture,
+  selection: { subject: sku, input: extensionsInput, selectionReceiptIds: ["R1", "R2"] },
+};
+
+it("joins position provenance with a visible notice at the same SKU and location", () => {
+  expect(api.ObservedSelectionProofV1Schema.safeParse(extensionProof).success).toBe(true);
+  for (const change of [
+    { data: { ...extensionRow.data, inbound: 9 } },
+    { data: { ...extensionRow.data, eta: end } },
+    { evidenceIds: ["R1"] },
+    { sourceVersion: noticeFact.fact.sourceVersion },
+  ]) {
+    const input = { ...extensionsInput, inventoryExtensions: [{ ...extensionRow, ...change }] };
+    expect(
+      api.ObservedSelectionProofV1Schema.safeParse({
+        ...extensionProof,
+        selection: { ...extensionProof.selection, input },
+      }).success,
+    ).toBe(false);
+  }
+});
+
+it("rejects a selection ID shared by an observed receipt and an unrelated base page", () => {
+  const collision = { stream: "MARKETING", pageId: "rc1", pageHash };
+  const capture = { ...skuCapture, base: { ...base, receipts: [...base.receipts, collision] } };
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, capture }).success).toBe(
+    false,
+  );
+});
+
+it.each([
+  ["null verified source row", { traffic: [{ ...trafficMetricRow, data: null }] }],
+  [
+    "unknown verified traffic",
+    { traffic: [{ ...trafficMetricRow, data: { ...trafficMetricRow.data, visitors: null } }] },
+  ],
+  [
+    "partial verified traffic",
+    {
+      traffic: [
+        { ...trafficMetricRow, data: { ...trafficMetricRow.data, coverageBasisPoints: 5000 } },
+      ],
+    },
+  ],
+])("rejects a standalone scoped input with %s", (_label, change) => {
+  expect(api.ScopedMetricInputV1Schema.safeParse(withMetricInput(change)).success).toBe(false);
+});
+
+it("retains an earlier-window origin for an eligible history fact", () => {
+  const fact = { ...a1.fact, occurredAt: start, payload: { ...a1.fact.payload, frozenAt: start } };
+  const historyCertificate = { ...firstSnapshot.certificate, window: pastWindow };
+  const historyReceipt = { ...firstSnapshot.certifiedReceipt, window: pastWindow };
+  const capture = {
+    ...correctedCapture,
+    facts: [{ ...a1, fact }, b2],
+    publications: [historyCertificate, correctedSnapshot.certificate],
+    receipts: [historyReceipt, correctedSnapshot.certifiedReceipt],
+  };
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+});
+
+it("preserves measured zero counters with their exact STORE source evidence", () => {
+  const zeros = { visitors: 0, cart: 0, checkout: 0, paidOrders: 0 };
+  const stored = returnedFact(withPayload(pageFact, zeros), "rc1");
+  const capture = {
+    ...zeroCapture,
+    facts: [stored],
+    publications: [{ ...publication, recordCount: 1 }],
+    receipts: [{ ...zeroReceipt, recordCount: 1, factRefs: [membership(stored)] }],
+  };
+  const input = {
+    ...zeroTrafficProof.selection.input,
+    traffic: [{ ...trafficMetricRow, data: { ...trafficMetricRow.data, ...zeros } }],
+  };
+  const selection = { ...zeroTrafficProof.selection, input };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...zeroTrafficProof, capture, selection })
+      .success,
+  ).toBe(true);
+});
+
+it.each([
+  { reason: "PARTIAL_COVERAGE", coverageBasisPoints: 9000 },
+  { reason: "ATTRIBUTION_MISSING", eligibleCount: null },
+])("rejects STORE ROAS with faithfully projected but incomplete source quality %o", (change) => {
+  const fact = withPayload(c2.fact, change);
+  const capture = { ...storeRoaSCapture, facts: [c1, { ...c2, fact }] };
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+  const row = campaignRows[1];
+  const measuredCoverage = {
+    ...row.measuredCoverage,
+    coverageBasisPoints: change.coverageBasisPoints ?? 10000,
+  };
+  const selection = {
+    ...storeRoaSProof.selection,
+    input: { ...roasInput, campaignFacts: [campaignRows[0], { ...row, measuredCoverage }] },
+  };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...storeRoaSProof, capture, selection }).success,
+  ).toBe(false);
+});
+
+it("rejects overlapping exact-window traffic measurements without discarding one source", () => {
+  const second = returnedFact(
+    {
+      ...skuTraffic.fact,
+      factId: "overlap",
+      sequence: 2,
+      sourceVersion: "observed-v1:g:0:e:2",
+    },
+    "rc1",
+  );
+  const capture = {
+    ...skuCapture,
+    facts: [skuTraffic, second],
+    publications: [{ ...skuCapture.publications[0], recordCount: 2 }],
+    receipts: [
+      {
+        ...skuTrafficReceipt,
+        recordCount: 2,
+        factRefs: [membership(skuTraffic), membership(second)],
+      },
+    ],
+  };
+  const secondRow = { ...trafficMetricRow, sourceVersion: second.fact.sourceVersion };
+  const selection = withMetricInput({ traffic: [trafficMetricRow, secondRow] });
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, capture, selection }).success,
+  ).toBe(false);
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...trafficProof, capture }).success).toBe(
+    false,
+  );
 });

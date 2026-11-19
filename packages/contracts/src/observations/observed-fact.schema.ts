@@ -13,7 +13,16 @@ import { MockScenarioPlanSchema } from "../commerce/mock-scenario.schema.js";
 import { EventEntitySchema } from "../events/event-evidence.schema.js";
 import {
   BasisPointsSchema,
+  MetricCollectionSchema,
+  MetricCoverageV1Schema,
   MetricFeeKindSchema,
+  MetricInputV1Schema,
+  MetricSubjectSchema,
+  type MetricCampaignFact,
+  type MetricInventoryExtension,
+  type MetricInputV1,
+  type MetricTraffic,
+  type MetricRefundFact,
   MetricIssueCodeSchema,
   MetricWindowSchema,
   SignedMinorSchema,
@@ -1315,3 +1324,886 @@ export const ObservedCaptureV1Schema = preflight(
   boundedCapture,
 );
 export type ObservedCaptureV1 = z.infer<typeof ObservedCaptureV1Schema>;
+
+const metricKind = MetricCoverageV1Schema.unwrap().shape.kind;
+export const ObservedSelectionRequestV1Schema = preflight(
+  z
+    .strictObject({ ...readRequestFields, subject: MetricSubjectSchema, kind: metricKind })
+    .refine(validCaptureRequest, "INVALID_CAPTURE_REQUEST")
+    .readonly(),
+  boundedCaptureRequest,
+);
+export type ObservedSelectionRequestV1 = z.infer<typeof ObservedSelectionRequestV1Schema>;
+
+const metricCollections = MetricCollectionSchema.options;
+type MetricCollection = (typeof metricCollections)[number];
+
+function arrayValues(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function boundedMetricFact(value: unknown): boolean {
+  const row = rawObject(value);
+  const data = rawObject(row?.data);
+  return (
+    withinArrayBounds(row, { evidenceIds: maxPages }) &&
+    withinArrayBounds(row?.measuredCoverage, { evidenceIds: maxPages }) &&
+    withinArrayBounds(data, { items: 500 }) &&
+    withinArrayBounds(rawObject(data?.source)?.quality, { issues: 9 })
+  );
+}
+
+function boundedMetricInput(value: unknown): boolean {
+  if (!withinArrayBounds(value, { evidenceIds: maxPages, metricCoverage: maxPages })) return false;
+  const input = rawObject(value);
+  const groups = metricCollections.map((key) => arrayValues(input?.[key]));
+  const count = groups.reduce((total, group) => total + group.length, 0);
+  return (
+    count <= maxCaptureFacts &&
+    arrayValues(input?.metricCoverage).every((coverage) =>
+      withinArrayBounds(coverage, { evidenceIds: maxPages, collections: metricCollections.length }),
+    ) &&
+    groups.every((group) => group.every(boundedMetricFact))
+  );
+}
+
+function boundedScopedInput(value: unknown): boolean {
+  return (
+    withinArrayBounds(value, { selectionReceiptIds: maxPages }) &&
+    boundedMetricInput(rawObject(value)?.input)
+  );
+}
+
+const paymentCollections = ["paymentFacts"] as const;
+const settledCollections = ["paymentFacts", "refundFacts"] as const;
+const costCollections = [
+  ...settledCollections,
+  "frozenCosts",
+  "refundAllocations",
+  "returnReceipts",
+] as const;
+const contributionCollections = [...costCollections, "fees"] as const;
+
+// The new projection must provide the source collections required by the existing metric leaves.
+const neededCollections: Readonly<Record<z.infer<typeof metricKind>, readonly MetricCollection[]>> =
+  {
+    GMV: paymentCollections,
+    PAID_REVENUE: paymentCollections,
+    AOV: paymentCollections,
+    PAID_ORDERS: paymentCollections,
+    PAID_UNITS: paymentCollections,
+    REFUND_SETTLED_AMOUNT: ["refundFacts"],
+    NET_REVENUE_SETTLEMENT: settledCollections,
+    REFUNDED_COHORT_ORDERS: settledCollections,
+    REFUND_COHORT_ORDER_RATE: settledCollections,
+    REFUND_COHORT_AMOUNT_RATE: settledCollections,
+    NET_MERCHANDISE_REVENUE: [...settledCollections, "refundAllocations"],
+    COGS: costCollections,
+    GROSS_PROFIT: costCollections,
+    CONTRIBUTION: contributionCollections,
+    ESTIMATED_NET_PROFIT: contributionCollections,
+    PROFIT_DELTA: contributionCollections,
+    INVENTORY_AVAILABLE: ["inventoryFacts"],
+    INVENTORY_HOURS_REMAINING: ["inventoryFacts", "paymentFacts", "inventoryExtensions"],
+    LEAD_TIME_HOURS: ["inventoryExtensions"],
+    CONVERSION_RATE: ["traffic"],
+    CART_RATE: ["traffic"],
+    CHECKOUT_RATE: ["traffic"],
+    ROAS: ["campaignFacts"],
+  };
+
+const scopedMetricObject = z.strictObject({
+  subject: MetricSubjectSchema,
+  input: MetricInputV1Schema,
+  selectionReceiptIds: receiptIds
+    .refine((ids) => ids.length > 0, "MISSING_SELECTION_RECEIPT")
+    .readonly(),
+});
+type ScopedInput = z.infer<typeof scopedMetricObject>;
+
+function verifiedScopedSources(input: MetricInputV1, coverage: number): boolean {
+  return (
+    coverage === 10000 &&
+    input.sourceWatermark !== null &&
+    Date.parse(input.sourceWatermark) >= Date.parse(input.periodEnd) &&
+    metricCollections.every((key) => (input[key] ?? []).every(({ data }) => data !== null)) &&
+    (input.traffic ?? []).every(({ data }) => data !== null && fullTraffic(data)) &&
+    (input.campaignFacts ?? []).every(
+      ({ data, measuredCoverage }) =>
+        measuredCoverage?.coverageBasisPoints === 10000 &&
+        data.spendMinor !== null &&
+        data.attributedRevenueMinor !== null,
+    )
+  );
+}
+
+function validScopedInput({ subject, input }: ScopedInput): boolean {
+  if (
+    !joinedRevision.safeParse(input.inputRevision).success ||
+    input.definitionVersion !== observedDefinition.value
+  )
+    return false;
+  const [coverage] = input.metricCoverage;
+  if (!coverage) return input.status === "UNAVAILABLE";
+  if (input.metricCoverage.length !== 1 || subjectKey(coverage.subject) !== subjectKey(subject))
+    return false;
+  if (input.status === "VERIFIED" && !verifiedScopedSources(input, coverage.coverageBasisPoints))
+    return false;
+  const collections = new Set(coverage.collections);
+  return (
+    neededCollections[coverage.kind].every((key) => collections.has(key)) &&
+    metricCollections.every((key) => collections.has(key) === (input[key] !== null))
+  );
+}
+
+export const ScopedMetricInputV1Schema = preflight(
+  scopedMetricObject.refine(validScopedInput, "INVALID_METRIC_PROJECTION").readonly(),
+  boundedScopedInput,
+);
+export type ScopedMetricInputV1 = z.infer<typeof ScopedMetricInputV1Schema>;
+
+const selectionProofObject = z.strictObject({
+  request: ObservedSelectionRequestV1Schema,
+  capture: ObservedCaptureV1Schema,
+  selection: ScopedMetricInputV1Schema,
+});
+type SelectionProof = z.infer<typeof selectionProofObject>;
+
+function boundedSelectionProof(value: unknown): boolean {
+  const proof = rawObject(value);
+  return (
+    boundedCaptureRequest(proof?.request) &&
+    boundedCapture(proof?.capture) &&
+    boundedScopedInput(proof?.selection)
+  );
+}
+
+function matchingRequest({ request, capture, selection }: SelectionProof): boolean {
+  const { input, subject } = selection;
+  const [coverage] = input.metricCoverage;
+  const domains = new Set(capture.domains);
+  const comparisons = new Map(
+    capture.comparisons.map((ref) => [windowKey(ref.window), ref.visibleAt]),
+  );
+  return (
+    coverage !== undefined &&
+    coverage.kind === request.kind &&
+    subjectKey(subject) === subjectKey(request.subject) &&
+    sameScope(request, capture) &&
+    sameBinding(request.binding, input.binding) &&
+    sameWindow(request.window, capture.window) &&
+    sameWindow(request.window, input) &&
+    request.visibleAt === capture.visibleAt &&
+    request.visibleAt === input.visibleAt &&
+    request.inputRevision === capture.inputRevision &&
+    request.inputRevision === input.inputRevision &&
+    input.definitionVersion === capture.definitionVersion &&
+    request.domains.length === domains.size &&
+    request.domains.every((domain) => domains.has(domain)) &&
+    request.comparisonWindows.length === comparisons.size &&
+    request.comparisonWindows.every(
+      (ref) => comparisons.get(windowKey(ref.window)) === ref.visibleAt,
+    )
+  );
+}
+
+type BaseStream = z.infer<typeof baseStream>;
+type MetricRow = Readonly<{
+  sourceVersion: string;
+  observedAt: string;
+  evidenceIds: readonly string[];
+}>;
+type SelectedSource = Readonly<{ fact: ObservedFactV1; receiptIds: Set<string> }>;
+type SelectionGraph = Readonly<{
+  proof: SelectionProof;
+  complete: boolean;
+  verified: boolean;
+  ids: ReadonlySet<string>;
+  used: Set<string>;
+  receiptById: ReadonlyMap<string, ObservedReceiptV1>;
+  versions: ReadonlyMap<string, StoredObservedFactV1>;
+  baseStreams: ReadonlyMap<BaseStream, ReadonlySet<string>>;
+  orderLines: ReadonlySet<string>;
+  orderSkus: ReadonlySet<string>;
+  refundOrders: ReadonlyMap<string, MetricRefundFact["data"]>;
+}>;
+
+function lineKey(orderId: string, lineId: string, skuId: string): string {
+  return JSON.stringify([orderId, lineId, skuId]);
+}
+
+function baseStreamsFor(proof: SelectionProof, ids: ReadonlySet<string>) {
+  const observedIds = new Set(proof.capture.receipts.map(({ receiptId }) => receiptId));
+  const indexed = new Map<BaseStream, Set<string>>();
+  const assigned = new Set<string>();
+  for (const { stream, pageId } of proof.capture.base?.receipts ?? []) {
+    if (ids.has(pageId) && (observedIds.has(pageId) || assigned.has(pageId))) return undefined;
+    const pages = indexed.get(stream) ?? new Set<string>();
+    pages.add(pageId);
+    indexed.set(stream, pages);
+    assigned.add(pageId);
+  }
+  return indexed;
+}
+
+function indexOrderLines(input: MetricInputV1) {
+  const orderLines = new Set<string>();
+  const orderSkus = new Set<string>();
+  for (const { data } of input.paymentFacts ?? []) {
+    for (const line of data.items) {
+      orderSkus.add(line.externalSkuId);
+      orderLines.add(lineKey(data.externalOrderId, line.externalLineId, line.externalSkuId));
+    }
+  }
+  return { orderLines, orderSkus };
+}
+
+function createSelectionGraph(proof: SelectionProof): SelectionGraph | undefined {
+  const { capture, selection } = proof;
+  const { input } = selection;
+  const [coverage] = input.metricCoverage;
+  const ids = new Set(selection.selectionReceiptIds);
+  const baseStreams = baseStreamsFor(proof, ids);
+  const versions = selectedVersions(capture);
+  if (
+    !coverage ||
+    !baseStreams ||
+    !versions ||
+    coverage.evidenceIds.length !== ids.size ||
+    !coverage.evidenceIds.every((id) => ids.has(id)) ||
+    !input.evidenceIds.every((id) => ids.has(id))
+  )
+    return undefined;
+  return {
+    proof,
+    ids,
+    baseStreams,
+    versions,
+    ...indexOrderLines(input),
+    complete: coverage.coverageBasisPoints === 10000,
+    verified: input.status === "VERIFIED",
+    used: new Set(),
+    receiptById: new Map(capture.receipts.map((entry) => [entry.receiptId, entry])),
+    refundOrders: new Map(
+      (input.refundFacts ?? []).map(({ data }) => [data.externalRefundId, data]),
+    ),
+  };
+}
+
+function witnessIds(
+  graph: SelectionGraph,
+  allowed: Iterable<string>,
+  all: boolean,
+): Set<string> | undefined {
+  const used = new Set<string>();
+  for (const id of allowed) {
+    if (graph.ids.has(id)) used.add(id);
+    else if (all) return undefined;
+  }
+  for (const id of used) graph.used.add(id);
+  return used.size > 0 ? used : undefined;
+}
+
+function baseWitness(graph: SelectionGraph, stream: BaseStream, all = graph.complete) {
+  return witnessIds(graph, graph.baseStreams.get(stream) ?? [], all);
+}
+
+function evidenceMatches(
+  ids: readonly string[],
+  primary: ReadonlySet<string>,
+  additional?: ReadonlySet<string>,
+): boolean {
+  return (
+    ids.some((id) => primary.has(id)) &&
+    ids.every((id) => primary.has(id) || (additional?.has(id) ?? false))
+  );
+}
+
+function matchesProvenance(
+  row: MetricRow,
+  source: SelectedSource,
+  additional?: ReadonlySet<string>,
+): boolean {
+  return (
+    row.sourceVersion === source.fact.sourceVersion &&
+    row.observedAt === source.fact.observedAt &&
+    evidenceMatches(row.evidenceIds, source.receiptIds, additional)
+  );
+}
+
+type ProjectedSources = ReadonlyMap<string, SelectedSource>;
+
+function addObservedMembers(
+  graph: SelectionGraph,
+  entry: Coverage,
+  allowed: ReadonlySet<string>,
+  sources: Map<string, SelectedSource>,
+): void {
+  for (const id of allowed) {
+    const receipt = graph.receiptById.get(id);
+    for (const member of receipt?.factRefs ?? []) {
+      const key = selectedVersionKey(entry.domain, member.sourceVersion);
+      const stored = graph.versions.get(key);
+      if (
+        !stored ||
+        stored.fact.factId !== member.factId ||
+        stored.fact.payloadHash !== member.payloadHash ||
+        subjectKey(stored.fact.subject) !== subjectKey(entry.subject)
+      )
+        continue;
+      const existing = sources.get(key);
+      if (existing) existing.receiptIds.add(id);
+      else sources.set(key, { fact: stored.fact, receiptIds: new Set([id]) });
+    }
+  }
+}
+
+function observedSources(
+  graph: SelectionGraph,
+  eligible: readonly Coverage[],
+): ProjectedSources | undefined {
+  if (eligible.length === 0) return undefined;
+  const [metricCoverage] = graph.proof.selection.input.metricCoverage;
+  const sources = new Map<string, SelectedSource>();
+  for (const entry of eligible) {
+    if (
+      !metricCoverage ||
+      entry.status === "UNAVAILABLE" ||
+      entry.coverageBasisPoints < metricCoverage.coverageBasisPoints
+    )
+      return undefined;
+    const ids = witnessIds(graph, entry.receiptIds, entry.status === "COMPLETE");
+    if (!ids) return undefined;
+    addObservedMembers(graph, entry, ids, sources);
+  }
+  return sources;
+}
+
+function coverageFor(graph: SelectionGraph, domain: ObservedDomain): Coverage[] {
+  const { request, capture } = graph.proof;
+  const { subject, kind } = request;
+  return capture.coverage.filter((entry) => {
+    if (entry.domain !== domain) return false;
+    if (subjectKey(entry.subject) === subjectKey(subject)) return true;
+    if (subject.kind !== "STORE") return false;
+    if (domain === "CAMPAIGN_MEASUREMENT" && kind === "ROAS")
+      return entry.subject.kind === "CAMPAIGN";
+    return (
+      (domain === "FROZEN_COST" || domain === "REFUND_ALLOCATION" || domain === "RETURN_RECEIPT") &&
+      entry.subject.kind === "SKU" &&
+      graph.orderSkus.has(entry.subject.externalSkuId)
+    );
+  });
+}
+
+function sourceFor(sources: ProjectedSources, domain: ObservedDomain, row: MetricRow) {
+  return sources.get(selectedVersionKey(domain, row.sourceVersion));
+}
+
+type TrafficData = NonNullable<MetricTraffic["data"]>;
+function fullTraffic(
+  data: Pick<TrafficData, "visitors" | "cart" | "checkout" | "paidOrders" | "coverageBasisPoints">,
+): boolean {
+  return (
+    data.coverageBasisPoints === 10000 &&
+    [data.visitors, data.cart, data.checkout, data.paidOrders].every((value) => value !== null)
+  );
+}
+
+function trafficMatches(
+  row: MetricTraffic,
+  source: SelectedSource,
+  graph: SelectionGraph,
+): boolean {
+  const { fact } = source;
+  const { data } = row;
+  if (
+    fact.domain !== "TRAFFIC" ||
+    !data ||
+    !matchesProvenance(row, source) ||
+    !sameWindow(data, graph.proof.request.window) ||
+    !sameWindow(data, fact.payload.window)
+  )
+    return false;
+  const { visitors, cart, checkout, paidOrders, coverageBasisPoints } = fact.payload;
+  return (
+    (!graph.verified || (fact.payload.reason === null && fullTraffic(fact.payload))) &&
+    data.visitors === visitors &&
+    data.cart === cart &&
+    data.checkout === checkout &&
+    data.paidOrders === paidOrders &&
+    data.coverageBasisPoints === coverageBasisPoints
+  );
+}
+
+function validTrafficProjection(graph: SelectionGraph): boolean {
+  const rows = graph.proof.selection.input.traffic ?? [];
+  const sources = observedSources(graph, coverageFor(graph, "TRAFFIC"));
+  if (!sources || rows.length !== sources.size || rows.length > 1) return false;
+  const [row] = rows;
+  if (!row) return graph.complete;
+  const source = sourceFor(sources, "TRAFFIC", row);
+  return source !== undefined && trafficMatches(row, source, graph);
+}
+
+function shanghaiDayIntersection(date: string, measured: Window, window: Window): boolean {
+  const start = Date.parse(measured.periodStart);
+  const end = Date.parse(measured.periodEnd);
+  const windowStart = Date.parse(window.periodStart);
+  const windowEnd = Date.parse(window.periodEnd);
+  return (
+    withinBusinessDate(date, measured) &&
+    (start === windowStart || shanghaiBusinessDate(start - 1) !== date) &&
+    (end === windowEnd || shanghaiBusinessDate(end) !== date)
+  );
+}
+
+type CampaignPayload = Extract<ObservedFactV1, { domain: "CAMPAIGN_MEASUREMENT" }>["payload"];
+function knownCampaign(payload: CampaignPayload): boolean {
+  return (
+    payload.reason === null &&
+    payload.coverageBasisPoints === 10000 &&
+    [
+      payload.spendMinor,
+      payload.attributedRevenueMinor,
+      payload.eligibleCount,
+      payload.measuredCount,
+    ].every((value) => value !== null)
+  );
+}
+
+function campaignMatches(
+  row: MetricCampaignFact,
+  source: SelectedSource,
+  marketing: ReadonlySet<string>,
+  graph: SelectionGraph,
+): boolean {
+  const { fact } = source;
+  const { data, measuredCoverage } = row;
+  if (
+    fact.domain !== "CAMPAIGN_MEASUREMENT" ||
+    !matchesProvenance(row, source, marketing) ||
+    !row.evidenceIds.some((id) => marketing.has(id))
+  )
+    return false;
+  const { payload } = fact;
+  if (
+    data.externalCampaignId !== payload.externalCampaignId ||
+    data.date !== payload.businessDate ||
+    data.spendMinor !== payload.spendMinor ||
+    data.attributedRevenueMinor !== payload.attributedRevenueMinor ||
+    data.currency !== payload.currency
+  )
+    return false;
+  if (
+    !measuredCoverage ||
+    !matchesProvenance(measuredCoverage, source, marketing) ||
+    !sameWindow(measuredCoverage, payload.window) ||
+    measuredCoverage.coverageBasisPoints !== payload.coverageBasisPoints
+  )
+    return false;
+  return (
+    !graph.complete ||
+    (knownCampaign(payload) &&
+      shanghaiDayIntersection(data.date, measuredCoverage, graph.proof.request.window))
+  );
+}
+
+function validCampaignProjection(graph: SelectionGraph): boolean {
+  const { request, selection } = graph.proof;
+  const rows = selection.input.campaignFacts ?? [];
+  const storeRoaS = request.subject.kind === "STORE" && request.kind === "ROAS";
+  if (request.subject.kind !== "CAMPAIGN" && !storeRoaS) return false;
+  const eligible = coverageFor(graph, "CAMPAIGN_MEASUREMENT");
+  const sources = observedSources(graph, eligible);
+  const marketing = baseWitness(graph, "MARKETING", storeRoaS && graph.complete);
+  if (!sources || !marketing || rows.length === 0 || rows.length !== sources.size) return false;
+  const campaignDays = new Set<string>();
+  for (const row of rows) {
+    const key = JSON.stringify([row.data.externalCampaignId, row.data.date]);
+    const source = sourceFor(sources, "CAMPAIGN_MEASUREMENT", row);
+    if (campaignDays.has(key) || !source || !campaignMatches(row, source, marketing, graph))
+      return false;
+    campaignDays.add(key);
+  }
+  return true;
+}
+
+function baseFacts<T extends MetricRow>(
+  graph: SelectionGraph,
+  stream: BaseStream,
+  rows: readonly T[],
+  identity: (row: T) => string,
+  eligible: (row: T) => boolean,
+): boolean {
+  const witness = baseWitness(graph, stream);
+  if (!witness || (!graph.complete && rows.length === 0)) return false;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = identity(row);
+    if (seen.has(key) || !evidenceMatches(row.evidenceIds, witness) || !eligible(row)) return false;
+    seen.add(key);
+  }
+  return true;
+}
+
+function hasProviderIssue(issues: readonly string[], missing: string): boolean {
+  return (
+    issues.includes(missing) ||
+    issues.includes("SOURCE_INCONSISTENT") ||
+    issues.includes("SOURCE_TIME_MISSING")
+  );
+}
+
+function validPayments(graph: SelectionGraph): boolean {
+  const { subject, input } = graph.proof.selection;
+  if (subject.kind === "CAMPAIGN") return false;
+  return baseFacts(
+    graph,
+    "ORDERS",
+    input.paymentFacts ?? [],
+    ({ data }) => data.externalOrderId,
+    ({ data }) => {
+      if (
+        subject.kind === "SKU" &&
+        !data.items.some((line) => line.externalSkuId === subject.externalSkuId)
+      )
+        return false;
+      return (
+        !graph.verified ||
+        (!hasProviderIssue(data.source.quality.issues, "PAYMENT_UNKNOWN") &&
+          data.paidMinor !== null &&
+          (data.paidAt !== null ||
+            (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status))))
+      );
+    },
+  );
+}
+
+function skuRefunds(graph: SelectionGraph, skuId: string): ReadonlySet<string> {
+  const eligible = new Set<string>();
+  for (const { data } of graph.proof.selection.input.refundAllocations ?? []) {
+    if (
+      data?.externalSkuId === skuId &&
+      graph.orderLines.has(lineKey(data.externalOrderId, data.externalLineId, skuId))
+    ) {
+      eligible.add(JSON.stringify([data.externalOrderId, data.externalRefundId]));
+    }
+  }
+  return eligible;
+}
+
+function validRefunds(graph: SelectionGraph): boolean {
+  const { subject, input } = graph.proof.selection;
+  if (subject.kind === "CAMPAIGN") return false;
+  const eligible =
+    subject.kind === "SKU" ? skuRefunds(graph, subject.externalSkuId) : new Set<string>();
+  return baseFacts(
+    graph,
+    "REFUNDS",
+    input.refundFacts ?? [],
+    ({ data }) => data.externalRefundId,
+    ({ data }) => {
+      if (
+        subject.kind === "SKU" &&
+        data.externalSkuId !== subject.externalSkuId &&
+        (data.externalSkuId !== null ||
+          !eligible.has(JSON.stringify([data.externalOrderId, data.externalRefundId])))
+      )
+        return false;
+      return (
+        !graph.verified ||
+        (!hasProviderIssue(data.source.quality.issues, "REFUND_UNKNOWN") &&
+          (data.status !== "SUCCEEDED" ||
+            (data.succeededAt !== null && data.succeededMinor !== null)))
+      );
+    },
+  );
+}
+
+function validInventory(graph: SelectionGraph): boolean {
+  const { subject, input } = graph.proof.selection;
+  if (subject.kind === "CAMPAIGN") return false;
+  return baseFacts(
+    graph,
+    "INVENTORY",
+    input.inventoryFacts ?? [],
+    ({ data }) => JSON.stringify([data.externalSkuId, data.externalLocationId]),
+    ({ data }) =>
+      (subject.kind !== "SKU" || data.externalSkuId === subject.externalSkuId) &&
+      (!graph.verified ||
+        (!hasProviderIssue(data.source.quality.issues, "INVENTORY_UNKNOWN") &&
+          !data.source.quality.issues.includes("INVENTORY_STALE") &&
+          [data.available, data.reserved, data.onHand].every((quantity) => quantity !== null))),
+  );
+}
+
+type FinancialDomain = "FROZEN_COST" | "REFUND_ALLOCATION" | "RETURN_RECEIPT";
+type FinancialFact = Extract<ObservedFactV1, { domain: FinancialDomain }>;
+
+function sameData(actual: object | null, expected: object): boolean {
+  const fields = rawObject(actual);
+  return (
+    fields !== undefined &&
+    Object.keys(fields).length === Object.keys(expected).length &&
+    Object.entries(expected).every(([key, value]) => fields[key] === value)
+  );
+}
+
+function matchesFinancialLine(fact: FinancialFact, graph: SelectionGraph): boolean {
+  const { externalOrderId, externalLineId, externalSkuId } = fact.payload;
+  if (!graph.orderLines.has(lineKey(externalOrderId, externalLineId, externalSkuId))) return false;
+  if (fact.domain === "FROZEN_COST") return true;
+  const refund = graph.refundOrders.get(fact.payload.externalRefundId);
+  return (
+    refund !== undefined &&
+    refund.externalOrderId === externalOrderId &&
+    (refund.externalSkuId === null || refund.externalSkuId === externalSkuId)
+  );
+}
+
+const financialLineFields = ["externalOrderId", "externalLineId", "externalSkuId"] as const;
+
+function matchesFields<T extends object>(
+  data: object | null,
+  payload: T,
+  keys: readonly (keyof T & string)[],
+): boolean {
+  const fields = rawObject(data);
+  return (
+    fields !== undefined &&
+    Object.keys(fields).length === keys.length &&
+    keys.every((key) => fields[key] === payload[key])
+  );
+}
+
+function financialDataMatches(
+  fact: FinancialFact,
+  data: object | null,
+  verified: boolean,
+): boolean {
+  if (verified && fact.payload.reason !== null) return false;
+  switch (fact.domain) {
+    case "FROZEN_COST":
+      return matchesFields(data, fact.payload, [
+        ...financialLineFields,
+        "quantity",
+        "frozenAt",
+        "skuCostVersion",
+        "unitCostMinor",
+        "basis",
+        "currency",
+      ]);
+    case "REFUND_ALLOCATION":
+      return matchesFields(data, fact.payload, [
+        ...financialLineFields,
+        "externalRefundId",
+        "merchandiseMinor",
+        "buyerShippingMinor",
+        "currency",
+      ]);
+    case "RETURN_RECEIPT":
+      return matchesFields(data, fact.payload, [
+        ...financialLineFields,
+        "externalRefundId",
+        "externalReceiptId",
+        "acceptedAt",
+        "resellableQuantity",
+      ]);
+  }
+}
+
+function observedRows(
+  graph: SelectionGraph,
+  sources: ProjectedSources,
+  domain: ObservedDomain,
+  rows: readonly (MetricRow & { readonly data: object | null })[],
+  matches: (fact: ObservedFactV1, data: object | null) => boolean,
+): boolean {
+  if (rows.length !== sources.size || (rows.length === 0 && !graph.complete)) return false;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const source = sourceFor(sources, domain, row);
+    if (
+      !source ||
+      seen.has(row.sourceVersion) ||
+      !matchesProvenance(row, source) ||
+      !matches(source.fact, row.data)
+    )
+      return false;
+    seen.add(row.sourceVersion);
+  }
+  return true;
+}
+
+const financialCollections = {
+  FROZEN_COST: "frozenCosts",
+  REFUND_ALLOCATION: "refundAllocations",
+  RETURN_RECEIPT: "returnReceipts",
+} as const;
+
+function validFinancialProjection(graph: SelectionGraph, domain: FinancialDomain): boolean {
+  const eligible = coverageFor(graph, domain);
+  const { input, subject } = graph.proof.selection;
+  if (subject.kind === "STORE" && eligible.length !== graph.orderSkus.size) return false;
+  const sources = observedSources(graph, eligible);
+  if (!sources) return false;
+  const matched = new Map(
+    [...sources].filter(
+      ([, { fact }]) => fact.domain === domain && matchesFinancialLine(fact, graph),
+    ),
+  );
+  return observedRows(
+    graph,
+    matched,
+    domain,
+    input[financialCollections[domain]] ?? [],
+    (fact, data) => fact.domain === domain && financialDataMatches(fact, data, graph.verified),
+  );
+}
+
+function validFeeProjection(graph: SelectionGraph): boolean {
+  const sources = observedSources(graph, coverageFor(graph, "FEE"));
+  if (!sources) return false;
+  return observedRows(
+    graph,
+    sources,
+    "FEE",
+    graph.proof.selection.input.fees ?? [],
+    (fact, data) => {
+      if (fact.domain !== "FEE" || (graph.verified && fact.payload.reason !== null)) return false;
+      const { window, kind, externalOrderId, amountMinor, coverageBasisPoints, basis } =
+        fact.payload;
+      return sameData(data, {
+        ...window,
+        kind,
+        externalOrderId,
+        amountMinor,
+        coverageBasisPoints,
+        basis,
+      });
+    },
+  );
+}
+
+type NoticeIndex = ReadonlyMap<string, ReadonlySet<string>>;
+type PositionData = NonNullable<MetricInventoryExtension["data"]>;
+function noticeKey(
+  sku: string,
+  location: string,
+  eta: string | null,
+  hours: number | null,
+): string {
+  return JSON.stringify([sku, location, eta, hours]);
+}
+
+function noticeIndex(graph: SelectionGraph): NoticeIndex | undefined {
+  const rows = coverageFor(graph, "SUPPLIER_NOTICE");
+  const required = graph.proof.request.kind === "LEAD_TIME_HOURS" && graph.verified;
+  const supported = rows.some((entry) => entry.receiptIds.some((id) => graph.ids.has(id)));
+  if (!supported && !required) return new Map();
+  const notices = observedSources(graph, rows);
+  if (!notices) return undefined;
+  const result = new Map<string, Set<string>>();
+  for (const { fact, receiptIds } of notices.values()) {
+    if (fact.domain !== "SUPPLIER_NOTICE") return undefined;
+    const { externalSkuId, externalLocationId, newEta, promisedLeadHours } = fact.payload;
+    const key = noticeKey(externalSkuId, externalLocationId, newEta, promisedLeadHours);
+    const ids = result.get(key) ?? new Set<string>();
+    for (const id of receiptIds) ids.add(id);
+    result.set(key, ids);
+  }
+  return result;
+}
+
+function positionMatches(fact: ObservedFactV1, data: PositionData, graph: SelectionGraph): boolean {
+  if (fact.domain !== "INVENTORY_POSITION") return false;
+  const { payload } = fact;
+  if (
+    graph.verified &&
+    graph.proof.request.kind === "INVENTORY_HOURS_REMAINING" &&
+    (payload.quarantine === null || payload.inbound === null)
+  )
+    return false;
+  if (
+    graph.verified &&
+    graph.proof.request.kind === "LEAD_TIME_HOURS" &&
+    data.leadTimeHours === null
+  )
+    return false;
+  return (
+    data.externalSkuId === payload.externalSkuId &&
+    data.externalLocationId === payload.externalLocationId &&
+    data.asOf === payload.asOf &&
+    data.quarantine === payload.quarantine &&
+    data.inbound === payload.inbound &&
+    data.safetyBufferHours === payload.safetyBufferHours
+  );
+}
+
+function matchesExtension(
+  row: MetricInventoryExtension,
+  source: SelectedSource,
+  notices: NoticeIndex,
+  graph: SelectionGraph,
+): boolean {
+  const { data } = row;
+  if (!data || !positionMatches(source.fact, data, graph)) return false;
+  const key = noticeKey(data.externalSkuId, data.externalLocationId, data.eta, data.leadTimeHours);
+  const notice = notices.get(key);
+  // The position owns row provenance; a separately witnessed notice can supply ETA and lead time.
+  return (
+    matchesProvenance(row, source, notice) &&
+    ((data.eta === null && data.leadTimeHours === null) ||
+      (notice !== undefined && row.evidenceIds.some((id) => notice.has(id))))
+  );
+}
+
+function validInventoryExtensions(graph: SelectionGraph): boolean {
+  const rows = graph.proof.selection.input.inventoryExtensions ?? [];
+  const positions = observedSources(graph, coverageFor(graph, "INVENTORY_POSITION"));
+  const notices = noticeIndex(graph);
+  if (!positions || !notices || rows.length === 0 || rows.length !== positions.size) return false;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const source = sourceFor(positions, "INVENTORY_POSITION", row);
+    if (!source || seen.has(row.sourceVersion) || !matchesExtension(row, source, notices, graph))
+      return false;
+    seen.add(row.sourceVersion);
+  }
+  return true;
+}
+
+const projectionChecks: Readonly<Record<MetricCollection, (graph: SelectionGraph) => boolean>> = {
+  paymentFacts: validPayments,
+  refundFacts: validRefunds,
+  inventoryFacts: validInventory,
+  campaignFacts: validCampaignProjection,
+  frozenCosts: (graph) => validFinancialProjection(graph, "FROZEN_COST"),
+  refundAllocations: (graph) => validFinancialProjection(graph, "REFUND_ALLOCATION"),
+  returnReceipts: (graph) => validFinancialProjection(graph, "RETURN_RECEIPT"),
+  fees: validFeeProjection,
+  traffic: validTrafficProjection,
+  inventoryExtensions: validInventoryExtensions,
+};
+
+function validProjection(proof: SelectionProof): boolean {
+  const graph = createSelectionGraph(proof);
+  const [coverage] = proof.selection.input.metricCoverage;
+  return (
+    graph !== undefined &&
+    coverage !== undefined &&
+    coverage.collections.every((key) => projectionChecks[key](graph)) &&
+    graph.used.size === graph.ids.size
+  );
+}
+
+/** Bind the three-key leaf projection to the reader's supplied sealed graph. */
+export const ObservedSelectionProofV1Schema = preflight(
+  selectionProofObject
+    .refine(matchingRequest, { message: "INVALID_SELECTION_IDENTITY", abort: true })
+    .refine(validProjection, "INVALID_SELECTION_EVIDENCE")
+    .readonly(),
+  boundedSelectionProof,
+);
+export type ObservedSelectionProofV1 = z.infer<typeof ObservedSelectionProofV1Schema>;
