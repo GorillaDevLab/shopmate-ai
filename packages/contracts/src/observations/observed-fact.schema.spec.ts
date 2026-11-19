@@ -1,5 +1,35 @@
-import { expect, it } from "vitest";
+import { expect, expectTypeOf, it } from "vitest";
 import * as api from "../index.js";
+import type {
+  AppendObservedPageV1,
+  AuthorizedObservedSelectionPort,
+  FactPage,
+  ObservedCaptureRequestV1,
+  ObservedCaptureV1,
+  ObservedCausalDependencies,
+  ObservedConsumerPort,
+  ObservedDemandPageV1,
+  ObservedDemandProducerPort,
+  ObservedError,
+  ObservedErrorCode,
+  ObservedFinancePageV1,
+  ObservedFinanceProducerPort,
+  ObservedFinanceProducerRequestV1,
+  ObservedProducerRunV1,
+  ObservedPublicationReadV1,
+  ObservedPublicationRequestV1,
+  ObservedPublicationV1,
+  ObservedPublishedPageV1,
+  ObservedPublisherPort,
+  ObservedReaderPort,
+  ObservedReadRequestV1,
+  ObservedReceiptV1,
+  ObservedResult,
+  ObservedSelectionRequestV1,
+  ObservedSupplyPageV1,
+  ObservedSupplyProducerPort,
+  ScopedMetricInputV1,
+} from "../index.js";
 import {
   MockObservedGenerationConfigV3Schema,
   ObservedDomainSchema,
@@ -2843,4 +2873,105 @@ it("decodes only supply source records on a readonly supply page", () => {
   expect(api.ObservedSupplyPageV1Schema.safeParse({ ...page, records: [cost] }).success).toBe(
     false,
   );
+});
+
+it("exports readonly publisher and consumer contracts with distinct requests and results", () => {
+  expectTypeOf<ObservedPublisherPort>().toEqualTypeOf<
+    Readonly<{
+      publishObserved: (
+        request: ObservedPublicationRequestV1,
+      ) => Promise<ObservedResult<ObservedPublicationV1>>;
+      readPublishedPage: (
+        request: ObservedPublicationReadV1,
+      ) => Promise<ObservedResult<ObservedPublishedPageV1>>;
+    }>
+  >();
+  expectTypeOf<ObservedConsumerPort>().toEqualTypeOf<
+    Readonly<{
+      appendObservedPage: (
+        request: AppendObservedPageV1,
+      ) => Promise<ObservedResult<ObservedReceiptV1>>;
+    }>
+  >();
+  expectTypeOf<
+    Parameters<ObservedConsumerPort["appendObservedPage"]>[0]
+  >().toEqualTypeOf<AppendObservedPageV1>();
+});
+
+it("exports readonly reader and authorized selection contracts", () => {
+  expectTypeOf<ObservedReaderPort>().toEqualTypeOf<
+    Readonly<{
+      captureObserved: (
+        request: ObservedCaptureRequestV1,
+      ) => Promise<ObservedResult<ObservedCaptureV1>>;
+      readObserved: (request: ObservedReadRequestV1) => Promise<ObservedResult<ObservedCaptureV1>>;
+    }>
+  >();
+  expectTypeOf<AuthorizedObservedSelectionPort>().toEqualTypeOf<
+    Readonly<{
+      selectObserved: (
+        request: ObservedSelectionRequestV1,
+      ) => Promise<ObservedResult<ScopedMetricInputV1>>;
+    }>
+  >();
+  expectTypeOf<ReturnType<AuthorizedObservedSelectionPort["selectObserved"]>>().toEqualTypeOf<
+    Promise<ObservedResult<ScopedMetricInputV1>>
+  >();
+});
+
+it("exports readonly causal producer calls with their schema-derived pages", () => {
+  expectTypeOf<ObservedFinanceProducerPort>().toEqualTypeOf<
+    Readonly<{
+      reduceFinance: (
+        request: ObservedFinanceProducerRequestV1,
+      ) => Promise<ObservedResult<ObservedFinancePageV1>>;
+    }>
+  >();
+  expectTypeOf<ObservedSupplyProducerPort>().toEqualTypeOf<
+    Readonly<{
+      produceSupply: (
+        request: ObservedProducerRunV1,
+      ) => Promise<ObservedResult<ObservedSupplyPageV1>>;
+    }>
+  >();
+  expectTypeOf<ObservedDemandProducerPort>().toEqualTypeOf<
+    Readonly<{
+      produceDemand: (
+        request: ObservedProducerRunV1,
+      ) => Promise<ObservedResult<ObservedDemandPageV1>>;
+    }>
+  >();
+  expectTypeOf<ObservedCausalDependencies>().toEqualTypeOf<
+    Readonly<{ supply: ObservedSupplyProducerPort; finance: ObservedFinanceProducerPort }>
+  >();
+});
+
+it("keeps producer schema outputs and fact-page domains identical", () => {
+  expectTypeOf<ReturnType<typeof api.ObservedFinancePageV1Schema.parse>>().toEqualTypeOf<
+    FactPage<"FROZEN_COST" | "REFUND_ALLOCATION" | "RETURN_RECEIPT" | "FEE">
+  >();
+  expectTypeOf<ReturnType<typeof api.ObservedSupplyPageV1Schema.parse>>().toEqualTypeOf<
+    FactPage<"LISTING" | "PRICE" | "INVENTORY_LOT" | "SUPPLIER_NOTICE" | "INVENTORY_POSITION">
+  >();
+  expectTypeOf<Pick<ObservedDemandPageV1, "records" | "nextCursor">>().toEqualTypeOf<
+    FactPage<"TRAFFIC" | "CAMPAIGN_MEASUREMENT">
+  >();
+});
+
+it("exports the exact closed error codes and readonly value-or-error result", () => {
+  expectTypeOf<ObservedErrorCode>().toEqualTypeOf<
+    | "INVALID_INPUT"
+    | "OVERFLOW"
+    | "CONFLICT"
+    | "VERSION_MISMATCH"
+    | "NOT_FOUND"
+    | "FORBIDDEN"
+    | "SOURCE_UNAVAILABLE"
+  >();
+  expectTypeOf<ObservedError>().toEqualTypeOf<Readonly<{ code: ObservedErrorCode }>>();
+  expectTypeOf<ObservedResult<string>>().toEqualTypeOf<
+    Readonly<
+      { ok: true; value: string } | { ok: false; error: Readonly<{ code: ObservedErrorCode }> }
+    >
+  >();
 });

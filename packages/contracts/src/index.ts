@@ -395,6 +395,7 @@ export * from "./events/event.schema.js";
 export type * from "./events/event-ports.js";
 
 export * from "./observations/observed-fact.schema.js";
+export type * from "./observations/observed-ports.js";
 
 export * from "./decisions/decision.schema.js";
 export * from "./decisions/decision-provider.js";
