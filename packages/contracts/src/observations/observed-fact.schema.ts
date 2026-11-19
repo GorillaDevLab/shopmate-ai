@@ -19,6 +19,8 @@ import {
   MetricInputV1Schema,
   MetricSubjectSchema,
   type MetricCampaignFact,
+  type MetricCoverageV1,
+  type MetricFrozenCost,
   type MetricInventoryExtension,
   type MetricInputV1,
   type MetricTraffic,
@@ -1456,9 +1458,16 @@ const scopedMetricObject = z.strictObject({
 });
 type ScopedInput = z.infer<typeof scopedMetricObject>;
 
-function verifiedScopedSources(input: MetricInputV1, coverage: number): boolean {
+function confirmedFrozenCost(data: MetricFrozenCost["data"]): boolean {
+  // Both source schemas require a known amount and version for a confirmed cost.
+  return data?.basis === "CONFIRMED";
+}
+
+function verifiedScopedSources(input: MetricInputV1, coverage: MetricCoverageV1): boolean {
   return (
-    coverage === 10000 &&
+    coverage.coverageBasisPoints === 10000 &&
+    (!neededCollections[coverage.kind].includes("frozenCosts") ||
+      (input.frozenCosts ?? []).every(({ data }) => confirmedFrozenCost(data))) &&
     input.sourceWatermark !== null &&
     Date.parse(input.sourceWatermark) >= Date.parse(input.periodEnd) &&
     metricCollections.every((key) => (input[key] ?? []).every(({ data }) => data !== null)) &&
@@ -1482,8 +1491,7 @@ function validScopedInput({ subject, input }: ScopedInput): boolean {
   if (!coverage) return input.status === "UNAVAILABLE";
   if (input.metricCoverage.length !== 1 || subjectKey(coverage.subject) !== subjectKey(subject))
     return false;
-  if (input.status === "VERIFIED" && !verifiedScopedSources(input, coverage.coverageBasisPoints))
-    return false;
+  if (input.status === "VERIFIED" && !verifiedScopedSources(input, coverage)) return false;
   const collections = new Set(coverage.collections);
   return (
     neededCollections[coverage.kind].every((key) => collections.has(key)) &&
@@ -2017,7 +2025,11 @@ function financialDataMatches(
   data: object | null,
   verified: boolean,
 ): boolean {
-  if (verified && fact.payload.reason !== null) return false;
+  const known =
+    fact.domain === "FROZEN_COST"
+      ? confirmedFrozenCost(fact.payload)
+      : fact.payload.reason === null;
+  if (verified && !known) return false;
   switch (fact.domain) {
     case "FROZEN_COST":
       return matchesFields(data, fact.payload, [

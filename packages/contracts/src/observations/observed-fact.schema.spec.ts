@@ -2191,6 +2191,83 @@ it("keeps an unavailable cost unknown even when the partition is fully enumerate
   ).toBe(true);
 });
 
+const cogsEvidence = ["R1", "base-ORDERS", "base-REFUNDS"];
+const cogsInput = {
+  ...metricInput(
+    sku,
+    "COGS",
+    ["paymentFacts", "refundFacts", "frozenCosts", "refundAllocations", "returnReceipts"],
+    cogsEvidence,
+  ),
+  paymentFacts: [orderRow],
+  refundFacts: [],
+  frozenCosts: [costMetricRow(financeA)],
+  refundAllocations: [],
+  returnReceipts: [],
+};
+
+it.each([
+  {
+    basis: "UNAVAILABLE",
+    unitCostMinor: null,
+    skuCostVersion: null,
+    nonVerified: "INSUFFICIENT",
+  },
+  { basis: "ESTIMATED", unitCostMinor: 0, skuCostVersion: "cost-v1", nonVerified: "ESTIMATED" },
+])("requires independently confirmed cost for standalone VERIFIED COGS ($basis)", (cost) => {
+  const { nonVerified, ...data } = cost;
+  const [row] = cogsInput.frozenCosts;
+  const input = { ...cogsInput, frozenCosts: [{ ...row, data: { ...row.data, ...data } }] };
+  const selection = { subject: sku, selectionReceiptIds: cogsEvidence, input };
+  const result = api.ScopedMetricInputV1Schema.safeParse(selection);
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain("INVALID_METRIC_PROJECTION");
+  const accepted = api.ScopedMetricInputV1Schema.parse({
+    ...selection,
+    input: { ...input, status: nonVerified },
+  });
+  expect(accepted.input.frozenCosts?.[0]?.data).toMatchObject(data);
+});
+
+it("preserves a confirmed zero unit cost in standalone VERIFIED COGS", () => {
+  const [row] = cogsInput.frozenCosts;
+  const input = {
+    ...cogsInput,
+    frozenCosts: [{ ...row, data: { ...row.data, unitCostMinor: 0 } }],
+  };
+  const selection = api.ScopedMetricInputV1Schema.parse({
+    subject: sku,
+    selectionReceiptIds: cogsEvidence,
+    input,
+  });
+  expect(selection.input.frozenCosts?.[0]?.data?.unitCostMinor).toBe(0);
+});
+
+it("keeps VERIFIED traffic independent of an unavailable cost in the capture", () => {
+  const unavailable = withPayload(financeA.fact, {
+    basis: "UNAVAILABLE",
+    unitCostMinor: null,
+    skuCostVersion: null,
+    reason: "COST_MISSING",
+  });
+  const domains = ["TRAFFIC", "FROZEN_COST"];
+  const capture = {
+    ...skuCapture,
+    domains,
+    facts: [...skuCapture.facts, { ...financeA, fact: unavailable }],
+    publications: [...skuCapture.publications, financeSnapshotA.certificate],
+    receipts: [...skuCapture.receipts, financeSnapshotA.certifiedReceipt],
+    coverage: [...skuCapture.coverage, financeSnapshotA.coverageRow],
+  };
+  const proof = api.ObservedSelectionProofV1Schema.parse({
+    ...trafficProof,
+    request: { ...trafficProof.request, domains },
+    capture,
+  });
+  expect(proof.selection.input.status).toBe("VERIFIED");
+  expect(proof.selection.input.frozenCosts).toBeNull();
+});
+
 const positionFact = returnedFact(position, "R1");
 const noticeFact = returnedFact(
   { ...notice, sequence: 2, sourceVersion: "observed-v1:g:0:e:2" },
