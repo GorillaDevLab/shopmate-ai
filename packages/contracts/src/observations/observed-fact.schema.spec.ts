@@ -742,3 +742,215 @@ it("preserves scenario hash field order and the original order of mutations", ()
   expect(Object.isFrozen(parsed.config.scenarioPlan?.mutations[0])).toBe(true);
   expect(Object.isFrozen(parsed.config.scenarioPlan?.delivery)).toBe(true);
 });
+
+const configHash = "d".repeat(64);
+const publicationHash = "e".repeat(64);
+const pageHash = "f".repeat(64);
+const partition = { binding, generation: 0, domain: "TRAFFIC", subject: store, window };
+const publication = {
+  ...partition,
+  publicationId: "pub1",
+  publicationHash,
+  modelVersion: common.modelVersion,
+  configHash,
+  producerVersion: "traffic-v1",
+  through: end,
+  clockRevision: 2,
+  publicationSequence: 1,
+  pageCount: 1,
+  recordCount: 0,
+  chainHash: hash,
+  availableAt: end,
+  recordedAt: later,
+};
+const page = {
+  pageId: "pg1",
+  pageIndex: 0,
+  pageHash,
+  priorPageHash: null,
+  expectedCursor: null,
+  nextCursor: null,
+  records: [],
+  terminalCoverage: { coverageBasisPoints: 10000 },
+};
+const { records: noRecords, ...pageMembership } = page;
+const zeroReceipt = {
+  ...partition,
+  ...pageMembership,
+  receiptId: "rc1",
+  publicationId: publication.publicationId,
+  publicationHash,
+  modelVersion: publication.modelVersion,
+  configHash,
+  through: end,
+  recordedAt: later,
+  recordCount: 0,
+  factRefs: [],
+};
+const publicationRequest = {
+  ...partition,
+  grantId: "grant1",
+  modelVersion: publication.modelVersion,
+  configHash,
+  through: end,
+  expectedSequence: 1,
+};
+const readPublication = {
+  ...partition,
+  grantId: "grant1",
+  publicationId: publication.publicationId,
+  publicationHash,
+  pageIndex: 0,
+};
+const appendPage = { ...readPublication, ...page, fence: 1, through: end };
+const pageFact = { ...traffic, producerVersion: publication.producerVersion };
+
+it("accepts the sealed zero traffic publication and immutable returned receipt", () => {
+  expect(api.ObservedPublicationRequestV1Schema.parse(publicationRequest)).toEqual(
+    publicationRequest,
+  );
+  expect(api.ObservedPublicationV1Schema.parse(publication)).toEqual(publication);
+  expect(api.ObservedPublicationReadV1Schema.parse(readPublication)).toEqual(readPublication);
+  expect(api.ObservedPublishedPageV1Schema.parse({ publication, ...page }).records).toEqual(
+    noRecords,
+  );
+  expect(api.AppendObservedPageV1Schema.parse(appendPage)).toEqual(appendPage);
+  const parsed = api.ObservedReceiptV1Schema.parse(zeroReceipt);
+  expect(parsed).toEqual(zeroReceipt);
+  expect(Object.isFrozen(parsed.factRefs)).toBe(true);
+  expect(Object.isFrozen(parsed.terminalCoverage)).toBe(true);
+});
+
+it.each([
+  ["publisher-provided terminal", { terminalCoverage: page.terminalCoverage }],
+  ["unclosed window", { through: start }],
+  ["zero ordinal", { expectedSequence: 0 }],
+  ["unsafe ordinal", { expectedSequence: Number.MAX_SAFE_INTEGER + 1 }],
+  ["invalid hash", { configHash: "?" }],
+  ["generation out of range", { generation: 2147483648 }],
+  ["domain-subject mismatch", { domain: "FROZEN_COST" }],
+  ["caller-supplied store identity", { subject: { ...store, storeId: binding.storeId } }],
+])("rejects publication request with %s", (_label, change) => {
+  expect(
+    api.ObservedPublicationRequestV1Schema.safeParse({ ...publicationRequest, ...change }).success,
+  ).toBe(false);
+});
+
+it.each([
+  ["early availability", { availableAt: start }],
+  ["empty nonterminal chain", { pageCount: 2 }],
+  ["page count overflow", { pageCount: 4097 }],
+  ["record count overflow", { recordCount: 819201 }],
+  ["malformed hash", { publicationHash: "x".repeat(64) }],
+])("rejects a certificate with %s", (_label, change) => {
+  expect(api.ObservedPublicationV1Schema.safeParse({ ...publication, ...change }).success).toBe(
+    false,
+  );
+});
+
+it.each([
+  ["binding swap", { binding: { ...binding, externalStoreId: "other" } }],
+  ["domain swap", { domain: "FEE", payload: fee.payload }],
+  ["generation swap", { generation: 1, sourceVersion: "observed-v1:g:1:e:1" }],
+  ["subject swap", { subject: sku }],
+
+  ["future observation", { observedAt: later }],
+  [
+    "outside measurement",
+    {
+      payload: {
+        ...traffic.payload,
+        window: { ...window, periodStart: "2026-10-31T16:00:00.000Z" },
+      },
+    },
+  ],
+  ["forged origin", { receiptId: "origin" }],
+  ["forged security time", { recordedAt: later }],
+])("rejects a page member with %s", (_label, change) => {
+  const records = [{ ...pageFact, ...change }];
+  expect(
+    api.ObservedPublishedPageV1Schema.safeParse({
+      publication: { ...publication, recordCount: 1 },
+      ...page,
+      records,
+    }).success,
+  ).toBe(false);
+  expect(api.AppendObservedPageV1Schema.safeParse({ ...appendPage, records }).success).toBe(false);
+});
+
+it("accepts sparse original source sequences under an independent publication ordinal", () => {
+  const second = {
+    ...pageFact,
+    factId: "f-other",
+    sequence: 7,
+    sourceVersion: "observed-v1:g:0:e:7",
+  };
+  const result = {
+    ...page,
+    publication: { ...publication, publicationSequence: 4, recordCount: 2 },
+    records: [pageFact, second],
+  };
+  expect(api.ObservedPublishedPageV1Schema.safeParse(result).success).toBe(true);
+  expect(
+    api.ObservedPublishedPageV1Schema.safeParse({ ...result, records: [second, pageFact] }).success,
+  ).toBe(false);
+  expect(
+    api.AppendObservedPageV1Schema.safeParse({ ...appendPage, records: Array(201).fill(pageFact) })
+      .success,
+  ).toBe(false);
+});
+
+it.each([
+  ["first page has cursor", { expectedCursor: "c1" }],
+  ["missing prior hash", { pageIndex: 1, expectedCursor: "c1" }],
+  ["terminal page has next cursor", { nextCursor: "c1" }],
+  ["nonterminal page without cursor", { terminalCoverage: null }],
+  ["DB-only receipt ID", { receiptId: "forged" }],
+])("rejects append with %s", (_label, change) => {
+  expect(api.AppendObservedPageV1Schema.safeParse({ ...appendPage, ...change }).success).toBe(
+    false,
+  );
+});
+
+const memberRef = {
+  factId: pageFact.factId,
+  sourceVersion: pageFact.sourceVersion,
+  payloadHash: pageFact.payloadHash,
+  originReceiptId: zeroReceipt.receiptId,
+};
+
+it("keeps membership origin explicit and checks reference uniqueness and generation", () => {
+  const received = {
+    ...zeroReceipt,
+    recordCount: 1,
+    factRefs: [{ ...memberRef, originReceiptId: "earlier" }],
+  };
+  expect(api.ObservedReceiptV1Schema.parse(received)).toEqual(received);
+  expect(
+    api.StoredObservedFactV1Schema.parse({
+      fact: pageFact,
+      receiptId: "earlier",
+      recordedAt: later,
+    }).receiptId,
+  ).toBe("earlier");
+  const invalid = [
+    { ...received, recordCount: 0 },
+    { ...received, recordCount: 2, factRefs: [memberRef, { ...memberRef, factId: "other" }] },
+    { ...received, factRefs: [{ ...memberRef, sourceVersion: "observed-v1:g:1:e:1" }] },
+    { ...received, factRefs: [{ ...memberRef, originReceiptId: undefined }] },
+  ];
+  for (const value of invalid)
+    expect(api.ObservedReceiptV1Schema.safeParse(value).success).toBe(false);
+});
+
+it("pins the published producer while leaving append certification to the service", () => {
+  const records = [{ ...pageFact, producerVersion: "other-v1" }];
+  expect(
+    api.ObservedPublishedPageV1Schema.safeParse({
+      ...page,
+      publication: { ...publication, recordCount: 1 },
+      records,
+    }).success,
+  ).toBe(false);
+  expect(api.AppendObservedPageV1Schema.safeParse({ ...appendPage, records }).success).toBe(true);
+});

@@ -3,6 +3,7 @@ import {
   ConnectorBindingSchema,
   ConnectorFailureCodeSchema,
   CurrencySchema,
+  CursorSchema,
   ExternalIdSchema,
   MinorAmountSchema,
   QuantitySchema,
@@ -554,3 +555,281 @@ export const MockObservedGenerationConfigV3Schema = z
   })
   .readonly();
 export type MockObservedGenerationConfigV3 = z.infer<typeof MockObservedGenerationConfigV3Schema>;
+
+const maxPageRecords = 200;
+const maxPages = 4096;
+const partitionFields = {
+  ...scope,
+  domain: ObservedDomainSchema,
+  subject: ObservedSubjectSchema,
+  window: exactWindow,
+};
+type Partition = z.infer<z.ZodObject<typeof partitionFields>>;
+type Binding = Partition["binding"];
+type Window = Partition["window"];
+
+const subjectKinds: Readonly<Record<ObservedDomain, readonly ObservedSubject["kind"][]>> = {
+  FROZEN_COST: ["SKU"],
+  REFUND_ALLOCATION: ["SKU"],
+  RETURN_RECEIPT: ["SKU"],
+  FEE: ["STORE"],
+  TRAFFIC: ["STORE", "SKU"],
+  CAMPAIGN_MEASUREMENT: ["CAMPAIGN"],
+  LISTING: ["SKU"],
+  PRICE: ["SKU"],
+  INVENTORY_LOT: ["SKU"],
+  SUPPLIER_NOTICE: ["SKU"],
+  INVENTORY_POSITION: ["SKU"],
+  SYNC_TRANSITION: ["CONNECTION"],
+};
+
+function validPartition({ binding, domain, subject }: Partition): boolean {
+  return (
+    subjectKinds[domain].includes(subject.kind) &&
+    (subject.kind !== "CONNECTION" || subject.connectionId === binding.connectionId)
+  );
+}
+
+function sameBinding(left: Binding, right: Binding): boolean {
+  return (
+    left.organizationId === right.organizationId &&
+    left.workspaceId === right.workspaceId &&
+    left.storeId === right.storeId &&
+    left.connectionId === right.connectionId &&
+    left.externalStoreId === right.externalStoreId
+  );
+}
+
+function subjectKey(subject: ObservedSubject): string {
+  switch (subject.kind) {
+    case "STORE":
+      return "STORE";
+    case "SKU":
+      return "SKU:" + subject.externalSkuId;
+    case "CAMPAIGN":
+      return "CAMPAIGN:" + subject.externalCampaignId;
+    case "CONNECTION":
+      return "CONNECTION:" + subject.connectionId;
+  }
+}
+
+function sameScope(left: Pick<Partition, "binding" | "generation">, right: typeof left): boolean {
+  return left.generation === right.generation && sameBinding(left.binding, right.binding);
+}
+
+function containsWindow(outer: Window, inner: Window): boolean {
+  return (
+    inner.periodStart >= outer.periodStart &&
+    inner.periodEnd <= outer.periodEnd &&
+    inner.timezone === outer.timezone &&
+    inner.currency === outer.currency
+  );
+}
+
+function inPartition(
+  fact: ObservedFactV1,
+  partition: Partition & { readonly through: string },
+): boolean {
+  return (
+    sameScope(fact, partition) &&
+    fact.domain === partition.domain &&
+    subjectKey(fact.subject) === subjectKey(partition.subject) &&
+    fact.observedAt <= partition.through &&
+    (!("window" in fact.payload) || containsWindow(partition.window, fact.payload.window))
+  );
+}
+
+function boundedArray<T extends z.ZodType>(item: T, limit: number) {
+  return z
+    .custom<z.input<T>[]>(
+      (value) => Array.isArray(value) && value.length <= limit,
+      "INVALID_ARRAY_LENGTH",
+    )
+    .pipe(z.array(item))
+    .readonly();
+}
+
+const publicationRefFields = { publicationId: ExternalIdSchema, publicationHash: sha256 };
+const publicationPins = { modelVersion, configHash: sha256 };
+const pageIndex = QuantitySchema.max(maxPages - 1);
+const pageRecordCount = QuantitySchema.max(maxPageRecords);
+const pageFields = {
+  pageId: ExternalIdSchema,
+  pageIndex,
+  pageHash: sha256,
+  priorPageHash: sha256.nullable(),
+  expectedCursor: CursorSchema.nullable(),
+  nextCursor: CursorSchema.nullable(),
+  terminalCoverage: z
+    .strictObject({ coverageBasisPoints: BasisPointsSchema })
+    .readonly()
+    .nullable(),
+};
+
+function validPageLinks(page: z.infer<z.ZodObject<typeof pageFields>>): boolean {
+  const first = page.pageIndex === 0;
+  return (
+    (page.priorPageHash === null) === first &&
+    (page.expectedCursor === null) === first &&
+    (page.nextCursor === null) === (page.terminalCoverage !== null)
+  );
+}
+
+function validPartitionCutoff(value: Partition & { readonly through: string }): boolean {
+  return validPartition(value) && value.window.periodEnd <= value.through;
+}
+
+export const ObservedPublicationRequestV1Schema = z
+  .strictObject({
+    ...partitionFields,
+    grantId: ExternalIdSchema,
+    ...publicationPins,
+    through: utcMs,
+    expectedSequence: sequence,
+  })
+  .refine(validPartitionCutoff, "INVALID_PUBLICATION_PARTITION")
+  .readonly();
+export type ObservedPublicationRequestV1 = z.infer<typeof ObservedPublicationRequestV1Schema>;
+
+export const ObservedPublicationV1Schema = z
+  .strictObject({
+    ...partitionFields,
+    ...publicationRefFields,
+    ...publicationPins,
+    producerVersion: SourceVersionSchema,
+    through: utcMs,
+    clockRevision: QuantitySchema,
+    publicationSequence: sequence,
+    pageCount: QuantitySchema.min(1).max(maxPages),
+    recordCount: QuantitySchema.max(maxPages * maxPageRecords),
+    chainHash: sha256,
+    availableAt: utcMs,
+    recordedAt: utcMs,
+  })
+  .refine(validPartitionCutoff, "INVALID_PUBLICATION_PARTITION")
+  .refine(
+    ({ through, availableAt, pageCount, recordCount }) =>
+      through <= availableAt &&
+      recordCount <= pageCount * maxPageRecords &&
+      (recordCount !== 0 || pageCount === 1),
+    "INVALID_PUBLICATION_CERTIFICATE",
+  )
+  .readonly();
+export type ObservedPublicationV1 = z.infer<typeof ObservedPublicationV1Schema>;
+
+export const ObservedPublicationReadV1Schema = z
+  .strictObject({
+    ...partitionFields,
+    ...publicationRefFields,
+    grantId: ExternalIdSchema,
+    pageIndex,
+  })
+  .refine(validPartition, "INVALID_PUBLICATION_PARTITION")
+  .readonly();
+export type ObservedPublicationReadV1 = z.infer<typeof ObservedPublicationReadV1Schema>;
+
+function validPageRecords(
+  records: readonly ObservedFactV1[],
+  partition: Partition & { readonly through: string },
+): boolean {
+  let lastSequence = 0;
+  const ids = new Set<string>();
+  for (const record of records) {
+    if (
+      !inPartition(record, partition) ||
+      record.sequence <= lastSequence ||
+      ids.has(record.factId)
+    )
+      return false;
+    ids.add(record.factId);
+    lastSequence = record.sequence;
+  }
+  return true;
+}
+
+const pageRecords = boundedArray(ObservedFactV1Schema, maxPageRecords);
+export const ObservedPublishedPageV1Schema = z
+  .strictObject({ publication: ObservedPublicationV1Schema, ...pageFields, records: pageRecords })
+  .refine(validPageLinks, "INVALID_PAGE_LINK")
+  .refine(
+    ({ publication, pageIndex, terminalCoverage, records }) =>
+      pageIndex < publication.pageCount &&
+      (terminalCoverage !== null) === (pageIndex === publication.pageCount - 1) &&
+      records.length <= publication.recordCount &&
+      (publication.pageCount !== 1 || records.length === publication.recordCount) &&
+      validPageRecords(records, publication) &&
+      records.every(
+        ({ producerVersion, modelVersion }) =>
+          producerVersion === publication.producerVersion &&
+          modelVersion === publication.modelVersion,
+      ),
+    "INVALID_PUBLISHED_PAGE",
+  )
+  .readonly();
+export type ObservedPublishedPageV1 = z.infer<typeof ObservedPublishedPageV1Schema>;
+
+export const AppendObservedPageV1Schema = z
+  .strictObject({
+    ...partitionFields,
+    ...publicationRefFields,
+    ...pageFields,
+    grantId: ExternalIdSchema,
+    fence: QuantitySchema,
+    through: utcMs,
+    records: pageRecords,
+  })
+  .refine(validPartitionCutoff, "INVALID_PUBLICATION_PARTITION")
+  .refine(validPageLinks, "INVALID_PAGE_LINK")
+  .refine((page) => validPageRecords(page.records, page), "INVALID_PAGE_RECORDS")
+  .readonly();
+export type AppendObservedPageV1 = z.infer<typeof AppendObservedPageV1Schema>;
+
+const memberRefSchema = z
+  .strictObject({
+    factId: ExternalIdSchema,
+    sourceVersion: observedVersion,
+    payloadHash: sha256,
+    originReceiptId: ExternalIdSchema,
+  })
+  .readonly();
+
+function validMembership(value: {
+  readonly generation: number;
+  readonly recordCount: number;
+  readonly factRefs: readonly z.infer<typeof memberRefSchema>[];
+}): boolean {
+  if (value.recordCount !== value.factRefs.length) return false;
+  const prefix = "observed-v1:g:" + value.generation + ":e:";
+  let lastSequence = 0;
+  for (const ref of value.factRefs) {
+    if (!ref.sourceVersion.startsWith(prefix)) return false;
+    const sequence = Number(ref.sourceVersion.slice(prefix.length));
+    if (sequence <= lastSequence) return false;
+    lastSequence = sequence;
+  }
+  return true;
+}
+
+export const ObservedReceiptV1Schema = z
+  .strictObject({
+    ...partitionFields,
+    ...publicationRefFields,
+    ...publicationPins,
+    ...pageFields,
+    through: utcMs,
+    receiptId: ExternalIdSchema,
+    recordedAt: utcMs,
+    recordCount: pageRecordCount,
+    factRefs: boundedArray(memberRefSchema, maxPageRecords),
+  })
+  .refine(validPartitionCutoff, "INVALID_PUBLICATION_PARTITION")
+  .refine(validPageLinks, "INVALID_PAGE_LINK")
+  .refine(validMembership, "INVALID_RECEIPT_MEMBERSHIP")
+  .readonly();
+export type ObservedReceiptV1 = z.infer<typeof ObservedReceiptV1Schema>;
+
+// The provenance belongs to the original immutable insertion, even across later page membership.
+export const StoredObservedFactV1Schema = z
+  .strictObject({ fact: ObservedFactV1Schema, receiptId: ExternalIdSchema, recordedAt: utcMs })
+  .readonly();
+export type StoredObservedFactV1 = z.infer<typeof StoredObservedFactV1Schema>;
