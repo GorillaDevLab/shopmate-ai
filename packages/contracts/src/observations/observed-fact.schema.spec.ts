@@ -954,3 +954,490 @@ it("pins the published producer while leaving append certification to the servic
   ).toBe(false);
   expect(api.AppendObservedPageV1Schema.safeParse({ ...appendPage, records }).success).toBe(true);
 });
+
+const revision = "p2-observed-v1:" + hash;
+const definitionVersion = "metrics-g4-observed-v2";
+const actor = {
+  userId: "user-A",
+  merchantId: "merchant-A",
+  organizationId: binding.organizationId,
+  workspaceId: binding.workspaceId,
+  role: "ANALYST",
+  permissions: ["tenant:read"],
+};
+const base = {
+  binding,
+  generation: 0,
+  window,
+  visibleAt: end,
+  inputRevision: "p2-normalized-v1:" + hash,
+  receipts: ["ORDERS", "REFUNDS", "INVENTORY", "MARKETING"].map((stream) => ({
+    stream,
+    pageId: "base-" + stream,
+    pageHash,
+  })),
+};
+const zeroCoverage = {
+  ...partition,
+  status: "COMPLETE",
+  coverageBasisPoints: 10000,
+  receiptIds: [zeroReceipt.receiptId],
+  reason: null,
+};
+const zeroCapture = {
+  binding,
+  generation: 0,
+  window,
+  visibleAt: end,
+  domains: ["TRAFFIC"],
+  inputRevision: revision,
+  ledgerVersion: common.ledgerVersion,
+  mappingVersion: "p2-observed-v1",
+  definitionVersion,
+  definitionSelectorVersion: "selector-v1",
+  modelVersion: common.modelVersion,
+  configHash,
+  clockRevision: 2,
+  capturedAt: later,
+  base,
+  comparisons: [],
+  publications: [publication],
+  receipts: [zeroReceipt],
+  facts: [],
+  coverage: [zeroCoverage],
+};
+const captureRequest = {
+  actor,
+  binding,
+  generation: 0,
+  window,
+  visibleAt: end,
+  domains: ["TRAFFIC"],
+  comparisonWindows: [],
+};
+
+it("keeps security recording separate from the certified empty business window", () => {
+  expect(api.ObservedCaptureV1Schema.parse(zeroCapture)).toEqual(zeroCapture);
+  const request = api.ObservedCaptureRequestV1Schema.parse(captureRequest);
+  expect(request).toEqual(captureRequest);
+  expect(Object.isFrozen(request.actor)).toBe(true);
+  expect(Object.isFrozen(request.actor.permissions)).toBe(true);
+  expect(
+    api.ObservedReadRequestV1Schema.parse({ ...captureRequest, inputRevision: revision })
+      .inputRevision,
+  ).toBe(revision);
+});
+
+const pastWindow = { ...window, periodStart: "2026-10-31T16:00:00.000Z", periodEnd: start };
+const comparisonWindow = { window: pastWindow, visibleAt: start };
+const comparisonRef = {
+  binding,
+  generation: 0,
+  ...comparisonWindow,
+  inputRevision: "p2-observed-v1:" + "b".repeat(64),
+  definitionVersion,
+};
+
+it.each([
+  ["same revision", { inputRevision: revision }],
+  ["another store", { binding: { ...binding, storeId: "other-store" } }],
+  ["another generation", { generation: 2147483648 }],
+  ["future cutoff", { visibleAt: later }],
+  ["unclosed window", { window }],
+])("rejects comparison ref with %s", (_label, change) => {
+  expect(
+    api.ObservedCaptureV1Schema.safeParse({ ...zeroCapture, comparisons: [comparisonRef] }).success,
+  ).toBe(true);
+  expect(
+    api.ObservedCaptureV1Schema.safeParse({
+      ...zeroCapture,
+      comparisons: [{ ...comparisonRef, ...change }],
+    }).success,
+  ).toBe(false);
+});
+
+it.each([
+  ["actor organization mismatch", { actor: { ...actor, organizationId: "other-org" } }],
+  ["actor workspace mismatch", { actor: { ...actor, workspaceId: "other-ws" } }],
+  ["duplicate domains", { domains: ["TRAFFIC", "TRAFFIC"] }],
+  ["empty domains", { domains: [] }],
+  ["open current window", { visibleAt: start }],
+  [
+    "unclosed comparison",
+    { comparisonWindows: [{ ...comparisonWindow, visibleAt: "2026-11-01T00:00:00.000Z" }] },
+  ],
+  [
+    "duplicate comparison windows",
+    { comparisonWindows: [comparisonWindow, { ...comparisonWindow, visibleAt: end }] },
+  ],
+  ["five comparisons", { comparisonWindows: Array(5).fill(comparisonWindow) }],
+])("rejects capture request with %s", (_label, change) => {
+  expect(
+    api.ObservedCaptureRequestV1Schema.safeParse({ ...captureRequest, ...change }).success,
+  ).toBe(false);
+});
+
+it.each([
+  ["no matching normalized base", { base: null }],
+  ["unrepresented requested domain", { domains: ["TRAFFIC", "FEE"] }],
+  ["unjoined revision", { inputRevision: base.inputRevision }],
+  ["duplicate coverage", { coverage: [zeroCoverage, zeroCoverage] }],
+  ["duplicate receipt ID", { receipts: [zeroReceipt, zeroReceipt] }],
+  ["duplicate publication ID", { publications: [publication, publication] }],
+  ["late publication availability", { publications: [{ ...publication, availableAt: later }] }],
+  ["publication hash mismatch", { publications: [{ ...publication, publicationHash: hash }] }],
+  ["receipt cutoff mismatch", { receipts: [{ ...zeroReceipt, through: later }] }],
+  ["receipt kind mismatch", { receipts: [{ ...zeroReceipt, domain: "FEE" }] }],
+  ["receipt subject mismatch", { receipts: [{ ...zeroReceipt, subject: sku }] }],
+  ["receipt generation mismatch", { receipts: [{ ...zeroReceipt, generation: 1 }] }],
+  [
+    "receipt binding mismatch",
+    { receipts: [{ ...zeroReceipt, binding: { ...binding, connectionId: "conn-B" } }] },
+  ],
+  ["receipt configuration mismatch", { receipts: [{ ...zeroReceipt, configHash: hash }] }],
+  ["receipt page ID overflow", { receipts: Array(4097).fill(zeroReceipt) }],
+  ["fact array overflow", { facts: Array(50001) }],
+  ["base stream missing", { base: { ...base, receipts: base.receipts.slice(1) } }],
+  [
+    "duplicate stream and page pair",
+    { base: { ...base, receipts: [...base.receipts, base.receipts[0]] } },
+  ],
+  ["base identity mismatch", { base: { ...base, visibleAt: later } }],
+])("rejects capture with %s", (_label, change) => {
+  expect(api.ObservedCaptureV1Schema.safeParse({ ...zeroCapture, ...change }).success).toBe(false);
+});
+
+type TestFact = Omit<typeof common, "priorVersion"> & {
+  priorVersion: string | null;
+  domain: string;
+  subject: object;
+  payload: object;
+};
+function returnedFact<T extends TestFact>(fact: T, receiptId: string, recordedAt = later) {
+  return { fact, receiptId, recordedAt };
+}
+
+function membership({ fact, receiptId }: ReturnType<typeof returnedFact>) {
+  return {
+    factId: fact.factId,
+    sourceVersion: fact.sourceVersion,
+    payloadHash: fact.payloadHash,
+    originReceiptId: receiptId,
+  };
+}
+
+function snapshot(
+  facts: readonly ReturnType<typeof returnedFact>[],
+  index: number,
+  through: string,
+) {
+  const first = facts[0].fact;
+  const selectedPartition = { ...partition, domain: first.domain, subject: first.subject };
+  const certificate = {
+    ...publication,
+    ...selectedPartition,
+    publicationId: "P" + index,
+    publicationHash: String(index).repeat(64),
+    publicationSequence: index,
+    through,
+    availableAt: through,
+    producerVersion: first.producerVersion,
+    recordCount: facts.length,
+  };
+  const certifiedReceipt = {
+    ...zeroReceipt,
+    ...selectedPartition,
+    receiptId: "R" + index,
+    publicationId: certificate.publicationId,
+    publicationHash: certificate.publicationHash,
+    pageId: "PG" + index,
+    pageHash: String(index + 3).repeat(64),
+    through,
+    recordCount: facts.length,
+    factRefs: facts.map(membership),
+  };
+  return {
+    certificate,
+    certifiedReceipt,
+    coverageRow: {
+      ...zeroCoverage,
+      ...selectedPartition,
+      receiptIds: [certifiedReceipt.receiptId],
+    },
+  };
+}
+
+function captured(
+  facts: readonly ReturnType<typeof returnedFact>[],
+  current: ReturnType<typeof snapshot>,
+  history?: ReturnType<typeof snapshot>,
+) {
+  const publications = history ? [history.certificate, current.certificate] : [current.certificate];
+  const receipts = history
+    ? [history.certifiedReceipt, current.certifiedReceipt]
+    : [current.certifiedReceipt];
+  const { through, domain } = current.certificate;
+  return {
+    ...zeroCapture,
+    domains: [domain],
+    visibleAt: through,
+    inputRevision: "p2-observed-v1:" + current.certificate.publicationHash,
+    base: domain === "SYNC_TRANSITION" ? null : { ...base, visibleAt: through },
+    publications,
+    receipts,
+    facts,
+    coverage: [current.coverageRow],
+  };
+}
+
+const a1 = returnedFact(
+  {
+    ...cost,
+    factId: "A",
+    payload: {
+      ...cost.payload,
+      externalOrderId: "oA",
+      externalLineId: "lA",
+      quantity: 1,
+      unitCostMinor: 100,
+      skuCostVersion: "cost-v1",
+    },
+  },
+  "R1",
+);
+const b1 = returnedFact(
+  {
+    ...cost,
+    factId: "B",
+    sequence: 2,
+    sourceVersion: "observed-v1:g:0:e:2",
+    payloadHash: "b".repeat(64),
+    payload: {
+      ...cost.payload,
+      externalOrderId: "oB",
+      externalLineId: "lB",
+      quantity: 1,
+      unitCostMinor: 150,
+      skuCostVersion: "cost-v1",
+    },
+  },
+  "R1",
+);
+const t2 = "2026-11-03T16:00:00.000Z";
+const b2 = returnedFact(
+  {
+    ...b1.fact,
+    sequence: 3,
+    sourceVersion: "observed-v1:g:0:e:3",
+    priorVersion: b1.fact.sourceVersion,
+    payloadHash: "c".repeat(64),
+    observedAt: t2,
+    payload: { ...b1.fact.payload, unitCostMinor: 155, skuCostVersion: "cost-v2" },
+  },
+  "R2",
+  "2026-11-05T16:00:00.000Z",
+);
+const firstSnapshot = snapshot([a1, b1], 1, end);
+const correctedSnapshot = snapshot([a1, b2], 2, t2);
+const firstCapture = captured([a1, b1], firstSnapshot);
+const correctedCapture = captured([a1, b2], correctedSnapshot, firstSnapshot);
+
+it("selects the corrected snapshot while preserving the original A1 insertion and T1 replay", () => {
+  const earlier = api.ObservedCaptureV1Schema.parse(firstCapture);
+  const current = api.ObservedCaptureV1Schema.parse(correctedCapture);
+  const currentPage = api.ObservedPublishedPageV1Schema.parse({
+    ...page,
+    pageId: correctedSnapshot.certifiedReceipt.pageId,
+    pageHash: correctedSnapshot.certifiedReceipt.pageHash,
+    publication: correctedSnapshot.certificate,
+    records: [a1.fact, b2.fact],
+  });
+  expect(currentPage.records.map(({ sequence }) => sequence)).toEqual([1, 3]);
+  expect(current.facts.map(({ fact, receiptId }) => [fact.sourceVersion, receiptId])).toEqual([
+    [a1.fact.sourceVersion, "R1"],
+    [b2.fact.sourceVersion, "R2"],
+  ]);
+  expect(current.facts[0]).toEqual(earlier.facts[0]);
+  expect(current.coverage[0]?.receiptIds).toEqual(["R2"]);
+  expect(current.receipts.flatMap(({ factRefs }) => factRefs)).toHaveLength(4);
+  expect(
+    new Set(
+      current.receipts.flatMap(({ factRefs }) =>
+        factRefs.map(({ sourceVersion }) => sourceVersion),
+      ),
+    ).size,
+  ).toBe(3);
+  expect(api.ObservedCaptureV1Schema.parse(firstCapture)).toEqual(earlier);
+  expect(earlier.inputRevision).toBe(firstCapture.inputRevision);
+  expect(earlier.facts).toEqual([a1, b1]);
+});
+
+it.each([
+  [
+    "two snapshots as one chain",
+    { coverage: [{ ...correctedSnapshot.coverageRow, receiptIds: ["R1", "R2"] }] },
+  ],
+  ["missing origin receipt", { receipts: [correctedSnapshot.certifiedReceipt] }],
+  ["missing origin certificate", { publications: [correctedSnapshot.certificate] }],
+  ["wrong original insertion", { facts: [{ ...a1, receiptId: "R2" }, b2] }],
+  [
+    "origin lacks self-origin",
+    {
+      receipts: [
+        {
+          ...firstSnapshot.certifiedReceipt,
+          factRefs: [{ ...membership(a1), originReceiptId: "R2" }, membership(b1)],
+        },
+        correctedSnapshot.certifiedReceipt,
+      ],
+    },
+  ],
+  ["missing selected A1", { facts: [b2] }],
+  ["superseded selected B1", { facts: [a1, b1] }],
+  ["two selected B versions", { facts: [a1, b1, b2] }],
+  ["retimed A1", { facts: [{ ...a1, fact: { ...a1.fact, observedAt: t2 } }, b2] }],
+  ["turned-forward replay", { visibleAt: end, base }],
+  [
+    "origin with overlapping ID from another SKU",
+    {
+      receipts: [
+        { ...firstSnapshot.certifiedReceipt, subject: { ...sku, externalSkuId: "sku-B" } },
+        correctedSnapshot.certifiedReceipt,
+      ],
+    },
+  ],
+  [
+    "origin with overlapping ID from another generation",
+    {
+      receipts: [
+        { ...firstSnapshot.certifiedReceipt, generation: 1 },
+        correctedSnapshot.certifiedReceipt,
+      ],
+    },
+  ],
+  [
+    "origin with overlapping ID from another store",
+    {
+      receipts: [
+        { ...firstSnapshot.certifiedReceipt, binding: { ...binding, storeId: "store-B" } },
+        correctedSnapshot.certifiedReceipt,
+      ],
+    },
+  ],
+])("rejects corrected lineage with %s", (_label, change) => {
+  expect(api.ObservedCaptureV1Schema.safeParse({ ...correctedCapture, ...change }).success).toBe(
+    false,
+  );
+});
+
+const firstPage = {
+  ...firstSnapshot.certifiedReceipt,
+  nextCursor: "c1",
+  terminalCoverage: null,
+  recordCount: 1,
+  factRefs: [membership(a1)],
+};
+const lastPage = {
+  ...firstSnapshot.certifiedReceipt,
+  receiptId: "second",
+  pageId: "pg2",
+  pageIndex: 1,
+  priorPageHash: firstPage.pageHash,
+  expectedCursor: firstPage.nextCursor,
+  pageHash: hash,
+  recordCount: 1,
+  factRefs: [{ ...membership(b1), originReceiptId: "second" }],
+};
+const twoPageCapture = {
+  ...firstCapture,
+  publications: [{ ...firstSnapshot.certificate, pageCount: 2 }],
+  receipts: [firstPage, lastPage],
+  facts: [a1, { ...b1, receiptId: "second" }],
+  coverage: [{ ...firstSnapshot.coverageRow, receiptIds: ["R1", "second"] }],
+};
+const partialCoverage = {
+  ...firstSnapshot.coverageRow,
+  status: "PARTIAL",
+  coverageBasisPoints: 8000,
+  reason: "PARTIAL_COVERAGE",
+};
+
+it("requires each chain link and preserves the known portion of a partial capture", () => {
+  expect(api.ObservedCaptureV1Schema.safeParse(twoPageCapture).success).toBe(true);
+  expect(
+    api.ObservedCaptureV1Schema.safeParse({
+      ...twoPageCapture,
+      receipts: [firstPage],
+      facts: [a1],
+      coverage: [partialCoverage],
+    }).success,
+  ).toBe(true);
+  for (const page of [
+    { ...lastPage, expectedCursor: "bad" },
+    { ...lastPage, priorPageHash: hash },
+    { ...lastPage, terminalCoverage: { coverageBasisPoints: 9000 } },
+    { ...lastPage, factRefs: [membership(a1)] },
+  ]) {
+    expect(
+      api.ObservedCaptureV1Schema.safeParse({ ...twoPageCapture, receipts: [firstPage, page] })
+        .success,
+    ).toBe(false);
+  }
+});
+
+it("uses an explicit unavailable domain row for a missing observed partition", () => {
+  const unavailable = {
+    ...zeroCapture,
+    publications: [],
+    receipts: [],
+    coverage: [
+      {
+        ...zeroCoverage,
+        status: "UNAVAILABLE",
+        coverageBasisPoints: 0,
+        receiptIds: [],
+        reason: "TRAFFIC_MISSING",
+      },
+    ],
+  };
+  expect(api.ObservedCaptureV1Schema.safeParse(unavailable).success).toBe(true);
+  expect(api.ObservedCaptureV1Schema.safeParse({ ...unavailable, coverage: [] }).success).toBe(
+    false,
+  );
+  expect(
+    api.ObservedCaptureV1Schema.safeParse({ ...unavailable, coverage: [zeroCoverage] }).success,
+  ).toBe(false);
+});
+
+it("accepts an actual failed initial synchronization without invented commerce evidence", () => {
+  const failure = returnedFact(sync, "R1");
+  const initial = captured([failure], snapshot([failure], 1, end));
+  expect(api.ObservedCaptureV1Schema.parse(initial).base).toBeNull();
+  expect(api.ObservedCaptureV1Schema.safeParse({ ...initial, domains: ["TRAFFIC"] }).success).toBe(
+    false,
+  );
+});
+
+it("admits an announced future ETA and excludes late observations at an earlier cutoff", () => {
+  const original = returnedFact(notice, "R1");
+  const earlierNotice = captured([original], snapshot([original], 1, end));
+  const lateNotice = { ...original, fact: { ...notice, occurredAt: start, observedAt: later } };
+  expect(api.ObservedCaptureV1Schema.parse(earlierNotice).facts[0]?.fact.payload).toEqual(
+    notice.payload,
+  );
+  expect(
+    api.ObservedCaptureV1Schema.safeParse({ ...earlierNotice, facts: [lateNotice] }).success,
+  ).toBe(false);
+});
+
+it("checks raw capture collection limits before decoding publication records", () => {
+  const oversized = { ...zeroCapture, publications: [{ ...publication }], facts: Array(50001) };
+  Object.defineProperty(oversized.publications[0], "publicationId", {
+    get() {
+      throw new Error("unexpected nested decode");
+    },
+  });
+  const result = api.ObservedCaptureV1Schema.safeParse(oversized);
+  expect(result.success).toBe(false);
+  if (!result.success) expect(result.error.issues[0]?.message).toBe("OVERFLOW");
+});

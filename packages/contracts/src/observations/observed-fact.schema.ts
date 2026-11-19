@@ -19,6 +19,8 @@ import {
   SignedMinorSchema,
 } from "../metrics/metric.schema.js";
 
+import { TenantContextSchema } from "../tenant/tenant.schema.js";
+
 const utcMs = z.iso
   .datetime({ precision: 3 })
   .refine(
@@ -833,3 +835,483 @@ export const StoredObservedFactV1Schema = z
   .strictObject({ fact: ObservedFactV1Schema, receiptId: ExternalIdSchema, recordedAt: utcMs })
   .readonly();
 export type StoredObservedFactV1 = z.infer<typeof StoredObservedFactV1Schema>;
+
+const maxCaptureFacts = 50000;
+const maxComparisons = 4;
+const joinedRevision = z.string().regex(/^p2-observed-v1:[a-f0-9]{64}$/u);
+const normalizedRevision = z.string().regex(/^p2-normalized-v1:[a-f0-9]{64}$/u);
+const observedDefinition = z.literal("metrics-g4-observed-v2");
+const domainList = boundedArray(ObservedDomainSchema, ObservedDomainSchema.options.length)
+  .refine(
+    (domains) => domains.length > 0 && new Set(domains).size === domains.length,
+    "INVALID_DOMAINS",
+  )
+  .readonly();
+const receiptIds = boundedArray(ExternalIdSchema, maxPages)
+  .refine((ids) => new Set(ids).size === ids.length, "DUPLICATE_RECEIPT")
+  .readonly();
+const captureIdentityFields = {
+  ...scope,
+  window: exactWindow,
+  visibleAt: utcMs,
+  domains: domainList,
+};
+const windowCutoffFields = { window: exactWindow, visibleAt: utcMs };
+type WindowCutoff = Readonly<{ window: Window; visibleAt: string }>;
+
+function sameWindow(left: Window, right: Window): boolean {
+  return (
+    left.periodStart === right.periodStart &&
+    left.periodEnd === right.periodEnd &&
+    left.timezone === right.timezone &&
+    left.currency === right.currency
+  );
+}
+
+function windowKey({ periodStart, periodEnd, timezone, currency }: Window): string {
+  return JSON.stringify([periodStart, periodEnd, timezone, currency]);
+}
+
+function validComparisons(visibleAt: string, comparisons: readonly WindowCutoff[]): boolean {
+  const windows = new Set<string>();
+  for (const entry of comparisons) {
+    const key = windowKey(entry.window);
+    if (entry.window.periodEnd > entry.visibleAt || entry.visibleAt > visibleAt || windows.has(key))
+      return false;
+    windows.add(key);
+  }
+  return true;
+}
+
+function rawObject(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function withinArrayBounds(value: unknown, limits: Readonly<Record<string, number>>): boolean {
+  const fields = rawObject(value);
+  return (
+    fields === undefined ||
+    Object.entries(limits).every(([key, limit]) => {
+      const field = fields[key];
+      return !Array.isArray(field) || field.length <= limit;
+    })
+  );
+}
+
+function preflight<T extends z.ZodType>(schema: T, withinBounds: (value: unknown) => boolean) {
+  return z.unknown().refine(withinBounds, "OVERFLOW").pipe(schema);
+}
+
+const captureRequestFields = {
+  ...captureIdentityFields,
+  actor: preflight(TenantContextSchema, (actor) => withinArrayBounds(actor, { permissions: 10 }))
+    .transform((actor) => ({ ...actor, permissions: Object.freeze(actor.permissions) }))
+    .readonly(),
+  comparisonWindows: boundedArray(z.strictObject(windowCutoffFields).readonly(), maxComparisons),
+};
+
+function validCaptureRequest(value: z.infer<z.ZodObject<typeof captureRequestFields>>): boolean {
+  return (
+    value.actor.organizationId === value.binding.organizationId &&
+    value.actor.workspaceId === value.binding.workspaceId &&
+    value.window.periodEnd <= value.visibleAt &&
+    validComparisons(value.visibleAt, value.comparisonWindows)
+  );
+}
+
+function boundedCaptureRequest(value: unknown): boolean {
+  return withinArrayBounds(value, {
+    domains: ObservedDomainSchema.options.length,
+    comparisonWindows: maxComparisons,
+  });
+}
+
+export const ObservedCaptureRequestV1Schema = preflight(
+  z
+    .strictObject(captureRequestFields)
+    .refine(validCaptureRequest, "INVALID_CAPTURE_REQUEST")
+    .readonly(),
+  boundedCaptureRequest,
+);
+export type ObservedCaptureRequestV1 = z.infer<typeof ObservedCaptureRequestV1Schema>;
+
+const readRequestFields = { ...captureRequestFields, inputRevision: joinedRevision };
+export const ObservedReadRequestV1Schema = preflight(
+  z
+    .strictObject(readRequestFields)
+    .refine(validCaptureRequest, "INVALID_CAPTURE_REQUEST")
+    .readonly(),
+  boundedCaptureRequest,
+);
+export type ObservedReadRequestV1 = z.infer<typeof ObservedReadRequestV1Schema>;
+
+const baseStream = z.enum(["ORDERS", "REFUNDS", "INVENTORY", "MARKETING"]);
+const basePageRef = z
+  .strictObject({
+    stream: baseStream,
+    pageId: ExternalIdSchema,
+    pageHash: sha256,
+  })
+  .readonly();
+
+function validBaseReceipts(receipts: readonly z.infer<typeof basePageRef>[]): boolean {
+  const streams = new Set<string>();
+  const pages = new Set<string>();
+  for (const { stream, pageId } of receipts) {
+    const key = stream + ":" + pageId;
+    if (pages.has(key)) return false;
+    pages.add(key);
+    streams.add(stream);
+  }
+  return streams.size === baseStream.options.length;
+}
+
+const baseRef = z
+  .strictObject({
+    ...scope,
+    ...windowCutoffFields,
+    inputRevision: normalizedRevision,
+    receipts: boundedArray(basePageRef, maxPages)
+      .refine(validBaseReceipts, "INVALID_BASE_RECEIPTS")
+      .readonly(),
+  })
+  .readonly();
+const comparisonRefSchema = z
+  .strictObject({
+    ...scope,
+    ...windowCutoffFields,
+    inputRevision: joinedRevision,
+    definitionVersion: observedDefinition,
+  })
+  .readonly();
+
+const coverageSchema = z
+  .strictObject({
+    ...partitionFields,
+    status: z.enum(["COMPLETE", "PARTIAL", "UNAVAILABLE"]),
+    coverageBasisPoints: BasisPointsSchema,
+    receiptIds,
+    reason: MetricIssueCodeSchema.nullable(),
+  })
+  .refine(validPartition, "INVALID_COVERAGE_PARTITION")
+  .refine(({ status, coverageBasisPoints, reason, receiptIds }) => {
+    switch (status) {
+      case "COMPLETE":
+        return coverageBasisPoints === 10000 && reason === null && receiptIds.length > 0;
+      case "PARTIAL":
+        return coverageBasisPoints < 10000 && reason === "PARTIAL_COVERAGE";
+      case "UNAVAILABLE":
+        return coverageBasisPoints === 0 && reason !== null;
+    }
+  }, "INVALID_COVERAGE_STATUS")
+  .readonly();
+
+const captureObject = z.strictObject({
+  ...captureIdentityFields,
+  inputRevision: joinedRevision,
+  ledgerVersion: z.literal("observed-facts-v1"),
+  mappingVersion: z.literal("p2-observed-v1"),
+  definitionVersion: observedDefinition,
+  definitionSelectorVersion: SourceVersionSchema,
+  ...publicationPins,
+  clockRevision: QuantitySchema,
+  capturedAt: utcMs,
+  base: baseRef.nullable(),
+  comparisons: boundedArray(comparisonRefSchema, maxComparisons),
+  publications: boundedArray(ObservedPublicationV1Schema, maxPages),
+  receipts: boundedArray(ObservedReceiptV1Schema, maxPages),
+  facts: boundedArray(StoredObservedFactV1Schema, maxCaptureFacts),
+  coverage: boundedArray(coverageSchema, maxPages),
+});
+type Capture = z.infer<typeof captureObject>;
+type Coverage = z.infer<typeof coverageSchema>;
+type Member = z.infer<typeof memberRefSchema>;
+
+function boundedCapture(value: unknown): boolean {
+  return (
+    withinArrayBounds(value, {
+      domains: ObservedDomainSchema.options.length,
+      comparisons: maxComparisons,
+      publications: maxPages,
+      receipts: maxPages,
+      facts: maxCaptureFacts,
+      coverage: maxPages,
+    }) && withinArrayBounds(rawObject(value)?.base, { receipts: maxPages })
+  );
+}
+
+function validCaptureIdentity(capture: Capture): boolean {
+  const { window, visibleAt, domains, base, comparisons, inputRevision } = capture;
+  if (window.periodEnd > visibleAt || !validComparisons(visibleAt, comparisons)) return false;
+  if (base === null) {
+    if (domains.some((domain) => domain !== "SYNC_TRANSITION")) return false;
+  } else if (
+    !sameScope(capture, base) ||
+    !sameWindow(window, base.window) ||
+    visibleAt !== base.visibleAt
+  ) {
+    return false;
+  }
+  const revisions = new Set([inputRevision]);
+  for (const comparison of comparisons) {
+    if (!sameScope(capture, comparison) || revisions.has(comparison.inputRevision)) return false;
+    revisions.add(comparison.inputRevision);
+  }
+  return true;
+}
+
+function samePartition(left: Partition, right: Partition): boolean {
+  return (
+    sameScope(left, right) &&
+    left.domain === right.domain &&
+    subjectKey(left.subject) === subjectKey(right.subject) &&
+    sameWindow(left.window, right.window)
+  );
+}
+
+function partitionKey(value: Pick<Partition, "domain" | "subject">): string {
+  return value.domain + ":" + subjectKey(value.subject);
+}
+
+function currentPublications(capture: Capture): Map<string, ObservedPublicationV1> | undefined {
+  const publications = new Map<string, ObservedPublicationV1>();
+  const domains = new Set(capture.domains);
+  for (const publication of capture.publications) {
+    if (
+      publications.has(publication.publicationId) ||
+      !sameScope(publication, capture) ||
+      !domains.has(publication.domain) ||
+      publication.modelVersion !== capture.modelVersion ||
+      publication.configHash !== capture.configHash ||
+      publication.availableAt > capture.visibleAt ||
+      publication.through > capture.visibleAt
+    )
+      return undefined;
+    publications.set(publication.publicationId, publication);
+  }
+  return publications;
+}
+
+function matchesPublication(
+  receipt: ObservedReceiptV1,
+  publication: ObservedPublicationV1,
+): boolean {
+  return (
+    samePartition(receipt, publication) &&
+    receipt.publicationHash === publication.publicationHash &&
+    receipt.modelVersion === publication.modelVersion &&
+    receipt.configHash === publication.configHash &&
+    receipt.through === publication.through &&
+    receipt.pageIndex < publication.pageCount &&
+    (receipt.terminalCoverage !== null) === (receipt.pageIndex === publication.pageCount - 1) &&
+    receipt.recordCount <= publication.recordCount &&
+    (publication.pageCount !== 1 || receipt.recordCount === publication.recordCount)
+  );
+}
+
+type CertifiedReceipt = Readonly<{
+  receipt: ObservedReceiptV1;
+  publication: ObservedPublicationV1;
+  members: ReadonlyMap<string, Member>;
+}>;
+
+function certifiedReceipts(
+  receipts: readonly ObservedReceiptV1[],
+  publications: ReadonlyMap<string, ObservedPublicationV1>,
+): Map<string, CertifiedReceipt> | undefined {
+  const result = new Map<string, CertifiedReceipt>();
+  const pageIndices = new Set<string>();
+  const pageIds = new Set<string>();
+  for (const receipt of receipts) {
+    const publication = publications.get(receipt.publicationId);
+    const pageIndex = JSON.stringify([receipt.publicationId, receipt.pageIndex]);
+    const pageId = JSON.stringify([receipt.publicationId, receipt.pageId]);
+    if (
+      !publication ||
+      !matchesPublication(receipt, publication) ||
+      result.has(receipt.receiptId) ||
+      pageIndices.has(pageIndex) ||
+      pageIds.has(pageId)
+    )
+      return undefined;
+    pageIndices.add(pageIndex);
+    pageIds.add(pageId);
+    result.set(receipt.receiptId, {
+      publication,
+      receipt,
+      members: new Map(receipt.factRefs.map((member) => [member.sourceVersion, member])),
+    });
+  }
+  return result;
+}
+
+function chainContinues(next: ObservedReceiptV1, previous: ObservedReceiptV1): boolean {
+  return (
+    next.publicationId === previous.publicationId &&
+    next.pageIndex === previous.pageIndex + 1 &&
+    next.priorPageHash === previous.pageHash &&
+    next.expectedCursor === previous.nextCursor
+  );
+}
+
+function completeChain(chain: readonly CertifiedReceipt[]): boolean {
+  const first = chain[0];
+  const last = chain.at(-1);
+  if (
+    !first ||
+    !last ||
+    first.receipt.pageIndex !== 0 ||
+    last.receipt.terminalCoverage?.coverageBasisPoints !== 10000 ||
+    chain.length !== first.publication.pageCount
+  )
+    return false;
+  const ids = new Set<string>();
+  let previous: ObservedReceiptV1 | undefined;
+  let lastSequence = 0;
+  let records = 0;
+  for (const { receipt } of chain) {
+    if (previous && !chainContinues(receipt, previous)) return false;
+    for (const { factId, sourceVersion } of receipt.factRefs) {
+      const sequence = Number(sourceVersion.slice(sourceVersion.lastIndexOf(":") + 1));
+      if (ids.has(factId) || sequence <= lastSequence) return false;
+      ids.add(factId);
+      lastSequence = sequence;
+    }
+    records += receipt.recordCount;
+    previous = receipt;
+  }
+  return records === first.publication.recordCount;
+}
+
+function selectedVersionKey(domain: ObservedDomain, sourceVersion: string): string {
+  return domain + ":" + sourceVersion;
+}
+
+function selectedVersions(capture: Capture): Map<string, StoredObservedFactV1> | undefined {
+  const selected = new Map<string, StoredObservedFactV1>();
+  const identities = new Set<string>();
+  for (const stored of capture.facts) {
+    const { fact } = stored;
+    const version = selectedVersionKey(fact.domain, fact.sourceVersion);
+    const identity = fact.domain + ":" + fact.factId;
+    if (
+      !sameScope(fact, capture) ||
+      fact.observedAt > capture.visibleAt ||
+      selected.has(version) ||
+      identities.has(identity)
+    )
+      return undefined;
+    identities.add(identity);
+    selected.set(version, stored);
+  }
+  return selected;
+}
+
+function matchesMember(fact: ObservedFactV1, ref: Member, claim: CertifiedReceipt): boolean {
+  return (
+    fact.factId === ref.factId &&
+    fact.sourceVersion === ref.sourceVersion &&
+    fact.payloadHash === ref.payloadHash &&
+    inPartition(fact, claim.publication) &&
+    fact.modelVersion === claim.publication.modelVersion &&
+    fact.producerVersion === claim.publication.producerVersion
+  );
+}
+
+type CaptureGraph = Readonly<{
+  receipts: ReadonlyMap<string, CertifiedReceipt>;
+  selected: ReadonlyMap<string, StoredObservedFactV1>;
+  usedReceipts: Set<string>;
+  matchedVersions: Set<string>;
+}>;
+
+function validateMembers(
+  claim: CertifiedReceipt,
+  coverage: Coverage,
+  graph: CaptureGraph,
+): boolean {
+  for (const member of claim.receipt.factRefs) {
+    const key = selectedVersionKey(coverage.domain, member.sourceVersion);
+    const stored = graph.selected.get(key);
+    if (!stored) {
+      if (coverage.status === "COMPLETE") return false;
+      continue;
+    }
+    if (stored.receiptId !== member.originReceiptId || !matchesMember(stored.fact, member, claim))
+      return false;
+    const origin = graph.receipts.get(stored.receiptId);
+    const originMember = origin?.members.get(stored.fact.sourceVersion);
+    if (
+      !origin ||
+      !originMember ||
+      originMember.originReceiptId !== stored.receiptId ||
+      !matchesMember(stored.fact, originMember, origin)
+    )
+      return false;
+    graph.usedReceipts.add(stored.receiptId);
+    graph.matchedVersions.add(key);
+  }
+  return true;
+}
+
+function validCaptureCoverage(capture: Capture, graph: CaptureGraph): boolean {
+  const partitions = new Set<string>();
+  const missingDomains = new Set(capture.domains);
+  const domains = new Set(capture.domains);
+  for (const coverage of capture.coverage) {
+    const key = partitionKey(coverage);
+    if (
+      partitions.has(key) ||
+      !domains.has(coverage.domain) ||
+      !sameScope(coverage, capture) ||
+      !sameWindow(coverage.window, capture.window)
+    )
+      return false;
+    partitions.add(key);
+    missingDomains.delete(coverage.domain);
+    const chain = [];
+    for (const id of coverage.receiptIds) {
+      const claim = graph.receipts.get(id);
+      if (
+        !claim ||
+        !samePartition(coverage, claim.receipt) ||
+        !validateMembers(claim, coverage, graph)
+      )
+        return false;
+      graph.usedReceipts.add(id);
+      chain.push(claim);
+    }
+    if (coverage.status === "COMPLETE" && !completeChain(chain)) return false;
+  }
+  return missingDomains.size === 0;
+}
+
+function validCaptureGraph(capture: Capture): boolean {
+  const publications = currentPublications(capture);
+  if (!publications) return false;
+  const receipts = certifiedReceipts(capture.receipts, publications);
+  const selected = selectedVersions(capture);
+  if (!receipts || !selected) return false;
+  const graph = {
+    receipts,
+    selected,
+    usedReceipts: new Set<string>(),
+    matchedVersions: new Set<string>(),
+  };
+  return (
+    validCaptureCoverage(capture, graph) &&
+    graph.matchedVersions.size === selected.size &&
+    graph.usedReceipts.size === receipts.size &&
+    new Set(capture.receipts.map(({ publicationId }) => publicationId)).size === publications.size
+  );
+}
+
+export const ObservedCaptureV1Schema = preflight(
+  captureObject
+    .refine(validCaptureIdentity, "INVALID_CAPTURE_IDENTITY")
+    .refine(validCaptureGraph, "INVALID_CAPTURE_GRAPH")
+    .readonly(),
+  boundedCapture,
+);
+export type ObservedCaptureV1 = z.infer<typeof ObservedCaptureV1Schema>;
