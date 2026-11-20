@@ -2529,13 +2529,11 @@ function emptyFinancePartition(domain: string, subject: object, index: number) {
   };
 }
 
-function completeCostProof(
-  subject: typeof sku | typeof store,
-  orders: readonly (Omit<typeof orderRow, "data"> & { data: api.ConnectorOrder })[],
-  skuCosts: readonly { subject: typeof sku; rows: readonly (typeof financeA)[] }[],
-) {
-  const domains = ["FROZEN_COST", "REFUND_ALLOCATION", "RETURN_RECEIPT"];
-  const partitions = domains.flatMap((domain, domainIndex) =>
+const cogsDomains = ["FROZEN_COST", "REFUND_ALLOCATION", "RETURN_RECEIPT"];
+type SkuCosts = Readonly<{ subject: typeof sku; rows: readonly (typeof financeA)[] }>;
+
+function cogsPartitions(skuCosts: readonly SkuCosts[]) {
+  return cogsDomains.flatMap((domain, domainIndex) =>
     skuCosts.map(({ subject, rows }, skuIndex) => {
       const ordinal = domainIndex * skuCosts.length + skuIndex + 1;
       return domain === "FROZEN_COST" && rows.length > 0
@@ -2543,15 +2541,23 @@ function completeCostProof(
         : emptyFinancePartition(domain, subject, ordinal);
     }),
   );
+}
+
+function completeCostProof(
+  subject: typeof sku | typeof store,
+  orders: readonly (Omit<typeof orderRow, "data"> & { data: api.ConnectorOrder })[],
+  skuCosts: readonly SkuCosts[],
+) {
+  const partitions = cogsPartitions(skuCosts);
   const receipts = partitions.map(({ certifiedReceipt }) => certifiedReceipt);
   const facts = skuCosts.flatMap(({ rows }) => rows);
   const evidence = [...receipts.map(({ receiptId }) => receiptId), "base-ORDERS", "base-REFUNDS"];
   const collections = cogsInput.metricCoverage[0].collections;
   return {
-    request: { ...trafficSelectionRequest, subject, domains, kind: "COGS" },
+    request: { ...trafficSelectionRequest, subject, domains: cogsDomains, kind: "COGS" },
     capture: {
       ...zeroCapture,
-      domains,
+      domains: cogsDomains,
       facts,
       receipts,
       publications: partitions.map(({ certificate }) => certificate),
