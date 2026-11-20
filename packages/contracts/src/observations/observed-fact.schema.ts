@@ -2451,7 +2451,7 @@ function addToTotal(totals: Map<string, bigint>, key: string, amount: number): b
   return sum;
 }
 
-function validReturnQuantities(
+function validAcceptedReturns(
   graph: SelectionGraph,
   allocations: ReadonlyMap<string, number | null>,
 ): boolean {
@@ -2464,6 +2464,8 @@ function validReturnQuantities(
     const { resellableQuantity, acceptedAt, externalOrderId, externalLineId, externalSkuId } = data;
     const line = applicablePaidLine(graph, data);
     if (!line || acceptedAt === null || resellableQuantity === null) continue;
+    if (!line.payment?.millisecondAligned || Date.parse(acceptedAt) < line.payment.epochMs)
+      return false;
     const key = lineKey(externalOrderId, externalLineId, externalSkuId);
     if (addToTotal(byLine, key, resellableQuantity) > BigInt(line.quantity)) return false;
     const allocation = refundLineKey(data);
@@ -2562,7 +2564,7 @@ function validSettlementEvidence(graph: SelectionGraph, coverage: MetricCoverage
   return (
     units !== undefined &&
     validAllocationAmounts(graph) &&
-    (!required.includes("returnReceipts") || validReturnQuantities(graph, units))
+    (!required.includes("returnReceipts") || validAcceptedReturns(graph, units))
   );
 }
 

@@ -3403,6 +3403,24 @@ it("does not demand allocations for settlements outside the paid cohort", () => 
   expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(true);
 });
 
+it("rejects an accepted return before its original in-window payment", () => {
+  const sources = [settledAllocation(), acceptedReturn({ acceptedAt: start })];
+  expectInvalidFinance(settlementProof({ sources }));
+});
+
+it.each([paidInWindow, "2026-11-02T05:00:00.000Z"])(
+  "allows a return accepted at %s before later refund settlement",
+  (acceptedAt) => {
+    const original = settledOrder();
+    const order = { ...original, data: { ...original.data, paidAt: "2026-11-02T09:00:00+08:00" } };
+    const proof = settlementProof({
+      order,
+      sources: [settledAllocation(), acceptedReturn({ acceptedAt })],
+    });
+    expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(true);
+  },
+);
+
 it("keeps VERIFIED traffic independent of an unavailable cost in the capture", () => {
   const unavailable = withPayload(financeA.fact, {
     basis: "UNAVAILABLE",
