@@ -45,8 +45,10 @@ type ObservedCall<I, O> = (request: I) => Promise<ObservedResult<O>>;
 
 export interface ObservedPublisherPort {
   /**
-   * P03-035 certifies the authoritative source through the pinned business cutoff under a live
-   * scoped grant. Verify the active generation, model and config hash server-side and derive
+   * P03-035 certifies the complete visible partition at through under a live scoped grant.
+   * Validate that cutoff against the server-owned authoritative business clock and derive
+   * clockRevision from its verified revision. Verify the active generation, model and config
+   * hash server-side and derive
    * contiguous publication/page links, exact original bytes and content hashes, and terminal
    * coverage. Exact ordinal retries return the original certificate. Divergent or gapped seals conflict.
    */
