@@ -2386,6 +2386,224 @@ const cogsInput = {
   returnReceipts: [],
 };
 
+const paidInWindow = "2026-11-02T01:00:00.000Z";
+const cohortPayment = { ...orderRow, data: { ...orderRow.data, paidAt: paidInWindow } };
+const costAtPayment = {
+  ...financeA,
+  fact: {
+    ...financeA.fact,
+    occurredAt: paidInWindow,
+    payload: { ...financeA.fact.payload, frozenAt: paidInWindow },
+  },
+};
+
+function emptyFinancePartition(domain: string, subject: object, index: number) {
+  const sample = returnedFact({ ...common, domain, subject, payload: {} }, "R" + index);
+  const { certificate, certifiedReceipt, coverageRow } = snapshot([sample], index, end);
+  return {
+    certificate: { ...certificate, recordCount: 0 },
+    certifiedReceipt: { ...certifiedReceipt, recordCount: 0, factRefs: [] },
+    coverageRow,
+  };
+}
+
+function completeCostProof(
+  subject: typeof sku | typeof store,
+  orders: readonly (Omit<typeof orderRow, "data"> & { data: api.ConnectorOrder })[],
+  skuCosts: readonly { subject: typeof sku; rows: readonly (typeof financeA)[] }[],
+) {
+  const domains = ["FROZEN_COST", "REFUND_ALLOCATION", "RETURN_RECEIPT"];
+  const partitions = domains.flatMap((domain, domainIndex) =>
+    skuCosts.map(({ subject, rows }, skuIndex) => {
+      const ordinal = domainIndex * skuCosts.length + skuIndex + 1;
+      return domain === "FROZEN_COST" && rows.length > 0
+        ? snapshot(rows, ordinal, end)
+        : emptyFinancePartition(domain, subject, ordinal);
+    }),
+  );
+  const receipts = partitions.map(({ certifiedReceipt }) => certifiedReceipt);
+  const facts = skuCosts.flatMap(({ rows }) => rows);
+  const evidence = [...receipts.map(({ receiptId }) => receiptId), "base-ORDERS", "base-REFUNDS"];
+  const collections = cogsInput.metricCoverage[0].collections;
+  return {
+    request: { ...trafficSelectionRequest, subject, domains, kind: "COGS" },
+    capture: {
+      ...zeroCapture,
+      domains,
+      facts,
+      receipts,
+      publications: partitions.map(({ certificate }) => certificate),
+      coverage: partitions.map(({ coverageRow }) => coverageRow),
+    },
+    selection: {
+      subject,
+      selectionReceiptIds: evidence,
+      input: {
+        ...metricInput(subject, "COGS", collections, evidence),
+        paymentFacts: orders,
+        frozenCosts: facts.map(costMetricRow),
+        refundFacts: [],
+        refundAllocations: [],
+        returnReceipts: [],
+      },
+    },
+  };
+}
+
+function cohortOrder(changes: Partial<api.ConnectorOrder> = {}) {
+  return {
+    ...cohortPayment,
+    data: { ...api.ConnectorOrderSchema.parse(cohortPayment.data), ...changes },
+  };
+}
+
+const skuB = { ...sku, externalSkuId: "sku-B" };
+const secondCostAtPayment = {
+  ...financeB,
+  fact: {
+    ...financeB.fact,
+    occurredAt: paidInWindow,
+    payload: { ...financeB.fact.payload, frozenAt: paidInWindow },
+  },
+};
+const storeCogsCosts = [
+  { subject: sku, rows: [costAtPayment] },
+  { subject: skuB, rows: [secondCostAtPayment] },
+];
+
+function costWith(changes: Partial<typeof costAtPayment.fact.payload>) {
+  return {
+    ...costAtPayment,
+    fact: { ...costAtPayment.fact, payload: { ...costAtPayment.fact.payload, ...changes } },
+  };
+}
+
+it.each([
+  ["omitted cost", []],
+  ["wrong paid quantity", [costWith({ quantity: 2 })]],
+  ["wrong freeze instant", [costWith({ frozenAt: start })]],
+  [
+    "two costs for one paid line",
+    [
+      costAtPayment,
+      {
+        ...costAtPayment,
+        fact: {
+          ...costAtPayment.fact,
+          factId: "extra",
+          sequence: 3,
+          sourceVersion: "observed-v1:g:0:e:3",
+        },
+      },
+    ],
+  ],
+] as const)("rejects VERIFIED STORE COGS with %s", (_label, rows) => {
+  const proof = completeCostProof(
+    store,
+    [cohortOrder()],
+    [{ subject: sku, rows }, storeCogsCosts[1]],
+  );
+  expect(api.ObservedCaptureV1Schema.safeParse(proof.capture).success).toBe(true);
+  const result = api.ObservedSelectionProofV1Schema.safeParse(proof);
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain(
+    "INVALID_SELECTION_EVIDENCE",
+  );
+});
+
+it("requires confirmed cost for a SKU line while retaining the full original paid order", () => {
+  const orders = [cohortOrder({ paidAt: paidInWindow.replace(".000Z", "Z") })];
+  const proof = completeCostProof(sku, orders, [
+    { subject: sku, rows: [costWith({ unitCostMinor: 0 })] },
+  ]);
+  const { input } = api.ObservedSelectionProofV1Schema.parse(proof).selection;
+  expect(input.paymentFacts?.[0]?.data).toEqual(orders[0].data);
+  expect(input.frozenCosts?.map(({ data }) => data?.unitCostMinor)).toEqual([0]);
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse(completeCostProof(store, orders, storeCogsCosts))
+      .success,
+  ).toBe(true);
+});
+
+it.each([start, end, pastWindow.periodStart])(
+  "uses half-open payment eligibility for a payment at %s",
+  (paidAt) => {
+    const proof = completeCostProof(
+      sku,
+      [cohortOrder({ paidAt, orderedAt: paidAt })],
+      [{ subject: sku, rows: [] }],
+    );
+    expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(paidAt !== start);
+  },
+);
+
+it("retains a supplied historical cost outside the paid cohort", () => {
+  const historicalCost = costWith({ frozenAt: pastWindow.periodStart });
+  const historicalOrder = cohortOrder({
+    paidAt: pastWindow.periodStart,
+    orderedAt: pastWindow.periodStart,
+  });
+  const proof = completeCostProof(
+    sku,
+    [historicalOrder],
+    [{ subject: sku, rows: [historicalCost] }],
+  );
+  expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(true);
+});
+
+it("accepts witnessed zero STORE costs for orders paid at the exclusive window end", () => {
+  const partitions = storeCogsCosts.map(({ subject }) => ({ subject, rows: [] }));
+  const proof = completeCostProof(store, [cohortOrder({ paidAt: end })], partitions);
+  expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(true);
+});
+
+it("preserves an explicitly estimated frozen cost for an in-window payment", () => {
+  const proof = completeCostProof(sku, [cohortOrder()], [{ subject: sku, rows: [costAtPayment] }]);
+  const estimate = { basis: "ESTIMATED", unitCostMinor: 0 };
+  const [fact] = proof.capture.facts;
+  const capture = {
+    ...proof.capture,
+    facts: [{ ...fact, fact: withPayload(fact.fact, { ...estimate, reason: "COST_ESTIMATED" }) }],
+  };
+  const [cost] = proof.selection.input.frozenCosts;
+  const input = {
+    ...proof.selection.input,
+    status: "ESTIMATED",
+    frozenCosts: [{ ...cost, data: { ...cost.data, ...estimate } }],
+  };
+  const selection = { ...proof.selection, input };
+  const result = api.ObservedSelectionProofV1Schema.parse({ ...proof, capture, selection });
+  expect(result.selection.input.frozenCosts?.[0]?.data).toMatchObject(estimate);
+});
+
+it("distinguishes a certified empty cohort from an unknown payment and preserves missing cost", () => {
+  const partitions = [{ subject: sku, rows: [] }];
+  const unpaid = cohortOrder({ status: "PENDING_PAYMENT", paidAt: null, paidMinor: 0 });
+  const unknown = cohortOrder({
+    paidAt: null,
+    paidMinor: null,
+    source: { ...unpaid.data.source, quality: { state: "PARTIAL", issues: ["PAYMENT_UNKNOWN"] } },
+  });
+  for (const orders of [[], [unpaid]]) {
+    expect(
+      api.ObservedSelectionProofV1Schema.safeParse(completeCostProof(sku, orders, partitions))
+        .success,
+    ).toBe(true);
+  }
+  const ambiguous = completeCostProof(sku, [unknown], partitions);
+  expect(api.ObservedSelectionProofV1Schema.safeParse(ambiguous).success).toBe(false);
+  for (const orders of [[unknown], [cohortOrder()]]) {
+    const proof = completeCostProof(sku, orders, partitions);
+    const selection = {
+      ...proof.selection,
+      input: { ...proof.selection.input, status: "INSUFFICIENT" },
+    };
+    expect(api.ObservedSelectionProofV1Schema.safeParse({ ...proof, selection }).success).toBe(
+      true,
+    );
+  }
+});
+
 it.each([
   {
     basis: "UNAVAILABLE",

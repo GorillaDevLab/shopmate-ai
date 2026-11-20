@@ -1723,6 +1723,7 @@ type MetricRow = Readonly<{
   evidenceIds: readonly string[];
 }>;
 type SelectedSource = Readonly<{ fact: ObservedFactV1; receiptIds: Set<string> }>;
+type OrderLine = Readonly<{ externalSkuId: string; quantity: number; paidAt: number | null }>;
 type SelectionGraph = Readonly<{
   proof: SelectionProof;
   complete: boolean;
@@ -1732,7 +1733,7 @@ type SelectionGraph = Readonly<{
   receiptById: ReadonlyMap<string, ObservedReceiptV1>;
   versions: ReadonlyMap<string, StoredObservedFactV1>;
   baseStreams: ReadonlyMap<BaseStream, ReadonlySet<string>>;
-  orderLines: ReadonlySet<string>;
+  orderLines: ReadonlyMap<string, OrderLine>;
   orderSkus: ReadonlySet<string>;
   refundOrders: ReadonlyMap<string, MetricRefundFact["data"]>;
 }>;
@@ -1756,12 +1757,18 @@ function baseStreamsFor(proof: SelectionProof, ids: ReadonlySet<string>) {
 }
 
 function indexOrderLines(input: MetricInputV1) {
-  const orderLines = new Set<string>();
+  const orderLines = new Map<string, OrderLine>();
   const orderSkus = new Set<string>();
   for (const { data } of input.paymentFacts ?? []) {
+    const paidAt = data.paidAt === null ? null : Date.parse(data.paidAt);
     for (const line of data.items) {
-      orderSkus.add(line.externalSkuId);
-      orderLines.add(lineKey(data.externalOrderId, line.externalLineId, line.externalSkuId));
+      const { externalLineId, externalSkuId, quantity } = line;
+      orderSkus.add(externalSkuId);
+      orderLines.set(lineKey(data.externalOrderId, externalLineId, externalSkuId), {
+        externalSkuId,
+        quantity,
+        paidAt,
+      });
     }
   }
   return { orderLines, orderSkus };
@@ -2256,6 +2263,37 @@ const financialCollections = {
   RETURN_RECEIPT: "returnReceipts",
 } as const;
 
+function coversPaidOrderCosts(graph: SelectionGraph, sources: ProjectedSources): boolean {
+  const { input, subject } = graph.proof.selection;
+  const start = Date.parse(input.periodStart);
+  const end = Date.parse(input.periodEnd);
+  const required = new Map<string, OrderLine>();
+  // The existing frozen-cost leaf uses the half-open payment cohort, including zero-cost sales.
+  for (const [key, line] of graph.orderLines) {
+    if (
+      (subject.kind === "STORE" ||
+        (subject.kind === "SKU" && line.externalSkuId === subject.externalSkuId)) &&
+      line.paidAt !== null &&
+      line.paidAt >= start &&
+      line.paidAt < end
+    )
+      required.set(key, line);
+  }
+  const seen = new Set<string>();
+  for (const { fact } of sources.values()) {
+    if (fact.domain !== "FROZEN_COST") continue;
+    const cost = fact.payload;
+    const key = lineKey(cost.externalOrderId, cost.externalLineId, cost.externalSkuId);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    const line = required.get(key);
+    if (!line) continue;
+    if (cost.quantity !== line.quantity || Date.parse(cost.frozenAt) !== line.paidAt) return false;
+    required.delete(key);
+  }
+  return required.size === 0;
+}
+
 function validFinancialProjection(graph: SelectionGraph, domain: FinancialDomain): boolean {
   const eligible = coverageFor(graph, domain);
   const { input, subject } = graph.proof.selection;
@@ -2267,6 +2305,15 @@ function validFinancialProjection(graph: SelectionGraph, domain: FinancialDomain
       ([, { fact }]) => fact.domain === domain && matchesFinancialLine(fact, graph),
     ),
   );
+  const [coverage] = input.metricCoverage;
+  if (
+    domain === "FROZEN_COST" &&
+    graph.verified &&
+    coverage &&
+    neededCollections[coverage.kind].includes("frozenCosts") &&
+    !coversPaidOrderCosts(graph, matched)
+  )
+    return false;
   return observedRows(
     graph,
     matched,
