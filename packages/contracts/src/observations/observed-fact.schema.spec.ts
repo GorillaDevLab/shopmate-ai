@@ -2995,8 +2995,8 @@ const baseRefund = {
     externalSkuId: line.externalSkuId,
     source: hasSource,
     status: "SUCCEEDED",
-    requestedMinor: 185,
-    succeededMinor: 185,
+    requestedMinor: 100,
+    succeededMinor: 100,
     requestedAt: paidInWindow,
     succeededAt: end,
     currency: "CNY",
@@ -3020,7 +3020,8 @@ it("keeps allocation quantity as a full-graph source quality check", () => {
   const [costPage, , returnPage] = proof.capture.receipts;
   const [costSeal, , returnSeal] = proof.capture.publications;
   const [costCoverage, , returnCoverage] = proof.capture.coverage;
-  const source = returnedFact(refund, "R2");
+  const data = { ...allocationData, merchandiseMinor: 100, buyerShippingMinor: 0 };
+  const source = returnedFact({ ...refund, payload: { ...refund.payload, ...data } }, "R2");
   const allocation = snapshot([source], 2, end);
   const capture = {
     ...proof.capture,
@@ -3032,7 +3033,7 @@ it("keeps allocation quantity as a full-graph source quality check", () => {
   const input = {
     ...proof.selection.input,
     refundFacts: [baseRefund],
-    refundAllocations: [{ ...projectionRow, evidenceIds: ["R2"], data: allocationData }],
+    refundAllocations: [{ ...projectionRow, evidenceIds: ["R2"], data }],
   };
   const selection = { ...proof.selection, input };
   expect(
