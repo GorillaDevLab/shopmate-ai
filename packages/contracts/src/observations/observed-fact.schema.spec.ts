@@ -3415,6 +3415,75 @@ it("rejects a successful STORE refund that names no SKU on its original paid ord
   expect(api.ObservedSelectionProofV1Schema.safeParse({ ...proof, selection }).success).toBe(true);
 });
 
+function omitProjectedAllocations(proof: ReturnType<typeof settlementProof>) {
+  const input = { ...proof.selection.input, refundAllocations: [] };
+  return { ...proof, selection: { ...proof.selection, input } };
+}
+
+it.each([store, sku])(
+  "requires the original refund for an applicable witnessed $kind allocation",
+  (subject) => {
+    const proof = settlementProof({ subject, refunds: [], sources: [settledAllocation()] });
+    const omitted = omitProjectedAllocations(proof);
+    expectInvalidFinance(omitted);
+    const input = { ...omitted.selection.input, status: "INSUFFICIENT" };
+    const selection = { ...omitted.selection, input };
+    expect(api.ObservedSelectionProofV1Schema.safeParse({ ...omitted, selection }).success).toBe(
+      true,
+    );
+  },
+);
+
+it("does not drop a witnessed allocation whose refund is for another order", () => {
+  const refunds = [settledRefund(100, { externalOrderId: "o-unrelated" })];
+  const proof = settlementProof({ refunds, sources: [settledAllocation()] });
+  expectInvalidFinance(omitProjectedAllocations(proof));
+});
+
+it("requires the original refund's SKU to match the witnessed paid line", () => {
+  const order = settledOrder(1, 0, [orderItem("l2", "sku-B", 200)]);
+  const refunds = [settledRefund(0, { externalSkuId: "sku-B" })];
+  const sources = [settledAllocation({ merchandiseMinor: 0, quantity: 0 })];
+  const proof = settlementProof({ order, costs: storeCogsCosts, refunds, sources });
+  expectInvalidFinance(omitProjectedAllocations(proof));
+});
+
+it("does not treat an unfinished original refund as a settled allocation", () => {
+  const refunds = [
+    settledRefund(100, { status: "PROCESSING", succeededMinor: null, succeededAt: null }),
+  ];
+  const proof = settlementProof({ refunds, sources: [settledAllocation()] });
+  expectInvalidFinance(proof);
+});
+
+it("allows omitted allocation projections for paid lines outside the cohort", () => {
+  const known = settledOrder();
+  const paidAt = pastWindow.periodStart;
+  const order = { ...known, data: { ...known.data, orderedAt: paidAt, paidAt } };
+  const costs = [{ subject: sku, rows: [] }];
+  const proof = settlementProof({ order, costs, refunds: [], sources: [settledAllocation()] });
+  const outOfCohort = omitProjectedAllocations(proof);
+  expect(api.ObservedSelectionProofV1Schema.safeParse(outOfCohort).success).toBe(true);
+});
+
+it("does not require another SKU's refund in the selected SKU projection", () => {
+  const order = settledOrder(1, 0, [orderItem("l2", "sku-B", 200)]);
+  const proof = settlementProof({ subject: sku, order, refunds: [], sources: [] });
+  const source = settledAllocation({ externalSkuId: "sku-B", externalLineId: "l2" });
+  const stored = returnedFact(source, "R4");
+  const otherSku = snapshot([stored], 4, end);
+  const capture = {
+    ...proof.capture,
+    facts: [...proof.capture.facts, stored],
+    publications: [...proof.capture.publications, otherSku.certificate],
+    receipts: [...proof.capture.receipts, otherSku.certifiedReceipt],
+    coverage: [...proof.capture.coverage, otherSku.coverageRow],
+  };
+  const result = api.ObservedSelectionProofV1Schema.parse({ ...proof, capture });
+  expect(result.selection.input.refundAllocations).toEqual([]);
+  expect(result.selection.input.paymentFacts?.[0]?.data.items).toEqual(order.data.items);
+});
+
 it("rejects an accepted return before its original in-window payment", () => {
   const sources = [settledAllocation(), acceptedReturn({ acceptedAt: start })];
   expectInvalidFinance(settlementProof({ sources }));

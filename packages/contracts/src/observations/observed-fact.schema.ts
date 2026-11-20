@@ -2401,24 +2401,45 @@ function coversPaidOrderCosts(graph: SelectionGraph, sources: ProjectedSources):
   return required.size === 0;
 }
 
+function matchingFinancialSources(
+  graph: SelectionGraph,
+  domain: FinancialDomain,
+  sources: ProjectedSources,
+  verifiedRequired: boolean,
+): ProjectedSources | undefined {
+  const matched = new Map<string, SelectedSource>();
+  for (const [key, source] of sources) {
+    const { fact } = source;
+    if (fact.domain !== domain) continue;
+    const matches = matchesFinancialLine(fact, graph);
+    // A witnessed settlement for a paid line needs its original refund before it can be projected.
+    if (
+      verifiedRequired &&
+      fact.domain === "REFUND_ALLOCATION" &&
+      applicablePaidLine(graph, fact.payload) &&
+      (!matches || graph.refundOrders.get(fact.payload.externalRefundId)?.status !== "SUCCEEDED")
+    )
+      return undefined;
+    if (matches) matched.set(key, source);
+  }
+  return matched;
+}
+
 function validFinancialProjection(graph: SelectionGraph, domain: FinancialDomain): boolean {
   const eligible = coverageFor(graph, domain);
   const { input, subject } = graph.proof.selection;
   if (subject.kind === "STORE" && eligible.length !== graph.orderSkus.size) return false;
   const sources = observedSources(graph, eligible);
   if (!sources) return false;
-  const matched = new Map(
-    [...sources].filter(
-      ([, { fact }]) => fact.domain === domain && matchesFinancialLine(fact, graph),
-    ),
-  );
   const [coverage] = input.metricCoverage;
-  if (
-    domain === "FROZEN_COST" &&
+  const verifiedRequired =
     graph.verified &&
-    coverage &&
-    neededCollections[coverage.kind].includes("frozenCosts") &&
-    !coversPaidOrderCosts(graph, matched)
+    coverage !== undefined &&
+    neededCollections[coverage.kind].includes(financialCollections[domain]);
+  const matched = matchingFinancialSources(graph, domain, sources, verifiedRequired);
+  if (
+    !matched ||
+    (domain === "FROZEN_COST" && verifiedRequired && !coversPaidOrderCosts(graph, matched))
   )
     return false;
   return observedRows(
