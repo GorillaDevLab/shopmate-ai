@@ -1800,6 +1800,7 @@ type SelectedSource = Readonly<{ fact: ObservedFactV1; receiptIds: Set<string> }
 type OrderLine = Readonly<{
   externalSkuId: string;
   quantity: number;
+  netMinor: number;
   payment: Readonly<{ epochMs: number; millisecondAligned: boolean }> | null;
 }>;
 type SelectionGraph = Readonly<{
@@ -1874,11 +1875,12 @@ function indexOrderLines(input: MetricInputV1) {
             millisecondAligned: !/\.\d{3}\d*[1-9]/u.test(data.paidAt),
           };
     for (const line of data.items) {
-      const { externalLineId, externalSkuId, quantity } = line;
+      const { externalLineId, externalSkuId, quantity, netMinor } = line;
       orderSkus.add(externalSkuId);
       orderLines.set(lineKey(data.externalOrderId, externalLineId, externalSkuId), {
         externalSkuId,
         quantity,
+        netMinor,
         payment,
       });
     }
@@ -2475,12 +2477,91 @@ function validReturnQuantities(
   return true;
 }
 
+type PaidOrderBudget = Readonly<{ shippingMinor: number; skus: ReadonlySet<string> }>;
+
+function paidOrderBudgets(input: MetricInputV1): Map<string, PaidOrderBudget> {
+  const start = Date.parse(input.periodStart);
+  const end = Date.parse(input.periodEnd);
+  const orders = new Map<string, PaidOrderBudget>();
+  for (const { data } of input.paymentFacts ?? []) {
+    if (data.paidAt === null) continue;
+    const paidAt = Date.parse(data.paidAt);
+    if (paidAt >= start && paidAt < end) {
+      orders.set(data.externalOrderId, {
+        shippingMinor: data.shippingMinor,
+        skus: new Set(data.items.map(({ externalSkuId }) => externalSkuId)),
+      });
+    }
+  }
+  return orders;
+}
+
+type RefundBudget = Readonly<{
+  succeededMinor: number;
+  shippingMinor: number;
+  fullySelected: boolean;
+}>;
+
+function settledRefundBudgets(graph: SelectionGraph): Map<string, RefundBudget> {
+  const { input, subject } = graph.proof.selection;
+  const orders = paidOrderBudgets(input);
+  const refunds = new Map<string, RefundBudget>();
+  for (const refund of graph.refundOrders.values()) {
+    const order = orders.get(refund.externalOrderId);
+    if (
+      !order ||
+      refund.status !== "SUCCEEDED" ||
+      refund.succeededMinor === null ||
+      refund.succeededAt === null ||
+      (refund.externalSkuId !== null && !order.skus.has(refund.externalSkuId))
+    )
+      continue;
+    refunds.set(refund.externalRefundId, {
+      succeededMinor: refund.succeededMinor,
+      shippingMinor: order.shippingMinor,
+      fullySelected:
+        subject.kind === "STORE" || refund.externalSkuId !== null || order.skus.size === 1,
+    });
+  }
+  return refunds;
+}
+
+function validAllocationAmounts(graph: SelectionGraph): boolean {
+  const refunds = settledRefundBudgets(graph);
+  const byLine = new Map<string, bigint>();
+  const byOrder = new Map<string, bigint>();
+  const byRefund = new Map<string, bigint>();
+  for (const { data } of graph.proof.selection.input.refundAllocations ?? []) {
+    if (!data) return false;
+    const { externalOrderId, externalLineId, externalSkuId, externalRefundId } = data;
+    const budget = refunds.get(externalRefundId);
+    if (!budget) continue;
+    const key = lineKey(externalOrderId, externalLineId, externalSkuId);
+    const line = graph.orderLines.get(key);
+    const { merchandiseMinor, buyerShippingMinor } = data;
+    if (!line || merchandiseMinor === null || buyerShippingMinor === null) return false;
+    if (addToTotal(byLine, key, merchandiseMinor) > BigInt(line.netMinor)) return false;
+    if (addToTotal(byOrder, externalOrderId, buyerShippingMinor) > BigInt(budget.shippingMinor))
+      return false;
+    addToTotal(byRefund, externalRefundId, merchandiseMinor);
+    if (addToTotal(byRefund, externalRefundId, buyerShippingMinor) > BigInt(budget.succeededMinor))
+      return false;
+  }
+  // Complete coverage can certify that an actual zero settlement had no allocations.
+  for (const [id, budget] of refunds) {
+    if (budget.fullySelected && (byRefund.get(id) ?? 0n) !== BigInt(budget.succeededMinor))
+      return false;
+  }
+  return true;
+}
+
 function validSettlementEvidence(graph: SelectionGraph, coverage: MetricCoverageV1): boolean {
   const required = neededCollections[coverage.kind];
   if (!graph.verified || !required.includes("refundAllocations")) return true;
   const units = allocationUnits(graph);
   return (
     units !== undefined &&
+    validAllocationAmounts(graph) &&
     (!required.includes("returnReceipts") || validReturnQuantities(graph, units))
   );
 }

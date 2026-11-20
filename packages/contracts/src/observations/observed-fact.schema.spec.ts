@@ -3256,7 +3256,10 @@ it("bounds cumulative accepted units by the witnessed allocation for that refund
 });
 
 it.each([
-  ["duplicate refund-line allocation", [settledAllocation(), settledAllocation({}, 2)]],
+  [
+    "duplicate refund-line allocation",
+    [settledAllocation({ merchandiseMinor: 50 }), settledAllocation({ merchandiseMinor: 50 }, 2)],
+  ],
   [
     "duplicate physical return receipt",
     [settledAllocation({ quantity: 2 }), acceptedReturn(), acceptedReturn({}, 2)],
@@ -3289,6 +3292,115 @@ it("preserves genuine partial refunds and explicitly unknown quantities below VE
   expect(api.ObservedSelectionProofV1Schema.safeParse({ ...unknown, selection }).success).toBe(
     true,
   );
+});
+
+it.each([
+  ["merchandise beyond the line net", settledOrder(1, 90), 180, 180, 0],
+  ["buyer shipping beyond the order charge", settledOrder(), 100, 95, 5],
+  ["allocation beyond the refund settlement", settledOrder(2), 100, 101, 0],
+  ["short allocation for a complete settlement", settledOrder(), 100, 99, 0],
+] as const)(
+  "rejects VERIFIED monetary evidence with %s",
+  (_label, order, amount, merchandise, shipping) => {
+    const source = settledAllocation({
+      merchandiseMinor: merchandise,
+      buyerShippingMinor: shipping,
+    });
+    expectInvalidFinance(
+      settlementProof({ order, refunds: [settledRefund(amount)], sources: [source] }),
+    );
+  },
+);
+
+it("requires allocations for a complete positive settlement and allows an empty zero settlement", () => {
+  expectInvalidFinance(settlementProof({ sources: [] }));
+  const zero = settlementProof({ refunds: [settledRefund(0)], sources: [] });
+  expect(api.ObservedSelectionProofV1Schema.safeParse(zero).success).toBe(true);
+});
+
+function splitSettlement(
+  first: { merchandise: number; shipping: number },
+  next: { merchandise: number; shipping: number },
+) {
+  const sources = [first, next].map(({ merchandise, shipping }, index) =>
+    settledAllocation(
+      {
+        externalRefundId: index === 0 ? "r1" : "r2",
+        quantity: 0,
+        merchandiseMinor: merchandise,
+        buyerShippingMinor: shipping,
+      },
+      index + 1,
+    ),
+  );
+  const refunds = [first, next].map(({ merchandise, shipping }, index) =>
+    settledRefund(merchandise + shipping, { externalRefundId: index === 0 ? "r1" : "r2" }),
+  );
+  return settlementProof({ order: settledOrder(1, 10), refunds, sources });
+}
+
+it("checks cumulative merchandise across distinct settlements for the original order line", () => {
+  expectInvalidFinance(
+    splitSettlement({ merchandise: 60, shipping: 0 }, { merchandise: 50, shipping: 0 }),
+  );
+  const valid = splitSettlement({ merchandise: 60, shipping: 4 }, { merchandise: 40, shipping: 6 });
+  expect(api.ObservedSelectionProofV1Schema.safeParse(valid).success).toBe(true);
+});
+
+it("checks cumulative buyer shipping across distinct settlements", () => {
+  expectInvalidFinance(
+    splitSettlement({ merchandise: 45, shipping: 6 }, { merchandise: 45, shipping: 5 }),
+  );
+});
+
+it("allows a faithful partial SKU projection of an original multi-SKU settlement", () => {
+  const order = settledOrder(1, 0, [orderItem("l2", "sku-B", 200)]);
+  const refunds = [settledRefund(100, { externalSkuId: null })];
+  const sourceA = settledAllocation({ merchandiseMinor: 40 });
+  const sourceB = settledAllocation(
+    { merchandiseMinor: 60, externalLineId: "l2", externalSkuId: "sku-B" },
+    2,
+  );
+  const skuProof = settlementProof({ subject: sku, order, refunds, sources: [sourceA] });
+  const parsed = api.ObservedSelectionProofV1Schema.parse(skuProof);
+  expect(parsed.selection.input.paymentFacts?.[0]?.data).toEqual(order.data);
+  expect(parsed.selection.input.refundFacts?.[0]?.data).toEqual(refunds[0].data);
+  const storeProof = settlementProof({
+    order,
+    costs: storeCogsCosts,
+    refunds,
+    sources: [sourceA, sourceB],
+  });
+  expect(api.ObservedSelectionProofV1Schema.safeParse(storeProof).success).toBe(true);
+  expectInvalidFinance(
+    settlementProof({ order, costs: storeCogsCosts, refunds, sources: [sourceA] }),
+  );
+});
+
+it("checks complete SKU settlement when the original refund explicitly identifies that SKU", () => {
+  const order = settledOrder(1, 0, [orderItem("l2", "sku-B", 200)]);
+  const sources = [settledAllocation({ merchandiseMinor: 99 })];
+  expectInvalidFinance(settlementProof({ subject: sku, order, sources }));
+});
+
+it("checks a complete SKU settlement of an unscoped refund on a single-SKU original order", () => {
+  const refunds = [settledRefund(100, { externalSkuId: null })];
+  const short = settlementProof({
+    subject: sku,
+    refunds,
+    sources: [settledAllocation({ merchandiseMinor: 99 })],
+  });
+  expectInvalidFinance(short);
+  const complete = settlementProof({ subject: sku, refunds });
+  expect(api.ObservedSelectionProofV1Schema.safeParse(complete).success).toBe(true);
+});
+
+it("does not demand allocations for settlements outside the paid cohort", () => {
+  const known = settledOrder();
+  const paidAt = pastWindow.periodStart;
+  const order = { ...known, data: { ...known.data, orderedAt: paidAt, paidAt } };
+  const proof = settlementProof({ order, costs: [{ subject: sku, rows: [] }], sources: [] });
+  expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(true);
 });
 
 it("keeps VERIFIED traffic independent of an unavailable cost in the capture", () => {
