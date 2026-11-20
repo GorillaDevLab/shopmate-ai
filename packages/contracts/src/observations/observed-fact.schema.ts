@@ -1403,6 +1403,20 @@ function matchesMember(fact: ObservedFactV1, ref: Member, claim: CertifiedReceip
   );
 }
 
+function matchesKnownPredecessor(
+  fact: ObservedFactV1,
+  claims: ReadonlyMap<string, CertifiedReceipt>,
+): boolean {
+  const { priorVersion, domain, factId, subject } = fact;
+  if (priorVersion === null) return true;
+  const prior = claims.get(selectedVersionKey(domain, priorVersion));
+  return (
+    prior === undefined ||
+    (prior.members.get(priorVersion)?.factId === factId &&
+      subjectKey(prior.receipt.subject) === subjectKey(subject))
+  );
+}
+
 function consistentReceiptClaims(
   receipts: ReadonlyMap<string, CertifiedReceipt>,
   selected: ReadonlyMap<string, StoredObservedFactV1>,
@@ -1432,6 +1446,9 @@ function consistentReceiptClaims(
         return false;
       if (!prior) claims.set(key, claim);
     }
+  }
+  for (const { fact } of selected.values()) {
+    if (!matchesKnownPredecessor(fact, claims)) return false;
   }
   return true;
 }

@@ -1318,6 +1318,62 @@ it("allows sparse supplied ordinals for seals from the same partition", () => {
   ]);
 });
 
+it("rejects a correction pointing to a known version of another fact", () => {
+  const wrong = { ...b2, fact: { ...b2.fact, priorVersion: a1.fact.sourceVersion } };
+  expect(api.ObservedFactV1Schema.safeParse(wrong.fact).success).toBe(true);
+  const result = api.ObservedCaptureV1Schema.safeParse({ ...correctedCapture, facts: [a1, wrong] });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain("INVALID_CAPTURE_GRAPH");
+});
+
+const captureWithoutB1 = captured([a1, b2], correctedSnapshot, snapshot([a1], 1, end));
+
+it("accepts correction history with an unavailable predecessor", () => {
+  expect(api.ObservedCaptureV1Schema.safeParse(captureWithoutB1).success).toBe(true);
+});
+
+it("does not resolve an absent predecessor against a different domain stream", () => {
+  const other = returnedFact(
+    { ...traffic, sequence: 2, sourceVersion: b1.fact.sourceVersion },
+    "R3",
+  );
+  const partition = snapshot([other], 3, end);
+  const capture = {
+    ...captureWithoutB1,
+    domains: [...captureWithoutB1.domains, other.fact.domain],
+    facts: [...captureWithoutB1.facts, other],
+    coverage: [...captureWithoutB1.coverage, partition.coverageRow],
+    publications: [...captureWithoutB1.publications, partition.certificate],
+    receipts: [...captureWithoutB1.receipts, partition.certifiedReceipt],
+  };
+  expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);
+});
+
+it("rejects a known predecessor that assigns the corrected fact to a different subject", () => {
+  const otherSku = { ...sku, externalSkuId: "sku-B" };
+  const moved = {
+    ...b1.fact,
+    subject: otherSku,
+    payload: { ...b1.fact.payload, externalSkuId: "sku-B" },
+  };
+  const witness = returnedFact(
+    { ...moved, factId: "C", sequence: 4, sourceVersion: "observed-v1:g:0:e:4" },
+    "R3",
+  );
+  const origin = snapshot([returnedFact(moved, "R3"), witness], 3, end);
+  const current = snapshot([witness], 4, t2);
+  const capture = {
+    ...captureWithoutB1,
+    facts: [...captureWithoutB1.facts, witness],
+    coverage: [...captureWithoutB1.coverage, current.coverageRow],
+    publications: [...captureWithoutB1.publications, origin.certificate, current.certificate],
+    receipts: [...captureWithoutB1.receipts, origin.certifiedReceipt, current.certifiedReceipt],
+  };
+  const result = api.ObservedCaptureV1Schema.safeParse(capture);
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain("INVALID_CAPTURE_GRAPH");
+});
+
 it.each(["fact ID", "payload hash", "origin receipt", "publication cutoff"])(
   "rejects a contradictory %s for an immutable source version in a historical receipt",
   (conflict) => {
