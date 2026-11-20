@@ -1820,6 +1820,33 @@ function lineKey(orderId: string, lineId: string, skuId: string): string {
   return JSON.stringify([orderId, lineId, skuId]);
 }
 
+type RefundLine = NonNullable<ProjectedData<"refundAllocations">>;
+
+function refundLineKey({
+  externalRefundId,
+  externalLineId,
+}: Pick<RefundLine, "externalRefundId" | "externalLineId">): string {
+  return JSON.stringify([externalRefundId, externalLineId]);
+}
+
+function applicablePaidLine(
+  graph: SelectionGraph,
+  {
+    externalOrderId,
+    externalLineId,
+    externalSkuId,
+  }: Pick<RefundLine, "externalOrderId" | "externalLineId" | "externalSkuId">,
+): OrderLine | undefined {
+  const { input } = graph.proof.selection;
+  const line = graph.orderLines.get(lineKey(externalOrderId, externalLineId, externalSkuId));
+  const paidAt = line?.payment?.epochMs;
+  return paidAt !== undefined &&
+    paidAt >= Date.parse(input.periodStart) &&
+    paidAt < Date.parse(input.periodEnd)
+    ? line
+    : undefined;
+}
+
 function baseStreamsFor(proof: SelectionProof, ids: ReadonlySet<string>) {
   const observedIds = new Set(proof.capture.receipts.map(({ receiptId }) => receiptId));
   const indexed = new Map<BaseStream, Set<string>>();
@@ -2401,6 +2428,63 @@ function validFinancialProjection(graph: SelectionGraph, domain: FinancialDomain
   );
 }
 
+function allocationUnits(graph: SelectionGraph): ReadonlyMap<string, number | null> | undefined {
+  const units = new Map<string, number | null>();
+  for (const { sourceVersion } of graph.proof.selection.input.refundAllocations ?? []) {
+    const fact = graph.versions.get(selectedVersionKey("REFUND_ALLOCATION", sourceVersion))?.fact;
+    if (fact?.domain !== "REFUND_ALLOCATION") return undefined;
+    const { payload } = fact;
+    const key = refundLineKey(payload);
+    const line = applicablePaidLine(graph, payload);
+    if (units.has(key) || (line && payload.quantity !== null && payload.quantity > line.quantity))
+      return undefined;
+    units.set(key, payload.quantity);
+  }
+  return units;
+}
+
+function addToTotal(totals: Map<string, bigint>, key: string, amount: number): bigint {
+  const sum = (totals.get(key) ?? 0n) + BigInt(amount);
+  totals.set(key, sum);
+  return sum;
+}
+
+function validReturnQuantities(
+  graph: SelectionGraph,
+  allocations: ReadonlyMap<string, number | null>,
+): boolean {
+  const receiptIds = new Set<string>();
+  const byLine = new Map<string, bigint>();
+  const byAllocation = new Map<string, bigint>();
+  for (const { data } of graph.proof.selection.input.returnReceipts ?? []) {
+    if (!data || receiptIds.has(data.externalReceiptId)) return false;
+    receiptIds.add(data.externalReceiptId);
+    const { resellableQuantity, acceptedAt, externalOrderId, externalLineId, externalSkuId } = data;
+    const line = applicablePaidLine(graph, data);
+    if (!line || acceptedAt === null || resellableQuantity === null) continue;
+    const key = lineKey(externalOrderId, externalLineId, externalSkuId);
+    if (addToTotal(byLine, key, resellableQuantity) > BigInt(line.quantity)) return false;
+    const allocation = refundLineKey(data);
+    const allocated = allocations.get(allocation);
+    if (
+      allocated != null &&
+      addToTotal(byAllocation, allocation, resellableQuantity) > BigInt(allocated)
+    )
+      return false;
+  }
+  return true;
+}
+
+function validSettlementEvidence(graph: SelectionGraph, coverage: MetricCoverageV1): boolean {
+  const required = neededCollections[coverage.kind];
+  if (!graph.verified || !required.includes("refundAllocations")) return true;
+  const units = allocationUnits(graph);
+  return (
+    units !== undefined &&
+    (!required.includes("returnReceipts") || validReturnQuantities(graph, units))
+  );
+}
+
 function validFeeProjection(graph: SelectionGraph): boolean {
   const sources = observedSources(graph, coverageFor(graph, "FEE"));
   if (!sources) return false;
@@ -2534,6 +2618,7 @@ function validProjection(proof: SelectionProof): boolean {
     graph !== undefined &&
     coverage !== undefined &&
     coverage.collections.every((key) => projectionChecks[key](graph)) &&
+    validSettlementEvidence(graph, coverage) &&
     graph.used.size === graph.ids.size
   );
 }

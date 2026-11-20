@@ -3051,6 +3051,246 @@ it("keeps allocation quantity as a full-graph source quality check", () => {
   ).toBe(false);
 });
 
+const settledAt = "2026-11-02T10:00:00.000Z";
+const acceptedAt = "2026-11-02T12:00:00.000Z";
+
+function settledOrder(quantity = 1, shippingMinor = 0, extra: api.ConnectorOrder["items"] = []) {
+  const netMinor = 100 * quantity;
+  const items = [
+    { ...orderItem("l1", "sku-A", 100), quantity, grossMinor: netMinor, netMinor },
+    ...extra,
+  ];
+  const grossMinor = items.reduce((total, item) => total + item.grossMinor, 0);
+  const payableMinor = grossMinor + shippingMinor;
+  return cohortOrder({ items, grossMinor, shippingMinor, payableMinor, paidMinor: payableMinor });
+}
+
+function settledRefund(amount = 100, changes: Partial<api.ConnectorRefund> = {}) {
+  return {
+    ...baseRefund,
+    data: {
+      ...baseRefund.data,
+      requestedMinor: amount,
+      succeededMinor: amount,
+      succeededAt: settledAt,
+      ...changes,
+    },
+  };
+}
+
+type AllocationPayload = Extract<api.ObservedFactV1, { domain: "REFUND_ALLOCATION" }>["payload"];
+type ReturnPayload = Extract<api.ObservedFactV1, { domain: "RETURN_RECEIPT" }>["payload"];
+
+function settledAllocation(changes: Partial<AllocationPayload> = {}, sequence = 1) {
+  const payload = {
+    ...refund.payload,
+    merchandiseMinor: 100,
+    buyerShippingMinor: 0,
+    settledAt,
+    ...changes,
+  };
+  return {
+    ...refund,
+    domain: "REFUND_ALLOCATION" as const,
+    subject: { ...sku, externalSkuId: payload.externalSkuId },
+    factId: "allocation-" + sequence,
+    sequence,
+    sourceVersion: "observed-v1:g:0:e:" + sequence,
+    occurredAt: settledAt,
+    payload,
+  };
+}
+
+function acceptedReturn(changes: Partial<ReturnPayload> = {}, sequence = 1) {
+  const payload = { ...receipt.payload, acceptedAt, ...changes };
+  return {
+    ...receipt,
+    domain: "RETURN_RECEIPT" as const,
+    subject: { ...sku, externalSkuId: payload.externalSkuId },
+    factId: "return-" + sequence,
+    sequence,
+    sourceVersion: "observed-v1:g:0:e:" + sequence,
+    occurredAt: payload.acceptedAt ?? acceptedAt,
+    payload,
+  };
+}
+
+type SettlementSource = ReturnType<typeof settledAllocation> | ReturnType<typeof acceptedReturn>;
+type CostProof = ReturnType<typeof completeCostProof>;
+
+function settlementPartitions(capture: CostProof["capture"], sources: readonly SettlementSource[]) {
+  return capture.publications.map((certificate, index) => {
+    const certifiedReceipt = capture.receipts[index];
+    const stored = sources
+      .filter(
+        (fact) =>
+          JSON.stringify(fact.subject) === JSON.stringify(certificate.subject) &&
+          fact.domain === certificate.domain,
+      )
+      .map((fact) => returnedFact(fact, certifiedReceipt.receiptId));
+    if (stored.length === 0) return { certificate, certifiedReceipt, stored };
+    return {
+      certificate: { ...certificate, recordCount: stored.length },
+      certifiedReceipt: {
+        ...certifiedReceipt,
+        recordCount: stored.length,
+        factRefs: stored.map(membership),
+      },
+      stored,
+    };
+  });
+}
+
+function settlementLine({
+  externalOrderId,
+  externalLineId,
+  externalSkuId,
+  externalRefundId,
+}: Pick<
+  AllocationPayload,
+  "externalOrderId" | "externalLineId" | "externalSkuId" | "externalRefundId"
+>) {
+  return { externalOrderId, externalLineId, externalSkuId, externalRefundId };
+}
+
+function settlementProjection(
+  stored: readonly ReturnType<typeof returnedFact<SettlementSource>>[],
+) {
+  return {
+    refundAllocations: stored.flatMap(({ fact, receiptId }) => {
+      if (fact.domain !== "REFUND_ALLOCATION") return [];
+      const { merchandiseMinor, buyerShippingMinor, currency } = fact.payload;
+      const data = {
+        ...settlementLine(fact.payload),
+        merchandiseMinor,
+        buyerShippingMinor,
+        currency,
+      };
+      return [
+        { ...projectionRow, sourceVersion: fact.sourceVersion, evidenceIds: [receiptId], data },
+      ];
+    }),
+    returnReceipts: stored.flatMap(({ fact, receiptId }) => {
+      if (fact.domain !== "RETURN_RECEIPT") return [];
+      const { externalReceiptId, acceptedAt, resellableQuantity } = fact.payload;
+      const data = {
+        ...settlementLine(fact.payload),
+        externalReceiptId,
+        acceptedAt,
+        resellableQuantity,
+      };
+      return [
+        { ...projectionRow, sourceVersion: fact.sourceVersion, evidenceIds: [receiptId], data },
+      ];
+    }),
+  };
+}
+
+type SettlementFixture = Readonly<{
+  subject?: typeof store | typeof sku;
+  order?: ReturnType<typeof settledOrder>;
+  costs?: readonly SkuCosts[];
+  refunds?: readonly ReturnType<typeof settledRefund>[];
+  sources?: readonly SettlementSource[];
+}>;
+
+function settlementProof({
+  subject = store,
+  order = settledOrder(),
+  costs = [{ subject: sku, rows: [costWith({ quantity: order.data.items[0].quantity })] }],
+  refunds = [settledRefund()],
+  sources = [settledAllocation(), acceptedReturn()],
+}: SettlementFixture = {}) {
+  const proof = completeCostProof(subject, [order], costs);
+  const partitions = settlementPartitions(proof.capture, sources);
+  const stored = partitions.flatMap(({ stored }) => stored);
+  const capture = {
+    ...proof.capture,
+    facts: [...proof.capture.facts, ...stored],
+    publications: partitions.map(({ certificate }) => certificate),
+    receipts: partitions.map(({ certifiedReceipt }) => certifiedReceipt),
+  };
+  const input = { ...proof.selection.input, refundFacts: refunds, ...settlementProjection(stored) };
+  return { ...proof, capture, selection: { ...proof.selection, input } };
+}
+
+function expectInvalidFinance(proof: ReturnType<typeof settlementProof>) {
+  expect(api.ObservedCaptureV1Schema.safeParse(proof.capture).success).toBe(true);
+  expect(api.ScopedMetricInputV1Schema.safeParse(proof.selection).success).toBe(true);
+  const result = api.ObservedSelectionProofV1Schema.safeParse(proof);
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain(
+    "INVALID_SELECTION_EVIDENCE",
+  );
+}
+
+it.each([
+  ["allocation exceeds the paid line", [settledAllocation({ quantity: 100 }), acceptedReturn()]],
+  [
+    "one return exceeds the paid line",
+    [settledAllocation(), acceptedReturn({ resellableQuantity: 100 })],
+  ],
+  [
+    "two returns exceed the paid line",
+    [settledAllocation(), acceptedReturn(), acceptedReturn({ externalReceiptId: "rr2" }, 2)],
+  ],
+])("rejects VERIFIED settlement when %s", (_label, sources) => {
+  expect(api.ObservedSelectionProofV1Schema.safeParse(settlementProof()).success).toBe(true);
+  expectInvalidFinance(settlementProof({ sources }));
+});
+
+it("bounds cumulative accepted units by the witnessed allocation for that refund and line", () => {
+  const order = settledOrder(2);
+  const returns = [acceptedReturn(), acceptedReturn({ externalReceiptId: "rr2" }, 2)];
+  const partial = settlementProof({
+    order,
+    sources: [settledAllocation({ quantity: 1 }), ...returns],
+  });
+  expectInvalidFinance(partial);
+  const full = settlementProof({
+    order,
+    refunds: [settledRefund(200)],
+    sources: [settledAllocation({ quantity: 2, merchandiseMinor: 200 }), ...returns],
+  });
+  expect(api.ObservedSelectionProofV1Schema.safeParse(full).success).toBe(true);
+});
+
+it.each([
+  ["duplicate refund-line allocation", [settledAllocation(), settledAllocation({}, 2)]],
+  [
+    "duplicate physical return receipt",
+    [settledAllocation({ quantity: 2 }), acceptedReturn(), acceptedReturn({}, 2)],
+  ],
+])("rejects %s even when source versions differ", (_label, sources) => {
+  expectInvalidFinance(settlementProof({ order: settledOrder(2), sources }));
+});
+
+it("preserves genuine partial refunds and explicitly unknown quantities below VERIFIED", () => {
+  const refunds = [settledRefund(50)];
+  const partial = settlementProof({
+    refunds,
+    sources: [
+      settledAllocation({ merchandiseMinor: 50 }),
+      acceptedReturn({ resellableQuantity: 0 }),
+    ],
+  });
+  expect(api.ObservedSelectionProofV1Schema.safeParse(partial).success).toBe(true);
+  const unknown = settlementProof({
+    refunds,
+    sources: [
+      settledAllocation({ merchandiseMinor: 50, quantity: null, reason: "REFUND_UNKNOWN" }),
+      acceptedReturn({ resellableQuantity: null, reason: "RETURN_UNKNOWN" }),
+    ],
+  });
+  const selection = {
+    ...unknown.selection,
+    input: { ...unknown.selection.input, status: "INSUFFICIENT" },
+  };
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...unknown, selection }).success).toBe(
+    true,
+  );
+});
+
 it("keeps VERIFIED traffic independent of an unavailable cost in the capture", () => {
   const unavailable = withPayload(financeA.fact, {
     basis: "UNAVAILABLE",
