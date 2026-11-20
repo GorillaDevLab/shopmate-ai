@@ -2739,6 +2739,64 @@ it("distinguishes a certified empty cohort from an unknown payment and preserves
   }
 });
 
+it.each(["CLOSED", "CANCELLED"] as const)(
+  "rejects a VERIFIED payment with inconsistent amount on a %s order",
+  (status) => {
+    const order = cohortOrder({ status, paidMinor: 100 });
+    const proof = completeCostProof(sku, [order], [{ subject: sku, rows: [costAtPayment] }]);
+    expect(api.MetricInputV1Schema.safeParse(proof.selection.input).success).toBe(true);
+    expect(api.ScopedMetricInputV1Schema.safeParse(proof.selection).success).toBe(false);
+    expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(false);
+    const selection = {
+      ...proof.selection,
+      input: { ...proof.selection.input, status: "INSUFFICIENT" },
+    };
+    expect(api.ObservedSelectionProofV1Schema.safeParse({ ...proof, selection }).success).toBe(
+      true,
+    );
+  },
+);
+
+it("keeps a fully paid closed order and a known unpaid cancelled order distinguishable", () => {
+  const closed = cohortOrder({ status: "CLOSED" });
+  const cancelled = cohortOrder({ status: "CANCELLED", paidAt: null, paidMinor: 0 });
+  const withCost = completeCostProof(sku, [closed], [{ subject: sku, rows: [costAtPayment] }]);
+  const empty = completeCostProof(sku, [cancelled], [{ subject: sku, rows: [] }]);
+  expect(api.ObservedSelectionProofV1Schema.safeParse(withCost).success).toBe(true);
+  expect(api.ObservedSelectionProofV1Schema.safeParse(empty).success).toBe(true);
+});
+
+it("treats a genuine zero-payable paid order as a paid line with its own cost", () => {
+  const free = cohortOrder({
+    items: [orderItem("l1", "sku-A", 0)],
+    grossMinor: 0,
+    shippingMinor: 0,
+    payableMinor: 0,
+    paidMinor: 0,
+  });
+  const measured = completeCostProof(
+    sku,
+    [free],
+    [{ subject: sku, rows: [costWith({ unitCostMinor: 0 })] }],
+  );
+  const empty = completeCostProof(sku, [free], [{ subject: sku, rows: [] }]);
+  expect(api.ObservedSelectionProofV1Schema.safeParse(measured).success).toBe(true);
+  expect(api.ObservedSelectionProofV1Schema.safeParse(empty).success).toBe(false);
+});
+
+it("rejects a pending-payment order with provider-flagged paid activity as VERIFIED", () => {
+  const order = cohortOrder({
+    status: "PENDING_PAYMENT",
+    source: {
+      ...cohortOrder().data.source,
+      quality: { state: "PARTIAL", issues: ["SOURCE_INCONSISTENT"] },
+    },
+  });
+  const proof = completeCostProof(sku, [order], [{ subject: sku, rows: [costAtPayment] }]);
+  expect(api.MetricInputV1Schema.safeParse(proof.selection.input).success).toBe(true);
+  expect(api.ScopedMetricInputV1Schema.safeParse(proof.selection).success).toBe(false);
+});
+
 it.each([
   {
     basis: "UNAVAILABLE",

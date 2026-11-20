@@ -1665,12 +1665,11 @@ function confirmedFee(data: ProjectedData<"fees">): boolean {
 }
 
 function knownPayment(data: ProjectedData<"paymentFacts">): boolean {
-  return (
-    !hasProviderIssue(data.source.quality.issues, "PAYMENT_UNKNOWN") &&
-    data.paidMinor !== null &&
-    (data.paidAt !== null ||
-      (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status)))
-  );
+  if (hasProviderIssue(data.source.quality.issues, "PAYMENT_UNKNOWN")) return false;
+  // The payment and refund leaves infer these contradictions even without a provider flag.
+  if (data.paidAt !== null)
+    return data.status !== "PENDING_PAYMENT" && data.paidMinor === data.payableMinor;
+  return data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status);
 }
 
 function knownRefund(data: ProjectedData<"refundFacts">): boolean {
