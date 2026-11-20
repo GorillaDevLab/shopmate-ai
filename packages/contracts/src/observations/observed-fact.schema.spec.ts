@@ -2641,6 +2641,216 @@ it("preserves a confirmed zero unit cost in standalone VERIFIED COGS", () => {
   expect(selection.input.frozenCosts?.[0]?.data?.unitCostMinor).toBe(0);
 });
 
+const allocationData = {
+  ...line,
+  externalRefundId: refund.payload.externalRefundId,
+  merchandiseMinor: refund.payload.merchandiseMinor,
+  buyerShippingMinor: refund.payload.buyerShippingMinor,
+  currency: refund.payload.currency,
+};
+const returnData = {
+  ...line,
+  externalRefundId: receipt.payload.externalRefundId,
+  externalReceiptId: receipt.payload.externalReceiptId,
+  acceptedAt: receipt.payload.acceptedAt,
+  resellableQuantity: receipt.payload.resellableQuantity,
+};
+const feeData = {
+  ...window,
+  kind: "FULFILLMENT",
+  externalOrderId: "o1",
+  amountMinor: 0,
+  coverageBasisPoints: 10000,
+  basis: "CONFIRMED",
+};
+const projectionRow = {
+  binding,
+  observedAt: end,
+  sourceVersion: common.sourceVersion,
+  evidenceIds: cogsEvidence,
+};
+const contributionInput = {
+  ...cogsInput,
+  metricCoverage: [
+    {
+      ...cogsInput.metricCoverage[0],
+      subject: store,
+      kind: "CONTRIBUTION",
+      collections: [...cogsInput.metricCoverage[0].collections, "fees"],
+    },
+  ],
+  fees: [{ ...projectionRow, data: feeData }],
+};
+
+it.each([
+  [
+    "unknown merchandise allocation",
+    {
+      refundAllocations: [
+        { ...projectionRow, data: { ...allocationData, merchandiseMinor: null } },
+      ],
+    },
+  ],
+  [
+    "unknown buyer shipping allocation",
+    {
+      refundAllocations: [
+        { ...projectionRow, data: { ...allocationData, buyerShippingMinor: null } },
+      ],
+    },
+  ],
+  [
+    "unknown return acceptance",
+    { returnReceipts: [{ ...projectionRow, data: { ...returnData, acceptedAt: null } }] },
+  ],
+  [
+    "unknown resellable quantity",
+    { returnReceipts: [{ ...projectionRow, data: { ...returnData, resellableQuantity: null } }] },
+  ],
+])("requires known finance for standalone VERIFIED COGS with %s", (_label, changes) => {
+  const input = { ...cogsInput, ...changes };
+  expect(api.MetricInputV1Schema.safeParse(input).success).toBe(true);
+  const selection = { subject: sku, selectionReceiptIds: cogsEvidence, input };
+  expect(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(false);
+  expect(
+    api.ScopedMetricInputV1Schema.safeParse({
+      ...selection,
+      input: { ...input, status: "INSUFFICIENT" },
+    }).success,
+  ).toBe(true);
+});
+
+it.each([
+  { basis: "UNAVAILABLE", amountMinor: null, coverageBasisPoints: 10000 },
+  { basis: "ESTIMATED", amountMinor: 0, coverageBasisPoints: 10000 },
+  { basis: "CONFIRMED", amountMinor: 0, coverageBasisPoints: 100 },
+])("requires complete confirmed fee data for VERIFIED CONTRIBUTION (%o)", (changes) => {
+  const fees = [{ ...projectionRow, data: { ...feeData, ...changes } }];
+  const input = { ...contributionInput, fees };
+  const selection = { subject: store, selectionReceiptIds: cogsEvidence, input };
+  expect(api.MetricInputV1Schema.safeParse(input).success).toBe(true);
+  expect(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(false);
+  const estimated = api.ScopedMetricInputV1Schema.parse({
+    ...selection,
+    input: { ...input, status: "ESTIMATED" },
+  });
+  expect(estimated.input.fees?.[0]?.data).toMatchObject(changes);
+});
+
+it("retains confirmed zero fees and certified absence of charges for VERIFIED CONTRIBUTION", () => {
+  for (const fees of [contributionInput.fees, []]) {
+    const input = { ...contributionInput, fees };
+    const selection = { subject: store, selectionReceiptIds: cogsEvidence, input };
+    expect(api.ScopedMetricInputV1Schema.parse(selection).input.fees).toEqual(fees);
+  }
+});
+
+it("retains known zero allocation amounts and zero resellable quantity", () => {
+  const input = {
+    ...cogsInput,
+    refundAllocations: [
+      { ...projectionRow, data: { ...allocationData, merchandiseMinor: 0, buyerShippingMinor: 0 } },
+    ],
+    returnReceipts: [{ ...projectionRow, data: { ...returnData, resellableQuantity: 0 } }],
+  };
+  const selection = { subject: sku, selectionReceiptIds: cogsEvidence, input };
+  expect(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(true);
+});
+
+it("keeps VERIFIED GMV independent of quality in a nonrequired fee collection", () => {
+  const fees = [
+    { ...projectionRow, data: { ...feeData, basis: "UNAVAILABLE", amountMinor: null } },
+  ];
+  const input = {
+    ...metricInput(store, "GMV", ["paymentFacts", "fees"], cogsEvidence),
+    paymentFacts: [orderRow],
+    fees,
+  };
+  const selection = { subject: store, selectionReceiptIds: cogsEvidence, input };
+  expect(api.ScopedMetricInputV1Schema.parse(selection).input.fees).toEqual(fees);
+});
+
+it.each(["PAYMENT_UNKNOWN", "SOURCE_INCONSISTENT", "SOURCE_TIME_MISSING"] as const)(
+  "rejects standalone VERIFIED COGS with payment quality %s",
+  (code) => {
+    const order = cohortOrder();
+    const source = { ...order.data.source, quality: { state: "PARTIAL" as const, issues: [code] } };
+    const paymentFacts = [{ ...order, data: { ...order.data, source } }];
+    const input = { ...cogsInput, paymentFacts };
+    expect(api.MetricInputV1Schema.safeParse(input).success).toBe(true);
+    const selection = { subject: sku, selectionReceiptIds: cogsEvidence, input };
+    expect(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(false);
+    const proof = completeCostProof(sku, paymentFacts, [{ subject: sku, rows: [costAtPayment] }]);
+    expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(false);
+  },
+);
+
+const baseRefund = {
+  ...projectionRow,
+  sourceVersion: "base-refund-1",
+  evidenceIds: ["base-REFUNDS"],
+  data: {
+    externalStoreId: binding.externalStoreId,
+    externalRefundId: refund.payload.externalRefundId,
+    externalOrderId: line.externalOrderId,
+    externalSkuId: line.externalSkuId,
+    source: hasSource,
+    status: "SUCCEEDED",
+    requestedMinor: 185,
+    succeededMinor: 185,
+    requestedAt: paidInWindow,
+    succeededAt: end,
+    currency: "CNY",
+  },
+};
+
+it("rejects standalone VERIFIED when a required settled refund has an unknown amount", () => {
+  const data = {
+    ...baseRefund.data,
+    succeededMinor: null,
+    source: { ...hasSource, quality: { state: "PARTIAL", issues: ["REFUND_UNKNOWN"] } },
+  };
+  const input = { ...cogsInput, refundFacts: [{ ...baseRefund, data }] };
+  expect(api.MetricInputV1Schema.safeParse(input).success).toBe(true);
+  const selection = { subject: sku, selectionReceiptIds: cogsEvidence, input };
+  expect(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(false);
+});
+
+it("keeps allocation quantity as a full-graph source quality check", () => {
+  const proof = completeCostProof(sku, [cohortOrder()], [{ subject: sku, rows: [costAtPayment] }]);
+  const [costPage, , returnPage] = proof.capture.receipts;
+  const [costSeal, , returnSeal] = proof.capture.publications;
+  const [costCoverage, , returnCoverage] = proof.capture.coverage;
+  const source = returnedFact(refund, "R2");
+  const allocation = snapshot([source], 2, end);
+  const capture = {
+    ...proof.capture,
+    facts: [...proof.capture.facts, source],
+    receipts: [costPage, allocation.certifiedReceipt, returnPage],
+    publications: [costSeal, allocation.certificate, returnSeal],
+    coverage: [costCoverage, allocation.coverageRow, returnCoverage],
+  };
+  const input = {
+    ...proof.selection.input,
+    refundFacts: [baseRefund],
+    refundAllocations: [{ ...projectionRow, evidenceIds: ["R2"], data: allocationData }],
+  };
+  const selection = { ...proof.selection, input };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...proof, selection, capture }).success,
+  ).toBe(true);
+  const unknown = {
+    ...source,
+    fact: withPayload(source.fact, { quantity: null, reason: "REFUND_UNKNOWN" }),
+  };
+  expect(api.ScopedMetricInputV1Schema.safeParse(selection).success).toBe(true);
+  const unknownCapture = { ...capture, facts: [...proof.capture.facts, unknown] };
+  expect(
+    api.ObservedSelectionProofV1Schema.safeParse({ ...proof, selection, capture: unknownCapture })
+      .success,
+  ).toBe(false);
+});
+
 it("keeps VERIFIED traffic independent of an unavailable cost in the capture", () => {
   const unavailable = withPayload(financeA.fact, {
     basis: "UNAVAILABLE",

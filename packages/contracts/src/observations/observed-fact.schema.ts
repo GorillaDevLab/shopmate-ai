@@ -1617,10 +1617,58 @@ const scopedMetricObject = z.strictObject({
     .readonly(),
 });
 type ScopedInput = z.infer<typeof scopedMetricObject>;
+type ProjectedData<K extends MetricCollection> = NonNullable<MetricInputV1[K]>[number]["data"];
 
 function confirmedFrozenCost(data: MetricFrozenCost["data"]): boolean {
   // Both source schemas require a known amount and version for a confirmed cost.
   return data?.basis === "CONFIRMED";
+}
+
+function knownAllocation(data: ProjectedData<"refundAllocations">): boolean {
+  return data !== null && data.merchandiseMinor !== null && data.buyerShippingMinor !== null;
+}
+
+function knownReturn(data: ProjectedData<"returnReceipts">): boolean {
+  return data !== null && data.acceptedAt !== null && data.resellableQuantity !== null;
+}
+
+function confirmedFee(data: ProjectedData<"fees">): boolean {
+  return data?.basis === "CONFIRMED" && data.coverageBasisPoints === 10000;
+}
+
+function knownPayment(data: ProjectedData<"paymentFacts">): boolean {
+  return (
+    !hasProviderIssue(data.source.quality.issues, "PAYMENT_UNKNOWN") &&
+    data.paidMinor !== null &&
+    (data.paidAt !== null ||
+      (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status)))
+  );
+}
+
+function knownRefund(data: ProjectedData<"refundFacts">): boolean {
+  return (
+    !hasProviderIssue(data.source.quality.issues, "REFUND_UNKNOWN") &&
+    (data.status !== "SUCCEEDED" || (data.succeededAt !== null && data.succeededMinor !== null))
+  );
+}
+
+function verifiedFinancialSources(
+  input: MetricInputV1,
+  required: readonly MetricCollection[],
+): boolean {
+  return (
+    (!required.includes("paymentFacts") ||
+      (input.paymentFacts ?? []).every(({ data }) => knownPayment(data))) &&
+    (!required.includes("refundFacts") ||
+      (input.refundFacts ?? []).every(({ data }) => knownRefund(data))) &&
+    (!required.includes("frozenCosts") ||
+      (input.frozenCosts ?? []).every(({ data }) => confirmedFrozenCost(data))) &&
+    (!required.includes("refundAllocations") ||
+      (input.refundAllocations ?? []).every(({ data }) => knownAllocation(data))) &&
+    (!required.includes("returnReceipts") ||
+      (input.returnReceipts ?? []).every(({ data }) => knownReturn(data))) &&
+    (!required.includes("fees") || (input.fees ?? []).every(({ data }) => confirmedFee(data)))
+  );
 }
 
 function knownCampaignAmounts(data: MetricCampaignFact["data"]): boolean {
@@ -1634,8 +1682,7 @@ function knownCampaignAmounts(data: MetricCampaignFact["data"]): boolean {
 function verifiedScopedSources(input: MetricInputV1, coverage: MetricCoverageV1): boolean {
   return (
     coverage.coverageBasisPoints === 10000 &&
-    (!neededCollections[coverage.kind].includes("frozenCosts") ||
-      (input.frozenCosts ?? []).every(({ data }) => confirmedFrozenCost(data))) &&
+    verifiedFinancialSources(input, neededCollections[coverage.kind]) &&
     input.sourceWatermark !== null &&
     Date.parse(input.sourceWatermark) >= Date.parse(input.periodEnd) &&
     metricCollections.every((key) => (input[key] ?? []).every(({ data }) => data !== null)) &&
@@ -2086,13 +2133,7 @@ function validPayments(graph: SelectionGraph): boolean {
         !data.items.some((line) => line.externalSkuId === subject.externalSkuId)
       )
         return false;
-      return (
-        !graph.verified ||
-        (!hasProviderIssue(data.source.quality.issues, "PAYMENT_UNKNOWN") &&
-          data.paidMinor !== null &&
-          (data.paidAt !== null ||
-            (data.paidMinor === 0 && !["PAID", "FULFILLED", "COMPLETED"].includes(data.status))))
-      );
+      return !graph.verified || knownPayment(data);
     },
   );
 }
@@ -2128,12 +2169,7 @@ function validRefunds(graph: SelectionGraph): boolean {
           !eligible.has(JSON.stringify([data.externalOrderId, data.externalRefundId])))
       )
         return false;
-      return (
-        !graph.verified ||
-        (!hasProviderIssue(data.source.quality.issues, "REFUND_UNKNOWN") &&
-          (data.status !== "SUCCEEDED" ||
-            (data.succeededAt !== null && data.succeededMinor !== null)))
-      );
+      return !graph.verified || knownRefund(data);
     },
   );
 }
@@ -2199,13 +2235,9 @@ function financialDataMatches(
   data: object | null,
   verified: boolean,
 ): boolean {
-  const known =
-    fact.domain === "FROZEN_COST"
-      ? confirmedFrozenCost(fact.payload)
-      : fact.payload.reason === null;
-  if (verified && !known) return false;
   switch (fact.domain) {
     case "FROZEN_COST":
+      if (verified && !confirmedFrozenCost(fact.payload)) return false;
       return matchesFields(data, fact.payload, [
         ...financialLineFields,
         "quantity",
@@ -2216,6 +2248,8 @@ function financialDataMatches(
         "currency",
       ]);
     case "REFUND_ALLOCATION":
+      if (verified && (!knownAllocation(fact.payload) || fact.payload.quantity === null))
+        return false;
       return matchesFields(data, fact.payload, [
         ...financialLineFields,
         "externalRefundId",
@@ -2224,6 +2258,7 @@ function financialDataMatches(
         "currency",
       ]);
     case "RETURN_RECEIPT":
+      if (verified && !knownReturn(fact.payload)) return false;
       return matchesFields(data, fact.payload, [
         ...financialLineFields,
         "externalRefundId",
@@ -2332,17 +2367,18 @@ function validFeeProjection(graph: SelectionGraph): boolean {
     "FEE",
     graph.proof.selection.input.fees ?? [],
     (fact, data) => {
-      if (fact.domain !== "FEE" || (graph.verified && fact.payload.reason !== null)) return false;
+      if (fact.domain !== "FEE") return false;
       const { window, kind, externalOrderId, amountMinor, coverageBasisPoints, basis } =
         fact.payload;
-      return sameData(data, {
+      const expected = {
         ...window,
         kind,
         externalOrderId,
         amountMinor,
         coverageBasisPoints,
         basis,
-      });
+      };
+      return (!graph.verified || confirmedFee(expected)) && sameData(data, expected);
     },
   );
 }
