@@ -1798,7 +1798,11 @@ type MetricRow = Readonly<{
   evidenceIds: readonly string[];
 }>;
 type SelectedSource = Readonly<{ fact: ObservedFactV1; receiptIds: Set<string> }>;
-type OrderLine = Readonly<{ externalSkuId: string; quantity: number; paidAt: number | null }>;
+type OrderLine = Readonly<{
+  externalSkuId: string;
+  quantity: number;
+  payment: Readonly<{ epochMs: number; millisecondAligned: boolean }> | null;
+}>;
 type SelectionGraph = Readonly<{
   proof: SelectionProof;
   complete: boolean;
@@ -1835,14 +1839,21 @@ function indexOrderLines(input: MetricInputV1) {
   const orderLines = new Map<string, OrderLine>();
   const orderSkus = new Set<string>();
   for (const { data } of input.paymentFacts ?? []) {
-    const paidAt = data.paidAt === null ? null : Date.parse(data.paidAt);
+    // Date.parse drops fractional digits beyond the observed timestamp's millisecond precision.
+    const payment =
+      data.paidAt === null
+        ? null
+        : {
+            epochMs: Date.parse(data.paidAt),
+            millisecondAligned: !/\.\d{3}\d*[1-9]/u.test(data.paidAt),
+          };
     for (const line of data.items) {
       const { externalLineId, externalSkuId, quantity } = line;
       orderSkus.add(externalSkuId);
       orderLines.set(lineKey(data.externalOrderId, externalLineId, externalSkuId), {
         externalSkuId,
         quantity,
-        paidAt,
+        payment,
       });
     }
   }
@@ -2336,9 +2347,9 @@ function coversPaidOrderCosts(graph: SelectionGraph, sources: ProjectedSources):
     if (
       (subject.kind === "STORE" ||
         (subject.kind === "SKU" && line.externalSkuId === subject.externalSkuId)) &&
-      line.paidAt !== null &&
-      line.paidAt >= start &&
-      line.paidAt < end
+      line.payment !== null &&
+      line.payment.epochMs >= start &&
+      line.payment.epochMs < end
     )
       required.set(key, line);
   }
@@ -2351,7 +2362,12 @@ function coversPaidOrderCosts(graph: SelectionGraph, sources: ProjectedSources):
     seen.add(key);
     const line = required.get(key);
     if (!line) continue;
-    if (cost.quantity !== line.quantity || Date.parse(cost.frozenAt) !== line.paidAt) return false;
+    if (
+      !line.payment?.millisecondAligned ||
+      cost.quantity !== line.quantity ||
+      Date.parse(cost.frozenAt) !== line.payment.epochMs
+    )
+      return false;
     required.delete(key);
   }
   return required.size === 0;

@@ -2647,6 +2647,19 @@ it("requires confirmed cost for a SKU line while retaining the full original pai
   ).toBe(true);
 });
 
+it.each([
+  ["same instant with extra fractional zeros", "2026-11-02T01:00:00.000000Z", true],
+  ["same instant with an explicit offset", "2026-11-02T09:00:00+08:00", true],
+  ["later instant truncated by Date.parse", "2026-11-02T01:00:00.0001Z", false],
+] as const)("checks the frozen payment instant for %s", (_label, paidAt, matches) => {
+  const proof = completeCostProof(
+    sku,
+    [cohortOrder({ paidAt })],
+    [{ subject: sku, rows: [costAtPayment] }],
+  );
+  expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(matches);
+});
+
 it.each([start, end, pastWindow.periodStart])(
   "uses half-open payment eligibility for a payment at %s",
   (paidAt) => {
