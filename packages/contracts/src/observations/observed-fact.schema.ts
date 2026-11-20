@@ -2504,7 +2504,7 @@ type RefundBudget = Readonly<{
   fullySelected: boolean;
 }>;
 
-function settledRefundBudgets(graph: SelectionGraph): Map<string, RefundBudget> {
+function settledRefundBudgets(graph: SelectionGraph): Map<string, RefundBudget> | undefined {
   const { input, subject } = graph.proof.selection;
   const orders = paidOrderBudgets(input);
   const refunds = new Map<string, RefundBudget>();
@@ -2514,10 +2514,10 @@ function settledRefundBudgets(graph: SelectionGraph): Map<string, RefundBudget> 
       !order ||
       refund.status !== "SUCCEEDED" ||
       refund.succeededMinor === null ||
-      refund.succeededAt === null ||
-      (refund.externalSkuId !== null && !order.skus.has(refund.externalSkuId))
+      refund.succeededAt === null
     )
       continue;
+    if (refund.externalSkuId !== null && !order.skus.has(refund.externalSkuId)) return undefined;
     refunds.set(refund.externalRefundId, {
       succeededMinor: refund.succeededMinor,
       shippingMinor: order.shippingMinor,
@@ -2530,6 +2530,7 @@ function settledRefundBudgets(graph: SelectionGraph): Map<string, RefundBudget> 
 
 function validAllocationAmounts(graph: SelectionGraph): boolean {
   const refunds = settledRefundBudgets(graph);
+  if (!refunds) return false;
   const byLine = new Map<string, bigint>();
   const byOrder = new Map<string, bigint>();
   const byRefund = new Map<string, bigint>();

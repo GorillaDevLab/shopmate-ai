@@ -3403,6 +3403,18 @@ it("does not demand allocations for settlements outside the paid cohort", () => 
   expect(api.ObservedSelectionProofV1Schema.safeParse(proof).success).toBe(true);
 });
 
+it("rejects a successful STORE refund that names no SKU on its original paid order", () => {
+  expect(api.ObservedSelectionProofV1Schema.safeParse(settlementProof()).success).toBe(true);
+  const refunds = [settledRefund(100, { externalSkuId: "sku-missing" })];
+  const proof = settlementProof({ refunds, sources: [] });
+  expectInvalidFinance(proof);
+  const selection = {
+    ...proof.selection,
+    input: { ...proof.selection.input, status: "INSUFFICIENT" },
+  };
+  expect(api.ObservedSelectionProofV1Schema.safeParse({ ...proof, selection }).success).toBe(true);
+});
+
 it("rejects an accepted return before its original in-window payment", () => {
   const sources = [settledAllocation(), acceptedReturn({ acceptedAt: start })];
   expectInvalidFinance(settlementProof({ sources }));
