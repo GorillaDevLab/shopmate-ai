@@ -1299,6 +1299,25 @@ it("selects the corrected snapshot while preserving the original A1 insertion an
   expect(earlier.facts).toEqual([a1, b1]);
 });
 
+it("rejects two certificates occupying the same ordinal of one partition", () => {
+  const [origin, current] = correctedCapture.publications;
+  const occupied = { ...current, publicationSequence: origin.publicationSequence };
+  const publications = [origin, occupied];
+  expect(api.ObservedPublicationV1Schema.safeParse(occupied).success).toBe(true);
+  const result = api.ObservedCaptureV1Schema.safeParse({ ...correctedCapture, publications });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain("INVALID_CAPTURE_GRAPH");
+});
+
+it("allows sparse supplied ordinals for seals from the same partition", () => {
+  const [origin, current] = correctedCapture.publications;
+  const publications = [origin, { ...current, publicationSequence: 8 }];
+  const capture = api.ObservedCaptureV1Schema.parse({ ...correctedCapture, publications });
+  expect(capture.publications.map(({ publicationSequence }) => publicationSequence)).toEqual([
+    1, 8,
+  ]);
+});
+
 it.each(["fact ID", "payload hash", "origin receipt", "publication cutoff"])(
   "rejects a contradictory %s for an immutable source version in a historical receipt",
   (conflict) => {
@@ -2969,10 +2988,11 @@ it("retains an earlier-window origin for an eligible history fact", () => {
   const fact = { ...a1.fact, occurredAt: start, payload: { ...a1.fact.payload, frozenAt: start } };
   const historyCertificate = { ...firstSnapshot.certificate, window: pastWindow };
   const historyReceipt = { ...firstSnapshot.certifiedReceipt, window: pastWindow };
+  const currentCertificate = { ...correctedSnapshot.certificate, publicationSequence: 1 };
   const capture = {
     ...correctedCapture,
     facts: [{ ...a1, fact }, b2],
-    publications: [historyCertificate, correctedSnapshot.certificate],
+    publications: [historyCertificate, currentCertificate],
     receipts: [historyReceipt, correctedSnapshot.certifiedReceipt],
   };
   expect(api.ObservedCaptureV1Schema.safeParse(capture).success).toBe(true);

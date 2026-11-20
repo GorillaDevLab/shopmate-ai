@@ -1251,10 +1251,18 @@ function partitionKey(value: Pick<Partition, "domain" | "subject">): string {
 
 function currentPublications(capture: Capture): Map<string, ObservedPublicationV1> | undefined {
   const publications = new Map<string, ObservedPublicationV1>();
+  const ordinals = new Set<string>();
   const domains = new Set(capture.domains);
   for (const publication of capture.publications) {
+    // Every certificate must match the capture's full binding and generation.
+    const ordinal = JSON.stringify([
+      partitionKey(publication),
+      windowKey(publication.window),
+      publication.publicationSequence,
+    ]);
     if (
       publications.has(publication.publicationId) ||
+      ordinals.has(ordinal) ||
       !sameScope(publication, capture) ||
       !domains.has(publication.domain) ||
       publication.modelVersion !== capture.modelVersion ||
@@ -1263,6 +1271,7 @@ function currentPublications(capture: Capture): Map<string, ObservedPublicationV
       publication.through > capture.visibleAt
     )
       return undefined;
+    ordinals.add(ordinal);
     publications.set(publication.publicationId, publication);
   }
   return publications;
