@@ -1374,6 +1374,53 @@ it("rejects a known predecessor that assigns the corrected fact to a different s
   expect(result.error?.issues.map(({ message }) => message)).toContain("INVALID_CAPTURE_GRAPH");
 });
 
+const b4 = returnedFact(
+  {
+    ...b1.fact,
+    sequence: 4,
+    sourceVersion: "observed-v1:g:0:e:4",
+    priorVersion: b1.fact.sourceVersion,
+    payloadHash: "d".repeat(64),
+  },
+  "R1",
+);
+const repeatedFactOrigin = snapshot([a1, b1, b4], 1, end);
+
+it("rejects the same logical fact at different versions on one returned receipt", () => {
+  const records = [a1.fact, b1.fact, b4.fact];
+  const { certificate, certifiedReceipt } = repeatedFactOrigin;
+  const publisher = api.ObservedPublishedPageV1Schema.safeParse({
+    ...page,
+    pageId: certifiedReceipt.pageId,
+    pageHash: certifiedReceipt.pageHash,
+    publication: certificate,
+    records,
+  });
+  expect(publisher.error?.issues.map(({ message }) => message)).toContain("INVALID_PUBLISHED_PAGE");
+  const append = api.AppendObservedPageV1Schema.safeParse({
+    ...appendPage,
+    ...partition,
+    domain: "FROZEN_COST",
+    subject: sku,
+    records,
+  });
+  expect(append.error?.issues.map(({ message }) => message)).toContain("INVALID_PAGE_RECORDS");
+  const result = api.ObservedReceiptV1Schema.safeParse(certifiedReceipt);
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain(
+    "INVALID_RECEIPT_MEMBERSHIP",
+  );
+});
+
+it("rejects duplicate logical IDs even when a receipt is reached only as an origin", () => {
+  const capture = captured([a1, b2], correctedSnapshot, repeatedFactOrigin);
+  const result = api.ObservedCaptureV1Schema.safeParse(capture);
+  expect(result.success).toBe(false);
+  expect(result.error?.issues.map(({ message }) => message)).toContain(
+    "INVALID_RECEIPT_MEMBERSHIP",
+  );
+});
+
 it.each(["fact ID", "payload hash", "origin receipt", "publication cutoff"])(
   "rejects a contradictory %s for an immutable source version in a historical receipt",
   (conflict) => {

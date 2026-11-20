@@ -961,11 +961,13 @@ function validMembership(value: {
 }): boolean {
   if (value.recordCount !== value.factRefs.length) return false;
   const prefix = "observed-v1:g:" + value.generation + ":e:";
+  const ids = new Set<string>();
   let lastSequence = 0;
   for (const ref of value.factRefs) {
-    if (!ref.sourceVersion.startsWith(prefix)) return false;
+    if (!ref.sourceVersion.startsWith(prefix) || ids.has(ref.factId)) return false;
     const sequence = Number(ref.sourceVersion.slice(prefix.length));
     if (sequence <= lastSequence) return false;
+    ids.add(ref.factId);
     lastSequence = sequence;
   }
   return true;
