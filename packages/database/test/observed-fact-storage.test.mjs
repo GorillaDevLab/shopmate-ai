@@ -328,6 +328,7 @@ function registerStorageCases() {
     wideIdentities(state));
   registerPayloadCases(state, financePayloadCases);
   registerPayloadCases(state, measurementPayloadCases);
+  registerPayloadCases(state, catalogPayloadCases);
 }
 
 function validatedRunnerUrl(value) {
@@ -1013,6 +1014,54 @@ const measurementPayloadCases = [
       { externalCampaignId: ["campaign/甲"] },
       { attributionPolicyVersion: null },
       { reason: undefined },
+    ],
+  },
+];
+
+const catalogPayloadCases = [
+  {
+    domain: "LISTING",
+    generation: 27,
+    payload: {
+      externalSkuId: subject.externalSkuId,
+      listedAt: periodStart,
+      effectiveAt: periodStart,
+      fromStatus: "UNLISTED",
+      toStatus: "LISTED",
+    },
+    accepted: [
+      { fromStatus: "DELISTED", effectiveAt: periodEnd },
+      { toStatus: "DELISTED", effectiveAt: periodEnd },
+    ],
+    rejected: [
+      { effectiveAt: periodEnd },
+      { fromStatus: "LISTED" },
+      { listedAt: periodEnd, fromStatus: "DELISTED" },
+      { effectiveAt: "2026-10-11T16:00:00.001Z", fromStatus: "DELISTED" },
+      { fromStatus: "DRAFT" },
+      { toStatus: "UNLISTED" },
+      { externalSkuId: "SKU/甲" },
+      { updatedAt: periodStart },
+    ],
+  },
+  {
+    domain: "PRICE",
+    generation: 28,
+    payload: priceFact("fixture", 1).payload,
+    accepted: [
+      { priorPriceMinor: null, priceMinor: 0, effectiveAt: periodEnd },
+      { priorPriceMinor: Number.MAX_SAFE_INTEGER, priceVersion: "🚀".repeat(128) },
+    ],
+    rejected: [
+      { effectiveAt: "2026-10-11T16:00:00.001Z" },
+      { priorPriceMinor: undefined },
+      { priceMinor: null },
+      { priceMinor: 1.5 },
+      { priorPriceMinor: -1 },
+      { priceVersion: "🚀".repeat(129) },
+      { priceVersion: {} },
+      { externalSkuId: " SKU/甲" },
+      { currency: "USD" },
     ],
   },
 ];

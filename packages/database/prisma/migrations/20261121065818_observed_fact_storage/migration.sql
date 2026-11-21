@@ -59,10 +59,15 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
   FROM (SELECT value_#>>'{}' AS text_) AS scalar
 $$;
 
-CREATE FUNCTION public.observed_finance_line(p_ JSONB, subject_ TEXT) RETURNS BOOLEAN
+CREATE FUNCTION public.observed_payload_sku(p_ JSONB, subject_ TEXT) RETURNS BOOLEAN
 LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
   SELECT public.observed_json_id(p_->'externalSkuId')
     AND p_->>'externalSkuId'=subject_ COLLATE "C"
+$$;
+
+CREATE FUNCTION public.observed_finance_line(p_ JSONB, subject_ TEXT) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_payload_sku(p_,subject_)
     AND public.observed_json_id(p_->'externalOrderId')
     AND public.observed_json_id(p_->'externalLineId')
 $$;
@@ -198,6 +203,31 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
       'ATTRIBUTION_MISSING',p_->'coverageBasisPoints'='10000'::jsonb)
 $$;
 
+CREATE FUNCTION public.observed_listing(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','listedAt','effectiveAt','fromStatus','toStatus'])
+    AND public.observed_payload_sku(p_,subject_)
+    AND p_->>'fromStatus' IN ('UNLISTED','LISTED','DELISTED')
+    AND p_->>'toStatus' IN ('LISTED','DELISTED')
+    AND p_->>'fromStatus'<>p_->>'toStatus'
+    AND listed_<=effective_ AND effective_<=seen_
+    AND (p_->>'fromStatus'<>'UNLISTED' OR p_->>'toStatus'<>'LISTED' OR listed_=effective_)
+  FROM (SELECT public.observed_json_time(p_->'listedAt') AS listed_,
+    public.observed_json_time(p_->'effectiveAt') AS effective_) AS times
+$$;
+
+CREATE FUNCTION public.observed_price(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','effectiveAt','priorPriceMinor',
+      'priceMinor','priceVersion','currency'])
+    AND public.observed_payload_sku(p_,subject_)
+    AND public.observed_json_time(p_->'effectiveAt')<=seen_
+    AND (p_->'priorPriceMinor'='null'::jsonb OR public.observed_json_integer(p_->'priorPriceMinor'))
+    AND public.observed_json_integer(p_->'priceMinor')
+    AND public.observed_json_id(p_->'priceVersion')
+    AND p_->>'currency'='CNY'
+$$;
+
 CREATE FUNCTION public.observed_payload_valid(
   domain_ TEXT, p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ
 ) RETURNS BOOLEAN
@@ -209,18 +239,21 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
     WHEN 'FEE' THEN public.observed_fee(p_,seen_)
     WHEN 'TRAFFIC' THEN public.observed_traffic(p_,seen_)
     WHEN 'CAMPAIGN_MEASUREMENT' THEN public.observed_campaign(p_,subject_,seen_)
+    WHEN 'LISTING' THEN public.observed_listing(p_,subject_,seen_)
+    WHEN 'PRICE' THEN public.observed_price(p_,subject_,seen_)
     ELSE jsonb_typeof(p_)='object'
   END
 $$;
 
 REVOKE ALL ON FUNCTION public.observed_json_keys(JSONB,TEXT[]),public.observed_json_id(JSONB),
   public.observed_json_number(JSONB),public.observed_json_integer(JSONB,BIGINT,BIGINT),
-  public.observed_json_time(JSONB),public.observed_finance_line(JSONB,TEXT),
+  public.observed_json_time(JSONB),public.observed_payload_sku(JSONB,TEXT),public.observed_finance_line(JSONB,TEXT),
   public.observed_frozen_cost(JSONB,TEXT,TIMESTAMPTZ),public.observed_refund_allocation(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_return_receipt(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_closed_window(JSONB,TIMESTAMPTZ),public.observed_measurement_quality(JSONB,BOOLEAN,TEXT,BOOLEAN),
   public.observed_fee(JSONB,TIMESTAMPTZ),public.observed_traffic(JSONB,TIMESTAMPTZ),
   public.observed_campaign_date(JSONB,JSONB),public.observed_campaign(JSONB,TEXT,TIMESTAMPTZ),
+  public.observed_listing(JSONB,TEXT,TIMESTAMPTZ),public.observed_price(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_payload_valid(TEXT,JSONB,TEXT,TIMESTAMPTZ) FROM PUBLIC;
 
 CREATE TABLE public.observed_scopes (
