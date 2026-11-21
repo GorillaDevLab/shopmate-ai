@@ -113,6 +113,91 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
         AND p_->'reason'='null'::jsonb END
 $$;
 
+CREATE FUNCTION public.observed_closed_window(w_ JSONB, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(w_,ARRAY['periodStart','periodEnd','timezone','currency'])
+    AND w_->>'timezone'='Asia/Shanghai' AND w_->>'currency'='CNY'
+    AND starts_<ends_ AND ends_<=seen_
+  FROM (SELECT public.observed_json_time(w_->'periodStart') AS starts_,
+    public.observed_json_time(w_->'periodEnd') AS ends_) AS limits
+$$;
+
+CREATE FUNCTION public.observed_measurement_quality(
+  reason_ JSONB, missing_ BOOLEAN, missing_reason_ TEXT, complete_ BOOLEAN
+) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT reason_=CASE WHEN missing_ THEN to_jsonb(missing_reason_)
+    WHEN NOT complete_ THEN '"PARTIAL_COVERAGE"'::jsonb ELSE 'null'::jsonb END
+$$;
+
+CREATE FUNCTION public.observed_fee(p_ JSONB, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['chargeId','kind','externalOrderId','externalCampaignId',
+      'window','amountMinor','basis','coverageBasisPoints','reason'])
+    AND public.observed_json_id(p_->'chargeId')
+    AND p_->>'kind' IN ('FULFILLMENT','PLATFORM','PAYMENT','ADVERTISING_PROMOTION','OTHER_OPERATING')
+    AND (p_->'externalOrderId'='null'::jsonb OR public.observed_json_id(p_->'externalOrderId'))
+    AND (p_->'externalCampaignId'='null'::jsonb OR public.observed_json_id(p_->'externalCampaignId'))
+    AND public.observed_closed_window(p_->'window',seen_)
+    AND public.observed_json_integer(p_->'coverageBasisPoints',0,10000)
+    AND CASE p_->>'basis'
+      WHEN 'UNAVAILABLE' THEN p_->'amountMinor'='null'::jsonb AND p_->>'reason'='FEE_MISSING'
+      WHEN 'ESTIMATED' THEN public.observed_json_integer(p_->'amountMinor') AND p_->>'reason'='FEE_ESTIMATED'
+      WHEN 'CONFIRMED' THEN public.observed_json_integer(p_->'amountMinor')
+        AND public.observed_measurement_quality(p_->'reason',FALSE,'FEE_MISSING',p_->'coverageBasisPoints'='10000'::jsonb)
+      ELSE FALSE END
+$$;
+
+CREATE FUNCTION public.observed_traffic(p_ JSONB, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['window','visitors','cart','checkout','paidOrders',
+      'measurementVersion','coverageBasisPoints','reason'])
+    AND public.observed_closed_window(p_->'window',seen_)
+    AND (p_->'visitors'='null'::jsonb OR public.observed_json_integer(p_->'visitors'))
+    AND (p_->'cart'='null'::jsonb OR public.observed_json_integer(p_->'cart'))
+    AND (p_->'checkout'='null'::jsonb OR public.observed_json_integer(p_->'checkout'))
+    AND (p_->'paidOrders'='null'::jsonb OR public.observed_json_integer(p_->'paidOrders'))
+    AND public.observed_json_id(p_->'measurementVersion')
+    AND public.observed_json_integer(p_->'coverageBasisPoints',0,10000)
+    AND public.observed_measurement_quality(p_->'reason',
+      'null'::jsonb IN (p_->'visitors',p_->'cart',p_->'checkout',p_->'paidOrders'),
+      'TRAFFIC_MISSING',p_->'coverageBasisPoints'='10000'::jsonb)
+$$;
+
+CREATE FUNCTION public.observed_campaign_date(day_ JSONB, w_ JSONB) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT jsonb_typeof(day_)='string' AND day_#>>'{}' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+    AND day_#>>'{}'=to_char(starts_ AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD')
+    -- The last included millisecond belongs to the business day even when the end is midnight.
+    AND day_#>>'{}'=to_char((ends_-interval '1 millisecond') AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD')
+  FROM (SELECT public.observed_json_time(w_->'periodStart') AS starts_,
+    public.observed_json_time(w_->'periodEnd') AS ends_) AS limits
+$$;
+
+CREATE FUNCTION public.observed_campaign(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalCampaignId','businessDate','window','spendMinor',
+      'attributedRevenueMinor','eligibleCount','measuredCount','measurementVersion',
+      'attributionPolicyVersion','coverageBasisPoints','currency','reason'])
+    AND public.observed_json_id(p_->'externalCampaignId')
+    AND p_->>'externalCampaignId'=subject_ COLLATE "C"
+    AND public.observed_closed_window(p_->'window',seen_)
+    AND public.observed_campaign_date(p_->'businessDate',p_->'window')
+    AND (p_->'spendMinor'='null'::jsonb OR public.observed_json_integer(p_->'spendMinor'))
+    AND (p_->'attributedRevenueMinor'='null'::jsonb OR public.observed_json_integer(p_->'attributedRevenueMinor'))
+    AND (p_->'eligibleCount'='null'::jsonb OR public.observed_json_integer(p_->'eligibleCount'))
+    AND (p_->'measuredCount'='null'::jsonb OR public.observed_json_integer(p_->'measuredCount'))
+    AND ('null'::jsonb IN (p_->'eligibleCount',p_->'measuredCount')
+      OR public.observed_json_number(p_->'measuredCount')<=public.observed_json_number(p_->'eligibleCount'))
+    AND public.observed_json_id(p_->'measurementVersion')
+    AND public.observed_json_id(p_->'attributionPolicyVersion')
+    AND public.observed_json_integer(p_->'coverageBasisPoints',0,10000)
+    AND p_->>'currency'='CNY'
+    AND public.observed_measurement_quality(p_->'reason',
+      'null'::jsonb IN (p_->'spendMinor',p_->'attributedRevenueMinor',p_->'eligibleCount',p_->'measuredCount'),
+      'ATTRIBUTION_MISSING',p_->'coverageBasisPoints'='10000'::jsonb)
+$$;
+
 CREATE FUNCTION public.observed_payload_valid(
   domain_ TEXT, p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ
 ) RETURNS BOOLEAN
@@ -121,6 +206,9 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
     WHEN 'FROZEN_COST' THEN public.observed_frozen_cost(p_,subject_,seen_)
     WHEN 'REFUND_ALLOCATION' THEN public.observed_refund_allocation(p_,subject_,seen_)
     WHEN 'RETURN_RECEIPT' THEN public.observed_return_receipt(p_,subject_,seen_)
+    WHEN 'FEE' THEN public.observed_fee(p_,seen_)
+    WHEN 'TRAFFIC' THEN public.observed_traffic(p_,seen_)
+    WHEN 'CAMPAIGN_MEASUREMENT' THEN public.observed_campaign(p_,subject_,seen_)
     ELSE jsonb_typeof(p_)='object'
   END
 $$;
@@ -130,6 +218,9 @@ REVOKE ALL ON FUNCTION public.observed_json_keys(JSONB,TEXT[]),public.observed_j
   public.observed_json_time(JSONB),public.observed_finance_line(JSONB,TEXT),
   public.observed_frozen_cost(JSONB,TEXT,TIMESTAMPTZ),public.observed_refund_allocation(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_return_receipt(JSONB,TEXT,TIMESTAMPTZ),
+  public.observed_closed_window(JSONB,TIMESTAMPTZ),public.observed_measurement_quality(JSONB,BOOLEAN,TEXT,BOOLEAN),
+  public.observed_fee(JSONB,TIMESTAMPTZ),public.observed_traffic(JSONB,TIMESTAMPTZ),
+  public.observed_campaign_date(JSONB,JSONB),public.observed_campaign(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_payload_valid(TEXT,JSONB,TEXT,TIMESTAMPTZ) FROM PUBLIC;
 
 CREATE TABLE public.observed_scopes (

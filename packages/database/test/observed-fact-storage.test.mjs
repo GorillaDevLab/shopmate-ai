@@ -327,6 +327,7 @@ function registerStorageCases() {
   test("maximum-width opaque identities compare exactly without overflowing indexes", () =>
     wideIdentities(state));
   registerPayloadCases(state, financePayloadCases);
+  registerPayloadCases(state, measurementPayloadCases);
 }
 
 function validatedRunnerUrl(value) {
@@ -888,6 +889,134 @@ const financePayloadCases = [
   },
 ];
 
+const storeSubject = { kind: "STORE" };
+const campaignSubject = { kind: "CAMPAIGN", externalCampaignId: "campaign/甲" };
+const measurementWindow = { periodStart, periodEnd, timezone: "Asia/Shanghai", currency: "CNY" };
+const historicalWindow = {
+  ...measurementWindow,
+  periodStart: "1990-06-30T15:00:00.000Z",
+  periodEnd: "1990-07-01T15:00:00.000Z",
+};
+const feePayload = {
+  chargeId: "charge/1",
+  kind: "ADVERTISING_PROMOTION",
+  externalOrderId: null,
+  externalCampaignId: campaignSubject.externalCampaignId,
+  window: measurementWindow,
+  amountMinor: 0,
+  basis: "CONFIRMED",
+  coverageBasisPoints: 10000,
+  reason: null,
+};
+const trafficPayload = {
+  window: measurementWindow,
+  visitors: 0,
+  cart: 2,
+  checkout: 3,
+  paidOrders: 1,
+  measurementVersion: "traffic/1",
+  coverageBasisPoints: 7500,
+  reason: "PARTIAL_COVERAGE",
+};
+const campaignPayload = {
+  externalCampaignId: campaignSubject.externalCampaignId,
+  businessDate: "1990-07-01",
+  window: historicalWindow,
+  spendMinor: 0,
+  attributedRevenueMinor: 0,
+  eligibleCount: 10,
+  measuredCount: 1,
+  measurementVersion: "campaign/1",
+  attributionPolicyVersion: "attribution/旧",
+  coverageBasisPoints: 10000,
+  currency: "CNY",
+  reason: null,
+};
+
+const measurementPayloadCases = [
+  {
+    domain: "FEE",
+    generation: 23,
+    subject: storeSubject,
+    payload: feePayload,
+    accepted: [
+      { basis: "ESTIMATED", reason: "FEE_ESTIMATED" },
+      { basis: "UNAVAILABLE", amountMinor: null, reason: "FEE_MISSING" },
+      { externalOrderId: "order/1", externalCampaignId: null },
+      { coverageBasisPoints: 0, reason: "PARTIAL_COVERAGE" },
+    ],
+    rejected: [
+      { coverageBasisPoints: 10001 },
+      { coverageBasisPoints: 1 },
+      { basis: "UNAVAILABLE", reason: "FEE_MISSING" },
+      { basis: "CONFIRMED", amountMinor: null },
+      { kind: "PAYOUT" },
+      { externalCampaignId: { id: "campaign/1" } },
+      { externalOrderId: undefined },
+      { window: { ...measurementWindow, timezone: "UTC" } },
+      { window: { ...measurementWindow, currency: "USD" } },
+      { window: { ...measurementWindow, oracle: null } },
+      { window: { ...measurementWindow, periodStart: periodEnd } },
+      { window: { ...measurementWindow, periodEnd: "2026-10-11T16:00:00.001Z" } },
+      { window: { ...measurementWindow, periodStart: "2026-10-00T16:00:00.000Z" } },
+      { window: ["Asia/Shanghai", "CNY"] },
+    ],
+  },
+  {
+    domain: "TRAFFIC",
+    generation: 24,
+    payload: trafficPayload,
+    accepted: [
+      { coverageBasisPoints: 10000, reason: null },
+      { visitors: null, coverageBasisPoints: 10000, reason: "TRAFFIC_MISSING" },
+    ],
+    rejected: [
+      { cart: null },
+      { coverageBasisPoints: 10000 },
+      { paidOrders: false },
+      { visitors: "0" },
+      { checkout: Number.MAX_SAFE_INTEGER + 1 },
+      { measurementVersion: "" },
+      { window: null },
+      { window: { ...measurementWindow, periodEnd: "2026-10-11T16:00:00.001Z" } },
+    ],
+  },
+  {
+    label: "STORE TRAFFIC",
+    domain: "TRAFFIC",
+    generation: 25,
+    subject: storeSubject,
+    payload: trafficPayload,
+    rejected: [{ oracle: null }],
+  },
+  {
+    domain: "CAMPAIGN_MEASUREMENT",
+    generation: 26,
+    subject: campaignSubject,
+    payload: campaignPayload,
+    receiptWindow: { ...historicalWindow, through: "1990-07-01T16:00:00.000Z" },
+    observedAt: "1990-07-01T16:00:00.000Z",
+    accepted: [
+      { eligibleCount: null, reason: "ATTRIBUTION_MISSING" },
+      { coverageBasisPoints: 1, measuredCount: 10, reason: "PARTIAL_COVERAGE" },
+    ],
+    rejected: [
+      { businessDate: "1990-06-30" },
+      { businessDate: "1990-06-31" },
+      { businessDate: 19900701 },
+      { window: { ...historicalWindow, periodStart: "1990-06-30T14:59:59.999Z" } },
+      { window: { ...historicalWindow, periodEnd: "1990-07-01T15:00:00.001Z" } },
+      { measuredCount: 11 },
+      { measuredCount: 11, spendMinor: null, reason: "ATTRIBUTION_MISSING" },
+      { spendMinor: null },
+      { externalCampaignId: "other-campaign" },
+      { externalCampaignId: ["campaign/甲"] },
+      { attributionPolicyVersion: null },
+      { reason: undefined },
+    ],
+  },
+];
+
 function payloadFact(spec, sequence, payload) {
   return priceFact(`typed-${spec.domain}-${sequence}`, sequence, null, {
     domain: spec.domain,
@@ -901,7 +1030,7 @@ function payloadFact(spec, sequence, payload) {
 
 function registerPayloadCases(state, cases) {
   for (const spec of cases) {
-    test(`${spec.domain} admits contract payloads and rejects malformed typed payloads`, () =>
+    test(`${spec.label ?? spec.domain} admits contract payloads and rejects malformed typed payloads`, () =>
       validatePayloads(state, spec));
   }
 }
