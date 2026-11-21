@@ -1080,10 +1080,39 @@ async function rejectUpgrade(client, sql, message) {
   assert.equal(rows[0].relation, null);
 }
 
+async function rejectExistingGuardObjects(client, sql) {
+  const ownershipCases = [
+    [
+      `CREATE FUNCTION public.observed_test_existing() RETURNS name
+       LANGUAGE SQL SECURITY DEFINER SET search_path=pg_catalog AS 'SELECT CURRENT_USER';
+       ALTER FUNCTION public.observed_test_existing() OWNER TO ${guardRole}`,
+      "DROP FUNCTION public.observed_test_existing()",
+    ],
+    [
+      `CREATE TABLE public.observed_test_existing (id integer);
+       ALTER TABLE public.observed_test_existing OWNER TO ${guardRole}`,
+      "DROP TABLE public.observed_test_existing",
+    ],
+    [
+      `CREATE SCHEMA observed_test_existing AUTHORIZATION ${guardRole}`,
+      "DROP SCHEMA observed_test_existing",
+    ],
+  ];
+  for (const [create, remove] of ownershipCases) {
+    await client.query(create);
+    try {
+      await rejectUpgrade(client, sql, "Unsafe observed guard ownership");
+    } finally {
+      await client.query(remove);
+    }
+  }
+}
+
 async function upgradeWithGuardMembership(client, sql, state) {
   const operator = "shopmate_observed_test_migration_admin";
   await client.query(`CREATE ROLE ${operator} NOLOGIN CREATEROLE BYPASSRLS`);
   (state.logins ??= []).push(operator);
+  await rejectExistingGuardObjects(client, sql);
   await client.query(`ALTER ROLE ${guardRole} BYPASSRLS`);
   try {
     await rejectUpgrade(client, sql, "Unsafe observed capability role");

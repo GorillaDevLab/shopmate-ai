@@ -25,6 +25,20 @@ BEGIN
 END
 $$;
 
+DO $$
+DECLARE
+  database_ OID := (SELECT oid FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database());
+  guard_ OID := 'shopmate_observed_guard'::regrole;
+BEGIN
+  -- Roles are cluster-wide. Reject pre-existing authority over objects in this database.
+  IF EXISTS (SELECT FROM pg_catalog.pg_shdepend d WHERE d.refclassid='pg_catalog.pg_authid'::regclass
+    AND d.refobjid=guard_ AND d.deptype='o' AND d.dbid=database_)
+    OR EXISTS (SELECT FROM pg_catalog.pg_database d WHERE d.oid=database_ AND d.datdba=guard_) THEN
+    RAISE EXCEPTION 'Unsafe observed guard ownership' USING ERRCODE='42501';
+  END IF;
+END
+$$;
+
 CREATE FUNCTION public.observed_opaque_text(value_ TEXT, maximum_ INTEGER) RETURNS BOOLEAN
 LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
   -- The wire contract bounds strings in UTF-16 code units and preserves their spelling.
