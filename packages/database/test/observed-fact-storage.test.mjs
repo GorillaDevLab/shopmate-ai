@@ -459,6 +459,20 @@ async function roleCatalog({ client }) {
     [guardRole, roles],
   );
   assert.equal(privateMembership.rows[0].count, 0);
+  await safeLoginCatalogResolution(client);
+}
+
+async function safeLoginCatalogResolution(client) {
+  const { rows } = await client.query(
+    `SELECT p.proconfig, p.prosrc
+     FROM pg_catalog.pg_proc p
+     WHERE p.oid=$1::regprocedure`,
+    ["public.observed_login_safe(text,text)"],
+  );
+  assert.deepEqual(rows[0].proconfig, ["search_path=pg_catalog, pg_temp"]);
+  for (const catalog of ["pg_roles", "pg_class", "pg_namespace", "pg_proc", "pg_database"]) {
+    assert.ok(rows[0].prosrc.includes(`pg_catalog.${catalog}`), catalog);
+  }
 }
 
 async function restrictedLogin(state, capability) {

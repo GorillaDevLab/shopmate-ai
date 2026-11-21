@@ -431,23 +431,23 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
 $$;
 
 CREATE FUNCTION public.observed_login_safe(login_ TEXT, capability_ TEXT) RETURNS BOOLEAN
-LANGUAGE SQL STABLE STRICT SET search_path=pg_catalog AS $$
+LANGUAGE SQL STABLE STRICT SET search_path=pg_catalog,pg_temp AS $$
   SELECT EXISTS (
-    SELECT FROM pg_roles AS login JOIN pg_roles AS cap ON cap.rolname=public.observed_capability_role(capability_)
+    SELECT FROM pg_catalog.pg_roles AS login JOIN pg_catalog.pg_roles AS cap ON cap.rolname=public.observed_capability_role(capability_)
     WHERE login.rolname::text=login_ COLLATE "C" AND login.rolcanlogin AND NOT cap.rolcanlogin
       AND pg_has_role(login.oid,cap.oid,'USAGE')
       AND NOT EXISTS (
-        SELECT FROM pg_roles AS r WHERE pg_has_role(login.oid,r.oid,'MEMBER') AND (
+        SELECT FROM pg_catalog.pg_roles AS r WHERE pg_has_role(login.oid,r.oid,'MEMBER') AND (
           r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication
           OR r.rolname IN ('pg_read_all_data','pg_write_all_data','pg_read_server_files','pg_write_server_files',
             'pg_execute_server_program','shopmate_sync_worker','shopmate_observed_guard')
-          OR EXISTS (SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relowner=r.oid
+          OR EXISTS (SELECT FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE c.relowner=r.oid
             AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
-          OR EXISTS (SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.proowner=r.oid
+          OR EXISTS (SELECT FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE p.proowner=r.oid
             AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
-          OR EXISTS (SELECT FROM pg_namespace n WHERE (n.nspowner=r.oid OR has_schema_privilege(r.oid,n.oid,'CREATE'))
+          OR EXISTS (SELECT FROM pg_catalog.pg_namespace n WHERE (n.nspowner=r.oid OR has_schema_privilege(r.oid,n.oid,'CREATE'))
             AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
-          OR EXISTS (SELECT FROM pg_database d WHERE d.datdba=r.oid AND d.datname=current_database())
+          OR EXISTS (SELECT FROM pg_catalog.pg_database d WHERE d.datdba=r.oid AND d.datname=current_database())
         )
       )
   )
