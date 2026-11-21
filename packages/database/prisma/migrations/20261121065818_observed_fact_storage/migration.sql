@@ -303,6 +303,25 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
       'null'::jsonb IN (p_->'quarantine',p_->'inbound'),p_->'safetyBufferHours'='null'::jsonb)
 $$;
 
+-- The envelope trigger separately binds the connection subject to its scope.
+CREATE FUNCTION public.observed_sync_transition(p_ JSONB, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['jobId','fence','stream','status','errorCode',
+      'successfulThrough','watermark','businessObservedAt','transitionSequence'])
+    AND public.observed_json_id(p_->'jobId')
+    AND public.observed_json_integer(p_->'fence')
+    AND p_->>'stream' IN ('PRODUCTS','ORDERS','REFUNDS','INVENTORY','MARKETING')
+    AND CASE p_->>'status'
+      WHEN 'FAILED' THEN p_->>'errorCode' IN ('TIMEOUT','RATE_LIMIT','AUTH_EXPIRED','PERMISSION_DENIED',
+        'TEMPORARY','CONFLICT','INVALID_INPUT','INVALID_RESPONSE','UNSUPPORTED','NOT_FOUND','ABORTED')
+      WHEN 'SUCCEEDED' THEN p_->'errorCode'='null'::jsonb
+      ELSE FALSE END
+    AND (p_->'successfulThrough'='null'::jsonb OR public.observed_json_time(p_->'successfulThrough')<=seen_)
+    AND (p_->'watermark'='null'::jsonb OR public.observed_json_time(p_->'watermark')<=seen_)
+    AND public.observed_json_time(p_->'businessObservedAt')=seen_
+    AND public.observed_json_integer(p_->'transitionSequence',1)
+$$;
+
 CREATE FUNCTION public.observed_payload_valid(
   domain_ TEXT, p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ
 ) RETURNS BOOLEAN
@@ -319,7 +338,8 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
     WHEN 'INVENTORY_LOT' THEN public.observed_inventory_lot(p_,subject_,seen_)
     WHEN 'SUPPLIER_NOTICE' THEN public.observed_supplier_notice(p_,subject_,seen_)
     WHEN 'INVENTORY_POSITION' THEN public.observed_inventory_position(p_,subject_,seen_)
-    ELSE jsonb_typeof(p_)='object'
+    WHEN 'SYNC_TRANSITION' THEN public.observed_sync_transition(p_,seen_)
+    ELSE FALSE
   END
 $$;
 
@@ -335,6 +355,7 @@ REVOKE ALL ON FUNCTION public.observed_json_keys(JSONB,TEXT[]),public.observed_j
   public.observed_payload_location(JSONB,TEXT),public.observed_inventory_lot(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_json_hours(JSONB),public.observed_supply_quality(JSONB,BOOLEAN,BOOLEAN),
   public.observed_supplier_notice(JSONB,TEXT,TIMESTAMPTZ),public.observed_inventory_position(JSONB,TEXT,TIMESTAMPTZ),
+  public.observed_sync_transition(JSONB,TIMESTAMPTZ),
   public.observed_payload_valid(TEXT,JSONB,TEXT,TIMESTAMPTZ) FROM PUBLIC;
 
 CREATE TABLE public.observed_scopes (

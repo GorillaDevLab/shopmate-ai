@@ -330,6 +330,9 @@ function registerStorageCases() {
   registerPayloadCases(state, measurementPayloadCases);
   registerPayloadCases(state, catalogPayloadCases);
   registerPayloadCases(state, inventoryPayloadCases);
+  registerPayloadCases(state, [syncPayloadCase]);
+  test("sync transition and receipt subjects match the exact binding connection", () =>
+    syncConnectionIdentity(state));
 }
 
 function validatedRunnerUrl(value) {
@@ -1169,6 +1172,69 @@ const inventoryPayloadCases = [
     ],
   },
 ];
+
+const connectionSubject = { kind: "CONNECTION", connectionId: binding.connectionId };
+const syncPayloadCase = {
+  domain: "SYNC_TRANSITION",
+  generation: 32,
+  subject: connectionSubject,
+  payload: {
+    jobId: "job/1",
+    fence: 0,
+    stream: "PRODUCTS",
+    status: "SUCCEEDED",
+    errorCode: null,
+    successfulThrough: periodEnd,
+    watermark: null,
+    businessObservedAt: periodEnd,
+    transitionSequence: 1,
+  },
+  accepted: [
+    { stream: "ORDERS", status: "FAILED", errorCode: "CONFLICT", successfulThrough: null },
+    { stream: "INVENTORY", watermark: periodStart },
+    { stream: "REFUNDS", watermark: periodEnd, successfulThrough: periodStart },
+    { stream: "MARKETING", successfulThrough: null },
+  ],
+  rejected: [
+    { status: "FAILED" },
+    { errorCode: "TIMEOUT" },
+    { status: "FAILED", errorCode: "UNKNOWN" },
+    { status: "PENDING" },
+    { errorCode: undefined },
+    { stream: "CAMPAIGN" },
+    { successfulThrough: future },
+    { watermark: future },
+    { businessObservedAt: periodStart },
+    { transitionSequence: 0 },
+    { fence: Number.MAX_SAFE_INTEGER + 1 },
+    { jobId: true },
+    { oracle: null },
+  ],
+};
+
+async function syncConnectionIdentity({ client, factSchema }) {
+  const spec = { ...syncPayloadCase, generation: 33 };
+  const scopeId = await insertScope(client, {}, spec.generation);
+  const fact = factSchema.parse(payloadFact(spec, 1, spec.payload));
+  const { receipt } = await transaction(client, () =>
+    insertOrigin(client, scopeId, "sync-bound", fact),
+  );
+  const other = { ...connectionSubject, connectionId: binding.connectionId.toUpperCase() };
+  const mismatched = { ...fact, subject: other };
+  assert.equal(factSchema.safeParse(mismatched).success, false);
+  await assert.rejects(insertFact(client, scopeId, receipt, mismatched), {
+    code: "23514",
+    constraint: "observed_facts_connection_subject",
+  });
+  await assert.rejects(
+    insertReceipt(client, scopeId, "sync-foreign", 0, {
+      domain: fact.domain,
+      subjectKind: other.kind,
+      subjectId: other.connectionId,
+    }),
+    { code: "23514", constraint: "observed_receipts_connection_subject" },
+  );
+}
 
 function payloadFact(spec, sequence, payload) {
   return priceFact(`typed-${spec.domain}-${sequence}`, sequence, null, {
