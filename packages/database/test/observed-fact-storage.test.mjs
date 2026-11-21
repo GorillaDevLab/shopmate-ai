@@ -329,6 +329,7 @@ function registerStorageCases() {
   registerPayloadCases(state, financePayloadCases);
   registerPayloadCases(state, measurementPayloadCases);
   registerPayloadCases(state, catalogPayloadCases);
+  registerPayloadCases(state, inventoryPayloadCases);
 }
 
 function validatedRunnerUrl(value) {
@@ -1062,6 +1063,109 @@ const catalogPayloadCases = [
       { priceVersion: {} },
       { externalSkuId: " SKU/甲" },
       { currency: "USD" },
+    ],
+  },
+];
+
+const future = "2026-10-12T16:00:00.000Z";
+const location = { externalSkuId: subject.externalSkuId, externalLocationId: "仓/1" };
+const inventoryPayloadCases = [
+  {
+    domain: "INVENTORY_LOT",
+    generation: 29,
+    payload: {
+      ...location,
+      externalLotId: "lot/1",
+      externalReceiptId: "receipt/1",
+      receivedAt: periodStart,
+      movementAt: periodEnd,
+      reason: "SALE",
+      deltaQuantity: -1,
+      beforeQuantity: Number.MAX_SAFE_INTEGER,
+      afterQuantity: Number.MAX_SAFE_INTEGER - 1,
+    },
+    accepted: [
+      { reason: "RECEIPT", deltaQuantity: 1, beforeQuantity: 0, afterQuantity: 1 },
+      { reason: "RETURN", deltaQuantity: 1, beforeQuantity: 0, afterQuantity: 1 },
+      { reason: "TRANSFER_IN", deltaQuantity: 1, beforeQuantity: 0, afterQuantity: 1 },
+      { reason: "TRANSFER_OUT" },
+      { reason: "WRITE_OFF" },
+    ],
+    rejected: [
+      { afterQuantity: Number.MAX_SAFE_INTEGER },
+      { reason: "TRANSFER_IN" },
+      { reason: "RECEIPT", deltaQuantity: 1, afterQuantity: Number.MAX_SAFE_INTEGER },
+      { reason: "REVISION" },
+      { reason: "TRANSFER_OUT", deltaQuantity: 0, afterQuantity: Number.MAX_SAFE_INTEGER },
+      { deltaQuantity: "-1" },
+      { beforeQuantity: Number.MAX_SAFE_INTEGER + 1 },
+      { receivedAt: future },
+      { movementAt: future },
+      { externalLocationId: [] },
+      { oracle: null },
+    ],
+  },
+  {
+    domain: "SUPPLIER_NOTICE",
+    generation: 30,
+    payload: {
+      ...location,
+      noticeId: "notice/1",
+      purchaseOrderId: "po/1",
+      announcedAt: periodEnd,
+      priorEta: null,
+      newEta: future,
+      inboundQuantity: 0,
+      promisedLeadHours: 1.25,
+      reason: null,
+    },
+    accepted: [
+      { priorEta: future, promisedLeadHours: 0 },
+      { inboundQuantity: null, reason: "INVENTORY_UNKNOWN" },
+      { newEta: null, reason: "LEAD_TIME_MISSING" },
+      { inboundQuantity: null, newEta: null, reason: "LEAD_TIME_MISSING" },
+    ],
+    rejected: [
+      { announcedAt: future },
+      { reason: "INVENTORY_UNKNOWN" },
+      { inboundQuantity: null },
+      { promisedLeadHours: null },
+      { promisedLeadHours: -0.25 },
+      { promisedLeadHours: Number.MAX_SAFE_INTEGER + 1 },
+      { promisedLeadHours: "1.25" },
+      { priorEta: "infinity" },
+      { priorEta: undefined },
+      { purchaseOrderId: "" },
+      { oracle: null },
+    ],
+  },
+  {
+    domain: "INVENTORY_POSITION",
+    generation: 31,
+    payload: {
+      ...location,
+      asOf: periodEnd,
+      quarantine: 0,
+      inbound: 1,
+      safetyBufferHours: 0.5,
+      reason: null,
+    },
+    accepted: [
+      { quarantine: null, reason: "INVENTORY_UNKNOWN" },
+      { inbound: null, safetyBufferHours: null, reason: "INVENTORY_UNKNOWN" },
+      { inbound: null, safetyBufferHours: null, reason: "LEAD_TIME_MISSING" },
+      { safetyBufferHours: null, reason: "LEAD_TIME_MISSING" },
+    ],
+    rejected: [
+      { inbound: null, reason: "LEAD_TIME_MISSING" },
+      { safetyBufferHours: null, reason: "INVENTORY_UNKNOWN" },
+      { quarantine: null },
+      { safetyBufferHours: false },
+      { quarantine: 1.5 },
+      { asOf: future },
+      { externalSkuId: "sku/foreign" },
+      { inbound: undefined },
+      { oracle: null },
     ],
   },
 ];

@@ -228,6 +228,81 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
     AND p_->>'currency'='CNY'
 $$;
 
+CREATE FUNCTION public.observed_payload_location(p_ JSONB, subject_ TEXT) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_payload_sku(p_,subject_) AND public.observed_json_id(p_->'externalLocationId')
+$$;
+
+CREATE FUNCTION public.observed_inventory_lot(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','externalLocationId','externalLotId',
+      'externalReceiptId','receivedAt','movementAt','reason','deltaQuantity','beforeQuantity','afterQuantity'])
+    AND public.observed_payload_location(p_,subject_)
+    AND public.observed_json_id(p_->'externalLotId')
+    AND public.observed_json_id(p_->'externalReceiptId')
+    AND public.observed_json_time(p_->'receivedAt')<=movement_ AND movement_<=seen_
+    AND CASE p_->>'reason'
+      WHEN 'RECEIPT' THEN delta_>0
+      WHEN 'RETURN' THEN delta_>0
+      WHEN 'TRANSFER_IN' THEN delta_>0
+      WHEN 'SALE' THEN delta_<0
+      WHEN 'WRITE_OFF' THEN delta_<0
+      WHEN 'TRANSFER_OUT' THEN delta_<0
+      ELSE FALSE END
+    AND CASE WHEN public.observed_json_integer(p_->'beforeQuantity')
+      AND public.observed_json_integer(p_->'deltaQuantity',-9007199254740991)
+      AND public.observed_json_integer(p_->'afterQuantity')
+      THEN public.observed_json_number(p_->'beforeQuantity')+delta_=public.observed_json_number(p_->'afterQuantity')
+      ELSE FALSE END
+  FROM (SELECT public.observed_json_time(p_->'movementAt') AS movement_,
+    public.observed_json_number(p_->'deltaQuantity') AS delta_) AS movement
+$$;
+
+CREATE FUNCTION public.observed_json_hours(value_ JSONB) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_number(value_) BETWEEN 0 AND 9007199254740991
+$$;
+
+CREATE FUNCTION public.observed_supply_quality(
+  reason_ JSONB, missing_inventory_ BOOLEAN, missing_lead_time_ BOOLEAN
+) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT CASE reason_
+    WHEN '"INVENTORY_UNKNOWN"'::jsonb THEN missing_inventory_
+    WHEN '"LEAD_TIME_MISSING"'::jsonb THEN missing_lead_time_
+    WHEN 'null'::jsonb THEN NOT missing_inventory_ AND NOT missing_lead_time_
+    ELSE FALSE END
+$$;
+
+CREATE FUNCTION public.observed_supplier_notice(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','externalLocationId','noticeId','purchaseOrderId',
+      'announcedAt','priorEta','newEta','inboundQuantity','promisedLeadHours','reason'])
+    AND public.observed_payload_location(p_,subject_)
+    AND public.observed_json_id(p_->'noticeId')
+    AND public.observed_json_id(p_->'purchaseOrderId')
+    AND public.observed_json_time(p_->'announcedAt')<=seen_
+    AND (p_->'priorEta'='null'::jsonb OR public.observed_json_time(p_->'priorEta') IS NOT NULL)
+    AND (p_->'newEta'='null'::jsonb OR public.observed_json_time(p_->'newEta') IS NOT NULL)
+    AND (p_->'inboundQuantity'='null'::jsonb OR public.observed_json_integer(p_->'inboundQuantity'))
+    AND (p_->'promisedLeadHours'='null'::jsonb OR public.observed_json_hours(p_->'promisedLeadHours'))
+    AND public.observed_supply_quality(p_->'reason',p_->'inboundQuantity'='null'::jsonb,
+      'null'::jsonb IN (p_->'newEta',p_->'promisedLeadHours'))
+$$;
+
+CREATE FUNCTION public.observed_inventory_position(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','externalLocationId','asOf',
+      'quarantine','inbound','safetyBufferHours','reason'])
+    AND public.observed_payload_location(p_,subject_)
+    AND public.observed_json_time(p_->'asOf')<=seen_
+    AND (p_->'quarantine'='null'::jsonb OR public.observed_json_integer(p_->'quarantine'))
+    AND (p_->'inbound'='null'::jsonb OR public.observed_json_integer(p_->'inbound'))
+    AND (p_->'safetyBufferHours'='null'::jsonb OR public.observed_json_hours(p_->'safetyBufferHours'))
+    AND public.observed_supply_quality(p_->'reason',
+      'null'::jsonb IN (p_->'quarantine',p_->'inbound'),p_->'safetyBufferHours'='null'::jsonb)
+$$;
+
 CREATE FUNCTION public.observed_payload_valid(
   domain_ TEXT, p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ
 ) RETURNS BOOLEAN
@@ -241,6 +316,9 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
     WHEN 'CAMPAIGN_MEASUREMENT' THEN public.observed_campaign(p_,subject_,seen_)
     WHEN 'LISTING' THEN public.observed_listing(p_,subject_,seen_)
     WHEN 'PRICE' THEN public.observed_price(p_,subject_,seen_)
+    WHEN 'INVENTORY_LOT' THEN public.observed_inventory_lot(p_,subject_,seen_)
+    WHEN 'SUPPLIER_NOTICE' THEN public.observed_supplier_notice(p_,subject_,seen_)
+    WHEN 'INVENTORY_POSITION' THEN public.observed_inventory_position(p_,subject_,seen_)
     ELSE jsonb_typeof(p_)='object'
   END
 $$;
@@ -254,6 +332,9 @@ REVOKE ALL ON FUNCTION public.observed_json_keys(JSONB,TEXT[]),public.observed_j
   public.observed_fee(JSONB,TIMESTAMPTZ),public.observed_traffic(JSONB,TIMESTAMPTZ),
   public.observed_campaign_date(JSONB,JSONB),public.observed_campaign(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_listing(JSONB,TEXT,TIMESTAMPTZ),public.observed_price(JSONB,TEXT,TIMESTAMPTZ),
+  public.observed_payload_location(JSONB,TEXT),public.observed_inventory_lot(JSONB,TEXT,TIMESTAMPTZ),
+  public.observed_json_hours(JSONB),public.observed_supply_quality(JSONB,BOOLEAN,BOOLEAN),
+  public.observed_supplier_notice(JSONB,TEXT,TIMESTAMPTZ),public.observed_inventory_position(JSONB,TEXT,TIMESTAMPTZ),
   public.observed_payload_valid(TEXT,JSONB,TEXT,TIMESTAMPTZ) FROM PUBLIC;
 
 CREATE TABLE public.observed_scopes (
