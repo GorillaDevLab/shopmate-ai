@@ -131,9 +131,133 @@ model PlatformConnection {
   metricDefinitions        MetricDefinitionRow[]
   metricSnapshots          MetricSnapshotRow[]
   events                   EventRow[]
+  observedScopes           ObservedScope[]
 
   @@unique([storeId, provider])
   @@unique([id, organizationId, workspaceId, storeId, externalStoreId])
+  @@schema("public")
+}
+
+model ObservedScope {
+  scopeId         String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String
+  workspaceId     String
+  storeId         String
+  connectionId    String
+  externalStoreId String
+  generation      Int
+  connection      PlatformConnection    @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "observed_scopes_connection_fkey")
+  receipts        ObservedPageReceipt[]
+  facts           ObservedFact[]
+  grants          ObservedPrincipalGrant[]
+
+  @@unique([connectionId, generation], map: "observed_scopes_connection_generation_key")
+  @@unique([scopeId, organizationId], map: "observed_scopes_organization_key")
+  @@map("observed_scopes")
+  @@schema("public")
+}
+
+model ObservedPrincipalGrant {
+  grantId         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeId         String             @db.Uuid
+  organizationId  String
+  databaseRole    String
+  principalUserId String
+  capability      String
+  allowedDomains  String[]
+  active          Boolean            @default(true)
+  expiresAt       DateTime           @db.Timestamptz(6)
+  scope           ObservedScope      @relation(fields: [scopeId, organizationId], references: [scopeId, organizationId], onDelete: Restrict, onUpdate: NoAction, map: "observed_grants_scope_fkey")
+  principal       OrganizationMember @relation(fields: [organizationId, principalUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction, map: "observed_grants_principal_fkey")
+
+  @@unique([scopeId, databaseRole, capability], map: "observed_grants_identity_key")
+  @@map("observed_principal_grants")
+  @@schema("public")
+}
+
+model ObservedPageReceipt {
+  receiptKey          String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeId             String                  @db.Uuid
+  receiptId           String
+  domain              String
+  subjectKind         String
+  subjectId           String
+  periodStart         DateTime                @db.Timestamptz(6)
+  periodEnd           DateTime                @db.Timestamptz(6)
+  timezone            String                  @default("Asia/Shanghai")
+  currency            String                  @default("CNY")
+  through             DateTime                @db.Timestamptz(6)
+  modelVersion        String
+  configHash          String
+  publicationId       String
+  publicationHash     String
+  pageId              String
+  pageIndex           Int
+  pageHash            String
+  priorPageHash       String?
+  expectedCursor      String?
+  nextCursor          String?
+  terminalCoverageBps Int?
+  recordCount         Int
+  recordedAt          DateTime                @default(dbgenerated("clock_timestamp()")) @db.Timestamptz(3)
+  scope               ObservedScope           @relation(fields: [scopeId], references: [scopeId], onDelete: Restrict, onUpdate: NoAction, map: "observed_receipts_scope_fkey")
+  members             ObservedReceiptMember[]
+
+  @@unique([scopeId, receiptId], map: "observed_receipts_identity_key")
+  @@unique([scopeId, publicationId, pageId], map: "observed_receipts_page_id_key")
+  @@unique([scopeId, publicationId, pageIndex], map: "observed_receipts_page_index_key")
+  @@unique([receiptKey, scopeId, domain, subjectKind, subjectId], map: "observed_receipts_partition_key")
+  @@map("observed_page_receipts")
+  @@schema("public")
+}
+
+model ObservedFact {
+  factKey          String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeId          String                  @db.Uuid
+  domain           String
+  subjectKind      String
+  subjectId        String
+  factId           String
+  sequence         BigInt
+  priorSequence    BigInt?
+  producerVersion  String
+  modelVersion     String
+  occurredAt       DateTime                @db.Timestamptz(6)
+  observedAt       DateTime                @db.Timestamptz(6)
+  payloadHash      String
+  payload          Json                    @db.JsonB
+  originReceiptKey String                  @db.Uuid
+  factBytes        Bytes                   @db.ByteA
+  scope            ObservedScope           @relation(fields: [scopeId], references: [scopeId], onDelete: Restrict, onUpdate: NoAction, map: "observed_facts_scope_fkey")
+  predecessor      ObservedFact?           @relation("ObservedFactCorrection", fields: [scopeId, domain, subjectKind, subjectId, factId, priorSequence], references: [scopeId, domain, subjectKind, subjectId, factId, sequence], onDelete: Restrict, onUpdate: NoAction, map: "observed_facts_predecessor_fkey")
+  corrections      ObservedFact[]          @relation("ObservedFactCorrection")
+  /// The original member's receipt supplies this fact's recordedAt.
+  originMember     ObservedReceiptMember   @relation("ObservedFactOrigin", fields: [originReceiptKey, factKey], references: [receiptKey, factKey], onDelete: NoAction, onUpdate: NoAction, map: "observed_facts_origin_member_fkey")
+  memberships      ObservedReceiptMember[] @relation("ObservedFactMembership")
+
+  @@unique([factKey, scopeId, domain, subjectKind, subjectId], map: "observed_facts_partition_key")
+  @@unique([scopeId, domain, sequence], map: "observed_facts_sequence_key")
+  @@unique([scopeId, domain, subjectKind, subjectId, factId, sequence], map: "observed_facts_predecessor_key")
+  @@unique([scopeId, domain, factId, priorSequence], map: "observed_facts_chain_key")
+  @@map("observed_facts")
+  @@schema("public")
+}
+
+model ObservedReceiptMember {
+  receiptKey  String              @db.Uuid
+  ordinal     Int
+  factKey     String              @db.Uuid
+  scopeId     String              @db.Uuid
+  domain      String
+  subjectKind String
+  subjectId   String
+  receipt     ObservedPageReceipt @relation(fields: [receiptKey, scopeId, domain, subjectKind, subjectId], references: [receiptKey, scopeId, domain, subjectKind, subjectId], onDelete: Restrict, onUpdate: NoAction, map: "observed_members_receipt_fkey")
+  fact        ObservedFact        @relation("ObservedFactMembership", fields: [factKey, scopeId, domain, subjectKind, subjectId], references: [factKey, scopeId, domain, subjectKind, subjectId], onDelete: Restrict, onUpdate: NoAction, map: "observed_members_fact_fkey")
+  origins     ObservedFact[]      @relation("ObservedFactOrigin")
+
+  @@id([receiptKey, ordinal])
+  @@unique([receiptKey, factKey], map: "observed_members_fact_key")
+  @@map("observed_receipt_members")
   @@schema("public")
 }
 
@@ -825,6 +949,7 @@ model OrganizationMember {
   auditServiceGrants       AuditServiceGrant[]
   mockGrants               MockWorkerGrant[]            @relation("WorkerMembership")
   syncGrants               SyncWorkerGrant[]
+  observedGrants           ObservedPrincipalGrant[]
   createdAt                DateTime                     @default(now())
   updatedAt                DateTime                     @updatedAt
 
