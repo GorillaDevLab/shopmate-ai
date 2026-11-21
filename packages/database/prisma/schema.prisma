@@ -149,9 +149,29 @@ model ObservedScope {
   connection      PlatformConnection    @relation(fields: [connectionId, organizationId, workspaceId, storeId, externalStoreId], references: [id, organizationId, workspaceId, storeId, externalStoreId], onDelete: Restrict, onUpdate: NoAction, map: "observed_scopes_connection_fkey")
   receipts        ObservedPageReceipt[]
   facts           ObservedFact[]
+  grants          ObservedPrincipalGrant[]
 
   @@unique([connectionId, generation], map: "observed_scopes_connection_generation_key")
+  @@unique([scopeId, organizationId], map: "observed_scopes_organization_key")
   @@map("observed_scopes")
+  @@schema("public")
+}
+
+model ObservedPrincipalGrant {
+  grantId         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeId         String             @db.Uuid
+  organizationId  String
+  databaseRole    String
+  principalUserId String
+  capability      String
+  allowedDomains  String[]
+  active          Boolean            @default(true)
+  expiresAt       DateTime           @db.Timestamptz(6)
+  scope           ObservedScope      @relation(fields: [scopeId, organizationId], references: [scopeId, organizationId], onDelete: Restrict, onUpdate: NoAction, map: "observed_grants_scope_fkey")
+  principal       OrganizationMember @relation(fields: [organizationId, principalUserId], references: [organizationId, userId], onDelete: Restrict, onUpdate: NoAction, map: "observed_grants_principal_fkey")
+
+  @@unique([scopeId, databaseRole, capability], map: "observed_grants_identity_key")
+  @@map("observed_principal_grants")
   @@schema("public")
 }
 
@@ -929,6 +949,7 @@ model OrganizationMember {
   auditServiceGrants       AuditServiceGrant[]
   mockGrants               MockWorkerGrant[]            @relation("WorkerMembership")
   syncGrants               SyncWorkerGrant[]
+  observedGrants           ObservedPrincipalGrant[]
   createdAt                DateTime                     @default(now())
   updatedAt                DateTime                     @updatedAt
 

@@ -1,5 +1,27 @@
 BEGIN;
 
+DO $$
+DECLARE
+  roles_ TEXT[] := ARRAY['shopmate_observed_publisher','shopmate_observed_consumer',
+    'shopmate_observed_reader','shopmate_observed_definition_provisioner','shopmate_observed_guard'];
+  role_ TEXT;
+BEGIN
+  FOREACH role_ IN ARRAY roles_ LOOP
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname=role_) THEN
+      EXECUTE pg_catalog.format(
+        'CREATE ROLE %I NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION',role_);
+    ELSIF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname=role_ AND
+      (rolcanlogin OR rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole OR rolreplication)) THEN
+      RAISE EXCEPTION 'Unsafe observed capability role' USING ERRCODE='42501';
+    END IF;
+  END LOOP;
+  IF EXISTS (SELECT FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles r ON r.oid=m.member
+    WHERE r.rolname=ANY(roles_) OR m.roleid='shopmate_observed_guard'::regrole) THEN
+    RAISE EXCEPTION 'Unsafe observed capability role membership' USING ERRCODE='42501';
+  END IF;
+END
+$$;
+
 CREATE FUNCTION public.observed_opaque_text(value_ TEXT, maximum_ INTEGER) RETURNS BOOLEAN
 LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
   -- The wire contract bounds strings in UTF-16 code units and preserves their spelling.
@@ -377,8 +399,82 @@ CREATE TABLE public.observed_scopes (
     FOREIGN KEY ("connectionId","organizationId","workspaceId","storeId","externalStoreId")
     REFERENCES public."PlatformConnection"(id,"organizationId","workspaceId","storeId","externalStoreId")
     ON DELETE RESTRICT ON UPDATE NO ACTION,
-  CONSTRAINT observed_scopes_connection_generation_key UNIQUE ("connectionId",generation)
+  CONSTRAINT observed_scopes_connection_generation_key UNIQUE ("connectionId",generation),
+  CONSTRAINT observed_scopes_organization_key UNIQUE ("scopeId","organizationId")
 );
+
+CREATE FUNCTION public.observed_capability_role(capability_ TEXT) RETURNS NAME
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT CASE capability_
+    WHEN 'PUBLISH' THEN 'shopmate_observed_publisher'
+    WHEN 'CONSUME' THEN 'shopmate_observed_consumer'
+    WHEN 'READ' THEN 'shopmate_observed_reader'
+    WHEN 'PROVISION_DEFINITION' THEN 'shopmate_observed_definition_provisioner'
+  END::name
+$$;
+
+CREATE FUNCTION public.observed_login_safe(login_ TEXT, capability_ TEXT) RETURNS BOOLEAN
+LANGUAGE SQL STABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT EXISTS (
+    SELECT FROM pg_roles AS login JOIN pg_roles AS cap ON cap.rolname=public.observed_capability_role(capability_)
+    WHERE login.rolname::text=login_ COLLATE "C" AND login.rolcanlogin AND NOT cap.rolcanlogin
+      AND pg_has_role(login.oid,cap.oid,'MEMBER')
+      AND NOT EXISTS (
+        SELECT FROM pg_roles AS r WHERE pg_has_role(login.oid,r.oid,'MEMBER') AND (
+          r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication
+          OR r.rolname IN ('pg_read_all_data','pg_write_all_data','pg_read_server_files','pg_write_server_files',
+            'pg_execute_server_program','shopmate_sync_worker','shopmate_observed_guard')
+          OR EXISTS (SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relowner=r.oid
+            AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
+          OR EXISTS (SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.proowner=r.oid
+            AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
+          OR EXISTS (SELECT FROM pg_namespace n WHERE n.nspowner=r.oid
+            AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
+          OR EXISTS (SELECT FROM pg_database d WHERE d.datdba=r.oid AND d.datname=current_database())
+        )
+      )
+  )
+$$;
+
+CREATE FUNCTION public.observed_grant_domains(domains_ TEXT[]) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT array_ndims(domains_)=1 AND array_lower(domains_,1)=1 AND cardinality(domains_) BETWEEN 1 AND 12
+    AND cardinality(domains_)=(SELECT count(DISTINCT domain_ COLLATE "C") FROM unnest(domains_) AS domain_)
+    AND domains_ COLLATE "C" <@ ARRAY['FROZEN_COST','REFUND_ALLOCATION','RETURN_RECEIPT','FEE','TRAFFIC',
+      'CAMPAIGN_MEASUREMENT','LISTING','PRICE','INVENTORY_LOT','SUPPLIER_NOTICE','INVENTORY_POSITION','SYNC_TRANSITION']
+$$;
+
+CREATE TABLE public.observed_principal_grants (
+  "grantId" UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  "scopeId" UUID NOT NULL,
+  "organizationId" TEXT COLLATE "C" NOT NULL,
+  "databaseRole" TEXT COLLATE "C" NOT NULL,
+  "principalUserId" TEXT COLLATE "C" NOT NULL,
+  capability TEXT COLLATE "C" NOT NULL,
+  "allowedDomains" TEXT[] COLLATE "C" NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  "expiresAt" TIMESTAMPTZ(6) NOT NULL,
+  CONSTRAINT observed_grants_scope_fkey FOREIGN KEY ("scopeId","organizationId")
+    REFERENCES public.observed_scopes("scopeId","organizationId") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  CONSTRAINT observed_grants_principal_fkey FOREIGN KEY ("organizationId","principalUserId")
+    REFERENCES public."OrganizationMember"("organizationId","userId") ON DELETE RESTRICT ON UPDATE NO ACTION,
+  CONSTRAINT observed_grants_identity_key UNIQUE ("scopeId","databaseRole","capability"),
+  CONSTRAINT observed_grants_domains_valid CHECK (public.observed_grant_domains("allowedDomains") IS TRUE),
+  CONSTRAINT observed_grants_expiry_finite CHECK (isfinite("expiresAt"))
+);
+
+CREATE FUNCTION public.observed_check_grant_login() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+  IF public.observed_login_safe(NEW."databaseRole",NEW.capability) IS NOT TRUE THEN
+    RAISE EXCEPTION 'Invalid observed grant login or capability'
+      USING ERRCODE='23514', CONSTRAINT='observed_grants_login_valid';
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER observed_grants_login_valid BEFORE INSERT OR UPDATE OF "databaseRole",capability
+  ON public.observed_principal_grants FOR EACH ROW EXECUTE FUNCTION public.observed_check_grant_login();
 
 CREATE TABLE public.observed_page_receipts (
   "receiptKey" UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -639,10 +735,24 @@ CREATE TRIGGER observed_members_no_truncate BEFORE TRUNCATE ON public.observed_r
   FOR EACH STATEMENT EXECUTE FUNCTION public.observed_reject_history_mutation();
 
 REVOKE ALL ON public.observed_scopes,public.observed_page_receipts,public.observed_facts,
-  public.observed_receipt_members FROM PUBLIC;
+  public.observed_receipt_members,public.observed_principal_grants
+  FROM PUBLIC,shopmate_observed_publisher,shopmate_observed_consumer,shopmate_observed_reader,
+    shopmate_observed_definition_provisioner;
+ALTER TABLE public.observed_scopes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_scopes FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_page_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_page_receipts FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_facts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_facts FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_receipt_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_receipt_members FORCE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_principal_grants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.observed_principal_grants FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON FUNCTION public.observed_opaque_text(TEXT,INTEGER),public.observed_time(TIMESTAMPTZ),
   public.observed_subject_valid(TEXT,TEXT,TEXT),public.observed_stamp_receipt(),
   public.observed_fact_envelope(public.observed_facts,public.observed_scopes),public.observed_check_fact_bytes(),
   public.observed_check_members(),public.observed_reject_history_mutation() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.observed_capability_role(TEXT),public.observed_login_safe(TEXT,TEXT),
+  public.observed_grant_domains(TEXT[]),public.observed_check_grant_login() FROM PUBLIC;
 
 COMMIT;

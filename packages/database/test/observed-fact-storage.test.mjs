@@ -18,6 +18,15 @@ const tables = [
   "observed_facts",
   "observed_receipt_members",
 ];
+const grantTable = "observed_principal_grants";
+const capabilityRoles = [
+  "shopmate_observed_publisher",
+  "shopmate_observed_consumer",
+  "shopmate_observed_reader",
+  "shopmate_observed_definition_provisioner",
+];
+const guardRole = "shopmate_observed_guard";
+const principal = "observed-operator";
 
 const modelVersion = "mock-business-observed-v1";
 const hash = "a".repeat(64);
@@ -340,6 +349,7 @@ function registerStorageCases() {
   test("sync transition and receipt subjects match the exact binding connection", () =>
     syncConnectionIdentity(state));
   registerMeasurementMemberships(state);
+  registerAuthorityCases(state);
 }
 
 function validatedRunnerUrl(value) {
@@ -386,12 +396,157 @@ function schemaParity({ url }) {
   assert.match(diff, /empty migration/u);
 }
 
-async function closeDatabase({ client, server, name }) {
+async function closeDatabase({ client, server, name, logins = [] }) {
   try {
     if (client) await client.end();
     if (name) await server.query(`DROP DATABASE "${name}"`);
+    for (const login of logins) await server.query(`DROP ROLE "${login}"`);
   } finally {
     if (server) await server.end();
+  }
+}
+
+function registerAuthorityCases(state) {
+  test("observed roles are safe and only private policies can read forced-RLS storage", () =>
+    roleCatalog(state));
+  test("operator grants bind an actual login and scoped membership to exact domains", () =>
+    operatorGrants(state));
+  test("each runtime capability denies raw storage and grant provisioning", () =>
+    rawStorageDenial(state));
+}
+
+async function roleCatalog({ client }) {
+  const roles = [...capabilityRoles, guardRole];
+  const result = await client.query(
+    `SELECT rolname, NOT (rolcanlogin OR rolsuper OR rolbypassrls OR rolcreatedb
+       OR rolcreaterole OR rolreplication) AS safe
+     FROM pg_catalog.pg_roles WHERE rolname=ANY($1::text[]) ORDER BY rolname`,
+    [roles],
+  );
+  assert.deepEqual(
+    result.rows,
+    roles.sort().map((rolname) => ({ rolname, safe: true })),
+  );
+  const policies = await client.query(
+    `SELECT c.relname, c.relrowsecurity AND c.relforcerowsecurity AS forced,
+       EXISTS (SELECT FROM pg_catalog.aclexplode(c.relacl) WHERE grantee=0) AS public
+     FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+     WHERE n.nspname='public' AND c.relname=ANY($1::text[]) ORDER BY c.relname`,
+    [[...tables, grantTable]],
+  );
+  assert.deepEqual(
+    policies.rows,
+    [...tables, grantTable].sort().map((relname) => ({ relname, forced: true, public: false })),
+  );
+  const privateMembership = await client.query(
+    `SELECT count(*)::integer AS count FROM pg_catalog.pg_auth_members m
+     WHERE m.roleid=$1::regrole OR m.member=ANY($2::regrole[])`,
+    [guardRole, roles],
+  );
+  assert.equal(privateMembership.rows[0].count, 0);
+}
+
+async function restrictedLogin(state, capability) {
+  const name = `observed_test_${randomBytes(12).toString("hex")}`;
+  const password = randomBytes(32).toString("hex");
+  const { rows } = await state.client.query(
+    `SELECT pg_catalog.format('CREATE ROLE %I LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD %L',
+      $1::text,$2::text) AS command`,
+    [name, password],
+  );
+  await state.client.query(rows[0].command);
+  (state.logins ??= []).push(name);
+  if (capability) {
+    assert.ok(capabilityRoles.includes(capability));
+    await state.client.query(`GRANT "${capability}" TO "${name}"`);
+  }
+  const url = new URL(state.url);
+  url.username = name;
+  url.password = password;
+  const client = new pg.Client({ connectionString: url.toString() });
+  await client.connect();
+  assert.equal((await client.query("SELECT SESSION_USER AS login")).rows[0].login, name);
+  return { client, name };
+}
+
+async function seedMember(client, userId, role = "OPERATOR") {
+  await client.query(
+    `INSERT INTO public."OrganizationMember"(id,"organizationId","userId",role,"updatedAt")
+     VALUES ($1,$2,$1,$3,clock_timestamp())`,
+    [userId, binding.organizationId, role],
+  );
+  await client.query(
+    `INSERT INTO public."WorkspaceMember"(id,"organizationId","workspaceId","userId")
+     VALUES ($1,$2,$3,$1)`,
+    [userId, binding.organizationId, binding.workspaceId],
+  );
+}
+
+async function putGrant(client, scopeId, login, fields = {}) {
+  const grant = {
+    organizationId: binding.organizationId,
+    userId: principal,
+    capability: "PUBLISH",
+    domains: ["PRICE"],
+    ...fields,
+  };
+  const { rows } = await client.query(
+    `INSERT INTO public.observed_principal_grants
+     ("scopeId","organizationId","databaseRole","principalUserId",capability,"allowedDomains","expiresAt")
+     VALUES ($1,$2,$3,$4,$5,$6,clock_timestamp()+interval '1 hour') RETURNING "grantId"`,
+    [scopeId, grant.organizationId, login, grant.userId, grant.capability, grant.domains],
+  );
+  return rows[0].grantId;
+}
+
+async function operatorGrants(state) {
+  const { client } = state;
+  const login = await restrictedLogin(state, capabilityRoles[0]);
+  try {
+    const scopeId = await insertScope(client, {}, 101);
+    await seedMember(client, principal);
+    for (const fields of [
+      { domains: [] },
+      { domains: ["PRICE", "PRICE"] },
+      { domains: ["PRICE", null] },
+      { domains: ["UNKNOWN"] },
+    ])
+      await assert.rejects(putGrant(client, scopeId, login.name, fields), { code: "23514" });
+    await assert.rejects(putGrant(client, scopeId, login.name, { capability: "READ" }), {
+      code: "23514",
+    });
+    await assert.rejects(putGrant(client, scopeId, "observed_missing_login"), { code: "23514" });
+    await assert.rejects(putGrant(client, scopeId, login.name, { userId: "unknown" }), {
+      code: "23503",
+    });
+    assert.match(await putGrant(client, scopeId, login.name), /^[\da-f-]{36}$/u);
+  } finally {
+    await login.client.end();
+  }
+}
+
+async function rawStorageDenial(state) {
+  for (const capability of capabilityRoles) {
+    const { client } = await restrictedLogin(state, capability);
+    try {
+      for (const table of [...tables, grantTable]) {
+        for (const statement of [
+          `SELECT * FROM public.${table}`,
+          `INSERT INTO public.${table} DEFAULT VALUES`,
+          `UPDATE public.${table} SET "scopeId"=$1 WHERE false`,
+          `DELETE FROM public.${table} WHERE false`,
+          `TRUNCATE public.${table}`,
+        ]) {
+          const parameters = statement.includes("$1")
+            ? ["00000000-0000-0000-0000-000000000000"]
+            : [];
+          await assert.rejects(client.query(statement, parameters), { code: "42501" });
+        }
+      }
+      await assert.rejects(client.query(`SET ROLE ${guardRole}`), { code: "42501" });
+    } finally {
+      await client.end();
+    }
   }
 }
 
@@ -705,7 +860,7 @@ async function immutableHistory({ client }) {
     "DELETE FROM public.observed_page_receipts",
     "DELETE FROM public.observed_facts",
     "DELETE FROM public.observed_receipt_members",
-    "TRUNCATE public.observed_scopes, public.observed_page_receipts, public.observed_facts, public.observed_receipt_members",
+    "TRUNCATE public.observed_scopes, public.observed_page_receipts, public.observed_facts, public.observed_receipt_members, public.observed_principal_grants",
   ];
   for (const statement of mutations) {
     await assert.rejects(client.query(statement), {
