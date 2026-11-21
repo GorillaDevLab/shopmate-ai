@@ -421,6 +421,8 @@ function registerAuthorityCases(state) {
     authorityBeforeChanges(state));
   test("authority denies a grant that expires while waiting on its locked row", () =>
     expiryWhileWaiting(state));
+  test("authorized restricted inserts enforce immutable receipt graph at actual commit", () =>
+    restrictedGraph(state));
 }
 
 async function roleCatalog({ client }) {
@@ -563,7 +565,7 @@ const authorityDenied = { code: "42501", message: "Observed scope access denied"
 const authoritySql =
   "SELECT public.observed_authorize($1::uuid,$2::text,$3::text,$4::text,$5::text)";
 
-async function authorityFixture(state, index = 0, role = "OPERATOR") {
+async function authorityFixture(state, index = 0, role = "OPERATOR", domains = ["PRICE"]) {
   const merchant = `observed-${randomBytes(6).toString("hex")}`;
   const scope = {
     organizationId: `legacy-org-${merchant}`,
@@ -577,7 +579,12 @@ async function authorityFixture(state, index = 0, role = "OPERATOR") {
   const userId = `user-${merchant}`;
   await seedMember(state.client, userId, role, scope);
   const login = await restrictedLogin(state, capabilityRoles[index]);
-  const grant = { organizationId: scope.organizationId, userId, capability: capabilities[index] };
+  const grant = {
+    organizationId: scope.organizationId,
+    userId,
+    capability: capabilities[index],
+    domains,
+  };
   try {
     const grantId = await putGrant(state.client, scopeId, login.name, grant);
     return { ...login, ...grant, scopeId, scope, grantId, merchant, admin: state.client };
@@ -869,6 +876,147 @@ function expiryWhileWaiting(state) {
     assert.match((await denial)?.message ?? "", /^Observed scope access denied$/u);
     assert.equal((await denial)?.code, "42501");
   });
+}
+
+const fixtureWriter = "shopmate_observed_test_writer";
+const fixturePrivileges = `
+  GRANT USAGE ON SCHEMA public TO shopmate_observed_test_writer;
+  GRANT SELECT ON public.observed_scopes TO shopmate_observed_test_writer;
+  GRANT SELECT ("receiptKey") ON public.observed_page_receipts TO shopmate_observed_test_writer;
+  GRANT SELECT ("factKey") ON public.observed_facts TO shopmate_observed_test_writer;
+  GRANT INSERT ON public.observed_page_receipts,public.observed_facts,public.observed_receipt_members
+    TO shopmate_observed_test_writer;
+  CREATE POLICY observed_test_read ON public.observed_scopes FOR SELECT TO shopmate_observed_test_writer USING (true);
+  CREATE POLICY observed_test_read ON public.observed_page_receipts FOR SELECT TO shopmate_observed_test_writer USING (true);
+  CREATE POLICY observed_test_read ON public.observed_facts FOR SELECT TO shopmate_observed_test_writer USING (true);
+  CREATE POLICY observed_test_insert ON public.observed_page_receipts FOR INSERT TO shopmate_observed_test_writer WITH CHECK (true);
+  CREATE POLICY observed_test_insert ON public.observed_facts FOR INSERT TO shopmate_observed_test_writer WITH CHECK (true);
+  CREATE POLICY observed_test_insert ON public.observed_receipt_members FOR INSERT TO shopmate_observed_test_writer WITH CHECK (true);
+  GRANT EXECUTE ON FUNCTION public.observed_authorize(uuid,text,text,text,text),
+    public.observed_fact_envelope(public.observed_facts,public.observed_scopes) TO shopmate_observed_test_writer;
+  DO $$
+  DECLARE
+    signature_ REGPROCEDURE;
+  BEGIN
+    FOR signature_ IN SELECT p.oid::regprocedure FROM pg_catalog.pg_proc p
+      JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+      WHERE n.nspname='public' AND starts_with(p.proname,'observed_') AND p.provolatile='i'
+    LOOP
+      EXECUTE pg_catalog.format('GRANT EXECUTE ON FUNCTION %s TO shopmate_observed_test_writer',signature_);
+    END LOOP;
+  END
+  $$;
+`;
+const fixtureWriteDefinition = `
+  CREATE FUNCTION observed_test.write_fact(
+    scope_ UUID, user_ TEXT, grant_ TEXT, receipt_ TEXT, bytes_ BYTEA,
+    start_ TIMESTAMPTZ, end_ TIMESTAMPTZ, total_ INTEGER
+  ) RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+  DECLARE
+    f_ JSONB := convert_from(bytes_,'UTF8')::jsonb;
+    kind_ TEXT := f_->'subject'->>'kind';
+    subject_ TEXT := coalesce(f_->'subject'->>'externalSkuId','');
+    receipt_key_ UUID;
+    fact_key_ UUID;
+  BEGIN
+    PERFORM public.observed_authorize(scope_,user_,'CONSUME',f_->>'domain',grant_);
+    INSERT INTO public.observed_page_receipts ("scopeId","receiptId",domain,"subjectKind","subjectId",
+      "periodStart","periodEnd",through,"modelVersion","configHash","publicationId","publicationHash",
+      "pageId","pageIndex","pageHash","terminalCoverageBps","recordCount","recordedAt")
+    VALUES (scope_,receipt_,f_->>'domain',kind_,subject_,start_,end_,end_,f_->>'modelVersion',
+      repeat('a',64),receipt_,repeat('a',64),receipt_,0,repeat('a',64),10000,total_,clock_timestamp())
+    RETURNING "receiptKey" INTO receipt_key_;
+    INSERT INTO public.observed_facts ("scopeId",domain,"subjectKind","subjectId","factId",sequence,
+      "producerVersion","modelVersion","occurredAt","observedAt","payloadHash",payload,"originReceiptKey","factBytes")
+    VALUES (scope_,f_->>'domain',kind_,subject_,f_->>'factId',(f_->>'sequence')::bigint,
+      f_->>'producerVersion',f_->>'modelVersion',(f_->>'occurredAt')::timestamptz,(f_->>'observedAt')::timestamptz,
+      f_->>'payloadHash',f_->'payload',receipt_key_,bytes_)
+    RETURNING "factKey" INTO fact_key_;
+    INSERT INTO public.observed_receipt_members ("receiptKey",ordinal,"factKey","scopeId",domain,"subjectKind","subjectId")
+    VALUES (receipt_key_,0,fact_key_,scope_,f_->>'domain',kind_,subject_);
+  END
+  $$;
+`;
+
+async function installWriteFixture(state) {
+  const { client } = state;
+  await client.query(`CREATE ROLE ${fixtureWriter} NOLOGIN NOSUPERUSER NOBYPASSRLS`);
+  state.logins.push(fixtureWriter);
+  await client.query(`CREATE SCHEMA observed_test AUTHORIZATION ${fixtureWriter}`);
+  await client.query(fixturePrivileges);
+  await client.query(fixtureWriteDefinition);
+  const signature =
+    "observed_test.write_fact(uuid,text,text,text,bytea,timestamptz,timestamptz,integer)";
+  await client.query(`ALTER FUNCTION ${signature} OWNER TO ${fixtureWriter}`);
+  await client.query(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC`);
+  await client.query(`GRANT USAGE ON SCHEMA observed_test TO ${capabilityRoles[1]}`);
+  await client.query(`GRANT EXECUTE ON FUNCTION ${signature} TO ${capabilityRoles[1]}`);
+}
+
+function graphFact(f, sequence, payload = feePayload) {
+  return priceFact(`restricted-${sequence}`, sequence, null, {
+    binding: f.scope,
+    domain: "FEE",
+    subject: storeSubject,
+    occurredAt: periodEnd,
+    observedAt: periodEnd,
+    payload,
+  });
+}
+
+function writeFixture(f, fact, fields = {}) {
+  const { count = 1, start = periodStart } = fields;
+  return f.client.query("SELECT observed_test.write_fact($1,$2,$3,$4,$5,$6,$7,$8)", [
+    f.scopeId,
+    f.userId,
+    f.grantId,
+    fact.factId,
+    factBytes(fact),
+    start,
+    periodEnd,
+    count,
+  ]);
+}
+
+async function restrictedGraph(state) {
+  const f = await authorityFixture(state, 1, "OPERATOR", ["FEE"]);
+  try {
+    await installWriteFixture(state);
+    const fact = state.factSchema.parse(graphFact(f, 1));
+    await transaction(f.client, () => writeFixture(f, fact));
+    const persisted = await readFromNewConnection(state.url, f.scopeId);
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].receiptId, fact.factId);
+    assert.equal(persisted[0].originReceiptId, fact.factId);
+    assert.deepEqual(persisted[0].factBytes, factBytes(fact));
+    await restrictedGraphDenials(state, f);
+    assert.deepEqual(await readFromNewConnection(state.url, f.scopeId), persisted);
+  } finally {
+    await f.client.end();
+  }
+}
+
+async function restrictedGraphDenials(state, f) {
+  const admitted = state.factSchema.parse(graphFact(f, 2));
+  for (const fields of [{ count: 2 }, { start: offsetMillisecond(periodStart, 1) }]) {
+    await f.client.query("BEGIN");
+    assert.equal((await writeFixture(f, admitted, fields)).rowCount, 1);
+    await assert.rejects(f.client.query("COMMIT"), {
+      code: "23514",
+      constraint: "observed_receipt_members_valid",
+    });
+  }
+  await assert.rejects(
+    writeFixture(f, graphFact(f, 3, { ...feePayload, amountMinor: "invalid" })),
+    {
+      code: "23514",
+      constraint: "observed_facts_payload_valid",
+    },
+  );
+  await assert.rejects(
+    writeFixture(f, priceFact("restricted-denied-domain", 4, null, { binding: f.scope })),
+    authorityDenied,
+  );
 }
 
 async function roundTrip({ client, url }) {

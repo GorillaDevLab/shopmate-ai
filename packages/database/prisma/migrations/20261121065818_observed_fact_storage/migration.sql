@@ -749,8 +749,9 @@ CREATE TRIGGER observed_facts_exact_bytes BEFORE INSERT ON public.observed_facts
   FOR EACH ROW EXECUTE FUNCTION public.observed_check_fact_bytes();
 
 -- Both inserts schedule the check so even an empty receipt or an attempted late edge is validated.
+-- The original writer's definer context has ended when this check runs at commit.
 CREATE FUNCTION public.observed_check_members() RETURNS TRIGGER
-LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public.observed_page_receipts AS r
@@ -834,6 +835,10 @@ REVOKE ALL ON FUNCTION public.observed_capability_role(TEXT),public.observed_log
 GRANT USAGE ON SCHEMA public TO shopmate_observed_publisher,shopmate_observed_consumer,
   shopmate_observed_reader,shopmate_observed_definition_provisioner,shopmate_observed_guard;
 GRANT SELECT ON public.observed_scopes,public.observed_principal_grants TO shopmate_observed_guard;
+GRANT SELECT ("receiptKey",domain,"periodStart","periodEnd",timezone,currency,through,"recordCount")
+  ON public.observed_page_receipts TO shopmate_observed_guard;
+GRANT SELECT ("factKey","factId",sequence,"observedAt",payload) ON public.observed_facts TO shopmate_observed_guard;
+GRANT SELECT ("receiptKey",ordinal,"factKey") ON public.observed_receipt_members TO shopmate_observed_guard;
 GRANT SELECT (id,"organizationId","workspaceId","storeId","externalStoreId",status,generation)
   ON public."PlatformConnection" TO shopmate_observed_guard;
 GRANT SELECT (id,"organizationId","workspaceId","merchantId") ON public."Store" TO shopmate_observed_guard;
@@ -845,6 +850,9 @@ GRANT SELECT ("organizationId","workspaceId","userId",status) ON public."Workspa
 
 CREATE POLICY observed_guard_read ON public.observed_scopes FOR SELECT TO shopmate_observed_guard USING (true);
 CREATE POLICY observed_guard_read ON public.observed_principal_grants FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public.observed_page_receipts FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public.observed_facts FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public.observed_receipt_members FOR SELECT TO shopmate_observed_guard USING (true);
 CREATE POLICY observed_guard_read ON public."PlatformConnection" FOR SELECT TO shopmate_observed_guard USING (true);
 CREATE POLICY observed_guard_read ON public."Organization" FOR SELECT TO shopmate_observed_guard USING (true);
 CREATE POLICY observed_guard_read ON public."Workspace" FOR SELECT TO shopmate_observed_guard USING (true);
@@ -869,10 +877,12 @@ CREATE POLICY observed_guard_lock ON public."WorkspaceMember" FOR UPDATE TO shop
 REVOKE ALL ON FUNCTION public.observed_lock_binding(UUID),public.observed_lock_member(UUID,TEXT,BOOLEAN),
   public.observed_authorize(UUID,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.observed_capability_role(TEXT),public.observed_login_safe(TEXT,TEXT),
-  public.observed_lock_binding(UUID),public.observed_lock_member(UUID,TEXT,BOOLEAN) TO shopmate_observed_guard;
+  public.observed_lock_binding(UUID),public.observed_lock_member(UUID,TEXT,BOOLEAN),
+  public.observed_json_time(JSONB) TO shopmate_observed_guard;
 GRANT EXECUTE ON FUNCTION public.observed_authorize(UUID,TEXT,TEXT,TEXT,TEXT)
   TO shopmate_observed_publisher,shopmate_observed_consumer,shopmate_observed_reader,
     shopmate_observed_definition_provisioner;
 ALTER FUNCTION public.observed_authorize(UUID,TEXT,TEXT,TEXT,TEXT) OWNER TO shopmate_observed_guard;
+ALTER FUNCTION public.observed_check_members() OWNER TO shopmate_observed_guard;
 
 COMMIT;
