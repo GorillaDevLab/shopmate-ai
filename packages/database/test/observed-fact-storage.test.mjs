@@ -268,11 +268,12 @@ async function transaction(client, callback) {
   }
 }
 
-async function insertOrigin(client, scopeId, id, fact, priorSequence = null) {
+async function insertOrigin(client, scopeId, id, fact, priorSequence = null, window = {}) {
   const receipt = await insertReceipt(client, scopeId, id, 1, {
     domain: fact.domain,
     subjectKind: fact.subject.kind,
     subjectId: subjectId(fact.subject),
+    ...window,
   });
   const factKey = await insertFact(client, scopeId, receipt, fact, priorSequence);
   await member(client, scopeId, receipt, factKey, 0, fact);
@@ -325,6 +326,7 @@ function registerStorageCases() {
     receiptMetadata(state));
   test("maximum-width opaque identities compare exactly without overflowing indexes", () =>
     wideIdentities(state));
+  registerPayloadCases(state, financePayloadCases);
 }
 
 function validatedRunnerUrl(value) {
@@ -337,6 +339,8 @@ function validatedRunnerUrl(value) {
 
 async function prepareDatabase(state) {
   const validated = validatedRunnerUrl(process.env.TEST_DATABASE_URL);
+  const { ObservedFactV1Schema } = await import("@shopmate/contracts");
+  state.factSchema = ObservedFactV1Schema;
   state.server = new pg.Client({ connectionString: validated });
   await state.server.connect();
   // This identifier is locally generated as SQL DDL cannot bind identifiers.
@@ -782,6 +786,149 @@ function wideReceiptPage(fact, publicationId) {
     nextCursor: first ? "next" : null,
     terminalCoverageBps: first ? null : 10000,
   };
+}
+
+const financeLine = {
+  externalSkuId: subject.externalSkuId,
+  externalOrderId: "order/甲",
+  externalLineId: "line/1",
+};
+const frozenCost = {
+  ...financeLine,
+  quantity: 1,
+  frozenAt: periodStart,
+  skuCostVersion: "cost/历史",
+  unitCostMinor: 0,
+  basis: "CONFIRMED",
+  currency: "CNY",
+  reason: null,
+};
+const refundAllocation = {
+  ...financeLine,
+  externalRefundId: "refund/1",
+  quantity: 0,
+  merchandiseMinor: 0,
+  buyerShippingMinor: 0,
+  settledAt: periodStart,
+  currency: "CNY",
+  reason: null,
+};
+const returnReceipt = {
+  ...financeLine,
+  externalRefundId: "refund/1",
+  externalReceiptId: "return/1",
+  acceptedAt: periodStart,
+  resellableQuantity: 0,
+  reason: null,
+};
+
+const financePayloadCases = [
+  {
+    domain: "FROZEN_COST",
+    generation: 20,
+    payload: frozenCost,
+    accepted: [
+      { basis: "ESTIMATED", reason: "COST_ESTIMATED" },
+      { basis: "UNAVAILABLE", unitCostMinor: null, reason: "COST_MISSING" },
+      { basis: "UNAVAILABLE", skuCostVersion: null, unitCostMinor: null, reason: "COST_MISSING" },
+    ],
+    rejected: [
+      { unitCostMinor: "0" },
+      { unitCostMinor: Number.MAX_SAFE_INTEGER + 1 },
+      { quantity: 0 },
+      { quantity: 1.5 },
+      { reason: undefined },
+      { oracle: null },
+      { skuCostVersion: null },
+      { skuCostVersion: " cost/历史" },
+      { externalLineId: 1 },
+      { externalSkuId: "another-sku" },
+      { frozenAt: "tomorrow" },
+      { frozenAt: "2026-02-30T16:00:00.000Z" },
+      { frozenAt: "2026-10-10T16:00:00Z" },
+      { frozenAt: "2026-10-10T16:00:00.000+00:00" },
+      { frozenAt: "2026-10-10T24:00:00.000Z" },
+      { frozenAt: "0000-01-01T00:00:00.000Z" },
+      { frozenAt: "2026-10-11T16:00:00.001Z" },
+      { basis: "UNAVAILABLE", reason: "COST_MISSING" },
+      { basis: "ESTIMATED" },
+      { currency: "USD" },
+    ],
+    shapes: [null, [], 1, "frozen cost"],
+  },
+  {
+    domain: "REFUND_ALLOCATION",
+    generation: 21,
+    payload: refundAllocation,
+    accepted: [{ merchandiseMinor: null, reason: "REFUND_UNKNOWN" }],
+    rejected: [
+      { merchandiseMinor: null },
+      { reason: "REFUND_UNKNOWN" },
+      { quantity: undefined },
+      { buyerShippingMinor: -1 },
+      { settledAt: "2026-10-11T16:00:00.001Z" },
+      { externalRefundId: "🚀".repeat(129) },
+    ],
+  },
+  {
+    domain: "RETURN_RECEIPT",
+    generation: 22,
+    payload: returnReceipt,
+    accepted: [
+      { acceptedAt: null, resellableQuantity: null, reason: "RETURN_UNKNOWN" },
+      { resellableQuantity: null, reason: "RETURN_UNKNOWN" },
+    ],
+    rejected: [
+      { acceptedAt: null },
+      { acceptedAt: "2026-10-11T16:00:00.001Z" },
+      { resellableQuantity: null },
+      { reason: "REFUND_UNKNOWN" },
+      { externalReceiptId: "bad\u200Breceipt" },
+    ],
+  },
+];
+
+function payloadFact(spec, sequence, payload) {
+  return priceFact(`typed-${spec.domain}-${sequence}`, sequence, null, {
+    domain: spec.domain,
+    generation: spec.generation,
+    subject: spec.subject ?? subject,
+    occurredAt: spec.observedAt ?? periodEnd,
+    observedAt: spec.observedAt ?? periodEnd,
+    payload,
+  });
+}
+
+function registerPayloadCases(state, cases) {
+  for (const spec of cases) {
+    test(`${spec.domain} admits contract payloads and rejects malformed typed payloads`, () =>
+      validatePayloads(state, spec));
+  }
+}
+
+async function validatePayloads({ client, factSchema }, spec) {
+  const scopeId = await insertScope(client, {}, spec.generation);
+  const accepted = [{}, ...(spec.accepted ?? [])];
+  for (const [index, fields] of accepted.entries()) {
+    const fact = factSchema.parse(payloadFact(spec, index + 1, { ...spec.payload, ...fields }));
+    await transaction(client, () =>
+      insertOrigin(client, scopeId, fact.factId, fact, null, spec.receiptWindow),
+    );
+  }
+  const invalid = spec.rejected.map((fields) => ({ ...spec.payload, ...fields }));
+  invalid.push(...(spec.shapes ?? []));
+  for (const [index, payload] of invalid.entries()) {
+    const fact = payloadFact(spec, accepted.length + index + 1, payload);
+    // JSON has no undefined value. Round-trip so omitted keys match the exact bytes SQL receives.
+    assert.equal(factSchema.safeParse(JSON.parse(JSON.stringify(fact))).success, false);
+    await assert.rejects(
+      transaction(client, () =>
+        insertOrigin(client, scopeId, fact.factId, fact, null, spec.receiptWindow),
+      ),
+      { code: "23514", constraint: "observed_facts_payload_valid" },
+      JSON.stringify(payload),
+    );
+  }
 }
 
 if (process.argv.includes(mode)) registerStorageCases();

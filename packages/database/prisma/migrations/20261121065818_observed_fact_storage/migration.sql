@@ -26,6 +26,112 @@ LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
   END) AND CASE kind_ WHEN 'STORE' THEN subject_='' ELSE public.observed_opaque_text(subject_,256) END
 $$;
 
+CREATE FUNCTION public.observed_json_keys(value_ JSONB, keys_ TEXT[]) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT CASE WHEN jsonb_typeof(value_)='object'
+    THEN value_ ?& keys_ AND value_-keys_='{}'::jsonb
+    ELSE FALSE END
+$$;
+
+CREATE FUNCTION public.observed_json_id(value_ JSONB) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT jsonb_typeof(value_)='string' AND public.observed_opaque_text(value_#>>'{}',256)
+$$;
+
+CREATE FUNCTION public.observed_json_number(value_ JSONB) RETURNS NUMERIC
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT CASE WHEN jsonb_typeof(value_)='number' THEN value_::numeric END
+$$;
+
+CREATE FUNCTION public.observed_json_integer(
+  value_ JSONB, minimum_ BIGINT DEFAULT 0, maximum_ BIGINT DEFAULT 9007199254740991
+) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT number_ BETWEEN minimum_ AND maximum_ AND trunc(number_)=number_
+  FROM public.observed_json_number(value_) AS number_
+$$;
+
+CREATE FUNCTION public.observed_json_time(value_ JSONB) RETURNS TIMESTAMPTZ
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT CASE WHEN jsonb_typeof(value_)='string' AND left(text_,4)<>'0000'
+    AND text_ ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9][.][0-9]{3}Z$'
+    AND pg_input_is_valid(text_,'timestamp with time zone') THEN text_::timestamptz END
+  FROM (SELECT value_#>>'{}' AS text_) AS scalar
+$$;
+
+CREATE FUNCTION public.observed_finance_line(p_ JSONB, subject_ TEXT) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_id(p_->'externalSkuId')
+    AND p_->>'externalSkuId'=subject_ COLLATE "C"
+    AND public.observed_json_id(p_->'externalOrderId')
+    AND public.observed_json_id(p_->'externalLineId')
+$$;
+
+CREATE FUNCTION public.observed_frozen_cost(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','externalOrderId','externalLineId',
+      'quantity','frozenAt','skuCostVersion','unitCostMinor','basis','currency','reason'])
+    AND public.observed_finance_line(p_,subject_)
+    AND public.observed_json_integer(p_->'quantity',1)
+    AND public.observed_json_time(p_->'frozenAt')<=seen_
+    AND p_->>'currency'='CNY'
+    AND (p_->'skuCostVersion'='null'::jsonb OR public.observed_json_id(p_->'skuCostVersion'))
+    AND CASE p_->>'basis'
+      WHEN 'UNAVAILABLE' THEN p_->'unitCostMinor'='null'::jsonb AND p_->>'reason'='COST_MISSING'
+      WHEN 'ESTIMATED' THEN p_->'skuCostVersion'<>'null'::jsonb
+        AND public.observed_json_integer(p_->'unitCostMinor') AND p_->>'reason'='COST_ESTIMATED'
+      WHEN 'CONFIRMED' THEN p_->'skuCostVersion'<>'null'::jsonb
+        AND public.observed_json_integer(p_->'unitCostMinor') AND p_->'reason'='null'::jsonb
+      ELSE FALSE END
+$$;
+
+CREATE FUNCTION public.observed_refund_allocation(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','externalOrderId','externalLineId',
+      'externalRefundId','quantity','merchandiseMinor','buyerShippingMinor','settledAt','currency','reason'])
+    AND public.observed_finance_line(p_,subject_)
+    AND public.observed_json_id(p_->'externalRefundId')
+    AND (p_->'quantity'='null'::jsonb OR public.observed_json_integer(p_->'quantity'))
+    AND (p_->'merchandiseMinor'='null'::jsonb OR public.observed_json_integer(p_->'merchandiseMinor'))
+    AND (p_->'buyerShippingMinor'='null'::jsonb OR public.observed_json_integer(p_->'buyerShippingMinor'))
+    AND public.observed_json_time(p_->'settledAt')<=seen_
+    AND p_->>'currency'='CNY'
+    AND CASE WHEN 'null'::jsonb IN (p_->'quantity',p_->'merchandiseMinor',p_->'buyerShippingMinor')
+      THEN p_->>'reason'='REFUND_UNKNOWN' ELSE p_->'reason'='null'::jsonb END
+$$;
+
+CREATE FUNCTION public.observed_return_receipt(p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT public.observed_json_keys(p_,ARRAY['externalSkuId','externalOrderId','externalLineId',
+      'externalRefundId','externalReceiptId','acceptedAt','resellableQuantity','reason'])
+    AND public.observed_finance_line(p_,subject_)
+    AND public.observed_json_id(p_->'externalRefundId')
+    AND public.observed_json_id(p_->'externalReceiptId')
+    AND (p_->'acceptedAt'='null'::jsonb OR public.observed_json_time(p_->'acceptedAt')<=seen_)
+    AND CASE WHEN p_->'resellableQuantity'='null'::jsonb THEN p_->>'reason'='RETURN_UNKNOWN'
+      ELSE p_->'acceptedAt'<>'null'::jsonb AND public.observed_json_integer(p_->'resellableQuantity')
+        AND p_->'reason'='null'::jsonb END
+$$;
+
+CREATE FUNCTION public.observed_payload_valid(
+  domain_ TEXT, p_ JSONB, subject_ TEXT, seen_ TIMESTAMPTZ
+) RETURNS BOOLEAN
+LANGUAGE SQL IMMUTABLE STRICT SET search_path=pg_catalog AS $$
+  SELECT CASE domain_
+    WHEN 'FROZEN_COST' THEN public.observed_frozen_cost(p_,subject_,seen_)
+    WHEN 'REFUND_ALLOCATION' THEN public.observed_refund_allocation(p_,subject_,seen_)
+    WHEN 'RETURN_RECEIPT' THEN public.observed_return_receipt(p_,subject_,seen_)
+    ELSE jsonb_typeof(p_)='object'
+  END
+$$;
+
+REVOKE ALL ON FUNCTION public.observed_json_keys(JSONB,TEXT[]),public.observed_json_id(JSONB),
+  public.observed_json_number(JSONB),public.observed_json_integer(JSONB,BIGINT,BIGINT),
+  public.observed_json_time(JSONB),public.observed_finance_line(JSONB,TEXT),
+  public.observed_frozen_cost(JSONB,TEXT,TIMESTAMPTZ),public.observed_refund_allocation(JSONB,TEXT,TIMESTAMPTZ),
+  public.observed_return_receipt(JSONB,TEXT,TIMESTAMPTZ),
+  public.observed_payload_valid(TEXT,JSONB,TEXT,TIMESTAMPTZ) FROM PUBLIC;
+
 CREATE TABLE public.observed_scopes (
   "scopeId" UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   "organizationId" TEXT COLLATE "C" NOT NULL,
@@ -141,7 +247,7 @@ CREATE TABLE public.observed_facts (
   ) IS TRUE),
   CONSTRAINT observed_facts_payload_valid CHECK ((
     "modelVersion"='mock-business-observed-v1' AND "payloadHash" ~ '^[a-f0-9]{64}$'
-    AND jsonb_typeof(payload)='object'
+    AND public.observed_payload_valid(domain,payload,"subjectId","observedAt")
   ) IS TRUE),
   CONSTRAINT observed_facts_time_valid CHECK ((
     public.observed_time("occurredAt") AND public.observed_time("observedAt") AND "occurredAt" <= "observedAt"
