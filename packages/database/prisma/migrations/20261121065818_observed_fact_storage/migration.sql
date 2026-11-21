@@ -173,11 +173,17 @@ ALTER TABLE public.observed_facts ADD CONSTRAINT observed_facts_origin_member_fk
 
 CREATE FUNCTION public.observed_stamp_receipt() RETURNS TRIGGER
 LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE
+  connection_ TEXT;
 BEGIN
-  IF NEW."subjectKind"='CONNECTION' AND EXISTS (
-    SELECT 1 FROM public.observed_scopes AS s
-    WHERE s."scopeId"=NEW."scopeId" AND s."connectionId"<>NEW."subjectId"
-  ) THEN
+  SELECT s."connectionId" INTO connection_ FROM public.observed_scopes AS s WHERE s."scopeId"=NEW."scopeId";
+  IF NOT FOUND THEN
+    -- Foreign key integrity checks can see a parent hidden from this trigger by RLS.
+    RAISE EXCEPTION 'Observed receipt scope is unavailable'
+      USING ERRCODE='23503', SCHEMA='public', TABLE='observed_page_receipts',
+        CONSTRAINT='observed_receipts_scope_fkey';
+  END IF;
+  IF NEW."subjectKind"='CONNECTION' AND NEW."subjectId"<>connection_ THEN
     RAISE EXCEPTION 'Observed receipt subject does not match its connection'
       USING ERRCODE='23514', CONSTRAINT='observed_receipts_connection_subject';
   END IF;
@@ -219,7 +225,9 @@ DECLARE
 BEGIN
   SELECT * INTO scope_ FROM public.observed_scopes AS s WHERE s."scopeId"=NEW."scopeId";
   IF NOT FOUND THEN
-    RETURN NEW; -- The scope FK reports the missing parent.
+    RAISE EXCEPTION 'Observed fact scope is unavailable'
+      USING ERRCODE='23503', SCHEMA='public', TABLE='observed_facts',
+        CONSTRAINT='observed_facts_scope_fkey';
   END IF;
   IF NEW."subjectKind"='CONNECTION' AND NEW."subjectId"<>scope_."connectionId" THEN
     RAISE EXCEPTION 'Observed fact subject does not match its connection'

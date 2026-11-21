@@ -309,6 +309,10 @@ function registerStorageCases() {
   test("storage binds all five connector identities and retains distinct generations", () =>
     bindingKeys(state));
   test("scope, subject and domain cannot be relabeled by membership", () => wrongMembership(state));
+  test("receipts require a scope visible to their insert trigger", () =>
+    receiptScopeVisibility(state));
+  test("facts require a scope visible to their byte validation trigger", () =>
+    factScopeVisibility(state));
   test("a fact must have its original membership at commit", () => missingOrigin(state));
   test("committed receipts require bounded, gapless, ordered, distinct membership", () =>
     invalidMemberships(state));
@@ -413,6 +417,76 @@ async function bindingKeys({ client }) {
   const prior = await insertScope(client, {}, 6);
   assert.notEqual(next, prior);
   await assert.rejects(insertScope(client, {}, 8), { code: "23505" });
+}
+
+const scopeVisibilityFixtureSql = `
+  CREATE ROLE observed_scope_visibility_fixture
+    NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+  GRANT USAGE ON SCHEMA public TO observed_scope_visibility_fixture;
+  GRANT SELECT ON public.observed_scopes TO observed_scope_visibility_fixture;
+  GRANT INSERT, SELECT ON public.observed_page_receipts, public.observed_facts
+    TO observed_scope_visibility_fixture;
+  GRANT EXECUTE ON FUNCTION public.observed_opaque_text(text, integer),
+    public.observed_time(timestamptz), public.observed_subject_valid(text, text, text),
+    public.observed_fact_envelope(public.observed_facts, public.observed_scopes)
+    TO observed_scope_visibility_fixture;
+  ALTER TABLE public.observed_scopes ENABLE ROW LEVEL SECURITY;
+  ALTER TABLE public.observed_scopes FORCE ROW LEVEL SECURITY;
+  CREATE POLICY observed_scope_visibility_fixture ON public.observed_scopes
+    FOR SELECT TO observed_scope_visibility_fixture USING (generation <> 18);
+  CREATE POLICY observed_receipt_visibility_fixture ON public.observed_page_receipts
+    TO observed_scope_visibility_fixture USING (true) WITH CHECK (true);
+  CREATE POLICY observed_fact_visibility_fixture ON public.observed_facts
+    TO observed_scope_visibility_fixture USING (true) WITH CHECK (true)
+`;
+
+async function withHiddenScope(client, verify) {
+  await client.query("BEGIN");
+  try {
+    const scopeId = await insertScope(client, {}, 18);
+    const receipt = await insertReceipt(client, scopeId, "hidden-scope-origin", 0);
+    await client.query(scopeVisibilityFixtureSql);
+    await client.query("SET LOCAL ROLE observed_scope_visibility_fixture");
+    const result = await client.query(
+      `SELECT current_user AS role, pg_catalog.has_table_privilege($1, $2) AS granted,
+        pg_catalog.row_security_active($1::regclass) AS filtered,
+        EXISTS (SELECT 1 FROM public.observed_scopes WHERE "scopeId"=$3) AS visible`,
+      ["public.observed_scopes", "SELECT", scopeId],
+    );
+    assert.deepEqual(result.rows, [
+      { role: "observed_scope_visibility_fixture", granted: true, filtered: true, visible: false },
+    ]);
+    await verify(scopeId, receipt);
+  } finally {
+    await client.query("ROLLBACK");
+  }
+}
+
+const missingScopeId = "00000000-0000-0000-0000-000000000000";
+
+async function receiptScopeVisibility({ client }) {
+  const expected = { code: "23503", constraint: "observed_receipts_scope_fkey" };
+  await assert.rejects(insertReceipt(client, missingScopeId, "absent-parent", 0), expected);
+  await withHiddenScope(client, async (scopeId) => {
+    const fields = { domain: "SYNC_TRANSITION", subjectKind: "CONNECTION", subjectId: "foreign" };
+    await assert.rejects(insertReceipt(client, scopeId, "hidden-parent", 0, fields), expected);
+  });
+  await withHiddenScope(client, (scopeId) =>
+    assert.rejects(insertReceipt(client, scopeId, "hidden-price-parent", 0), expected),
+  );
+}
+
+async function factScopeVisibility({ client }) {
+  const expected = { code: "23503", constraint: "observed_facts_scope_fkey" };
+  const fact = priceFact("hidden-parent", 1, null, { generation: 18 });
+  await assert.rejects(
+    insertFact(client, missingScopeId, { receiptKey: missingScopeId }, fact),
+    expected,
+  );
+  const mismatched = factBytes({ ...fact, sourceVersion: "observed-v1:g:18:e:2" });
+  await withHiddenScope(client, (scopeId, receipt) =>
+    assert.rejects(insertFact(client, scopeId, receipt, fact, null, mismatched), expected),
+  );
 }
 
 async function rejectsTransaction(client, callback, code, constraint) {
