@@ -418,7 +418,7 @@ LANGUAGE SQL STABLE STRICT SET search_path=pg_catalog AS $$
   SELECT EXISTS (
     SELECT FROM pg_roles AS login JOIN pg_roles AS cap ON cap.rolname=public.observed_capability_role(capability_)
     WHERE login.rolname::text=login_ COLLATE "C" AND login.rolcanlogin AND NOT cap.rolcanlogin
-      AND pg_has_role(login.oid,cap.oid,'MEMBER')
+      AND pg_has_role(login.oid,cap.oid,'USAGE')
       AND NOT EXISTS (
         SELECT FROM pg_roles AS r WHERE pg_has_role(login.oid,r.oid,'MEMBER') AND (
           r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication
@@ -475,6 +475,82 @@ END
 $$;
 CREATE TRIGGER observed_grants_login_valid BEFORE INSERT OR UPDATE OF "databaseRole",capability
   ON public.observed_principal_grants FOR EACH ROW EXECUTE FUNCTION public.observed_check_grant_login();
+
+CREATE FUNCTION public.observed_lock_binding(scope_ UUID) RETURNS BOOLEAN
+LANGUAGE SQL VOLATILE STRICT SET search_path=pg_catalog AS $$
+  SELECT EXISTS (
+    SELECT FROM public.observed_scopes b JOIN public."PlatformConnection" c
+      ON (c.id,c."organizationId",c."workspaceId",c."storeId",c."externalStoreId",c.generation)
+        =(b."connectionId",b."organizationId",b."workspaceId",b."storeId",b."externalStoreId",b.generation)
+    JOIN public."Store" s ON (s.id,s."organizationId",s."workspaceId")=(c."storeId",c."organizationId",c."workspaceId")
+    JOIN public."Organization" o ON (o.id,o."legacyMerchantId")=(s."organizationId",s."merchantId")
+    JOIN public."Workspace" w ON (w.id,w."organizationId")=(s."workspaceId",o.id)
+    JOIN public."Merchant" m ON m.id=s."merchantId"
+    WHERE b."scopeId"=scope_ AND c.status='ACTIVE' AND o.status='ACTIVE'
+      AND w.status='ACTIVE' AND m.status='ACTIVE'
+    FOR SHARE OF c
+  )
+$$;
+
+CREATE FUNCTION public.observed_lock_member(scope_ UUID, user_ TEXT, writer_ BOOLEAN) RETURNS BOOLEAN
+LANGUAGE plpgsql VOLATILE STRICT SET search_path=pg_catalog AS $$
+DECLARE
+  role_ public."TenantRole";
+BEGIN
+  SELECT m.role INTO role_ FROM public.observed_scopes b JOIN public."OrganizationMember" m
+    ON m."organizationId"=b."organizationId"
+    WHERE b."scopeId"=scope_ AND m."userId"=user_ AND m.status='ACTIVE'
+      AND (NOT writer_ OR m.role IN ('OWNER','ADMIN','OPERATOR'))
+    FOR SHARE OF m;
+  IF NOT FOUND THEN RETURN FALSE; END IF;
+  IF role_ IN ('OWNER','ADMIN') THEN RETURN TRUE; END IF;
+  RETURN EXISTS (
+    SELECT FROM public.observed_scopes b JOIN public."WorkspaceMember" m
+      ON (m."organizationId",m."workspaceId")=(b."organizationId",b."workspaceId")
+    WHERE b."scopeId"=scope_ AND m."userId"=user_ AND m.status='ACTIVE'
+    FOR SHARE OF m
+  );
+END
+$$;
+
+-- The caller holds this transaction open through its own final operation, passing the grant
+-- from any request that carries one. Actor-based reads can rely on the unique scoped grant.
+CREATE FUNCTION public.observed_authorize(
+  scope_ UUID, user_ TEXT, capability_ TEXT, domain_ TEXT, expected_grant_ TEXT DEFAULT NULL
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER VOLATILE SET search_path=pg_catalog AS $$
+DECLARE
+  grant_ UUID;
+  expiry_ TIMESTAMPTZ;
+BEGIN
+  IF current_setting('transaction_isolation')<>'read committed'
+    OR current_setting('role') NOT IN ('none',SESSION_USER)
+    OR public.observed_login_safe(SESSION_USER,capability_) IS NOT TRUE THEN
+    RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
+  END IF;
+  -- Do not lock caller-selected resources until a scoped grant is visible.
+  SELECT g."grantId" INTO grant_ FROM public.observed_principal_grants g
+    WHERE g."scopeId"=scope_ AND g."databaseRole"=SESSION_USER AND g."principalUserId"=user_ COLLATE "C"
+      AND g.capability=capability_ COLLATE "C" AND domain_ COLLATE "C"=ANY(g."allowedDomains")
+      AND (expected_grant_ IS NULL OR g."grantId"::text=expected_grant_ COLLATE "C")
+      AND g.active AND g."expiresAt">clock_timestamp();
+  IF grant_ IS NULL OR public.observed_lock_binding(scope_) IS NOT TRUE THEN
+    RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
+  END IF;
+  SELECT g."expiresAt" INTO expiry_ FROM public.observed_principal_grants g
+    WHERE g."grantId"=grant_ AND g."scopeId"=scope_ AND g."databaseRole"=SESSION_USER
+      AND g."principalUserId"=user_ COLLATE "C" AND g.capability=capability_ COLLATE "C"
+      AND domain_ COLLATE "C"=ANY(g."allowedDomains") AND g.active
+    FOR SHARE OF g;
+  IF expiry_ IS NULL OR public.observed_lock_member(scope_,user_,capability_<>'READ') IS NOT TRUE THEN
+    RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
+  END IF;
+  IF public.observed_lock_binding(scope_) IS NOT TRUE
+    OR public.observed_login_safe(SESSION_USER,capability_) IS NOT TRUE OR expiry_<=clock_timestamp() THEN
+    RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
+  END IF;
+END
+$$;
 
 CREATE TABLE public.observed_page_receipts (
   "receiptKey" UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -754,5 +830,49 @@ REVOKE ALL ON FUNCTION public.observed_opaque_text(TEXT,INTEGER),public.observed
   public.observed_check_members(),public.observed_reject_history_mutation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.observed_capability_role(TEXT),public.observed_login_safe(TEXT,TEXT),
   public.observed_grant_domains(TEXT[]),public.observed_check_grant_login() FROM PUBLIC;
+
+GRANT USAGE ON SCHEMA public TO shopmate_observed_publisher,shopmate_observed_consumer,
+  shopmate_observed_reader,shopmate_observed_definition_provisioner,shopmate_observed_guard;
+GRANT SELECT ON public.observed_scopes,public.observed_principal_grants TO shopmate_observed_guard;
+GRANT SELECT (id,"organizationId","workspaceId","storeId","externalStoreId",status,generation)
+  ON public."PlatformConnection" TO shopmate_observed_guard;
+GRANT SELECT (id,"organizationId","workspaceId","merchantId") ON public."Store" TO shopmate_observed_guard;
+GRANT SELECT (id,status,"legacyMerchantId") ON public."Organization" TO shopmate_observed_guard;
+GRANT SELECT (id,status,"organizationId") ON public."Workspace" TO shopmate_observed_guard;
+GRANT SELECT (id,status) ON public."Merchant" TO shopmate_observed_guard;
+GRANT SELECT ("organizationId","userId",status,role) ON public."OrganizationMember" TO shopmate_observed_guard;
+GRANT SELECT ("organizationId","workspaceId","userId",status) ON public."WorkspaceMember" TO shopmate_observed_guard;
+
+CREATE POLICY observed_guard_read ON public.observed_scopes FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public.observed_principal_grants FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public."PlatformConnection" FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public."Organization" FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public."Workspace" FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public."OrganizationMember" FOR SELECT TO shopmate_observed_guard USING (true);
+CREATE POLICY observed_guard_read ON public."WorkspaceMember" FOR SELECT TO shopmate_observed_guard USING (true);
+
+-- PostgreSQL requires an UPDATE column privilege for row locks. Policies prohibit writes.
+GRANT UPDATE (active) ON public.observed_principal_grants TO shopmate_observed_guard;
+GRANT UPDATE (status) ON public."PlatformConnection",public."OrganizationMember",public."WorkspaceMember"
+  TO shopmate_observed_guard;
+CREATE POLICY observed_guard_lock ON public.observed_principal_grants FOR UPDATE TO shopmate_observed_guard
+  USING (true) WITH CHECK (false);
+CREATE POLICY observed_guard_lock ON public."PlatformConnection" FOR UPDATE TO shopmate_observed_guard
+  USING (true) WITH CHECK (false);
+CREATE POLICY observed_guard_no_update ON public."PlatformConnection" AS RESTRICTIVE FOR UPDATE TO shopmate_observed_guard
+  USING (true) WITH CHECK (false);
+CREATE POLICY observed_guard_lock ON public."OrganizationMember" FOR UPDATE TO shopmate_observed_guard
+  USING (true) WITH CHECK (false);
+CREATE POLICY observed_guard_lock ON public."WorkspaceMember" FOR UPDATE TO shopmate_observed_guard
+  USING (true) WITH CHECK (false);
+
+REVOKE ALL ON FUNCTION public.observed_lock_binding(UUID),public.observed_lock_member(UUID,TEXT,BOOLEAN),
+  public.observed_authorize(UUID,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.observed_capability_role(TEXT),public.observed_login_safe(TEXT,TEXT),
+  public.observed_lock_binding(UUID),public.observed_lock_member(UUID,TEXT,BOOLEAN) TO shopmate_observed_guard;
+GRANT EXECUTE ON FUNCTION public.observed_authorize(UUID,TEXT,TEXT,TEXT,TEXT)
+  TO shopmate_observed_publisher,shopmate_observed_consumer,shopmate_observed_reader,
+    shopmate_observed_definition_provisioner;
+ALTER FUNCTION public.observed_authorize(UUID,TEXT,TEXT,TEXT,TEXT) OWNER TO shopmate_observed_guard;
 
 COMMIT;

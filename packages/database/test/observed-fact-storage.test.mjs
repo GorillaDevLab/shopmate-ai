@@ -5,9 +5,12 @@ import { randomBytes } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import process from "node:process";
 import { after, before, test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, URL } from "node:url";
 import pg from "pg";
 import { requireIsolatedDatabaseUrl } from "./helpers/isolated-postgres.mjs";
+import { configFor, hashConfig } from "./helpers/mock-platform-fixture.mjs";
+import { beginControl, operatorControl } from "./helpers/mock-source-control-fixture.mjs";
 
 const root = new URL("../", import.meta.url);
 const migrations = new URL("prisma/migrations/", root);
@@ -68,33 +71,26 @@ function prisma(url, args) {
   );
 }
 
-async function seedBinding(client) {
+async function seedBinding(client, scope = binding, merchant = "observed-a") {
   await client.query(
     'INSERT INTO public."Merchant" (id, name, slug, "updatedAt") VALUES ($1, $1, $1, now())',
-    ["observed-a"],
+    [merchant],
   );
   await client.query(
     `INSERT INTO public."Store" (id, "merchantId", name, city, platform, "organizationId", "workspaceId")
      VALUES ($1, $2, $1, $3, $4, $5, $6)`,
-    [
-      binding.storeId,
-      "observed-a",
-      "Shanghai",
-      "MOCK",
-      binding.organizationId,
-      binding.workspaceId,
-    ],
+    [scope.storeId, merchant, "Shanghai", "MOCK", scope.organizationId, scope.workspaceId],
   );
   await client.query(
     `INSERT INTO public."PlatformConnection"
      (id, "organizationId", "workspaceId", "storeId", "externalStoreId", generation)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [
-      binding.connectionId,
-      binding.organizationId,
-      binding.workspaceId,
-      binding.storeId,
-      binding.externalStoreId,
+      scope.connectionId,
+      scope.organizationId,
+      scope.workspaceId,
+      scope.storeId,
+      scope.externalStoreId,
       7,
     ],
   );
@@ -413,6 +409,18 @@ function registerAuthorityCases(state) {
     operatorGrants(state));
   test("each runtime capability denies raw storage and grant provisioning", () =>
     rawStorageDenial(state));
+  test("restricted authority accepts each scoped capability and checks login, domain and generation", () =>
+    scopedAuthority(state));
+  test("restricted authority revalidates live tenant, membership and grant state", () =>
+    liveAuthority(state));
+  test("grant revocation committed first denies a waiting authority check", () =>
+    revokeBeforeAuthority(state));
+  test("generation reset committed first denies a waiting authority check", () =>
+    resetBeforeAuthority(state));
+  test("authority locks serialize concurrent generation, grant and membership changes", () =>
+    authorityBeforeChanges(state));
+  test("authority denies a grant that expires while waiting on its locked row", () =>
+    expiryWhileWaiting(state));
 }
 
 async function roleCatalog({ client }) {
@@ -469,16 +477,16 @@ async function restrictedLogin(state, capability) {
   return { client, name };
 }
 
-async function seedMember(client, userId, role = "OPERATOR") {
+async function seedMember(client, userId, role = "OPERATOR", scope = binding) {
   await client.query(
     `INSERT INTO public."OrganizationMember"(id,"organizationId","userId",role,"updatedAt")
      VALUES ($1,$2,$1,$3,clock_timestamp())`,
-    [userId, binding.organizationId, role],
+    [userId, scope.organizationId, role],
   );
   await client.query(
     `INSERT INTO public."WorkspaceMember"(id,"organizationId","workspaceId","userId")
      VALUES ($1,$2,$3,$1)`,
-    [userId, binding.organizationId, binding.workspaceId],
+    [userId, scope.organizationId, scope.workspaceId],
   );
 }
 
@@ -548,6 +556,319 @@ async function rawStorageDenial(state) {
       await client.end();
     }
   }
+}
+
+const capabilities = ["PUBLISH", "CONSUME", "READ", "PROVISION_DEFINITION"];
+const authorityDenied = { code: "42501", message: "Observed scope access denied" };
+const authoritySql =
+  "SELECT public.observed_authorize($1::uuid,$2::text,$3::text,$4::text,$5::text)";
+
+async function authorityFixture(state, index = 0, role = "OPERATOR") {
+  const merchant = `observed-${randomBytes(6).toString("hex")}`;
+  const scope = {
+    organizationId: `legacy-org-${merchant}`,
+    workspaceId: `legacy-workspace-${merchant}`,
+    storeId: `store-${merchant}`,
+    connectionId: `connection-${merchant}`,
+    externalStoreId: `shop/${merchant}`,
+  };
+  await seedBinding(state.client, scope, merchant);
+  const scopeId = await insertScope(state.client, scope);
+  const userId = `user-${merchant}`;
+  await seedMember(state.client, userId, role, scope);
+  const login = await restrictedLogin(state, capabilityRoles[index]);
+  const grant = { organizationId: scope.organizationId, userId, capability: capabilities[index] };
+  try {
+    const grantId = await putGrant(state.client, scopeId, login.name, grant);
+    return { ...login, ...grant, scopeId, scope, grantId, merchant, admin: state.client };
+  } catch (error) {
+    await login.client.end();
+    throw error;
+  }
+}
+
+function authorize(fixture, fields = {}) {
+  const {
+    client,
+    scopeId,
+    userId,
+    capability,
+    domain = "PRICE",
+    grantId,
+  } = { ...fixture, ...fields };
+  return client.query(authoritySql, [scopeId, userId, capability, domain, grantId]);
+}
+
+async function scopedAuthority(state) {
+  for (const [index, capability] of capabilities.entries()) {
+    const fixture = await authorityFixture(state, index, index === 2 ? "VIEWER" : "OPERATOR");
+    try {
+      assert.equal(
+        (await authorize(fixture, { grantId: index === 2 ? null : fixture.grantId })).rowCount,
+        1,
+      );
+      for (const other of capabilities.filter((candidate) => candidate !== capability)) {
+        await assert.rejects(authorize(fixture, { capability: other }), authorityDenied);
+      }
+      await assert.rejects(authorize(fixture, { domain: "LISTING" }), authorityDenied);
+      await assert.rejects(authorize(fixture, { userId: principal }), authorityDenied);
+      await assert.rejects(authorize(fixture, { domain: null }), authorityDenied);
+      if (index === 0) await mismatchedAuthority(state, fixture);
+    } finally {
+      await fixture.client.end();
+    }
+  }
+}
+
+async function mismatchedAuthority(state, fixture) {
+  const { admin, scope, name, client } = fixture;
+  const oldScope = await insertScope(admin, scope, 6);
+  const oldGrant = await putGrant(admin, oldScope, name, fixture);
+  await assert.rejects(
+    authorize(fixture, { scopeId: oldScope, grantId: oldGrant }),
+    authorityDenied,
+  );
+  await assert.rejects(authorize(fixture, { grantId: oldGrant }), authorityDenied);
+  await assert.rejects(authorize(fixture, { grantId: "malformed" }), authorityDenied);
+  const unrelatedScope = await insertScope(admin, binding, 102);
+  await assert.rejects(authorize(fixture, { scopeId: unrelatedScope }), authorityDenied);
+  const other = await restrictedLogin(state, capabilityRoles[0]);
+  try {
+    await other.client.query("SELECT set_config('app.user_id',$1,false)", [fixture.userId]);
+    await assert.rejects(authorize(fixture, { client: other.client }), authorityDenied);
+  } finally {
+    await other.client.end();
+  }
+  await assert.rejects(
+    client.query("SELECT public.observed_login_safe($1,$2)", [name, "PUBLISH"]),
+    {
+      code: "42501",
+    },
+  );
+  await client.query(`SET ROLE ${capabilityRoles[0]}`);
+  await assert.rejects(authorize(fixture), authorityDenied);
+  await client.query("RESET ROLE");
+  await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+  await assert.rejects(authorize(fixture), authorityDenied);
+  await client.query("ROLLBACK");
+  await admin.query(`GRANT pg_write_all_data TO "${name}"`);
+  await assert.rejects(authorize(fixture), authorityDenied);
+  await admin.query(`REVOKE pg_write_all_data FROM "${name}"`);
+}
+
+async function liveAuthority(state) {
+  const f = await authorityFixture(state);
+  const { admin, client, scope, userId, grantId, merchant } = f;
+  const cases = [
+    ['public."Organization"', "status", "id", scope.organizationId, "SUSPENDED", "ACTIVE"],
+    ['public."Workspace"', "status", "id", scope.workspaceId, "SUSPENDED", "ACTIVE"],
+    ['public."Merchant"', "status", "id", merchant, "INACTIVE", "ACTIVE"],
+    ['public."OrganizationMember"', "status", "id", userId, "INACTIVE", "ACTIVE"],
+    ['public."WorkspaceMember"', "status", "id", userId, "INACTIVE", "ACTIVE"],
+    ['public."OrganizationMember"', "role", "id", userId, "VIEWER", "OPERATOR"],
+    ["public.observed_principal_grants", "active", "grantId", grantId, false, true],
+  ];
+  try {
+    for (const [table, column, key, id, inactive, restored] of cases) {
+      const change = `UPDATE ${table} SET "${column}"=$2 WHERE "${key}"=$1`;
+      assert.equal((await admin.query(change, [id, inactive])).rowCount, 1);
+      await assert.rejects(authorize(f), authorityDenied);
+      await admin.query(change, [id, restored]);
+      assert.equal((await authorize(f)).rowCount, 1);
+    }
+    await disconnectedAuthority(f);
+    await admin.query(
+      'UPDATE public.observed_principal_grants SET "expiresAt"=clock_timestamp() WHERE "grantId"=$1',
+      [grantId],
+    );
+    await assert.rejects(authorize(f), authorityDenied);
+  } finally {
+    await client.end();
+  }
+}
+
+async function seedSourceControl({ admin, scope, merchant, userId }) {
+  const sessionId = `session-${merchant}`;
+  const operator = `${userId}-owner`;
+  const config = configFor(scope);
+  await seedMember(admin, operator, "OWNER", scope);
+  await admin.query('INSERT INTO public."DemoTenant"("organizationId") VALUES ($1)', [
+    scope.organizationId,
+  ]);
+  await admin.query('UPDATE public."TenantBootstrapEnvironment" SET environment=$1 WHERE id=$2', [
+    "DEMO",
+    "singleton",
+  ]);
+  await admin.query(
+    `INSERT INTO demo."DemoCommerceSession"
+       (id,"organizationId","workspaceId","storeId","connectionId","externalStoreId",
+        config,"configHash","generatorVersion","clockNow")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      sessionId,
+      scope.organizationId,
+      scope.workspaceId,
+      scope.storeId,
+      scope.connectionId,
+      scope.externalStoreId,
+      config,
+      hashConfig(config),
+      "mock-source-v1",
+      config.historyStart,
+    ],
+  );
+  return { sessionId, operator };
+}
+
+async function disconnectedAuthority(f) {
+  const { operator, sessionId } = await seedSourceControl(f);
+  const change = 'UPDATE public."PlatformConnection" SET status=$2 WHERE id=$1';
+  await operatorControl(
+    f.admin,
+    change,
+    [f.scope.connectionId, "DISCONNECTED"],
+    { sessionId },
+    operator,
+  );
+  await assert.rejects(authorize(f), authorityDenied);
+  await operatorControl(f.admin, change, [f.scope.connectionId, "ACTIVE"], { sessionId }, operator);
+  assert.equal((await authorize(f)).rowCount, 1);
+}
+
+const revokeGrant = 'UPDATE public.observed_principal_grants SET active=false WHERE "grantId"=$1';
+const resetGeneration =
+  'UPDATE public."PlatformConnection" SET generation=generation+1 WHERE id=$1';
+
+async function waitForLock(observer, waiter, blocker, operation = "authority check") {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const { rows } = await observer.query(
+      "SELECT $2::integer=ANY(pg_blocking_pids($1::integer)) AS blocked",
+      [waiter.processID, blocker.processID],
+    );
+    if (rows[0].blocked) return;
+    await delay(15);
+  }
+  assert.fail(`expected PostgreSQL to report a transaction lock for ${operation}`);
+}
+
+async function withLockFixture(state, check) {
+  const f = await authorityFixture(state);
+  const observer = new pg.Client({ connectionString: state.url });
+  try {
+    await observer.connect();
+    for (const client of [f.client, f.admin]) {
+      await client.query("SELECT set_config('statement_timeout',$1,false)", ["8s"]);
+    }
+    await check(f, observer);
+  } finally {
+    try {
+      await f.client.end();
+    } finally {
+      await f.admin.query("ROLLBACK");
+      await f.admin.query("RESET statement_timeout");
+      await observer.end();
+    }
+  }
+}
+
+function revokeBeforeAuthority(state) {
+  return withLockFixture(state, async (f, observer) => {
+    await f.admin.query("BEGIN");
+    await f.admin.query(revokeGrant, [f.grantId]);
+    const denial = authorize(f).then(
+      () => null,
+      (error) => error,
+    );
+    await waitForLock(observer, f.client, f.admin);
+    await f.admin.query("COMMIT");
+    assert.match((await denial)?.message ?? "", /^Observed scope access denied$/u);
+    assert.equal((await denial)?.code, "42501");
+  });
+}
+
+function resetBeforeAuthority(state) {
+  return withLockFixture(state, async (f, observer) => {
+    const { operator, sessionId } = await seedSourceControl(f);
+    await beginControl(f.admin, sessionId, operator);
+    assert.equal((await f.admin.query(resetGeneration, [f.scope.connectionId])).rowCount, 1);
+    await f.client.query("SET lock_timeout='200ms'");
+    await assert.rejects(authorize(f, { domain: "LISTING" }), authorityDenied);
+    await f.client.query("RESET lock_timeout");
+    const denial = authorize(f).then(
+      () => null,
+      (error) => error,
+    );
+    await waitForLock(observer, f.client, f.admin);
+    await f.admin.query("COMMIT");
+    assert.match((await denial)?.message ?? "", /^Observed scope access denied$/u);
+    assert.equal((await denial)?.code, "42501");
+  });
+}
+
+function authorityBeforeChanges(state) {
+  return withLockFixture(state, async (f, observer) => {
+    const { operator, sessionId } = await seedSourceControl(f);
+    await f.client.query("BEGIN");
+    assert.equal((await authorize(f)).rowCount, 1);
+    const changes = [
+      [resetGeneration, f.scope.connectionId],
+      [revokeGrant, f.grantId],
+      ["UPDATE public.\"OrganizationMember\" SET status='INACTIVE' WHERE id=$1", f.userId],
+      ["UPDATE public.\"WorkspaceMember\" SET status='INACTIVE' WHERE id=$1", f.userId],
+    ];
+    for (const [statement, parameter] of changes) {
+      if (statement === resetGeneration) await beginControl(f.admin, sessionId, operator);
+      else await f.admin.query("BEGIN");
+      const mutation = f.admin.query(statement, [parameter]).then(
+        (result) => result,
+        (error) => ({ error }),
+      );
+      await waitForLock(observer, f.admin, f.client, statement);
+      await f.client.query("COMMIT");
+      const result = await mutation;
+      if (result.error) throw result.error;
+      assert.equal(result.rowCount, 1);
+      await f.admin.query("ROLLBACK");
+      await f.client.query("BEGIN");
+      assert.equal((await authorize(f)).rowCount, 1);
+    }
+    await f.client.query("COMMIT");
+    await f.admin.query(revokeGrant, [f.grantId]);
+    await assert.rejects(authorize(f), authorityDenied);
+  });
+}
+
+function expiryWhileWaiting(state) {
+  return withLockFixture(state, async (f, observer) => {
+    const expiry = `UPDATE public.observed_principal_grants
+      SET "expiresAt"=clock_timestamp()+interval '3 seconds' WHERE "grantId"=$1`;
+    await f.admin.query(expiry, [f.grantId]);
+    await f.admin.query("BEGIN");
+    await f.admin.query(
+      'SELECT "grantId" FROM public.observed_principal_grants WHERE "grantId"=$1 FOR UPDATE',
+      [f.grantId],
+    );
+    const denial = authorize(f).then(
+      () => null,
+      (error) => error,
+    );
+    await waitForLock(observer, f.client, f.admin);
+    const live = await observer.query(
+      `SELECT "expiresAt">clock_timestamp() AS live
+      FROM public.observed_principal_grants WHERE "grantId"=$1`,
+      [f.grantId],
+    );
+    assert.equal(live.rows[0].live, true);
+    await observer.query(
+      `SELECT pg_sleep(greatest(0,extract(epoch FROM "expiresAt"-clock_timestamp())))
+      FROM public.observed_principal_grants WHERE "grantId"=$1`,
+      [f.grantId],
+    );
+    await f.admin.query("COMMIT");
+    assert.match((await denial)?.message ?? "", /^Observed scope access denied$/u);
+    assert.equal((await denial)?.code, "42501");
+  });
 }
 
 async function roundTrip({ client, url }) {
