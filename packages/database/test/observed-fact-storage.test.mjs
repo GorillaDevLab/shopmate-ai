@@ -270,14 +270,20 @@ async function transaction(client, callback) {
 
 async function insertOrigin(client, scopeId, id, fact, priorSequence = null, window = {}) {
   const receipt = await insertReceipt(client, scopeId, id, 1, {
-    domain: fact.domain,
-    subjectKind: fact.subject.kind,
-    subjectId: subjectId(fact.subject),
+    ...factPartition(fact),
     ...window,
   });
   const factKey = await insertFact(client, scopeId, receipt, fact, priorSequence);
   await member(client, scopeId, receipt, factKey, 0, fact);
   return { receipt, factKey };
+}
+
+function factPartition(fact) {
+  return {
+    domain: fact.domain,
+    subjectKind: fact.subject.kind,
+    subjectId: subjectId(fact.subject),
+  };
 }
 
 const readMembers = `
@@ -333,6 +339,7 @@ function registerStorageCases() {
   registerPayloadCases(state, [syncPayloadCase]);
   test("sync transition and receipt subjects match the exact binding connection", () =>
     syncConnectionIdentity(state));
+  registerMeasurementMemberships(state);
 }
 
 function validatedRunnerUrl(value) {
@@ -345,7 +352,8 @@ function validatedRunnerUrl(value) {
 
 async function prepareDatabase(state) {
   const validated = validatedRunnerUrl(process.env.TEST_DATABASE_URL);
-  const { ObservedFactV1Schema } = await import("@shopmate/contracts");
+  const { AppendObservedPageV1Schema, ObservedFactV1Schema } = await import("@shopmate/contracts");
+  state.appendSchema = AppendObservedPageV1Schema;
   state.factSchema = ObservedFactV1Schema;
   state.server = new pg.Client({ connectionString: validated });
   await state.server.connect();
@@ -1275,6 +1283,125 @@ async function validatePayloads({ client, factSchema }, spec) {
       ),
       { code: "23514", constraint: "observed_facts_payload_valid" },
       JSON.stringify(payload),
+    );
+  }
+}
+
+function registerMeasurementMemberships(state) {
+  for (const spec of measurementPayloadCases) {
+    for (const original of [true, false]) {
+      const membership = original ? "original" : "later";
+      test(`${spec.label ?? spec.domain} payload window fits its ${membership} receipt at commit`, () =>
+        measurementMembership(state, spec, original));
+    }
+  }
+}
+
+function offsetMillisecond(time, delta) {
+  return new Date(Date.parse(time) + delta).toISOString();
+}
+
+function receiptWindowCases(window) {
+  const startEarlier = offsetMillisecond(window.periodStart, -1);
+  const startLater = offsetMillisecond(window.periodStart, 1);
+  const endEarlier = offsetMillisecond(window.periodEnd, -1);
+  const endLater = offsetMillisecond(window.periodEnd, 1);
+  return [
+    ["exact", window, true],
+    ["enclosing", { ...window, periodStart: startEarlier, periodEnd: endLater }, true],
+    ["clipped-start", { ...window, periodStart: startLater }, false],
+    ["clipped-end", { ...window, periodEnd: endEarlier }, false],
+  ];
+}
+
+function appendWindowFixture(fact, receiptId, window, through) {
+  return {
+    binding: fact.binding,
+    generation: fact.generation,
+    domain: fact.domain,
+    subject: fact.subject,
+    window,
+    publicationId: `publication-${receiptId}`,
+    publicationHash: hash,
+    pageId: `page-${receiptId}`,
+    pageIndex: 0,
+    pageHash: hash,
+    priorPageHash: null,
+    expectedCursor: null,
+    nextCursor: null,
+    terminalCoverage: { coverageBasisPoints: 10000 },
+    grantId: "window-proof",
+    fence: 0,
+    through,
+    records: [fact],
+  };
+}
+
+async function measurementMembership({ client, factSchema, appendSchema }, measurement, original) {
+  const spec = { ...measurement, generation: measurement.generation + (original ? 20 : 30) };
+  const scopeId = await insertScope(client, {}, spec.generation);
+  const fact = factSchema.parse(payloadFact(spec, 1, spec.payload));
+  const inner = fact.payload.window;
+  const factKey = original
+    ? null
+    : (
+        await transaction(client, () =>
+          insertOrigin(client, scopeId, "stored-measurement", fact, null, {
+            ...inner,
+            through: fact.observedAt,
+          }),
+        )
+      ).factKey;
+  for (const [index, [receiptId, window, allowed]] of receiptWindowCases(inner).entries()) {
+    const candidate = original
+      ? factSchema.parse(payloadFact(spec, index + 2, spec.payload))
+      : fact;
+    const through =
+      candidate.observedAt > window.periodEnd ? candidate.observedAt : window.periodEnd;
+    const parsed = appendSchema.safeParse(
+      appendWindowFixture(candidate, receiptId, window, through),
+    );
+    assert.equal(parsed.success, allowed, receiptId);
+    if (!parsed.success) assert.equal(parsed.error.issues[0].message, "INVALID_PAGE_RECORDS");
+    await checkMeasurementCommit(client, scopeId, candidate, {
+      receiptId,
+      window: { ...window, through },
+      factKey,
+      allowed,
+    });
+  }
+}
+
+async function checkMeasurementCommit(
+  client,
+  scopeId,
+  fact,
+  { receiptId, window, factKey, allowed },
+) {
+  let wroteMembership = false;
+  const commit = transaction(client, async () => {
+    if (factKey === null) {
+      await insertOrigin(client, scopeId, receiptId, fact, null, window);
+    } else {
+      const receipt = await insertReceipt(client, scopeId, receiptId, 1, {
+        ...factPartition(fact),
+        ...window,
+      });
+      await member(client, scopeId, receipt, factKey, 0, fact);
+    }
+    wroteMembership = true;
+  });
+  if (allowed) await commit;
+  else {
+    await assert.rejects(
+      commit,
+      { code: "23514", constraint: "observed_receipt_members_valid" },
+      receiptId,
+    );
+    assert.equal(
+      wroteMembership,
+      true,
+      "window validation belongs to the deferred membership check",
     );
   }
 }

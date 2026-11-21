@@ -584,10 +584,15 @@ BEGIN
     SELECT 1 FROM public.observed_page_receipts AS r
     CROSS JOIN LATERAL (
       SELECT count(*) AS members, count(DISTINCT "factId") AS identities,
-        bool_and(ordinal=position-1 AND (previous IS NULL OR previous<sequence)
-          AND "observedAt"<=r.through) AS ordered
+        bool_and((ordinal=position-1 AND (previous IS NULL OR previous<sequence)
+          AND "observedAt"<=r.through
+          AND (r.domain NOT IN ('FEE','TRAFFIC','CAMPAIGN_MEASUREMENT') OR (
+            public.observed_json_time(payload->'window'->'periodStart')>=r."periodStart"
+            AND public.observed_json_time(payload->'window'->'periodEnd')<=r."periodEnd"
+            AND payload->'window'->>'timezone'=r.timezone AND payload->'window'->>'currency'=r.currency
+          ))) IS TRUE) AS valid
       FROM (
-        SELECT m.ordinal, f."factId", f.sequence, f."observedAt",
+        SELECT m.ordinal, f."factId", f.sequence, f."observedAt", f.payload,
           row_number() OVER member_order AS position, lag(f.sequence) OVER member_order AS previous
         FROM public.observed_receipt_members AS m
         JOIN public.observed_facts AS f ON f."factKey"=m."factKey"
@@ -596,7 +601,7 @@ BEGIN
       ) AS page_members
     ) AS page
     WHERE r."receiptKey"=NEW."receiptKey" AND page.members=r."recordCount"
-      AND page.members=page.identities AND coalesce(page.ordered,TRUE)
+      AND page.members=page.identities AND coalesce(page.valid,TRUE)
   ) THEN
     RAISE EXCEPTION 'Observed receipt membership is invalid'
       USING ERRCODE='23514', CONSTRAINT='observed_receipt_members_valid';
