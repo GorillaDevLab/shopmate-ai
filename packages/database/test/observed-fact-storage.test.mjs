@@ -626,7 +626,10 @@ async function scopedAuthority(state) {
       await assert.rejects(authorize(fixture, { domain: "LISTING" }), authorityDenied);
       await assert.rejects(authorize(fixture, { userId: principal }), authorityDenied);
       await assert.rejects(authorize(fixture, { domain: null }), authorityDenied);
-      if (index === 0) await mismatchedAuthority(state, fixture);
+      if (index === 0) {
+        await mismatchedAuthority(state, fixture);
+        await unsafeSchemaAuthority(state, fixture);
+      }
     } finally {
       await fixture.client.end();
     }
@@ -681,6 +684,23 @@ async function mismatchedAuthority(state, fixture) {
   await admin.query(`GRANT pg_write_all_data TO "${name}"`);
   await assert.rejects(authorize(fixture), authorityDenied);
   await admin.query(`REVOKE pg_write_all_data FROM "${name}"`);
+}
+
+async function unsafeSchemaAuthority(state, fixture) {
+  const { admin, name } = fixture;
+  const group = "shopmate_observed_test_schema_creator";
+  await admin.query(`CREATE ROLE ${group} NOLOGIN`);
+  state.logins.push(group);
+  await admin.query(`GRANT ${group} TO "${name}"`);
+  for (const role of [name, group]) {
+    await admin.query(`GRANT CREATE ON SCHEMA public TO "${role}"`);
+    try {
+      await assert.rejects(authorize(fixture), authorityDenied);
+    } finally {
+      await admin.query(`REVOKE CREATE ON SCHEMA public FROM "${role}"`);
+    }
+    assert.equal((await authorize(fixture)).rowCount, 1);
+  }
 }
 
 async function liveAuthority(state) {

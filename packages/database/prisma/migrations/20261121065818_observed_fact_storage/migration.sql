@@ -445,7 +445,7 @@ LANGUAGE SQL STABLE STRICT SET search_path=pg_catalog AS $$
             AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
           OR EXISTS (SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.proowner=r.oid
             AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
-          OR EXISTS (SELECT FROM pg_namespace n WHERE n.nspowner=r.oid
+          OR EXISTS (SELECT FROM pg_namespace n WHERE (n.nspowner=r.oid OR has_schema_privilege(r.oid,n.oid,'CREATE'))
             AND n.nspname IN ('public','demo','commerce','sync_host','mock_platform'))
           OR EXISTS (SELECT FROM pg_database d WHERE d.datdba=r.oid AND d.datname=current_database())
         )
@@ -543,7 +543,7 @@ BEGIN
   IF current_setting('transaction_isolation')<>'read committed'
     OR current_setting('role') NOT IN ('none',SESSION_USER)
     OR (capability_ IN ('PUBLISH','CONSUME') AND expected_grant_ IS NULL)
-    OR public.observed_login_safe(SESSION_USER,capability_) IS NOT TRUE THEN
+    OR public.observed_login_safe(SESSION_USER::text,capability_) IS NOT TRUE THEN
     RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
   END IF;
   -- Do not lock caller-selected resources until a scoped grant is visible.
@@ -564,7 +564,7 @@ BEGIN
     RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
   END IF;
   IF public.observed_lock_binding(scope_) IS NOT TRUE
-    OR public.observed_login_safe(SESSION_USER,capability_) IS NOT TRUE OR expiry_<=clock_timestamp() THEN
+    OR public.observed_login_safe(SESSION_USER::text,capability_) IS NOT TRUE OR expiry_<=clock_timestamp() THEN
     RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
   END IF;
 END
