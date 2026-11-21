@@ -628,6 +628,7 @@ async function scopedAuthority(state) {
       await assert.rejects(authorize(fixture, { domain: null }), authorityDenied);
       if (index === 0) {
         await mismatchedAuthority(state, fixture);
+        await crossBindingAuthority(state, fixture);
         await unsafeSchemaAuthority(state, fixture);
       }
     } finally {
@@ -660,8 +661,6 @@ async function mismatchedAuthority(state, fixture) {
   );
   await assert.rejects(authorize(fixture, { grantId: oldGrant }), authorityDenied);
   await assert.rejects(authorize(fixture, { grantId: "malformed" }), authorityDenied);
-  const unrelatedScope = await insertScope(admin, binding, 102);
-  await assert.rejects(authorize(fixture, { scopeId: unrelatedScope }), authorityDenied);
   const other = await restrictedLogin(state, capabilityRoles[0]);
   try {
     await other.client.query("SELECT set_config('app.user_id',$1,false)", [fixture.userId]);
@@ -684,6 +683,17 @@ async function mismatchedAuthority(state, fixture) {
   await admin.query(`GRANT pg_write_all_data TO "${name}"`);
   await assert.rejects(authorize(fixture), authorityDenied);
   await admin.query(`REVOKE pg_write_all_data FROM "${name}"`);
+}
+
+async function crossBindingAuthority(state, fixture) {
+  const target = await authorityFixture(state);
+  try {
+    assert.equal((await authorize(target)).rowCount, 1);
+    await assert.rejects(authorize(target, { client: fixture.client }), authorityDenied);
+    assert.equal((await authorize(fixture)).rowCount, 1);
+  } finally {
+    await target.client.end();
+  }
 }
 
 async function unsafeSchemaAuthority(state, fixture) {
