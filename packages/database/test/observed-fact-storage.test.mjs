@@ -658,7 +658,23 @@ async function invalidFactBytes({ client }) {
   }
 }
 
+async function assertTruncateGuards(client) {
+  // A single TRUNCATE can stop at a foreign key or the first guard it reaches.
+  const { rows } = await client.query(
+    `SELECT c.relname AS name FROM pg_catalog.pg_trigger AS t
+     JOIN pg_catalog.pg_class AS c ON c.oid=t.tgrelid
+     JOIN pg_catalog.pg_namespace AS n ON n.oid=c.relnamespace
+     WHERE n.nspname='public' AND c.relname=ANY($1::text[])
+       AND t.tgfoid='public.observed_reject_history_mutation()'::regprocedure
+       AND t.tgenabled IN ('O','A') AND NOT t.tgisinternal
+       AND pg_catalog.pg_get_triggerdef(t.oid) LIKE $2`,
+    [tables, "% BEFORE TRUNCATE % FOR EACH STATEMENT EXECUTE FUNCTION %"],
+  );
+  assert.deepEqual(rows.map(({ name }) => name).sort(), [...tables].sort());
+}
+
 async function immutableHistory({ client }) {
+  await assertTruncateGuards(client);
   const scopeId = await insertScope(client, {}, 15);
   const fact = priceFact("immutable", 1, null, { generation: 15 });
   await transaction(client, () => insertOrigin(client, scopeId, "immutable", fact));
