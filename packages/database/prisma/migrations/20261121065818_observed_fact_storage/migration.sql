@@ -516,8 +516,8 @@ BEGIN
 END
 $$;
 
--- The caller holds this transaction open through its own final operation, passing the grant
--- from any request that carries one. Actor-based reads can rely on the unique scoped grant.
+-- The caller holds this transaction open through its own final operation. Publish and consume
+-- require the request's exact grant. Actor-based checks can rely on the unique scoped grant.
 CREATE FUNCTION public.observed_authorize(
   scope_ UUID, user_ TEXT, capability_ TEXT, domain_ TEXT, expected_grant_ TEXT DEFAULT NULL
 ) RETURNS VOID
@@ -528,6 +528,7 @@ DECLARE
 BEGIN
   IF current_setting('transaction_isolation')<>'read committed'
     OR current_setting('role') NOT IN ('none',SESSION_USER)
+    OR (capability_ IN ('PUBLISH','CONSUME') AND expected_grant_ IS NULL)
     OR public.observed_login_safe(SESSION_USER,capability_) IS NOT TRUE THEN
     RAISE EXCEPTION 'Observed scope access denied' USING ERRCODE='42501';
   END IF;

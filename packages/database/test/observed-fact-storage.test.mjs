@@ -616,9 +616,10 @@ async function scopedAuthority(state) {
     const fixture = await authorityFixture(state, index, index === 2 ? "VIEWER" : "OPERATOR");
     try {
       assert.equal(
-        (await authorize(fixture, { grantId: index === 2 ? null : fixture.grantId })).rowCount,
+        (await authorize(fixture, { grantId: index < 2 ? fixture.grantId : null })).rowCount,
         1,
       );
+      if (index < 2) await requiresExplicitGrant(fixture);
       for (const other of capabilities.filter((candidate) => candidate !== capability)) {
         await assert.rejects(authorize(fixture, { capability: other }), authorityDenied);
       }
@@ -630,6 +631,20 @@ async function scopedAuthority(state) {
       await fixture.client.end();
     }
   }
+}
+
+async function requiresExplicitGrant(fixture) {
+  const { client, scopeId, userId, capability } = fixture;
+  await assert.rejects(authorize(fixture, { grantId: null }), authorityDenied);
+  await assert.rejects(
+    client.query("SELECT public.observed_authorize($1::uuid,$2::text,$3::text,$4::text)", [
+      scopeId,
+      userId,
+      capability,
+      "PRICE",
+    ]),
+    authorityDenied,
+  );
 }
 
 async function mismatchedAuthority(state, fixture) {
