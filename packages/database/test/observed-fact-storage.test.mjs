@@ -15,6 +15,7 @@ import { beginControl, operatorControl } from "./helpers/mock-source-control-fix
 const root = new URL("../", import.meta.url);
 const migrations = new URL("prisma/migrations/", root);
 const mode = "--restricted-observed-storage";
+const observedMigration = /^\d{14}_observed_fact_storage$/u;
 const tables = [
   "observed_scopes",
   "observed_page_receipts",
@@ -44,14 +45,12 @@ const binding = {
   externalStoreId: "shop/甲",
 };
 
-test("observed fact storage has one additive SQL migration and four mapped history tables", async () => {
-  const names = (await readdir(migrations)).filter((name) =>
-    /^\d{14}_observed_fact_storage$/u.test(name),
-  );
+test("observed fact storage has one additive migration with mapped history and grants", async () => {
+  const names = (await readdir(migrations)).filter((name) => observedMigration.test(name));
   assert.equal(names.length, 1);
   const sql = await readFile(new URL(`${names[0]}/migration.sql`, migrations), "utf8");
   const prisma = await readFile(new URL("prisma/schema.prisma", root), "utf8");
-  for (const table of tables) {
+  for (const table of [...tables, grantTable]) {
     assert.ok(sql.includes(`CREATE TABLE public.${table}`), table);
     assert.ok(prisma.includes(`@@map("${table}")`), table);
   }
@@ -363,13 +362,7 @@ async function prepareDatabase(state) {
   state.factSchema = ObservedFactV1Schema;
   state.server = new pg.Client({ connectionString: validated });
   await state.server.connect();
-  // This identifier is locally generated as SQL DDL cannot bind identifiers.
-  const name = `shopmate_tenant_test_${randomBytes(8).toString("hex")}`;
-  await state.server.query(`CREATE DATABASE "${name}"`);
-  state.name = name;
-  const testUrl = new URL(validated);
-  testUrl.pathname = `/${name}`;
-  state.url = requireIsolatedDatabaseUrl(testUrl.toString());
+  Object.assign(state, await createDisposableDatabase(state.server, validated));
   prisma(state.url, ["migrate", "deploy"]);
   state.client = new pg.Client({ connectionString: state.url });
   await state.client.connect();
@@ -377,6 +370,16 @@ async function prepareDatabase(state) {
     "Pacific/Auckland",
   ]);
   await seedBinding(state.client);
+}
+
+async function createDisposableDatabase(server, validated) {
+  // This identifier is locally generated as SQL DDL cannot bind identifiers.
+  const name = `shopmate_tenant_test_${randomBytes(8).toString("hex")}`;
+  const testUrl = new URL(validated);
+  testUrl.pathname = `/${name}`;
+  const url = requireIsolatedDatabaseUrl(testUrl.toString());
+  await server.query(`CREATE DATABASE "${name}"`);
+  return { name, url };
 }
 
 function schemaParity({ url }) {
@@ -423,6 +426,8 @@ function registerAuthorityCases(state) {
     expiryWhileWaiting(state));
   test("authorized restricted inserts enforce immutable receipt graph at actual commit", () =>
     restrictedGraph(state));
+  test("seeded upgrade rejects unsafe guard authority and preserves existing tenant data", () =>
+    seededUpgrade(state));
 }
 
 async function roleCatalog({ client }) {
@@ -1017,6 +1022,92 @@ async function restrictedGraphDenials(state, f) {
     writeFixture(f, priceFact("restricted-denied-domain", 4, null, { binding: f.scope })),
     authorityDenied,
   );
+}
+
+async function applyMigrations(client, names) {
+  for (const name of names) {
+    await client.query(await readFile(new URL(`${name}/migration.sql`, migrations), "utf8"));
+  }
+}
+
+async function upgradeHistory(client) {
+  const names = (await readdir(migrations)).filter((name) => /^\d{14}_/u.test(name)).sort();
+  const index = names.findIndex((name) => observedMigration.test(name));
+  assert.ok(index > 0);
+  await applyMigrations(client, names.slice(0, index));
+  const sql = await readFile(new URL(`${names[index]}/migration.sql`, migrations), "utf8");
+  return { sql, later: names.slice(index + 1) };
+}
+
+async function tenantSnapshot(client) {
+  const { rows } = await client.query(
+    `SELECT to_jsonb(c) AS connection, to_jsonb(s) AS store, to_jsonb(o) AS organization,
+       to_jsonb(w) AS workspace, to_jsonb(m) AS member, to_jsonb(wm) AS assignment
+     FROM public."PlatformConnection" c
+     JOIN public."Store" s ON s.id=c."storeId"
+     JOIN public."Organization" o ON o.id=s."organizationId"
+     JOIN public."Workspace" w ON w.id=s."workspaceId"
+     JOIN public."OrganizationMember" m ON m."organizationId"=o.id AND m."userId"=$2
+     JOIN public."WorkspaceMember" wm ON wm."workspaceId"=w.id AND wm."userId"=m."userId"
+     WHERE c.id=$1`,
+    [binding.connectionId, principal],
+  );
+  assert.equal(rows.length, 1);
+  return rows[0];
+}
+
+async function rejectUpgrade(client, sql, message) {
+  await assert.rejects(client.query(sql), { code: "42501", message });
+  await client.query("ROLLBACK");
+  const { rows } = await client.query("SELECT to_regclass($1) AS relation", [
+    `public.${grantTable}`,
+  ]);
+  assert.equal(rows[0].relation, null);
+}
+
+async function upgradeWithGuardMembership(client, sql, state) {
+  const operator = "shopmate_observed_test_migration_admin";
+  await client.query(`CREATE ROLE ${operator} NOLOGIN CREATEROLE BYPASSRLS`);
+  (state.logins ??= []).push(operator);
+  await client.query(`ALTER ROLE ${guardRole} BYPASSRLS`);
+  try {
+    await rejectUpgrade(client, sql, "Unsafe observed capability role");
+  } finally {
+    await client.query(`ALTER ROLE ${guardRole} NOBYPASSRLS`);
+  }
+  await client.query(`GRANT ${guardRole} TO ${operator} WITH ADMIN TRUE, INHERIT FALSE, SET TRUE`);
+  await rejectUpgrade(client, sql, "Unsafe observed capability role membership");
+  await client.query(`GRANT ${guardRole} TO ${operator} WITH SET FALSE`);
+  try {
+    await client.query(sql);
+  } finally {
+    await client.query("ROLLBACK");
+    await client.query(`REVOKE ${guardRole} FROM ${operator}`);
+  }
+}
+
+async function seededUpgrade(state) {
+  const { name, url } = await createDisposableDatabase(state.server, state.url);
+  const client = new pg.Client({ connectionString: url });
+  try {
+    await client.connect();
+    const { sql, later } = await upgradeHistory(client);
+    await seedBinding(client);
+    await seedMember(client, principal);
+    const before = await tenantSnapshot(client);
+    await upgradeWithGuardMembership(client, sql, state);
+    assert.deepEqual(await tenantSnapshot(client), before);
+    assert.equal(
+      (await client.query("SELECT count(*)::int AS count FROM public.observed_principal_grants"))
+        .rows[0].count,
+      0,
+    );
+    await applyMigrations(client, later);
+    schemaParity({ url });
+  } finally {
+    await client.end();
+    await state.server.query(`DROP DATABASE "${name}"`);
+  }
 }
 
 async function roundTrip({ client, url }) {

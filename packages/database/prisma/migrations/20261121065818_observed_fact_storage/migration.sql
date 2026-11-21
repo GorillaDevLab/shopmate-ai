@@ -15,8 +15,11 @@ BEGIN
       RAISE EXCEPTION 'Unsafe observed capability role' USING ERRCODE='42501';
     END IF;
   END LOOP;
+  -- PostgreSQL 16 records admin-only membership for a non-superuser role creator.
   IF EXISTS (SELECT FROM pg_catalog.pg_auth_members m JOIN pg_catalog.pg_roles r ON r.oid=m.member
-    WHERE r.rolname=ANY(roles_) OR m.roleid='shopmate_observed_guard'::regrole) THEN
+    WHERE r.rolname=ANY(roles_) OR (m.roleid='shopmate_observed_guard'::regrole AND
+      (m.set_option OR m.inherit_option OR NOT m.admin_option OR
+        NOT (r.rolsuper OR (r.rolcreaterole AND r.rolbypassrls))))) THEN
     RAISE EXCEPTION 'Unsafe observed capability role membership' USING ERRCODE='42501';
   END IF;
 END
