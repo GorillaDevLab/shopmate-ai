@@ -655,6 +655,77 @@ async function testTypedPublications(state) {
   }
 }
 
+async function assertLegacyGenerator(state, observed) {
+  const { MockConfigSchema, generatorVersion } = await import(
+    "../../../apps/api/dist/integrations/mock/mock-config.js"
+  );
+  const { binding, seed, profile, historyStart } = observed;
+  const defaultConfig = MockConfigSchema.parse({ binding, seed, profile, historyStart });
+  assert.equal(generatorVersion(defaultConfig), "mock-source-v1");
+  assert.equal(defaultConfig.days, 180);
+  assert.equal(defaultConfig.productCount, 60);
+  assert.equal(defaultConfig.dailyOrders, 100);
+  assert.equal(MockConfigSchema.safeParse(observed).success, false);
+  for (const { candidate } of state.history) {
+    assert.equal(generatorVersion(MockConfigSchema.parse(candidate.config)), candidate.version);
+  }
+}
+
+async function assertApiRead(ports, scope, version, validatePersistentPage) {
+  const port = ports.bind(readerActor, scope);
+  const certificate = await port.findPublication();
+  assert.ok(certificate);
+  const request = {
+    kind: "STORE",
+    requestedUntil: certificate.targetTime,
+    businessNow: certificate.targetTime,
+    limit: 1,
+    contextHash: hashConfig({ kind: "STORE" }),
+  };
+  const page = await port.read(request);
+  assert.ok(page);
+  assert.deepEqual(page.publication, certificate);
+  assert.equal(certificate.generatorVersion, version);
+  assert.equal(page.items.length, 1);
+  assert.deepEqual(validatePersistentPage(page, scope, request), {
+    items: [{ kind: "STORE", record: page.items[0].payload }],
+    nextCursor: null,
+    effectiveUntil: certificate.targetTime,
+  });
+  for (const patch of [
+    { generatorVersion: "mock-source-v4" },
+    { runtimeVersion: "mock-runtime-v3" },
+    { codec: "source-snapshot-v2" },
+    { scope: { ...scope, connectionId: "another-connection" } },
+  ]) {
+    const invalid = { ...page, publication: { ...certificate, ...patch } };
+    assert.throws(() => validatePersistentPage(invalid, scope, request), {
+      code: "INVALID_RESPONSE",
+    });
+  }
+}
+
+async function testApiPublications(state) {
+  const { createMockSourceReadPorts } = await import("@shopmate/database/mock-platform-read");
+  const { validatePersistentPage } = await import(
+    "../../../apps/api/dist/integrations/mock/persistent-read-port.js"
+  );
+  const ports = createMockSourceReadPorts({
+    MOCK_PLATFORM_READ_DATABASE_URL: loginUrl(state.url, "source_read_login"),
+    MOCK_SOURCE_CURSOR_KEY: randomUUID(),
+  });
+  try {
+    for (const { context, candidate } of state.history) {
+      await assertApiRead(ports, context.scope, candidate.version, validatePersistentPage);
+    }
+    const { context } = await publishV3ForRead(state, "v3-api-publication");
+    await assertLegacyGenerator(state, configV3(context));
+    await assertApiRead(ports, context.scope, v3, validatePersistentPage);
+  } finally {
+    await ports.close();
+  }
+}
+
 async function testRestrictedRole(state) {
   const context = await contextFor(state, "authority");
   const candidate = request(configV3(context));
@@ -903,6 +974,8 @@ function registerRestrictedCases() {
     testRejectedTypedGenerations(state));
   test("typed database reader verifies v3 and historical publication certificates", () =>
     testTypedPublications(state));
+  test("API persistent page accepts certified v3 and historical transport", () =>
+    testApiPublications(state));
   test("existing scoped grants and derived-only BuildJob columns control admission", () =>
     testRestrictedRole(state));
   test("the internal codecs are executable only by the source worker capability", () =>
