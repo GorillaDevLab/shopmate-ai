@@ -16,6 +16,7 @@ import {
   grantSource,
   hashConfig,
   loginUrl,
+  readerActor,
   scopeFor,
   sourceFixtures,
 } from "./helpers/mock-platform-fixture.mjs";
@@ -244,12 +245,23 @@ async function prepare(state) {
     result,
     /migrations? have been successfully applied|already up to date|No pending migrations/u,
   );
+  const { createMockSourceReader, createMockSourceWorker } = await import(
+    "@shopmate/database/mock-platform"
+  );
+  state.typedWorker = createMockSourceWorker({
+    MOCK_PLATFORM_WORKER_DATABASE_URL: loginUrl(state.url, "source_worker_login"),
+  });
+  state.typedReader = createMockSourceReader({
+    MOCK_PLATFORM_READ_DATABASE_URL: loginUrl(state.url, "source_read_login"),
+  });
 }
 
 async function shutdown(state) {
-  const results = await Promise.allSettled(
-    state.clients.filter((client) => client !== state.owner).map((client) => client.end()),
-  );
+  const results = await Promise.allSettled([
+    state.typedWorker?.close(),
+    state.typedReader?.close(),
+    ...state.clients.filter((client) => client !== state.owner).map((client) => client.end()),
+  ]);
   try {
     if (state.created) await state.owner.query('DROP DATABASE "shopmate_tenant_test_admission"');
   } finally {
@@ -547,6 +559,64 @@ async function testUnsupportedVersion(state) {
   assert.equal((await claim(state.worker, context)).rowCount, 0);
 }
 
+async function testTypedGeneration(state) {
+  const context = await contextFor(state, "typed-v3");
+  const { scope, grant } = context;
+  const config = { ...configV3(context), profile: "new" };
+  config.scenarioPlan = scenarioFor(config);
+  const candidate = request(sortKeys(config));
+  await provision(state, context, candidate);
+  const result = await state.typedWorker.initializeGeneration({ grantId: grant }, scope);
+  assert.equal(result.status, "CREATED");
+  const { createdAt, ...generation } = result.generation;
+  assert.match(createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u);
+  assert.deepEqual(generation, {
+    scope,
+    sourceConfig: config,
+    configHash: candidate.hash,
+    generatorVersion: v3,
+    runtimeVersion: "mock-runtime-v2",
+    openingAt: candidate.openingAt,
+    baselineEnd: candidate.baselineEnd,
+  });
+  assert.deepEqual(await state.typedReader.findGeneration(readerActor, scope), result.generation);
+  assert.deepEqual(await state.typedWorker.initializeGeneration({ grantId: grant }, scope), {
+    status: "EXISTS",
+    generation: result.generation,
+  });
+}
+
+async function testRejectedTypedGenerations(state) {
+  const context = await contextFor(state, "invalid-typed-v3");
+  const { scope, grant } = context;
+  const config = configV3(context);
+  const candidate = request(config);
+  const omittedPlan = { ...config };
+  delete omittedPlan.scenarioPlan;
+  const candidates = [
+    { ...candidate, json: JSON.stringify(omittedPlan) },
+    { ...candidate, json: JSON.stringify({ ...config, modelVersion: "other" }) },
+    {
+      ...candidate,
+      json: JSON.stringify({
+        ...config,
+        scenarioPlan: { ...scenarioFor(config), externalStoreId: "another-store" },
+      }),
+    },
+    { ...candidate, hash: "0".repeat(64) },
+    request(config, "mock-source-v4"),
+    { ...request(configFor(scope), "mock-source-v1"), version: v3, hash: candidate.hash },
+  ];
+  for (const invalid of candidates) {
+    await provision(state, context, invalid);
+    await assert.rejects(state.typedWorker.initializeGeneration({ grantId: grant }, scope), {
+      code: "SOURCE_INTEGRITY",
+      message: "SOURCE_INTEGRITY",
+    });
+    assert.equal(await state.typedReader.findGeneration(readerActor, scope), null);
+  }
+}
+
 async function testRestrictedRole(state) {
   const context = await contextFor(state, "authority");
   const candidate = request(configV3(context));
@@ -789,6 +859,10 @@ function registerRestrictedCases() {
   test("v3 rejects copied or forged hashes and derived dates", () => testMismatchedSnapshot(state));
   test("only known generator versions can create a Runtime or build", () =>
     testUnsupportedVersion(state));
+  test("typed worker initializes and reader reloads an explicitly provisioned v3 snapshot", () =>
+    testTypedGeneration(state));
+  test("typed initialization rejects malformed, mismatched and unknown frozen snapshots", () =>
+    testRejectedTypedGenerations(state));
   test("existing scoped grants and derived-only BuildJob columns control admission", () =>
     testRestrictedRole(state));
   test("the internal codecs are executable only by the source worker capability", () =>
