@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,6 +43,10 @@ const databaseRoot = new URL("../", import.meta.url);
 const root = new URL("prisma/migrations/", databaseRoot);
 const migrationPattern = /^\d{14}_mock_observed_generation_admission$/u;
 const mode = "--restricted-observed-generation-admission";
+const restricted = process.argv.includes(mode);
+const observedSchema = restricted
+  ? (await import("@shopmate/contracts")).MockObservedGenerationConfigV3Schema
+  : undefined;
 const v3 = "mock-source-v3";
 const modelVersion = "mock-business-observed-v1";
 const namespace = 'mock/店𠮷"\\e\u0301';
@@ -50,9 +54,9 @@ const day = 86_400_000;
 const vectors = {
   "mock-source-v1": "6a384aac570b53f23caaf8447f40e58f278a94ea7b8e404f6322b01647d8085e",
   "mock-source-v2": "92a81771c1363c37d38c72cc1fde5bd1fb373ebf073ea73259cf292355f83ebd",
-  v3: "cb31a85cbf23400a748bff0401a8b6ca6737c5cdc70781c4d402c232d80d90ad",
-  plan: "ba1837c03bff6aa64874bb18d76929dfca898add8ca2c027196d3550ac828488",
-  reversed: "ce1f713a6a7ed619287e2055fd300beaf9872da58dbe09ab41b7f9e4cb4a9c75",
+  v3: "bba65b59b42fd4e1a79db7e9b54ee39b0f3c3ca9e722e589f87d928bc07e5985",
+  plan: "5a5d1b0c6cbf8dc5c0f7801cee8f7f651bef9272d551cad362e6e14cbfa96edb",
+  reversed: "9b0f33a466ebc643621109a6cbf537660f8a5bdcef31c2e8da5aa245b2e37b81",
 };
 
 const runtimeSql = `INSERT INTO mock_platform."Runtime"
@@ -128,10 +132,13 @@ function sortKeys(value) {
   );
 }
 
-function proposedHash(config) {
-  return createHash("sha256")
-    .update(JSON.stringify(sortKeys(config)), "utf8")
-    .digest("hex");
+function decodeConfig(config) {
+  return observedSchema.parse({
+    generatorVersion: v3,
+    generation: 0,
+    configHash: "0".repeat(64),
+    config,
+  }).config;
 }
 
 function request(config, version = v3, overrides = {}) {
@@ -141,7 +148,7 @@ function request(config, version = v3, overrides = {}) {
     version,
     config,
     json: JSON.stringify(config),
-    hash: version === v3 ? proposedHash(config) : hashConfig(config),
+    hash: hashConfig(version === v3 ? decodeConfig(config) : config),
     openingAt: new Date(start + offset * day).toISOString(),
     baselineEnd: new Date(start + config.days * day).toISOString(),
     ...overrides,
@@ -268,7 +275,7 @@ async function contextFor(state, suffix, externalStoreId = namespace) {
 }
 
 function configV3(context) {
-  return { ...configFor(context.scope), modelVersion };
+  return { modelVersion, ...configFor(context.scope), scenarioPlan: null };
 }
 
 async function provision(state, context, candidate) {
@@ -375,11 +382,20 @@ function boundedSnapshotError(error) {
   return true;
 }
 
+async function assertDatabaseConfigBytes(state, candidate) {
+  const result = await state.worker.query(
+    "SELECT mock_platform.observed_config_json($1::jsonb) AS bytes",
+    [candidate.json],
+  );
+  assert.equal(result.rows[0].bytes, JSON.stringify(decodeConfig(candidate.config)));
+}
+
 async function testV3Publication(state) {
   const context = await contextFor(state, "v3");
   const config = configV3(context);
   const candidate = request(config);
   assert.equal(candidate.hash, vectors.v3);
+  await assertDatabaseConfigBytes(state, candidate);
   await provision(state, context, candidate);
   const rows = (await insertRuntime(state, context, candidate)).rows;
   assert.deepEqual(rows, [
@@ -420,6 +436,9 @@ async function testPlanVector(state) {
     insertRuntime(state, context, { ...outOfOrder, hash: candidate.hash }),
     boundedSnapshotError,
   );
+  assert.equal(hashConfig(decodeConfig(JSON.parse(json))), candidate.hash);
+  assert.notEqual(json, JSON.stringify(decodeConfig(config)));
+  await assertDatabaseConfigBytes(state, { ...candidate, json });
   await provision(state, context, { ...candidate, json });
   const rows = (await insertRuntime(state, context, candidate)).rows;
   assert.equal(rows.length, 1);
@@ -439,7 +458,7 @@ const invalidRoot = [
   ["noncanonical Gregorian date", { historyStart: "2025-02-29T16:00:00.000Z" }],
   ["non-Shanghai midnight", { historyStart: "2025-12-31T00:00:00.000Z" }],
   ["overflowing settlement date", { historyStart: "9999-12-31T16:00:00.000Z" }],
-  ["null scenario", { scenarioPlan: null }],
+  ["invalid scalar scenario", { scenarioPlan: 1 }],
   ["oversize configuration", { profile: "a".repeat(1_000_000) }],
 ];
 
@@ -464,9 +483,37 @@ async function rejectConfig(state, label, change) {
   const config = configV3(context);
   const valid = request(config);
   const rejected = change(config);
-  const candidate = { ...valid, json: JSON.stringify(rejected), hash: proposedHash(rejected) };
+  const candidate = { ...valid, json: JSON.stringify(rejected), hash: hashConfig(rejected) };
   await provision(state, context, candidate);
   await assert.rejects(insertRuntime(state, context, candidate), boundedSnapshotError, label);
+  assert.equal(await runtimeCount(state, context), 0);
+}
+
+async function testAbsentScenario(state) {
+  const context = await contextFor(state, "absent-plan");
+  const config = configV3(context);
+  const valid = request(config);
+  const missing = { ...config, scenarioPlan: undefined };
+  const candidate = {
+    ...valid,
+    json: JSON.stringify(missing),
+    hash: hashConfig(sortKeys(missing)),
+  };
+  assert.throws(() => decodeConfig(missing));
+  await provision(state, context, candidate);
+  await assert.rejects(insertRuntime(state, context, candidate), boundedSnapshotError);
+  assert.equal(await runtimeCount(state, context), 0);
+}
+
+async function testSortedDigest(state) {
+  const context = await contextFor(state, "sorted");
+  const config = configV3(context);
+  config.scenarioPlan = scenarioFor(config);
+  const oldHash = hashConfig(sortKeys(config));
+  const candidate = request(config, v3, { hash: oldHash });
+  assert.notEqual(oldHash, hashConfig(decodeConfig(config)));
+  await provision(state, context, candidate);
+  await assert.rejects(insertRuntime(state, context, candidate), boundedSnapshotError);
   assert.equal(await runtimeCount(state, context), 0);
 }
 
@@ -529,7 +576,9 @@ async function testRestrictedRole(state) {
 
 async function testHelperAccess(state) {
   const signatures = [
-    "mock_platform.observed_config_json(jsonb,integer)",
+    "mock_platform.observed_config_json(jsonb)",
+    "mock_platform.observed_config_properties(jsonb,text[])",
+    "mock_platform.observed_config_scenario_json(jsonb)",
     "mock_platform.observed_config_shape(jsonb,jsonb)",
   ];
   const sql = "SELECT has_function_privilege(current_user, $1, 'EXECUTE') AS allowed";
@@ -716,6 +765,10 @@ function registerConfigurationCases(state) {
       ...c,
       binding: { ...c.binding, token: "private" },
     })));
+  test("v3 requires a scenario key even for a planless generation", () =>
+    testAbsentScenario(state));
+  test("v3 rejects the superseded sorted-key digest for an otherwise valid plan", () =>
+    testSortedDigest(state));
   test("strict v3 enforces the UTF-16 namespace limit", () => testLongNamespace(state));
   for (const delivery of [{ kind: "NORMAL" }, { kind: "REPLAY_SAVED_PAGE", repetitions: 3 }]) {
     test(`strict v3 admits ${delivery.kind} and derives new-profile leap-year dates`, () =>
@@ -729,9 +782,9 @@ function registerRestrictedCases() {
   after(() => shutdown(state));
   test("Prisma deploy upgrades the seeded database with no schema drift", () =>
     testSeededMigration(state));
-  test("v3 pins its model and publishes all six existing transport kinds", () =>
+  test("v3 admits the contract digest and explicit null scenario and publishes six transport kinds", () =>
     testV3Publication(state));
-  test("v3 digests Unicode, sorted objects and normalized integer tokens with a strict plan", () =>
+  test("v3 digests Unicode, reordered keys and normalized integers in the contract declaration order", () =>
     testPlanVector(state));
   test("v3 rejects copied or forged hashes and derived dates", () => testMismatchedSnapshot(state));
   test("only known generator versions can create a Runtime or build", () =>
@@ -750,4 +803,4 @@ function registerRestrictedCases() {
     testLeaseExpiresWhilePublishing(state));
 }
 
-if (process.argv.includes(mode)) registerRestrictedCases();
+if (restricted) registerRestrictedCases();

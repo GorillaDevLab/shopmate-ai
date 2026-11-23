@@ -62,33 +62,58 @@ BEGIN
     FROM jsonb_array_elements(mutations));
 END $$;
 
--- Strict shape confines keys to ASCII; the C collation supplies their bytewise order.
--- The depth bound also applies to calls by the worker outside the admission trigger.
-CREATE FUNCTION mock_platform.observed_config_json(value JSONB, remaining_depth INTEGER)
-RETURNS TEXT LANGUAGE plpgsql IMMUTABLE STRICT SECURITY INVOKER SET search_path=pg_catalog AS $$
+-- JSONB drops object order. Rebuild each object in the frozen contract's declaration order.
+CREATE FUNCTION mock_platform.observed_config_properties(value JSONB, keys TEXT[]) RETURNS TEXT
+LANGUAGE SQL IMMUTABLE STRICT SECURITY INVOKER SET search_path=pg_catalog AS $$
+  SELECT string_agg(to_jsonb(key)::text||':'||
+    CASE jsonb_typeof(value->key)
+      WHEN 'number' THEN trim_scale((value->key)::numeric)::text
+      WHEN 'string' THEN (value->key)::text
+    END,',' ORDER BY position)
+  FROM unnest(keys) WITH ORDINALITY AS field(key,position)
+$$;
+
+CREATE FUNCTION mock_platform.observed_config_scenario_json(plan JSONB) RETURNS TEXT
+LANGUAGE plpgsql IMMUTABLE STRICT SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE mutations JSONB:=plan->'mutations'; delivery JSONB:=plan->'delivery'; items TEXT;
+  delivery_keys TEXT[]:=ARRAY['kind'];
 BEGIN
-  PERFORM mock_platform.integrity(remaining_depth BETWEEN 0 AND 4 AND pg_column_size(value)<=1000000);
-  CASE jsonb_typeof(value)
-    WHEN 'object' THEN
-      PERFORM mock_platform.integrity(remaining_depth>0);
-      RETURN (SELECT '{'||coalesce(string_agg(to_jsonb(key)::text||':'||
-        mock_platform.observed_config_json(item,remaining_depth-1),',' ORDER BY key COLLATE "C"),'')||'}'
-        FROM jsonb_each(value) AS entry(key,item));
-    WHEN 'array' THEN
-      PERFORM mock_platform.integrity(remaining_depth>0 AND jsonb_array_length(value)<=3);
-      RETURN (SELECT '['||coalesce(string_agg(mock_platform.observed_config_json(item,remaining_depth-1),
-        ',' ORDER BY position),'')||']' FROM jsonb_array_elements(value) WITH ORDINALITY AS entry(item,position));
-    WHEN 'number' THEN RETURN trim_scale(value::numeric)::text;
-    ELSE RETURN value::text;
+  PERFORM mock_platform.integrity(jsonb_typeof(mutations)='array');
+  PERFORM mock_platform.integrity(jsonb_array_length(mutations)<=3);
+  SELECT coalesce(string_agg('{'||mock_platform.observed_config_properties(item, ARRAY[
+    'skuIndex','retainDemandBps','priceBps','discountBps','refundBps','cancelBps',
+    'restockBps','launchRampDays','restockDelayDays'])||'}',',' ORDER BY position),'')
+  INTO items FROM jsonb_array_elements(mutations) WITH ORDINALITY AS entry(item,position);
+  CASE delivery->>'kind'
+    WHEN 'INTERRUPT' THEN delivery_keys:=array_append(delivery_keys,'durationMs');
+    WHEN 'REPLAY_SAVED_PAGE' THEN delivery_keys:=array_append(delivery_keys,'repetitions');
+    ELSE NULL;
   END CASE;
+  RETURN '{'||mock_platform.observed_config_properties(plan, ARRAY[
+    'version','scenarioId','externalStoreId','startDay','endDay'])
+    ||',"mutations":['||items||'],'||mock_platform.observed_config_properties(plan,
+      ARRAY['campaignSpendBps','campaignConversionBps'])
+    ||',"delivery":{'||mock_platform.observed_config_properties(delivery,delivery_keys)||'}}';
+END $$;
+
+CREATE FUNCTION mock_platform.observed_config_json(config JSONB) RETURNS TEXT
+LANGUAGE plpgsql IMMUTABLE STRICT SECURITY INVOKER SET search_path=pg_catalog AS $$
+BEGIN
+  PERFORM mock_platform.integrity(pg_column_size(config)<=1000000);
+  RETURN '{'||mock_platform.observed_config_properties(config,ARRAY['modelVersion'])
+    ||',"binding":{'||mock_platform.observed_config_properties(config->'binding', ARRAY[
+      'organizationId','workspaceId','storeId','connectionId','externalStoreId'])||'},'
+    ||mock_platform.observed_config_properties(config, ARRAY['seed','profile','historyStart',
+      'days','productCount','variantsPerProduct','dailyOrders','growthBps','refundBps','adSpendMinor'])
+    ||',"scenarioPlan":'||CASE WHEN config->'scenarioPlan'='null'::jsonb THEN 'null'
+      ELSE mock_platform.observed_config_scenario_json(config->'scenarioPlan') END||'}';
 END $$;
 
 CREATE FUNCTION mock_platform.observed_config_shape(config JSONB, binding JSONB) RETURNS BOOLEAN
 LANGUAGE plpgsql IMMUTABLE SECURITY INVOKER SET search_path=pg_catalog AS $$
-DECLARE keys TEXT[]:=ARRAY['binding','seed','profile','historyStart','days','productCount',
-  'variantsPerProduct','dailyOrders','growthBps','refundBps','adSpendMinor','modelVersion'];
+DECLARE keys TEXT[]:=ARRAY['modelVersion','binding','seed','profile','historyStart','days',
+  'productCount','variantsPerProduct','dailyOrders','growthBps','refundBps','adSpendMinor','scenarioPlan'];
 BEGIN
-  IF config ? 'scenarioPlan' THEN keys:=array_append(keys,'scenarioPlan'); END IF;
   IF NOT mock_platform.observed_config_fields(config,keys)
     OR config->'binding' IS DISTINCT FROM binding
     OR NOT mock_platform.valid_external_id(binding->>'externalStoreId',true)
@@ -105,7 +130,7 @@ BEGIN
   RETURN (config->'days')::integer*ceil((config->'dailyOrders')::integer*1.35)<=150000
     AND ((config->>'historyStart')::timestamp+((config->'days')::integer+5)*interval '1 day'
       <=timestamp '9999-12-31 23:59:59.999')
-    AND (NOT (config ? 'scenarioPlan') OR mock_platform.observed_config_scenario(
+    AND (config->'scenarioPlan'='null'::jsonb OR mock_platform.observed_config_scenario(
       config->'scenarioPlan',binding->>'externalStoreId',(config->'days')::integer,
       (config->'productCount')::integer*(config->'variantsPerProduct')::integer
     ));
@@ -121,7 +146,7 @@ BEGIN
     RAISE EXCEPTION 'Invalid source snapshot' USING ERRCODE='23514';
   END IF;
   IF candidate."configHash" IS DISTINCT FROM
-    encode(sha256(convert_to(mock_platform.observed_config_json(config,4),'UTF8')),'hex') THEN
+    encode(sha256(convert_to(mock_platform.observed_config_json(config),'UTF8')),'hex') THEN
     RAISE EXCEPTION 'Invalid source snapshot' USING ERRCODE='23514';
   END IF;
   days:=(config->'days')::integer; start_at:=(config->>'historyStart')::timestamp;
@@ -179,13 +204,15 @@ END $$;
 REVOKE ALL ON FUNCTION mock_platform.observed_config_fields(JSONB,TEXT[]),
   mock_platform.observed_config_integer(JSONB,INTEGER,BIGINT),mock_platform.observed_config_delivery(JSONB),
   mock_platform.observed_config_mutation(JSONB,INTEGER),mock_platform.observed_config_scenario(JSONB,TEXT,INTEGER,INTEGER),
-  mock_platform.observed_config_json(JSONB,INTEGER),mock_platform.observed_config_shape(JSONB,JSONB),
+  mock_platform.observed_config_properties(JSONB,TEXT[]),mock_platform.observed_config_scenario_json(JSONB),
+  mock_platform.observed_config_json(JSONB),mock_platform.observed_config_shape(JSONB,JSONB),
   mock_platform.observed_runtime_calendar(mock_platform."Runtime",JSONB),
   mock_platform.legacy_runtime_calendar(mock_platform."Runtime",JSONB) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION mock_platform.observed_config_fields(JSONB,TEXT[]),
   mock_platform.observed_config_integer(JSONB,INTEGER,BIGINT),mock_platform.observed_config_delivery(JSONB),
   mock_platform.observed_config_mutation(JSONB,INTEGER),mock_platform.observed_config_scenario(JSONB,TEXT,INTEGER,INTEGER),
-  mock_platform.observed_config_json(JSONB,INTEGER),mock_platform.observed_config_shape(JSONB,JSONB),
+  mock_platform.observed_config_properties(JSONB,TEXT[]),mock_platform.observed_config_scenario_json(JSONB),
+  mock_platform.observed_config_json(JSONB),mock_platform.observed_config_shape(JSONB,JSONB),
   mock_platform.observed_runtime_calendar(mock_platform."Runtime",JSONB),
   mock_platform.legacy_runtime_calendar(mock_platform."Runtime",JSONB) TO shopmate_mock_source_worker;
 
@@ -195,7 +222,8 @@ ALTER TABLE mock_platform."Runtime" ADD CONSTRAINT "Runtime_generatorVersion_che
   ("generatorVersion"='mock-source-v2' AND jsonb_typeof("sourceConfig"->'scenarioPlan')='object'
     AND "sourceConfig"->'scenarioPlan'->>'version'='mock-scenario-v1'
     AND "sourceConfig"->'scenarioPlan'->>'externalStoreId'="externalStoreId") OR
-  ("generatorVersion"='mock-source-v3' AND "sourceConfig"->>'modelVersion'='mock-business-observed-v1')
+  ("generatorVersion"='mock-source-v3' AND "sourceConfig"->>'modelVersion'='mock-business-observed-v1'
+    AND ("sourceConfig" ? 'scenarioPlan'))
 ) IS TRUE);
 ALTER TABLE mock_platform."BuildJob" DROP CONSTRAINT "BuildJob_generatorVersion_check";
 ALTER TABLE mock_platform."BuildJob" ADD CONSTRAINT "BuildJob_generatorVersion_check"
