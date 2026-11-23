@@ -617,6 +617,44 @@ async function testRejectedTypedGenerations(state) {
   }
 }
 
+async function publishV3ForRead(state, label) {
+  const context = await contextFor(state, label);
+  const candidate = request(configV3(context));
+  await provision(state, context, candidate);
+  assert.equal((await insertRuntime(state, context, candidate)).rowCount, 1);
+  return { context, certificate: await buildPublication(state, context, v3) };
+}
+
+async function testTypedPublications(state) {
+  for (const { context, bytes } of state.history) {
+    assert.deepEqual(await state.typedReader.findPublication(readerActor, context.scope), {
+      ...JSON.parse(bytes.certificate.certificateBytes),
+      certificateHash: bytes.certificate.certificateHash,
+    });
+  }
+  const { context, certificate } = await publishV3ForRead(state, "typed-v3-publication");
+  const decoded = await state.typedReader.findPublication(readerActor, context.scope);
+  assert.ok(decoded);
+  assert.deepEqual(decoded.scope, context.scope);
+  assert.equal(decoded.generatorVersion, v3);
+  assert.equal(decoded.runtimeVersion, "mock-runtime-v2");
+  assert.equal(decoded.codec, "source-snapshot-v1");
+  assert.equal(decoded.certificateHash, certificate.certificateHash);
+  const { validatePublication } = await import(
+    "../dist/src/mock-platform/publication-validation.js"
+  );
+  for (const patch of [
+    { generatorVersion: "mock-source-v4" },
+    { runtimeVersion: "mock-runtime-v3" },
+    { codec: "source-snapshot-v2" },
+    { eventCount: "0" },
+  ]) {
+    assert.throws(() => validatePublication({ ...decoded, ...patch }), {
+      code: "SOURCE_INTEGRITY",
+    });
+  }
+}
+
 async function testRestrictedRole(state) {
   const context = await contextFor(state, "authority");
   const candidate = request(configV3(context));
@@ -863,6 +901,8 @@ function registerRestrictedCases() {
     testTypedGeneration(state));
   test("typed initialization rejects malformed, mismatched and unknown frozen snapshots", () =>
     testRejectedTypedGenerations(state));
+  test("typed database reader verifies v3 and historical publication certificates", () =>
+    testTypedPublications(state));
   test("existing scoped grants and derived-only BuildJob columns control admission", () =>
     testRestrictedRole(state));
   test("the internal codecs are executable only by the source worker capability", () =>
