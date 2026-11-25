@@ -229,9 +229,12 @@ async function prepare(state) {
   state.url = url.toString();
   state.admin = await connect(state, state.url);
   const names = await migrationNames();
+  const admission = names.find((name) => migrationPattern.test(name));
+  assert.ok(admission, "observed generation admission migration is required");
+  state.deployed = admission;
   await deployPreviousHistory(
     state.url,
-    names.filter((name) => !migrationPattern.test(name)),
+    names.filter((name) => name < admission),
   );
   await sourceFixtures(state.admin);
   await grantControl(state.admin, "source_control_login");
@@ -240,7 +243,6 @@ async function prepare(state) {
   state.reader = await connect(state, loginUrl(state.url, "source_read_login"));
   await seedHistory(state);
   const result = prisma(state.url, ["migrate", "deploy"]);
-  state.deployed = names.find((name) => migrationPattern.test(name)) ?? "";
   assert.match(
     result,
     /migrations? have been successfully applied|already up to date|No pending migrations/u,
