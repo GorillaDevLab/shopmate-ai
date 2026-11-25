@@ -27,6 +27,7 @@ const requiredTargetCounts = new Map([
   ["test/integration/audit-storage.test.mjs", 206],
   ["test/integration/notification-outbox-storage.test.mjs", 16],
   ["test/observed-fact-storage.test.mjs", 47],
+  ["test/observed-generation-admission.test.mjs", 48],
 ]);
 const forbiddenEnvironment =
   /(?:DATABASE|OPERATOR|MIGRATION|SHADOW|DIRECT|POSTGRES).*URL|(?:^|_)DB(?:_|$).*URL|^PG[A-Z_]*$|^DOTENV_CONFIG_|^NODE_TEST_CONTEXT$|^METRIC_CURSOR_SECRET$/iu;
@@ -403,6 +404,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       "packages/database",
       "test/observed-fact-storage.test.mjs",
       ["--restricted-observed-storage"],
+      {
+        TEST_DATABASE_URL: server.url,
+      },
+    );
+    await run(
+      "packages/database",
+      "test/observed-generation-admission.test.mjs",
+      ["--restricted-observed-generation-admission"],
       {
         TEST_DATABASE_URL: server.url,
       },

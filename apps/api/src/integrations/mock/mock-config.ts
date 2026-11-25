@@ -1,12 +1,18 @@
 import {
   ConnectorBindingSchema,
   ConnectorTimestampSchema,
+  MockObservedGenerationConfigV3Schema,
   MockScenarioPlanSchema,
 } from "@shopmate/contracts";
 import { z } from "zod";
 
 export const DAY_MS = 86_400_000;
 export const GENERATOR_VERSION = "mock-source-v1";
+export const MockPublicationGeneratorVersionSchema = z.enum([
+  GENERATOR_VERSION,
+  "mock-source-v2",
+  MockObservedGenerationConfigV3Schema.unwrap().shape.generatorVersion.value,
+]);
 export const profileDefaults = Object.freeze({
   growing: Object.freeze({
     dailyOrders: 180,

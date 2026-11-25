@@ -1,3 +1,4 @@
+import { MockObservedGenerationConfigV3Schema } from "@shopmate/contracts";
 import { SourceStorageError } from "./errors.js";
 import type {
   BuildLease,
@@ -31,6 +32,11 @@ import {
 import { validateRecord } from "./record-validation.js";
 
 export { incrementUInt, validateUInt, validateUtc } from "./record-primitives.js";
+const publicationVersions = [
+  "mock-source-v1",
+  "mock-source-v2",
+  MockObservedGenerationConfigV3Schema.unwrap().shape.generatorVersion.value,
+] as const satisfies readonly Publication["generatorVersion"][];
 const leaseKeys = ["scope", "revision", "fence", "ownerId"];
 const buildKeys = [
   ...leaseKeys,
@@ -213,7 +219,7 @@ function publicationFields(value: unknown): Publication {
   );
   requireInput([result.targetTime, result.processedThrough, result.publishedAt].every(validateUtc));
   requireInput(
-    ["mock-source-v1", "mock-source-v2"].includes(result.generatorVersion as string) &&
+    oneOf(result.generatorVersion, publicationVersions) &&
       result.runtimeVersion === "mock-runtime-v2" &&
       result.codec === "source-snapshot-v1" &&
       hash(result.certificateHash),

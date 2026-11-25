@@ -1,7 +1,8 @@
 import { validScenario, canonicalScenario } from "./scenario-configuration.js";
 import { createHash } from "node:crypto";
+import { MockObservedGenerationConfigV3Schema } from "@shopmate/contracts";
 import { SourceStorageError } from "./errors.js";
-import { bindingKeys, exact, integer, object } from "./validation.js";
+import { bindingKeys, exact, externalId, integer, object } from "./validation.js";
 import type { SourceScope } from "./types.js";
 
 const DAY = 86400000;
@@ -43,6 +44,9 @@ function validStart(value: unknown): value is string {
     new Date(at).toISOString() === value
   );
 }
+function jsonDigest(config: unknown): string {
+  return createHash("sha256").update(JSON.stringify(config)).digest("hex");
+}
 function canonicalHash(config: Record<string, unknown>): string {
   const binding = config.binding as Record<string, unknown>;
   // Approved v1 hashes schema-ordered JSON; JSONB discards that order at rest.
@@ -58,7 +62,7 @@ function canonicalHash(config: Record<string, unknown>): string {
       ],
     ),
   );
-  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+  return jsonDigest(canonical);
 }
 function validShape(
   config: unknown,
@@ -76,12 +80,43 @@ function validShape(
     validStart(config.historyStart)
   );
 }
+function calendar(start: number, days: number, profile: unknown): FrozenConfiguration {
+  const offset = profile === "new" ? Math.max(0, days - 14) : 0;
+  return {
+    openingAt: new Date(start + offset * DAY).toISOString(),
+    baselineEnd: new Date(start + days * DAY).toISOString(),
+  };
+}
+function frozenObservedConfiguration(
+  config: unknown,
+  configHash: unknown,
+  generatorVersion: unknown,
+  scope: SourceScope,
+): FrozenConfiguration {
+  const parsed = MockObservedGenerationConfigV3Schema.safeParse({
+    generatorVersion,
+    generation: scope.generation,
+    configHash,
+    config,
+  });
+  if (!parsed.success) throw new SourceStorageError("SOURCE_INTEGRITY");
+  const { binding, historyStart, days, profile } = parsed.data.config;
+  if (
+    !externalId(binding.externalStoreId) ||
+    !bindingKeys.every((key) => binding[key] === scope[key]) ||
+    jsonDigest(parsed.data.config) !== parsed.data.configHash
+  )
+    throw new SourceStorageError("SOURCE_INTEGRITY");
+  return calendar(Date.parse(historyStart), days, profile);
+}
 export function frozenConfiguration(
   config: unknown,
   hash: unknown,
   version: unknown,
   scope: SourceScope,
 ): FrozenConfiguration {
+  if (version === MockObservedGenerationConfigV3Schema.unwrap().shape.generatorVersion.value)
+    return frozenObservedConfiguration(config, hash, version, scope);
   if (
     !object(config) ||
     !validShape(config, scope, version) ||
@@ -99,9 +134,5 @@ export function frozenConfiguration(
     start + (days + 5) * DAY > MAX_DATE
   )
     throw new SourceStorageError("SOURCE_INTEGRITY");
-  const offset = config.profile === "new" ? Math.max(0, days - 14) : 0;
-  return {
-    openingAt: new Date(start + offset * DAY).toISOString(),
-    baselineEnd: new Date(start + days * DAY).toISOString(),
-  };
+  return calendar(start, days, config.profile);
 }

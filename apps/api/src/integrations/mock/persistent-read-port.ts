@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { CursorSchema, type ReadOptions } from "@shopmate/contracts";
 import { z } from "zod";
 import { MockConnectorError } from "./mock-call.js";
+import { MockPublicationGeneratorVersionSchema } from "./mock-config.js";
 import {
   PersistentSourceScopeSchema,
   PersistentSourceVersionSchema,
@@ -53,7 +54,7 @@ const PublicationSchema = z.strictObject({
   eventCount: uint,
   versionCount: uint,
   processedThrough: utc,
-  generatorVersion: z.enum(["mock-source-v1", "mock-source-v2"]),
+  generatorVersion: MockPublicationGeneratorVersionSchema,
   runtimeVersion: z.literal("mock-runtime-v2"),
   codec: z.literal("source-snapshot-v1"),
   publishedAt: utc,
